@@ -22,7 +22,8 @@ client + web renderer.
 | Browser canvas renderer + keyboard input (`cmd/gateway/web/index.html`) | ✅ renders frames; key→bytes mapping |
 | **Frame diffing** (gateway sends only changed cells) | ✅ full frame ~53 KB → steady-state diffs ~100 B |
 | **Mouse input** (SGR 1006) gated on server `MouseCapture` | ✅ MouseCapture decodes; browser sends drag/wheel/click |
-| **Clipboard**: herdr→browser copy (OSC 52) + browser→herdr paste | ✅ paste via structured `InputEvents::Paste` |
+| **Clipboard**: herdr→browser copy (OSC 52) | ✅ |
+| **Paste**: ⌘V text (`InputEvents::Paste`) / Ctrl+V image (`ClipboardImage` → staged file path) | ✅ verified end-to-end into Claude Code |
 | **OSC 8 hyperlinks** (click-to-open when mouse not captured) | ✅ |
 | **Window title** + **notify toasts** | ✅ |
 | Kitty graphics passthrough | ⏳ deferred |
