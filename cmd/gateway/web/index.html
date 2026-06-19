@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+<title>herdr · web</title>
+<style>
+  :root { --bg:#181818; --fg:#d4d4d4; }
+  html,body { margin:0; height:100%; background:var(--bg); color:var(--fg);
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; overflow:hidden; }
+  #screen { display:block; outline:none; }
+  #status { position:fixed; left:8px; bottom:6px; font-size:11px; color:#888;
+    background:rgba(0,0,0,.45); padding:2px 6px; border-radius:4px; pointer-events:none; z-index:5; }
+  #status.err { color:#ff6b6b; }
+  #toasts { position:fixed; right:10px; top:10px; display:flex; flex-direction:column; gap:6px; z-index:6; }
+  .toast { background:#2a2a2a; color:#eee; border:1px solid #3a3a3a; border-left:3px solid #6aa0ff;
+    padding:6px 10px; border-radius:5px; font-size:12px; max-width:340px; box-shadow:0 2px 8px rgba(0,0,0,.4);
+    opacity:0; transform:translateX(8px); transition:opacity .2s, transform .2s; }
+  .toast.show { opacity:1; transform:none; }
+</style>
+</head>
+<body>
+<canvas id="screen" tabindex="0"></canvas>
+<div id="status">connecting…</div>
+<div id="toasts"></div>
+<script>
+(() => {
+  const FONT_PX = 15, LINE = 1.25;
+  const canvas = document.getElementById("screen");
+  const ctx = canvas.getContext("2d", { alpha: false });
+  const statusEl = document.getElementById("status");
+  const toastsEl = document.getElementById("toasts");
+  const dpr = window.devicePixelRatio || 1;
+
+  // Grid + frame state.
+  let cellW = 9, cellH = 19, cols = 0, rows = 0;
+  let W = 0, H = 0, cells = [], links = [], cur = null;
+  let mouseCapture = false, ws = null;
+  let defBg = "#181818", defFg = "#d4d4d4";
+
+  // ratatui Modifier bits.
+  const M_BOLD = 0x1, M_ITALIC = 0x4, M_UNDERLINED = 0x8, M_REVERSED = 0x40, M_HIDDEN = 0x80;
+
+  function readTheme() {
+    const css = getComputedStyle(document.documentElement);
+    defBg = css.getPropertyValue("--bg").trim() || "#181818";
+    defFg = css.getPropertyValue("--fg").trim() || "#d4d4d4";
+  }
+
+  function measure() {
+    ctx.font = `${FONT_PX}px ui-monospace, Menlo, monospace`;
+    cellW = Math.max(1, Math.round(ctx.measureText("M").width * 100) / 100);
+    cellH = Math.ceil(FONT_PX * LINE);
+  }
+
+  function layout() {
+    cols = Math.max(20, Math.floor(window.innerWidth / cellW));
+    rows = Math.max(6, Math.floor(window.innerHeight / cellH));
+    canvas.style.width = window.innerWidth + "px";
+    canvas.style.height = window.innerHeight + "px";
+    canvas.width = Math.floor(window.innerWidth * dpr);
+    canvas.height = Math.floor(window.innerHeight * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    measure();
+  }
+
+  // Coalesce redraws to one per animation frame.
+  let dirty = false;
+  function scheduleDraw() {
+    if (dirty) return;
+    dirty = true;
+    requestAnimationFrame(() => { dirty = false; draw(); });
+  }
+
+  function draw() {
+    ctx.fillStyle = defBg;
+    ctx.fillRect(0, 0, window.innerWidth, window.innerHeight);
+    ctx.textBaseline = "top";
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        const c = cells[y * W + x];
+        if (!c) continue;
+        const m = c.m || 0;
+        let fg = c.f || defFg, bg = c.b || defBg;
+        if (m & M_REVERSED) { const t = fg; fg = bg; bg = t; }
+        const px = x * cellW, py = y * cellH;
+        if (bg !== defBg) { ctx.fillStyle = bg; ctx.fillRect(px, py, cellW + 0.5, cellH + 0.5); }
+        const ch = c.s;
+        if (ch && ch !== " " && !(m & M_HIDDEN)) {
+          let font = "";
+          if (m & M_BOLD) font += "bold ";
+          if (m & M_ITALIC) font += "italic ";
+          ctx.font = `${font}${FONT_PX}px ui-monospace, Menlo, monospace`;
+          ctx.fillStyle = fg;
+          ctx.fillText(ch, px, py + 1);
+          if ((m & M_UNDERLINED) || c.h) { ctx.fillRect(px, py + cellH - 2, cellW, 1); }
+        }
+      }
+    }
+    if (cur && cur.vis) {
+      ctx.fillStyle = defFg; ctx.globalAlpha = 0.7;
+      ctx.fillRect(cur.x * cellW, cur.y * cellH, cellW, cellH);
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  function setStatus(t, err) { statusEl.textContent = t; statusEl.className = err ? "err" : ""; }
+
+  function toast(text) {
+    const el = document.createElement("div");
+    el.className = "toast"; el.textContent = text;
+    toastsEl.appendChild(el);
+    requestAnimationFrame(() => el.classList.add("show"));
+    setTimeout(() => { el.classList.remove("show"); setTimeout(() => el.remove(), 250); }, 4000);
+  }
+
+  function onMessage(msg) {
+    switch (msg.t) {
+      case "frame":
+        W = msg.w; H = msg.h; cells = msg.cells; links = msg.links || []; cur = msg.cur || null;
+        scheduleDraw(); break;
+      case "fdiff":
+        if (msg.cells) for (const dc of msg.cells) cells[dc.i] = dc;
+        cur = msg.cur || null; scheduleDraw(); break;
+      case "mouse": mouseCapture = !!msg.enabled; break;
+      case "title": document.title = msg.title ? ("herdr · " + msg.title) : "herdr · web"; break;
+      case "clipboard":
+        try { navigator.clipboard.writeText(b64decode(msg.data)); } catch (e) {}
+        break;
+      case "notify": toast(msg.message + (msg.body ? ": " + msg.body : "")); break;
+      case "error": setStatus("error: " + msg.msg, true); break;
+      case "shutdown": setStatus("server shut down", true); break;
+    }
+  }
+
+  function b64decode(s) {
+    try { return decodeURIComponent(escape(atob(s))); } catch (e) { return atob(s); }
+  }
+
+  function connect() {
+    const proto = location.protocol === "https:" ? "wss" : "ws";
+    ws = new WebSocket(`${proto}://${location.host}/ws`);
+    ws.onopen = () => { setStatus(`connected · ${cols}×${rows}`); ws.send(JSON.stringify({ t: "init", cols, rows })); };
+    ws.onmessage = (ev) => onMessage(JSON.parse(ev.data));
+    ws.onclose = () => { setStatus("disconnected — retrying…", true); setTimeout(connect, 1500); };
+    ws.onerror = () => ws.close();
+  }
+
+  function send(data) { if (ws && ws.readyState === 1) ws.send(JSON.stringify({ t: "input", data })); }
+  function sendPaste(text) { if (ws && ws.readyState === 1) ws.send(JSON.stringify({ t: "paste", text })); }
+
+  // ---- Keyboard ----
+  const SPECIAL = {
+    Enter: "\r", Backspace: "\x7f", Tab: "\t", Escape: "\x1b",
+    ArrowUp: "\x1b[A", ArrowDown: "\x1b[B", ArrowRight: "\x1b[C", ArrowLeft: "\x1b[D",
+    Home: "\x1b[H", End: "\x1b[F", PageUp: "\x1b[5~", PageDown: "\x1b[6~",
+    Delete: "\x1b[3~", Insert: "\x1b[2~",
+  };
+  canvas.addEventListener("keydown", (e) => {
+    if (e.metaKey && !e.ctrlKey) return; // leave Cmd shortcuts (incl. Cmd-V paste) to the browser
+    let seq = null;
+    if (SPECIAL[e.key]) seq = SPECIAL[e.key];
+    else if (e.ctrlKey && e.key.length === 1) {
+      const code = e.key.toLowerCase().charCodeAt(0);
+      if (code >= 97 && code <= 122) seq = String.fromCharCode(code - 96); // Ctrl-A..Z (incl. Ctrl-C interrupt)
+      else if (e.key === " ") seq = "\x00";
+    } else if (e.key.length === 1) seq = e.key;
+    if (seq !== null) { e.preventDefault(); send(seq); }
+  });
+
+  // ---- Paste (Cmd/Ctrl-V, right-click paste) ----
+  document.addEventListener("paste", (e) => {
+    const text = (e.clipboardData || window.clipboardData).getData("text");
+    if (text) { e.preventDefault(); sendPaste(text); }
+  });
+
+  // ---- Mouse (SGR 1006), gated on server MouseCapture ----
+  function cellCoord(ev) {
+    const x = Math.min(W || cols, Math.max(1, Math.floor(ev.clientX / cellW) + 1));
+    const y = Math.min(H || rows, Math.max(1, Math.floor(ev.clientY / cellH) + 1));
+    return [x, y];
+  }
+  function mods(ev) { return (ev.shiftKey ? 4 : 0) | (ev.altKey ? 8 : 0) | (ev.ctrlKey ? 16 : 0); }
+  function sgr(btn, x, y, press) { send(`\x1b[<${btn};${x};${y}${press ? "M" : "m"}`); }
+
+  let dragging = false, dragBtn = 0, lastCell = "";
+
+  canvas.addEventListener("mousedown", (ev) => {
+    canvas.focus();
+    const [x, y] = cellCoord(ev);
+    if (!mouseCapture) { // allow click-to-open hyperlinks when the app isn't grabbing the mouse
+      const c = cells[(y - 1) * W + (x - 1)];
+      if (c && c.h && links[c.h - 1]) { window.open(links[c.h - 1], "_blank", "noopener"); }
+      return;
+    }
+    ev.preventDefault();
+    dragging = true; dragBtn = ev.button;
+    sgr(ev.button + mods(ev), x, y, true);
+  });
+  window.addEventListener("mouseup", (ev) => {
+    if (!mouseCapture || !dragging) return;
+    const [x, y] = cellCoord(ev);
+    sgr(dragBtn + mods(ev), x, y, false);
+    dragging = false;
+  });
+  canvas.addEventListener("mousemove", (ev) => {
+    if (!mouseCapture || !dragging) return;
+    const [x, y] = cellCoord(ev);
+    const key = x + ":" + y;
+    if (key === lastCell) return; // one report per cell to avoid flooding
+    lastCell = key;
+    sgr(dragBtn + 32 + mods(ev), x, y, true);
+  });
+  canvas.addEventListener("wheel", (ev) => {
+    if (!mouseCapture) return;
+    ev.preventDefault();
+    const [x, y] = cellCoord(ev);
+    sgr((ev.deltaY < 0 ? 64 : 65) + mods(ev), x, y, true);
+  }, { passive: false });
+  canvas.addEventListener("contextmenu", (ev) => { if (mouseCapture) ev.preventDefault(); });
+
+  // ---- Resize ----
+  let resizeTimer = null;
+  window.addEventListener("resize", () => {
+    layout();
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => {
+      if (ws && ws.readyState === 1) { ws.send(JSON.stringify({ t: "resize", cols, rows })); setStatus(`connected · ${cols}×${rows}`); }
+      scheduleDraw();
+    }, 120);
+  });
+
+  readTheme();
+  layout();
+  canvas.focus();
+  connect();
+})();
+</script>
+</body>
+</html>
