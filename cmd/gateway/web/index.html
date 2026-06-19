@@ -193,7 +193,46 @@
   }
 
   function send(data) { if (ws && ws.readyState === 1) ws.send(JSON.stringify({ t: "input", data })); }
-  function sendPaste(text) { if (ws && ws.readyState === 1) ws.send(JSON.stringify({ t: "paste", text })); }
+  function sendPaste(text) { if (ws && ws.readyState === 1) ws.send(JSON.stringify({ t: "paste", data: text })); }
+  function sendImage(ext, b64) { if (ws && ws.readyState === 1) ws.send(JSON.stringify({ t: "image", ext, data: b64 })); }
+
+  // Cmd+V: read clipboard text and forward it as a paste. Toasts surface why a
+  // paste did nothing (no permission, empty clipboard, unsupported browser).
+  function pasteText() {
+    if (!navigator.clipboard || !navigator.clipboard.readText) { toast("clipboard read unavailable in this browser"); return; }
+    navigator.clipboard.readText()
+      .then((t) => { if (t) { sendPaste(t); toast("pasted " + t.length + " chars"); } else toast("clipboard has no text"); })
+      .catch((err) => toast("paste blocked: " + ((err && err.name) || err)));
+  }
+
+  // Ctrl+V: read an image off the clipboard and send it for herdr to stage and
+  // paste into the focused pane (how Claude Code receives images).
+  function pasteImage() {
+    if (!navigator.clipboard || !navigator.clipboard.read) { toast("clipboard image read unavailable in this browser"); return; }
+    navigator.clipboard.read()
+      .then(async (items) => {
+        for (const item of items) {
+          const type = item.types.find((t) => t.indexOf("image/") === 0);
+          if (type) {
+            const blob = await item.getType(type);
+            const buf = await blob.arrayBuffer();
+            sendImage(type.split("/")[1] || "png", base64FromBuffer(buf));
+            toast("pasted image (" + blob.size + " bytes)");
+            return;
+          }
+        }
+        toast("clipboard has no image");
+      })
+      .catch((err) => toast("image paste blocked: " + ((err && err.name) || err)));
+  }
+
+  function base64FromBuffer(buf) {
+    const bytes = new Uint8Array(buf);
+    let bin = "";
+    const chunk = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunk) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+    return btoa(bin);
+  }
 
   // ---- Keyboard ----
   const SPECIAL = {
@@ -203,7 +242,13 @@
     Delete: "\x1b[3~", Insert: "\x1b[2~",
   };
   canvas.addEventListener("keydown", (e) => {
-    if (e.metaKey && !e.ctrlKey) return; // leave Cmd shortcuts (incl. Cmd-V paste) to the browser
+    const isV = e.key === "v" || e.key === "V";
+    // Ctrl+V → paste an image from the clipboard (staged by herdr as a file path).
+    if (e.ctrlKey && !e.metaKey && isV) { e.preventDefault(); pasteImage(); return; }
+    // Cmd+V → paste text. A focused <canvas> emits no native 'paste' event, so we
+    // read the clipboard directly (this keydown supplies the required user gesture).
+    if (e.metaKey && !e.ctrlKey && isV) { e.preventDefault(); pasteText(); return; }
+    if (e.metaKey && !e.ctrlKey) return; // leave other Cmd shortcuts to the browser
     let seq = null;
     if (SPECIAL[e.key]) seq = SPECIAL[e.key];
     else if (e.ctrlKey && e.key.length === 1) {

@@ -43,6 +43,11 @@ func (h *Conn) SendInput(data []byte) error { return h.send(wire.EncodeInput(dat
 // SendPaste forwards pasted text as a structured paste event.
 func (h *Conn) SendPaste(text string) error { return h.send(wire.EncodePaste(text)) }
 
+// SendClipboardImage forwards a pasted image for the server to stage and paste.
+func (h *Conn) SendClipboardImage(ext string, data []byte) error {
+	return h.send(wire.EncodeClipboardImage(ext, data))
+}
+
 // Resize notifies the server of a new terminal size.
 func (h *Conn) Resize(cols, rows uint16) error { return h.send(wire.EncodeResize(cols, rows, 0, 0)) }
 

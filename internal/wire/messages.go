@@ -98,6 +98,17 @@ func EncodePaste(text string) []byte {
 	return e.Payload()
 }
 
+// EncodeClipboardImage builds a ClientMessage::ClipboardImage payload. The
+// server stages the image to a temp file and pastes its path into the focused
+// pane — the mechanism Claude Code uses to receive pasted images.
+func EncodeClipboardImage(ext string, data []byte) []byte {
+	e := NewEncoder()
+	e.Variant(cmClipboardImage)
+	e.Str(ext)
+	e.ByteSlice(data)
+	return e.Payload()
+}
+
 // EncodeResize builds a ClientMessage::Resize frame payload.
 func EncodeResize(cols, rows uint16, cellW, cellH uint32) []byte {
 	e := NewEncoder()

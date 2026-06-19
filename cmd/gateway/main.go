@@ -9,6 +9,7 @@ package main
 
 import (
 	"embed"
+	"encoding/base64"
 	"encoding/json"
 	"flag"
 	"log"
@@ -54,8 +55,9 @@ func defaultSocket() string {
 
 // clientCmd is a message from the browser.
 type clientCmd struct {
-	T    string `json:"t"`    // "init" | "input" | "resize"
-	Data string `json:"data"` // raw input bytes (for "input")
+	T    string `json:"t"`    // "init" | "input" | "paste" | "image" | "resize"
+	Data string `json:"data"` // raw input/paste text, or base64 image bytes (for "image")
+	Ext  string `json:"ext"`  // image file extension (for "image")
 	Cols uint16 `json:"cols"`
 	Rows uint16 `json:"rows"`
 }
@@ -148,6 +150,12 @@ func bridge(ws *rweb.WSConn, socket string) error {
 			_ = h.SendInput([]byte(c.Data))
 		case "paste":
 			_ = h.SendPaste(c.Data)
+		case "image":
+			if c.Ext != "" {
+				if raw, err := base64.StdEncoding.DecodeString(c.Data); err == nil && len(raw) > 0 {
+					_ = h.SendClipboardImage(c.Ext, raw)
+				}
+			}
 		case "resize":
 			if c.Cols > 0 && c.Rows > 0 {
 				_ = h.Resize(c.Cols, c.Rows)
