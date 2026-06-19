@@ -72,17 +72,59 @@
     requestAnimationFrame(() => { dirty = false; draw(); });
   }
 
+  // Focus emphasis: herdr marks the active sidebar row (agent/workspace) with a
+  // subtle dark background (palette surface_dim). Detect that left-anchored,
+  // partial-width highlight band and make it bolder — brighten the band and add
+  // a bright accent stripe down its left edge.
+  const ACCENT = "#5b9dff";
+  const BAND_MIN_W = 5;
+
+  function lighten(css, amt) {
+    const m = /^#([0-9a-fA-F]{6})$/.exec(css);
+    if (!m) return css;
+    const n = parseInt(m[1], 16);
+    let r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+    r = Math.round(r + (255 - r) * amt);
+    g = Math.round(g + (255 - g) * amt);
+    b = Math.round(b + (255 - b) * amt);
+    return "#" + ((1 << 24) | (r << 16) | (g << 8) | b).toString(16).slice(1);
+  }
+
+  // Returns { boost: Map(cellIndex -> brightenedBg), stripes: [rowY...] }.
+  function findHighlightBands() {
+    const boost = new Map(), stripes = [];
+    if (!W || !H) return { boost, stripes };
+    const maxW = Math.max(BAND_MIN_W, Math.floor(W * 0.55)); // exclude full-width bars
+    for (let y = 0; y < H; y++) {
+      const c0 = cells[y * W];
+      const bg = (c0 && c0.b) || "";
+      if (!bg) continue; // band must touch the left edge (the sidebar)
+      let x2 = 0;
+      while (x2 < W) { const cc = cells[y * W + x2]; if (!cc || (cc.b || "") !== bg) break; x2++; }
+      if (x2 >= BAND_MIN_W && x2 <= maxW) {
+        const lb = lighten(bg, 0.09);
+        for (let xi = 0; xi < x2; xi++) boost.set(y * W + xi, lb);
+        stripes.push(y);
+      }
+    }
+    return { boost, stripes };
+  }
+
   function draw() {
     ctx.fillStyle = defBg;
     ctx.fillRect(0, 0, window.innerWidth, window.innerHeight);
     ctx.textBaseline = "top";
+    const { boost, stripes } = findHighlightBands();
     for (let y = 0; y < H; y++) {
       for (let x = 0; x < W; x++) {
-        const c = cells[y * W + x];
+        const idx = y * W + x;
+        const c = cells[idx];
         if (!c) continue;
         const m = c.m || 0;
         let fg = c.f || defFg, bg = c.b || defBg;
         if (m & M_REVERSED) { const t = fg; fg = bg; bg = t; }
+        const bb = boost.get(idx);
+        if (bb) bg = bb;
         const px = x * cellW, py = y * cellH;
         if (bg !== defBg) { ctx.fillStyle = bg; ctx.fillRect(px, py, cellW + 0.5, cellH + 0.5); }
         const ch = c.s;
@@ -96,6 +138,10 @@
           if ((m & M_UNDERLINED) || c.h) { ctx.fillRect(px, py + cellH - 2, cellW, 1); }
         }
       }
+    }
+    if (stripes.length) {
+      ctx.fillStyle = ACCENT;
+      for (const y of stripes) ctx.fillRect(0, y * cellH, 3, cellH + 0.5);
     }
     if (cur && cur.vis) {
       ctx.fillStyle = defFg; ctx.globalAlpha = 0.7;
