@@ -39,7 +39,7 @@
   let defBg = "#181818", defFg = "#d4d4d4";
 
   // ratatui Modifier bits.
-  const M_BOLD = 0x1, M_ITALIC = 0x4, M_UNDERLINED = 0x8, M_REVERSED = 0x40, M_HIDDEN = 0x80;
+  const M_BOLD = 0x1, M_DIM = 0x2, M_ITALIC = 0x4, M_UNDERLINED = 0x8, M_REVERSED = 0x40, M_HIDDEN = 0x80;
 
   function readTheme() {
     const css = getComputedStyle(document.documentElement);
@@ -79,15 +79,28 @@
   const ACCENT = "#5b9dff";
   const BAND_MIN_W = 5;
 
-  function lighten(css, amt) {
+  function parseHex(css) {
     const m = /^#([0-9a-fA-F]{6})$/.exec(css);
-    if (!m) return css;
+    if (!m) return null;
     const n = parseInt(m[1], 16);
-    let r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
-    r = Math.round(r + (255 - r) * amt);
-    g = Math.round(g + (255 - g) * amt);
-    b = Math.round(b + (255 - b) * amt);
-    return "#" + ((1 << 24) | (r << 16) | (g << 8) | b).toString(16).slice(1);
+    return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  }
+
+  function toHex(r, g, b) {
+    return "#" + ((1 << 24) | (Math.round(r) << 16) | (Math.round(g) << 8) | Math.round(b)).toString(16).slice(1);
+  }
+
+  function lighten(css, amt) {
+    const p = parseHex(css);
+    if (!p) return css;
+    return toHex(p[0] + (255 - p[0]) * amt, p[1] + (255 - p[1]) * amt, p[2] + (255 - p[2]) * amt);
+  }
+
+  // Mix color a toward color b by t (0..1). Used to render DIM/faint text.
+  function blend(a, b, t) {
+    const pa = parseHex(a), pb = parseHex(b);
+    if (!pa || !pb) return a;
+    return toHex(pa[0] + (pb[0] - pa[0]) * t, pa[1] + (pb[1] - pa[1]) * t, pa[2] + (pb[2] - pa[2]) * t);
   }
 
   // Returns { boost: Map(cellIndex -> brightenedBg), stripes: [rowY...] }.
@@ -125,6 +138,7 @@
         if (m & M_REVERSED) { const t = fg; fg = bg; bg = t; }
         const bb = boost.get(idx);
         if (bb) bg = bb;
+        if (m & M_DIM) fg = blend(fg, bg, 0.5); // faint text (e.g. Claude Code suggestions)
         const px = x * cellW, py = y * cellH;
         if (bg !== defBg) { ctx.fillStyle = bg; ctx.fillRect(px, py, cellW + 0.5, cellH + 0.5); }
         const ch = c.s;
