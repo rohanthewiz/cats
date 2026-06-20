@@ -1,3 +1,5 @@
+//go:build ghostty
+
 // Command vtspike is the Phase B proof-of-concept: it drives a go-libghostty
 // terminal entirely in Go (no Rust server), feeds it VT escape sequences, and
 // reads the result back two ways:

@@ -82,13 +82,19 @@ go run ./cmd/wsprobe --frames 1
 ```
 internal/wire/        bincode codec, wire messages, framing, color decode
 internal/herdrconn/   herdr client connection (handshake, send/recv)
+internal/terminal/    Phase B: Go-owned VT emulator (Emulator iface + go-libghostty)
 cmd/gateway/          rweb web server + WebSocket bridge + embedded canvas UI
 cmd/smoke/            direct protocol smoke test (no web)
 cmd/wsprobe/          stdlib-only WebSocket client for end-to-end verification
 cmd/vtspike/          Phase B spike: drive a go-libghostty terminal in Go, read cells
-cmd/ptyspike/         Phase B spike: spawn a shell PTY -> go-libghostty -> read grid
+cmd/ptyspike/         Phase B spike: shell PTY -> internal/terminal.Emulator -> grid
 scripts/build-libghostty-vt.sh   build libghostty-vt (Zig 0.15.2 + macOS-26 SDK patch)
 ```
+
+The CGO terminal backend is behind the `ghostty` build tag, so the Phase A
+gateway still builds with a plain `go build ./...` (no Zig toolchain, no
+libghostty-vt). Only the Phase B code (`internal/terminal`, the spikes) needs
+`-tags ghostty` + `PKG_CONFIG_PATH`.
 
 ## Phase B spike (go-libghostty)
 
@@ -101,9 +107,15 @@ Silicon / macOS 26.5. To build:
 ```bash
 ./scripts/build-libghostty-vt.sh          # builds libghostty-vt, prints PKG_CONFIG_PATH
 export PKG_CONFIG_PATH=~/projs/rust/herdr/vendor/libghostty-vt/zig-out/share/pkgconfig
-go run ./cmd/vtspike
-go run ./cmd/ptyspike
+go test -tags ghostty ./internal/terminal/   # Emulator round-trip tests
+go run  -tags ghostty ./cmd/vtspike
+go run  -tags ghostty ./cmd/ptyspike
 ```
+
+The reusable piece is `internal/terminal`: an `Emulator` interface (`io.Writer`
+in, `Snapshot` of cells + cursor out) with a go-libghostty-backed implementation.
+The Phase B browser renderer will consume `Snapshot` the way the Phase A gateway
+consumes wire `FrameData`.
 
 **Toolchain note (the Zig/SDK risk, now resolved):** libghostty-vt pins Zig
 0.15.x, but the macOS 26.5 SDK dropped the plain `arm64-macos` slice from its
