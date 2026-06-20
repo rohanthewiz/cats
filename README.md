@@ -49,9 +49,25 @@ go run ./cmd/gateway --addr :8420
 # then open http://localhost:8420
 ```
 
+### Starting the web client (step by step)
+
+1. **Have a `herdr server` running.** The gateway is a thin client — it attaches to an
+   already-running herdr session over a Unix socket; it does not start herdr itself.
+2. **Start the gateway:**
+
+   ```bash
+   go run ./cmd/gateway --addr :8420
+   ```
+
+3. **Open `http://localhost:8420`** in your browser.
+
 `--socket` defaults to `~/.config/herdr/herdr-client.sock` (the default session). The
 gateway attaches to whatever session that socket belongs to, so the browser controls that
 live session — keystrokes reach its focused pane.
+
+> **Note:** `web/index.html` is embedded into the gateway binary at compile time
+> (`//go:embed`). After editing it, **restart the gateway** (`go run` recompiles and
+> re-embeds) — a browser reload alone will keep serving the old page.
 
 ### Headless verification
 
