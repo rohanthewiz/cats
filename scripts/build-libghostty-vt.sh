@@ -86,9 +86,10 @@ if [[ -f "$LIB" && -f "$PC_DIR/libghostty-vt-static.pc" ]]; then
   echo
   echo ">> SUCCESS. Build the Go Phase B code with -tags ghostty:"
   echo "   export PKG_CONFIG_PATH=$PC_DIR"
-  echo "   go test -tags ghostty ./internal/terminal/"
+  echo "   go test -tags ghostty ./internal/terminal/ ./internal/orchestration/"
   echo "   go run  -tags ghostty ./cmd/vtspike"
   echo "   go run  -tags ghostty ./cmd/ptyspike"
+  echo "   go run  -tags ghostty ./cmd/termhost   # Go↔Rust terminal-backend daemon"
 else
   echo ">> FAILED: expected static lib + pkgconfig not found" >&2
   exit 1

@@ -83,11 +83,13 @@ go run ./cmd/wsprobe --frames 1
 internal/wire/        bincode codec, wire messages, framing, color decode
 internal/herdrconn/   herdr client connection (handshake, send/recv)
 internal/terminal/    Phase B: Go-owned VT emulator (Emulator iface + go-libghostty)
+internal/orchestration/  Phase B: Go↔Rust seam (protocol + terminal-backend Host)
 cmd/gateway/          rweb web server + WebSocket bridge + embedded canvas UI
 cmd/smoke/            direct protocol smoke test (no web)
 cmd/wsprobe/          stdlib-only WebSocket client for end-to-end verification
 cmd/vtspike/          Phase B spike: drive a go-libghostty terminal in Go, read cells
 cmd/ptyspike/         Phase B spike: shell PTY -> internal/terminal.Emulator -> grid
+cmd/termhost/         Phase B: terminal-backend daemon (orchestration Host over a socket)
 scripts/build-libghostty-vt.sh   build libghostty-vt (Zig 0.15.2 + macOS-26 SDK patch)
 ```
 
@@ -117,6 +119,26 @@ in, `Snapshot` of cells + cursor out) with a go-libghostty-backed implementation
 The Phase B browser renderer will consume `Snapshot` the way the Phase A gateway
 consumes wire `FrameData`.
 
+### Go↔Rust orchestration seam
+
+`internal/orchestration` is the seam where Go becomes the **terminal backend**
+and Rust stays the **orchestrator** (workspace/pane tree, layout, detection,
+session, compositing). Rust sends commands (`create_pane` / `input` / `resize` /
+`close_pane`); Go runs a PTY + `Emulator` per pane and sends events
+(`pane_frame` / `pane_exited`). Frames are shaped to drop into Rust's
+`wire::FrameData`/`CellData` compositing (packed colors, ratatui modifier bits,
+`skip` diffing). The `Host` serves this over any connection; `cmd/termhost` is a
+Unix-socket daemon wrapping it. The protocol + frame conversion are pure Go
+(tested without the toolchain); the `Host` is behind `-tags ghostty`.
+
+Full design: [`ai_docs/phase-b-orchestration-seam.md`](ai_docs/phase-b-orchestration-seam.md).
+
+```bash
+go test ./internal/orchestration/                    # protocol/diff (no toolchain)
+go test -tags ghostty ./internal/orchestration/      # + end-to-end Host
+go run  -tags ghostty ./cmd/termhost --socket /tmp/herdr-termhost.sock
+```
+
 **Toolchain note (the Zig/SDK risk, now resolved):** libghostty-vt pins Zig
 0.15.x, but the macOS 26.5 SDK dropped the plain `arm64-macos` slice from its
 `.tbd` stubs (only `arm64e-macos` remains) and Zig 0.15.2 doesn't fall back
@@ -132,8 +154,10 @@ slice and pointing Zig at it via an `xcrun` shim. Zig itself is downloaded to
 - **Phase B:** move PTY + VT emulation into Go via `go.mitchellh.com/libghostty`
   (go-libghostty), shrinking the Rust surface. **Spike done** (see above): the
   toolchain builds and both the cell-grid and shell-PTY paths work end-to-end on
-  macOS 26.5. Remaining: a Go terminal-runtime package wrapping go-libghostty
-  behind an interface (pinned commit), resize/scrollback/hyperlink coverage, and
-  the Go↔Rust orchestration seam so panes route through the Go terminals.
+  macOS 26.5. Done since: `internal/terminal` (Emulator wrapping go-libghostty)
+  and `internal/orchestration` (the Go↔Rust seam + terminal-backend Host /
+  `termhost` daemon). Remaining: the Rust side of the seam (drive panes through
+  `termhost`, splice Go pane frames into Rust compositing), OSC passthrough
+  (title/cwd/clipboard/hyperlinks), scrollback/selection, Go-side input encoding.
 - **Phase C:** port herdr's portable logic (app state, BSP layout, agent detection,
   session/workspace) to Go and retire the Rust core.

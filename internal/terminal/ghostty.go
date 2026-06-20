@@ -31,9 +31,29 @@ type ghosttyEmulator struct {
 	rc *libghostty.RenderStateRowCells
 }
 
+// Option configures a new Emulator.
+type Option func(*[]libghostty.TerminalOption)
+
+// WithWritePTY registers a callback the terminal invokes when it needs to write
+// bytes back to the PTY (e.g. responses to device-attribute / cursor-position
+// queries). The Host wires this to the pane's PTY master so query responses are
+// handled entirely within Go.
+func WithWritePTY(fn func(data []byte)) Option {
+	return func(opts *[]libghostty.TerminalOption) {
+		*opts = append(*opts, libghostty.WithWritePty(func(_ *libghostty.Terminal, data []byte) {
+			// Copy: the slice is only valid for the duration of the callback.
+			fn(append([]byte(nil), data...))
+		}))
+	}
+}
+
 // New creates a go-libghostty-backed Emulator of the given cell dimensions.
-func New(cols, rows uint16) (Emulator, error) {
-	term, err := libghostty.NewTerminal(libghostty.WithSize(cols, rows))
+func New(cols, rows uint16, opts ...Option) (Emulator, error) {
+	topts := []libghostty.TerminalOption{libghostty.WithSize(cols, rows)}
+	for _, o := range opts {
+		o(&topts)
+	}
+	term, err := libghostty.NewTerminal(topts...)
 	if err != nil {
 		return nil, fmt.Errorf("terminal: new: %w", err)
 	}
