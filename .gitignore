@@ -14,3 +14,6 @@
 
 # Python
 __pycache__/
+
+# local toolchain (zig 0.15.2 for libghostty-vt build)
+.tools/

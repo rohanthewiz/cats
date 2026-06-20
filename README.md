@@ -85,14 +85,43 @@ internal/herdrconn/   herdr client connection (handshake, send/recv)
 cmd/gateway/          rweb web server + WebSocket bridge + embedded canvas UI
 cmd/smoke/            direct protocol smoke test (no web)
 cmd/wsprobe/          stdlib-only WebSocket client for end-to-end verification
+cmd/vtspike/          Phase B spike: drive a go-libghostty terminal in Go, read cells
+cmd/ptyspike/         Phase B spike: spawn a shell PTY -> go-libghostty -> read grid
+scripts/build-libghostty-vt.sh   build libghostty-vt (Zig 0.15.2 + macOS-26 SDK patch)
 ```
+
+## Phase B spike (go-libghostty)
+
+A proof-of-concept that Go can own PTY + VT emulation via
+[go-libghostty](https://github.com/mitchellh/go-libghostty) is in `cmd/vtspike`
+(drive a terminal, read back per-cell glyph + fg/bg) and `cmd/ptyspike` (spawn a
+real shell PTY, pump it through the emulator, dump the grid). Both work on Apple
+Silicon / macOS 26.5. To build:
+
+```bash
+./scripts/build-libghostty-vt.sh          # builds libghostty-vt, prints PKG_CONFIG_PATH
+export PKG_CONFIG_PATH=~/projs/rust/herdr/vendor/libghostty-vt/zig-out/share/pkgconfig
+go run ./cmd/vtspike
+go run ./cmd/ptyspike
+```
+
+**Toolchain note (the Zig/SDK risk, now resolved):** libghostty-vt pins Zig
+0.15.x, but the macOS 26.5 SDK dropped the plain `arm64-macos` slice from its
+`.tbd` stubs (only `arm64e-macos` remains) and Zig 0.15.2 doesn't fall back
+arm64→arm64e, so its native build fails to link libSystem. The build script
+works around this by patching a copy of the SDK to re-add the `arm64-macos`
+slice and pointing Zig at it via an `xcrun` shim. Zig itself is downloaded to
+`.tools/` (gitignored); no system changes are made.
 
 ## What's next (migration roadmap)
 
 - **Phase A polish:** mouse/wheel input, OSC 8 hyperlinks, Kitty graphics passthrough,
   clipboard (OSC 52), frame diffing to cut bandwidth, per-tab isolation.
 - **Phase B:** move PTY + VT emulation into Go via `go.mitchellh.com/libghostty`
-  (go-libghostty), shrinking the Rust surface. Note: go-libghostty links libghostty-vt,
-  which must be built with Zig — the same toolchain herdr uses.
+  (go-libghostty), shrinking the Rust surface. **Spike done** (see above): the
+  toolchain builds and both the cell-grid and shell-PTY paths work end-to-end on
+  macOS 26.5. Remaining: a Go terminal-runtime package wrapping go-libghostty
+  behind an interface (pinned commit), resize/scrollback/hyperlink coverage, and
+  the Go↔Rust orchestration seam so panes route through the Go terminals.
 - **Phase C:** port herdr's portable logic (app state, BSP layout, agent detection,
   session/workspace) to Go and retire the Rust core.
