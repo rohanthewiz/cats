@@ -123,10 +123,44 @@ in the single spawn chokepoint — **no public spawn-signature churn**, and bran
 - Build env: Rust links ghostty via `export ZIG="~/projs/go/herdr-web/.tools/zig-wrapped"`;
   Go needs `export PKG_CONFIG_PATH=~/projs/rust/herdr/vendor/libghostty-vt/zig-out/share/pkgconfig`.
 
-## NOT done — live end-to-end smoke test (next)
+## Live end-to-end smoke test — PASSED (commit `9cd8f35`)
 
-Verified at build/test level on both sides; a real run (herdr spawning a pane via a
-**running** daemon, rendered in a browser) is still pending — it's interactive/outward.
+Built a feature-gated integration test `tests/termhost_e2e.rs` (gated `#![cfg(feature =
+"termhost")]`; skips/passes when `HERDR_TERMHOST_SOCKET` is unset/unreachable). It drives
+the **whole seam** through the real binaries: starts the Go daemon, spawns a real
+`herdr server` with `HERDR_TERMHOST_SOCKET` set, creates a workspace over the JSON-RPC API
+(root pane → spawned on the Go daemon), attaches a client, sends `echo <marker>` via
+`pane.send_text`, and asserts the marker renders in a client `SemanticFrame`.
+
+**Result: green.** Two assertions make it definitive:
+1. The marker renders in a client frame — `workspace.create` → Go `create_pane` → `input`
+   → Go VT emulator → `pane_frame` → spliced into the compositor → client. ✅
+2. `pane.read` (which reads the **local** Rust emulator) returns **len=0** — the local
+   emulator is unfed, proving the pane is genuinely Go-backed, **not** an in-process
+   fallback that coincidentally works. ✅ (This is exactly the slice-1 degraded behavior.)
+
+Gotchas found while bringing it up (worth remembering):
+- The headless server does **not** auto-spawn a pane; you must `workspace.create` over the
+  API socket to get one. (First attempt asserted on frames with no pane → failed.)
+- Server logs go to `config_dir()/herdr-dev/herdr-server.log` (under the test's
+  `XDG_CONFIG_HOME`), not `XDG_DATA_HOME`; on macOS `XDG_DATA_HOME` is ignored.
+- `pane.read`/`pane.*` text APIs read the local emulator → empty for termhost panes; assert
+  via the rendered client frame instead.
+- Run env: `ZIG=~/projs/go/herdr-web/.tools/zig-wrapped` (Rust),
+  `PKG_CONFIG_PATH=~/projs/rust/herdr/vendor/libghostty-vt/zig-out/share/pkgconfig` (Go).
+
+Reproduce:
+```bash
+# daemon
+cd ~/projs/go/herdr-web && export PKG_CONFIG_PATH=~/projs/rust/herdr/vendor/libghostty-vt/zig-out/share/pkgconfig
+go build -tags ghostty -o /tmp/td ./cmd/termhost && /tmp/td --socket /tmp/herdr-th.sock &
+# test
+cd ~/projs/rust/herdr && export ZIG="~/projs/go/herdr-web/.tools/zig-wrapped"
+HERDR_TERMHOST_SOCKET=/tmp/herdr-th.sock cargo test --features termhost --test termhost_e2e -- --nocapture
+```
+
+A **browser-rendered** run (vs. the programmatic SemanticFrame client used here) is still
+worth doing manually, but the seam is now proven end-to-end.
 
 ```bash
 # terminal 1 — Go daemon
@@ -156,10 +190,16 @@ and whether the retained path vs fallback is taken (`render_prof` events in head
   switch to changed-rows once correctness is confirmed.
 - **CI:** cache the libghostty-vt `.a` so `-tags ghostty` / `--features termhost` run in CI.
 
-## Commits on `roh/phase-b-termhost-client` (nothing pushed)
+## Commits on `roh/phase-b-termhost-client`
 
 ```
+9cd8f35 test: e2e smoke test for the termhost backend (step 3)        ← this session
 038d45a feat: route the live pane runtime through termhost (step 3)   ← this session
 14b2212 feat: termhost terminal-backend seam (feature-gated, no rewiring)
 1e4dd9a feat: Rust client for the Go↔Rust orchestration seam
 ```
+
+**Push target note:** the Rust repo has two remotes — `herdr-origin` →
+`ogulcancelik/herdr` (upstream, **no write access** for rohanthewiz, push 403) and
+`origin` → `rohanthewiz/herdr-go` (own fork, **pushable**). Pushed to `origin`. Landing on
+the upstream needs a PR. The Go repo pushes to `rohanthewiz/herdr-web` (`roh/phase-b`).
