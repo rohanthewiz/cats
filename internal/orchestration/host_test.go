@@ -137,6 +137,40 @@ func TestHostReportsPaneCwd(t *testing.T) {
 	t.Fatal("never received pane_cwd")
 }
 
+func TestHostReportsAgent(t *testing.T) {
+	c := startTestHost(t)
+
+	cp := NewCreatePane(4, 40, 5)
+	cp.Command = "/bin/sh"
+	// Advertise argv[0]="codex" over a real binary so process-based detection
+	// identifies the agent without needing one installed.
+	cp.Args = []string{"-c", "exec -a codex sleep 3"}
+	if err := WriteMessage(c, cp); err != nil {
+		t.Fatalf("create_pane: %v", err)
+	}
+
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		typ, payload := readEvent(t, c)
+		switch typ {
+		case MsgPaneAgent:
+			var pa PaneAgent
+			if err := json.Unmarshal(payload, &pa); err != nil {
+				t.Fatalf("decode pane_agent: %v", err)
+			}
+			if pa.PaneID != 4 {
+				t.Fatalf("pane_agent for pane %d, want 4", pa.PaneID)
+			}
+			if pa.Agent == "codex" {
+				return // identity reported
+			}
+		case MsgError:
+			t.Fatalf("unexpected error event: %s", string(payload))
+		}
+	}
+	t.Fatal("never received pane_agent with agent=codex")
+}
+
 func TestHostInputEchoAndClose(t *testing.T) {
 	c := startTestHost(t)
 

@@ -15,12 +15,17 @@ import (
 	"time"
 
 	"github.com/creack/pty"
+	"github.com/rohanthewiz/herdr-web/internal/detect"
 	"github.com/rohanthewiz/herdr-web/internal/terminal"
 )
 
 // DefaultFlushInterval coalesces dirty panes into frames at ~60 Hz, mirroring
 // the Phase A requestAnimationFrame coalescing.
 const DefaultFlushInterval = 16 * time.Millisecond
+
+// detectInterval is how often a pane's foreground process group is probed for
+// agent identity.
+const detectInterval = 400 * time.Millisecond
 
 // pane is one terminal: a PTY + go-libghostty emulator + child process.
 type pane struct {
@@ -218,6 +223,7 @@ func (h *Host) createPane(c CreatePane) error {
 	h.mu.Unlock()
 
 	go h.readPump(p)
+	go h.detectPump(p)
 	return nil
 }
 
@@ -247,6 +253,35 @@ func (h *Host) readPump(p *pane) {
 	}
 	h.closePane(p)
 	h.emit(NewPaneExited(p.id, exitCode(p.cmd.Wait())))
+}
+
+// detectPump probes the pane's foreground process group for agent identity and
+// emits a pane_agent event whenever the (agent, state) pair changes. Stage A:
+// identity only — state is idle when an agent is foreground, unknown for a plain
+// shell. Working/blocked discrimination (screen manifests) comes later.
+func (h *Host) detectPump(p *pane) {
+	t := time.NewTicker(detectInterval)
+	defer t.Stop()
+	last := "\x00sentinel"
+	for {
+		select {
+		case <-h.done:
+			return
+		case <-t.C:
+		}
+		if h.getPane(p.id) == nil {
+			return // pane closed/removed
+		}
+		agent := detect.ForegroundAgent(p.ptmx.Fd())
+		state := "unknown"
+		if agent != "" {
+			state = "idle"
+		}
+		if key := agent + "\x00" + state; key != last {
+			last = key
+			h.emit(NewPaneAgent(p.id, agent, state))
+		}
+	}
 }
 
 func (h *Host) feed(p *pane, b []byte) {

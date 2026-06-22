@@ -41,6 +41,7 @@ const (
 	MsgWelcome    MessageType = "welcome"
 	MsgPaneFrame  MessageType = "pane_frame"
 	MsgPaneCwd    MessageType = "pane_cwd"
+	MsgPaneAgent  MessageType = "pane_agent"
 	MsgPaneExited MessageType = "pane_exited"
 	MsgError      MessageType = "error"
 )
@@ -134,6 +135,23 @@ type PaneCwd struct {
 
 func NewPaneCwd(id uint32, cwd string) PaneCwd {
 	return PaneCwd{Type: MsgPaneCwd, PaneID: id, Cwd: cwd}
+}
+
+// PaneAgent reports the detected agent identity and state for a pane. The Go
+// daemon owns the PTY child, so it runs detection and reports results; the
+// orchestrator maps this onto its screen-detection path. Agent is "" for a plain
+// shell; State is one of idle|working|blocked|unknown.
+type PaneAgent struct {
+	Type           MessageType `json:"type"`
+	PaneID         uint32      `json:"pane_id"`
+	Agent          string      `json:"agent"`
+	State          string      `json:"state"`
+	VisibleBlocker bool        `json:"visible_blocker"`
+	VisibleWorking bool        `json:"visible_working"`
+}
+
+func NewPaneAgent(id uint32, agent, state string) PaneAgent {
+	return PaneAgent{Type: MsgPaneAgent, PaneID: id, Agent: agent, State: state}
 }
 
 type PaneExited struct {
