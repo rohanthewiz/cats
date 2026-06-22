@@ -43,6 +43,7 @@ const (
 	MsgPaneCwd       MessageType = "pane_cwd"
 	MsgPaneAgent     MessageType = "pane_agent"
 	MsgPaneClipboard MessageType = "pane_clipboard"
+	MsgPaneTitle     MessageType = "pane_title"
 	MsgPaneExited    MessageType = "pane_exited"
 	MsgError         MessageType = "error"
 )
@@ -176,6 +177,20 @@ type PaneClipboard struct {
 
 func NewPaneClipboard(id uint32, data []byte) PaneClipboard {
 	return PaneClipboard{Type: MsgPaneClipboard, PaneID: id, Data: data}
+}
+
+// PaneTitle reports a pane's window title (OSC 0/2) when it changes. libghostty
+// surfaces the title to the emulator, but the seam otherwise carries none, so the
+// orchestrator can show the running program's title on a termhost pane's border the
+// way it does for in-process panes. An empty Title is a title-clear.
+type PaneTitle struct {
+	Type   MessageType `json:"type"`
+	PaneID uint32      `json:"pane_id"`
+	Title  string      `json:"title"`
+}
+
+func NewPaneTitle(id uint32, title string) PaneTitle {
+	return PaneTitle{Type: MsgPaneTitle, PaneID: id, Title: title}
 }
 
 type PaneExited struct {

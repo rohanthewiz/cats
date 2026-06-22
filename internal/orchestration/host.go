@@ -50,6 +50,9 @@ type pane struct {
 	osc52   osc52Scanner // OSC 52 clipboard writes (also not surfaced by go-libghostty)
 	osc9    osc9Scanner  // OSC 9 progress, owned by readPump; latest published to progress
 
+	oscTitle  oscTitleScanner // OSC 0/2 window title, for the pane_title chrome event
+	lastTitle string          // last OSC 0/2 title emitted, for change detection
+
 	// progress holds the latest OSC 9 progress payload (readPump writes, detectPump
 	// reads). nil = none retained; detectPump clears it on agent change so a new
 	// agent does not inherit the previous process's progress.
@@ -255,6 +258,10 @@ func (h *Host) readPump(p *pane) {
 			}
 			if prog, ok := p.osc9.scan(buf[:n]); ok {
 				p.progress.Store(&prog)
+			}
+			if title, ok := p.oscTitle.scan(buf[:n]); ok && title != p.lastTitle {
+				p.lastTitle = title
+				h.emit(NewPaneTitle(p.id, title))
 			}
 		}
 		if err != nil { // EOF / EIO when the child exits or the PTY closes

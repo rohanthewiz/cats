@@ -242,6 +242,41 @@ func TestHostReportsPaneClipboard(t *testing.T) {
 	t.Fatal("never received pane_clipboard")
 }
 
+func TestHostReportsPaneTitle(t *testing.T) {
+	c := startTestHost(t)
+
+	cp := NewCreatePane(7, 40, 5)
+	cp.Command = "/bin/sh"
+	// Emit an OSC 2 window-title report on stdout, then linger briefly so the read
+	// pump forwards it before the child exits.
+	cp.Args = []string{"-c", `printf '\033]2;vim - main.go\033\\'; sleep 0.3`}
+	if err := WriteMessage(c, cp); err != nil {
+		t.Fatalf("create_pane: %v", err)
+	}
+
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		typ, payload := readEvent(t, c)
+		switch typ {
+		case MsgPaneTitle:
+			var pt PaneTitle
+			if err := json.Unmarshal(payload, &pt); err != nil {
+				t.Fatalf("decode pane_title: %v", err)
+			}
+			if pt.PaneID != 7 {
+				t.Fatalf("pane_title for pane %d, want 7", pt.PaneID)
+			}
+			if pt.Title != "vim - main.go" {
+				t.Fatalf("pane_title = %q, want %q", pt.Title, "vim - main.go")
+			}
+			return
+		case MsgError:
+			t.Fatalf("unexpected error event: %s", string(payload))
+		}
+	}
+	t.Fatal("never received pane_title")
+}
+
 func TestHostInputEchoAndClose(t *testing.T) {
 	c := startTestHost(t)
 
