@@ -38,12 +38,13 @@ const (
 	MsgClosePane  MessageType = "close_pane"
 
 	// Go → Rust (events).
-	MsgWelcome    MessageType = "welcome"
-	MsgPaneFrame  MessageType = "pane_frame"
-	MsgPaneCwd    MessageType = "pane_cwd"
-	MsgPaneAgent  MessageType = "pane_agent"
-	MsgPaneExited MessageType = "pane_exited"
-	MsgError      MessageType = "error"
+	MsgWelcome       MessageType = "welcome"
+	MsgPaneFrame     MessageType = "pane_frame"
+	MsgPaneCwd       MessageType = "pane_cwd"
+	MsgPaneAgent     MessageType = "pane_agent"
+	MsgPaneClipboard MessageType = "pane_clipboard"
+	MsgPaneExited    MessageType = "pane_exited"
+	MsgError         MessageType = "error"
 )
 
 // --- Commands (Rust → Go) ---------------------------------------------------
@@ -159,6 +160,22 @@ func NewPaneAgent(id uint32, agent, state string, visibleBlocker, visibleWorking
 		VisibleBlocker: visibleBlocker,
 		VisibleWorking: visibleWorking,
 	}
+}
+
+// PaneClipboard forwards an OSC 52 clipboard-write the pane's child emitted.
+// libghostty-vt drops OSC 52, so the Host reconstructs it from the raw PTY byte
+// stream (as it does OSC 7 cwd) and the orchestrator re-emits it through its own
+// clipboard writer. Data is the decoded clipboard bytes (base64 on the wire); an
+// empty Data is a clipboard-clear. Only the "c"/default selection is forwarded;
+// queries have no reply path and are dropped.
+type PaneClipboard struct {
+	Type   MessageType `json:"type"`
+	PaneID uint32      `json:"pane_id"`
+	Data   []byte      `json:"data"`
+}
+
+func NewPaneClipboard(id uint32, data []byte) PaneClipboard {
+	return PaneClipboard{Type: MsgPaneClipboard, PaneID: id, Data: data}
 }
 
 type PaneExited struct {

@@ -207,6 +207,41 @@ func TestHostReportsAgentWorkingState(t *testing.T) {
 	t.Fatal("never received pane_agent with agent=pi state=working")
 }
 
+func TestHostReportsPaneClipboard(t *testing.T) {
+	c := startTestHost(t)
+
+	cp := NewCreatePane(6, 40, 5)
+	cp.Command = "/bin/sh"
+	// Emit an OSC 52 clipboard write ("hello" = aGVsbG8=) on stdout, then linger
+	// briefly so the read pump forwards it before the child exits.
+	cp.Args = []string{"-c", `printf '\033]52;c;aGVsbG8=\033\\'; sleep 0.3`}
+	if err := WriteMessage(c, cp); err != nil {
+		t.Fatalf("create_pane: %v", err)
+	}
+
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		typ, payload := readEvent(t, c)
+		switch typ {
+		case MsgPaneClipboard:
+			var pc PaneClipboard
+			if err := json.Unmarshal(payload, &pc); err != nil {
+				t.Fatalf("decode pane_clipboard: %v", err)
+			}
+			if pc.PaneID != 6 {
+				t.Fatalf("pane_clipboard for pane %d, want 6", pc.PaneID)
+			}
+			if string(pc.Data) != "hello" {
+				t.Fatalf("pane_clipboard data = %q, want hello", pc.Data)
+			}
+			return
+		case MsgError:
+			t.Fatalf("unexpected error event: %s", string(payload))
+		}
+	}
+	t.Fatal("never received pane_clipboard")
+}
+
 func TestHostInputEchoAndClose(t *testing.T) {
 	c := startTestHost(t)
 

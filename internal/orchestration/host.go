@@ -46,7 +46,8 @@ type pane struct {
 	// OSC passthrough state, owned exclusively by this pane's readPump goroutine
 	// (libghostty-vt does not surface OSC 7 cwd, so we scan the raw byte stream).
 	osc     oscScanner
-	lastPwd string // last OSC 7 cwd emitted, for change detection
+	lastPwd string       // last OSC 7 cwd emitted, for change detection
+	osc52   osc52Scanner // OSC 52 clipboard writes (also not surfaced by go-libghostty)
 
 	// ptyMu serializes writes to the PTY master (user input + the emulator's
 	// query-response callback can both write).
@@ -238,10 +239,13 @@ func (h *Host) readPump(p *pane) {
 			h.feed(p, buf[:n])
 			p.dirty.Store(true)
 			p.detectSeq.Add(1) // mark new content for the detector's content-skip
-			// Scan the raw stream for OSC passthrough (cwd) the emulator doesn't surface.
+			// Scan the raw stream for OSC passthrough the emulator doesn't surface.
 			if cwd, ok := p.osc.scan(buf[:n]); ok && cwd != p.lastPwd {
 				p.lastPwd = cwd
 				h.emit(NewPaneCwd(p.id, cwd))
+			}
+			for _, clip := range p.osc52.scan(buf[:n]) {
+				h.emit(NewPaneClipboard(p.id, clip))
 			}
 		}
 		if err != nil { // EOF / EIO when the child exits or the PTY closes
