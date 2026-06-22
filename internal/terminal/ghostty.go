@@ -135,6 +135,7 @@ func (e *ghosttyEmulator) Snapshot() (*Snapshot, error) {
 
 	var style libghostty.RenderCellStyle
 	buf := make([]byte, 0, 8)
+	var linkRows []uint32 // viewport rows the iterator flags as containing OSC 8 links
 	for e.ri.Next() {
 		if err := e.ri.Cells(e.rc); err != nil {
 			return nil, fmt.Errorf("terminal: cells: %w", err)
@@ -150,7 +151,39 @@ func (e *ghosttyEmulator) Snapshot() (*Snapshot, error) {
 			}
 			row = append(row, toCell(string(g), &style))
 		}
+		// Cheap per-row gate: only rows flagged as having hyperlinks get the
+		// (relatively expensive) per-cell URI lookup below. The flag may have
+		// false positives, which the per-cell HyperlinkURI ("" = none) absorbs.
+		if raw, err := e.ri.Raw(); err == nil {
+			if hl, err := raw.Hyperlink(); err == nil && hl {
+				linkRows = append(linkRows, uint32(len(snap.Cells)))
+			}
+		}
 		snap.Cells = append(snap.Cells, row)
+	}
+
+	// Resolve OSC 8 URIs for flagged rows after the render iteration completes, so
+	// GridRef (a borrowed view of terminal internals) never interleaves with the
+	// render-state iterators. libghostty does not surface hyperlinks on the
+	// render-cell path, only via GridRef.HyperlinkURI.
+	for _, y := range linkRows {
+		row := snap.Cells[y]
+		for x := range row {
+			ref, err := e.term.GridRef(libghostty.Point{
+				Tag: libghostty.PointTagViewport,
+				X:   uint16(x),
+				Y:   y,
+			})
+			if err != nil {
+				continue
+			}
+			uri, err := ref.HyperlinkURI()
+			if err != nil || uri == "" {
+				continue
+			}
+			row[x].Link = uri
+			snap.HasHyperlinks = true
+		}
 	}
 
 	return snap, nil

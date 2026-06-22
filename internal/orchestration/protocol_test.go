@@ -85,6 +85,47 @@ func TestFrameFromSnapshotDiff(t *testing.T) {
 	}
 }
 
+func TestFrameFromSnapshotHyperlinks(t *testing.T) {
+	const url = "https://example.com/a"
+	cells := [][]terminal.Cell{{
+		{Rune: "l", Link: url},
+		{Rune: "k", Link: url}, // same URI ⇒ deduped to one table entry
+		{Rune: "x"},            // no link
+	}}
+	snap := mkSnap(3, 1, cells, terminal.Cursor{Visible: true})
+	snap.HasHyperlinks = true
+	// A prev exists with identical dims, but a link-bearing frame must still be full.
+	prev := mkSnap(3, 1, [][]terminal.Cell{{{Rune: "l"}, {Rune: "k"}, {Rune: "x"}}}, terminal.Cursor{Visible: true})
+
+	f := FrameFromSnapshot(snap, prev)
+
+	if !f.Full {
+		t.Fatal("a frame carrying hyperlinks must be sent full")
+	}
+	if len(f.Hyperlinks) != 1 || f.Hyperlinks[0] != url {
+		t.Fatalf("hyperlinks table = %v, want one entry %q", f.Hyperlinks, url)
+	}
+	if f.Cells[0].Hyperlink == nil || *f.Cells[0].Hyperlink != 0 {
+		t.Errorf("cell 0 should index hyperlink 0, got %v", f.Cells[0].Hyperlink)
+	}
+	if f.Cells[1].Hyperlink == nil || *f.Cells[1].Hyperlink != 0 {
+		t.Errorf("cell 1 should share hyperlink index 0, got %v", f.Cells[1].Hyperlink)
+	}
+	if f.Cells[2].Hyperlink != nil {
+		t.Errorf("cell 2 has no link, want nil index, got %v", f.Cells[2].Hyperlink)
+	}
+}
+
+func TestFrameFromSnapshotNoHyperlinksOmitsTable(t *testing.T) {
+	f := FrameFromSnapshot(mkSnap(1, 1, [][]terminal.Cell{{{Rune: "a"}}}, terminal.Cursor{}), nil)
+	if f.Hyperlinks != nil {
+		t.Errorf("no-link frame should have nil hyperlinks table, got %v", f.Hyperlinks)
+	}
+	if f.Cells[0].Hyperlink != nil {
+		t.Errorf("no-link cell should have nil hyperlink index")
+	}
+}
+
 func TestFrameDiffForcesFullOnResize(t *testing.T) {
 	prev := mkSnap(2, 1, [][]terminal.Cell{{{Rune: "a"}, {Rune: "b"}}}, terminal.Cursor{})
 	cur := mkSnap(3, 1, [][]terminal.Cell{{{Rune: "a"}, {Rune: "b"}, {Rune: "c"}}}, terminal.Cursor{})

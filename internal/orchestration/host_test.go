@@ -277,6 +277,47 @@ func TestHostReportsPaneTitle(t *testing.T) {
 	t.Fatal("never received pane_title")
 }
 
+func TestHostReportsHyperlinkFrame(t *testing.T) {
+	c := startTestHost(t)
+
+	cp := NewCreatePane(8, 40, 5)
+	cp.Command = "/bin/sh"
+	// Emit an OSC 8 hyperlink ("link" wrapped in a link to example.com), then
+	// linger so the flusher emits a frame carrying it before the child exits.
+	cp.Args = []string{"-c", `printf '\033]8;;https://example.com\033\\link\033]8;;\033\\'; sleep 0.5`}
+	if err := WriteMessage(c, cp); err != nil {
+		t.Fatalf("create_pane: %v", err)
+	}
+
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		typ, payload := readEvent(t, c)
+		switch typ {
+		case MsgPaneFrame:
+			var pf PaneFrame
+			if err := json.Unmarshal(payload, &pf); err != nil {
+				t.Fatalf("decode pane_frame: %v", err)
+			}
+			if pf.PaneID != 8 || pf.Frame == nil || len(pf.Frame.Hyperlinks) == 0 {
+				continue // wait for the frame that carries the link table
+			}
+			if pf.Frame.Hyperlinks[0] != "https://example.com" {
+				t.Fatalf("hyperlink table = %v, want [https://example.com]", pf.Frame.Hyperlinks)
+			}
+			// At least one cell must index into the table.
+			for _, cell := range pf.Frame.Cells {
+				if cell.Hyperlink != nil && *cell.Hyperlink == 0 {
+					return // link plumbed end-to-end
+				}
+			}
+			t.Fatal("hyperlink table present but no cell indexes it")
+		case MsgError:
+			t.Fatalf("unexpected error event: %s", string(payload))
+		}
+	}
+	t.Fatal("never received a pane_frame carrying a hyperlink")
+}
+
 func TestHostInputEchoAndClose(t *testing.T) {
 	c := startTestHost(t)
 

@@ -50,6 +50,9 @@ type Cell struct {
 	Underline     bool
 	Strikethrough bool
 	Inverse       bool
+
+	// Link is the OSC 8 hyperlink URI for this cell, or "" if none.
+	Link string
 }
 
 // Snapshot is an immutable, copied view of the terminal grid. Every field is a
@@ -61,6 +64,10 @@ type Snapshot struct {
 	Cursor     Cursor
 	DefaultFg  Color
 	DefaultBg  Color
+
+	// HasHyperlinks is true when at least one cell carries an OSC 8 Link, letting
+	// the frame builder skip the per-cell link scan when there are none.
+	HasHyperlinks bool
 }
 
 // At returns the cell at (col,row), or the zero Cell if out of range.

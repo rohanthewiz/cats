@@ -242,6 +242,9 @@ type Frame struct {
 	Full   bool    `json:"full"`
 	Cursor *Cursor `json:"cursor"`
 	Cells  []Cell  `json:"cells"` // row-major, len == cols*rows
+	// Hyperlinks is the frame's OSC 8 URI table; a cell's Hyperlink indexes into it.
+	// Only populated on frames that carry links (which are always sent full).
+	Hyperlinks []string `json:"hyperlinks,omitempty"`
 }
 
 // ratatui Modifier bits (subset we map).
@@ -320,7 +323,11 @@ func resolveCell(snap *terminal.Snapshot, c terminal.Cell) Cell {
 // differ, the frame is full (all cells sent, skip=false). Otherwise it is a
 // diff: cells unchanged from prev are marked skip=true.
 func FrameFromSnapshot(cur, prev *terminal.Snapshot) *Frame {
-	full := prev == nil || prev.Cols != cur.Cols || prev.Rows != cur.Rows
+	// A frame carrying OSC 8 links is always sent full: the per-cell hyperlink
+	// index points into this frame's Hyperlinks table, and a skipped (diff) cell
+	// would keep a stale index from the prior frame's table. Links are uncommon
+	// and transient, so the lost diff savings while a link is on screen is fine.
+	full := prev == nil || prev.Cols != cur.Cols || prev.Rows != cur.Rows || cur.HasHyperlinks
 
 	f := &Frame{
 		Cols:  cur.Cols,
@@ -335,13 +342,29 @@ func FrameFromSnapshot(cur, prev *terminal.Snapshot) *Frame {
 		},
 	}
 
+	var hlIndex map[string]uint32 // URI → table index, built only when links present
+	if cur.HasHyperlinks {
+		hlIndex = make(map[string]uint32)
+	}
+
 	for y := uint16(0); y < cur.Rows; y++ {
 		for x := uint16(0); x < cur.Cols; x++ {
-			cell := resolveCell(cur, cur.At(x, y))
+			src := cur.At(x, y)
+			cell := resolveCell(cur, src)
 			if !full {
 				if prevCell := resolveCell(prev, prev.At(x, y)); prevCell == cell {
 					cell.Skip = true
 				}
+			}
+			if hlIndex != nil && src.Link != "" {
+				idx, ok := hlIndex[src.Link]
+				if !ok {
+					idx = uint32(len(f.Hyperlinks))
+					hlIndex[src.Link] = idx
+					f.Hyperlinks = append(f.Hyperlinks, src.Link)
+				}
+				i := idx // stable address; &idx would alias the loop's reused var
+				cell.Hyperlink = &i
 			}
 			f.Cells = append(f.Cells, cell)
 		}
