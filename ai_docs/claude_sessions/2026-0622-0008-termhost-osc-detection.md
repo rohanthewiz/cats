@@ -162,6 +162,21 @@ channel so the Rust emulator can eventually be dropped.
   future-proofing**; the testable surface is the scanner (covered). No host integration test added
   (nothing the idle fallback doesn't already produce).
 
+### 8. OSC 0/2 window-title passthrough — commit `6807bbb` (Rust consumer: herdr `7f32edf`)
+- **`internal/orchestration/osctitle.go`** (new, **pure / no ghostty tag**) — `oscTitleScanner`
+  raw-scans OSC 0/2 (libghostty surfaces title via `Title()` for detection, but the seam carried
+  none, so a termhost pane's border couldn't show the program's title). Same scanner template as
+  osc7/52/9; `parseOSCTitle` accepts OSC 0 (icon+title) / OSC 2 (title), `sanitizeOSCString`,
+  empty payload = clear; latest-in-chunk wins.
+- **`protocol.go`**: `MsgPaneTitle` + `PaneTitle{pane_id, title}` + `NewPaneTitle`.
+- **`host.go`**: `pane.oscTitle` + `lastTitle`; `readPump` emits `pane_title` on change.
+- Tests: `osctitle_test.go` (8 pure — OSC0/2, ignore-other incl. OSC 1 icon-only, split, latest-wins,
+  control-strip, cap, overlong-recover) + Host integration `TestHostReportsPaneTitle`.
+- **Rust consumer** (`7f32edf`): `Event::PaneTitle` → `PaneSignal::Title` → `AppEvent::TerminalTitleReported`
+  → `TerminalState.terminal_title`. **`border_label` precedence chosen: hook title > OSC title >
+  manual label > agent label** (OSC title shadows a manual label — confirmed via the option preview;
+  one-line swap if that's unwanted). Chrome only, not session-persisted.
+
 ---
 
 ## Key facts for future me
@@ -184,20 +199,22 @@ channel so the Rust emulator can eventually be dropped.
   - Rust: `export ZIG="~/projs/go/herdr-web/.tools/zig-wrapped"`
   - Go (ghostty): `export PKG_CONFIG_PATH=~/projs/rust/herdr/vendor/libghostty-vt/zig-out/share/pkgconfig`
   - Daemon: `go build -tags ghostty -o /tmp/td ./cmd/termhost && /tmp/td --socket /tmp/x.sock`
-- **Seam events now (Go→Rust):** `welcome`, `pane_frame`, `pane_cwd`, `pane_agent`, `pane_clipboard`, `pane_exited`, `error`.
+- **Seam events now (Go→Rust):** `welcome`, `pane_frame`, `pane_cwd`, `pane_agent`, `pane_clipboard`, `pane_title`, `pane_exited`, `error`.
 
 ## Verification (all green)
 
 - Default `go build ./...` (cgo on); `-tags ghostty` build.
 - `go test ./internal/detect/` (pure, no toolchain): identify, manifest engine, all-compile.
 - `go test ./internal/orchestration/` (pure, default build): `detectstate` debounce (8) +
-  `detectthrottle` (8) + `osc` (OSC 7) + `osc52` (OSC 52, 12) + `osc9` (OSC 9, 9) scanners.
+  `detectthrottle` (8) + `osc` (OSC 7) + `osc52` (OSC 52, 12) + `osc9` (OSC 9, 9) +
+  `osctitle` (OSC 0/2, 8) scanners.
 - `go test -tags ghostty ./internal/...`: Host cwd/agent/agent-working + terminal + orchestration.
 - gofmt/vet clean in both default and `-tags ghostty` modes.
 
 ## Commits on `roh/phase-b` (this session)
 
 ```
+6807bbb feat: OSC 0/2 window title passthrough on the termhost seam (Go side)
 5c18aa5 feat: OSC 9 progress wired into detection (Go side)
 c2cb5f8 feat: OSC 52 clipboard passthrough on the termhost seam (Go side)
 5c6da0d feat: Stage C.2 — process-probe throttle (Go side)
@@ -210,9 +227,11 @@ c2cb5f8 feat: OSC 52 clipboard passthrough on the termhost seam (Go side)
 
 ## Next steps
 
-- **Rust consumer for `pane_clipboard`:** ✅ done in herdr `5ce148a` (`Event::PaneClipboard` →
-  `PaneSignal::Clipboard` → `AppEvent::ClipboardWrite`). (OSC 9 progress is consumed Go-side
-  already, inside detection — no new seam event.)
+- **`pane_clipboard` (OSC 52)** ✅ herdr `5ce148a`; **`pane_title` (OSC 0/2)** ✅ herdr `7f32edf`.
+  (OSC 9 progress is consumed Go-side inside detection — no seam event.)
+- **Remaining termhost degradations:** scrollback, selection, hyperlinks (OSC 8), kitty graphics —
+  each needs a seam carry + Rust consumer. Hyperlinks (OSC 8) are the closest analog to the OSC
+  passthrough scanners already built.
 - **Daemon lifecycle:** have the Rust server spawn/supervise `cmd/termhost` instead of the
   manual `HERDR_TERMHOST_SOCKET` env + hand launch.
 - Eventually: make termhost the default and **retire the Rust in-process detector/PTY path**.
