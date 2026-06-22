@@ -45,6 +45,18 @@ const (
 	argsBufSize  = 1 << 16
 )
 
+// ForegroundPGID returns the foreground process-group id of the terminal whose
+// master fd is fd, or -1 if there is none. This is the cheap probe (a single
+// tcgetpgrp) the detector uses to gate the far more expensive ForegroundAgent
+// enumeration — see internal/orchestration/detectthrottle.go.
+func ForegroundPGID(fd uintptr) int {
+	pgid := int(C.fg_pgrp(C.int(fd)))
+	if pgid <= 0 {
+		return -1
+	}
+	return pgid
+}
+
 // ForegroundAgent returns the canonical agent label for the foreground process
 // group of the terminal whose master fd is fd, or "" for a plain shell /
 // unidentified program. Prefers the process-group leader, then any member.

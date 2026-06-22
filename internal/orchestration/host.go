@@ -268,9 +268,11 @@ func (h *Host) readPump(p *pane) {
 // reach the wire. Concretely: a newly-acquired agent is pinned to Idle for a
 // startup grace window; Working→plain-Idle drops are debounced over several fast
 // rechecks; an idle agent with no new output skips the screen scan entirely; and a
-// steady visible blocker is periodically re-emitted.
+// steady visible blocker is periodically re-emitted. Identity itself is throttled
+// (detectthrottle.go): the expensive foreground enumeration runs only when the
+// process group changed or a recheck interval elapsed, and survives transient
+// misses, so an idle pane costs ~one tcgetpgrp per tick.
 func (h *Host) detectPump(p *pane) {
-	agent := ""
 	state := detect.StateUnknown
 	var lastVIdle, lastVBlocker, lastVWorking bool
 	var lastRefresh time.Time
@@ -283,6 +285,14 @@ func (h *Host) detectPump(p *pane) {
 	var hasLastScanSeq bool
 
 	var pending pendingIdle
+
+	// Process-probe throttle state.
+	var presence agentPresence
+	var lastProcessCheck time.Time
+	lastForegroundPgid := noPGID
+	var hasProcessProbe bool
+	var acquisitionStartedAt time.Time
+	var hasAcquisition bool
 
 	for {
 		sleep := detectInterval
@@ -301,10 +311,49 @@ func (h *Host) detectPump(p *pane) {
 		}
 		now := time.Now()
 
-		// Identity: re-probe the foreground process group every tick.
-		newAgent := detect.ForegroundAgent(p.ptmx.Fd())
-		if newAgent != agent {
-			agent = newAgent
+		// Identity: a cheap tcgetpgrp every tick gates the expensive enumeration.
+		foregroundPgid := detect.ForegroundPGID(p.ptmx.Fd())
+		groupChanged := foregroundGroupChanged(foregroundPgid, lastForegroundPgid)
+
+		var acquisitionAge time.Duration
+		if hasAcquisition {
+			acquisitionAge = now.Sub(acquisitionStartedAt)
+			if acquisitionAge > processAcquisitionWindow {
+				hasAcquisition = false // window elapsed; stop fast-probing
+			}
+		}
+
+		agentChanged := false
+		if shouldProbeForegroundJob(processProbeInput{
+			currentAgentPresent: presence.currentAgent() != "",
+			foregroundPgid:      foregroundPgid,
+			lastForegroundPgid:  lastForegroundPgid,
+			hasProcessProbe:     hasProcessProbe,
+			hasAcquisition:      hasAcquisition,
+			acquisitionAge:      acquisitionAge,
+			elapsedSinceCheck:   now.Sub(lastProcessCheck),
+		}) {
+			lastProcessCheck = now
+			hadProcessProbe := hasProcessProbe
+			hasProcessProbe = true
+			prevAgent := presence.currentAgent()
+			changed := presence.observeProcessProbe(detect.ForegroundAgent(p.ptmx.Fd()))
+			lastForegroundPgid = foregroundPgid
+			if presence.currentAgent() != "" {
+				hasAcquisition = false // identified — no need to keep acquiring
+			} else if hadProcessProbe && groupChanged {
+				// Unidentified group change: open an acquisition window so a
+				// still-starting agent is caught quickly.
+				acquisitionStartedAt = now
+				hasAcquisition = true
+			}
+			if changed {
+				agentChanged = prevAgent != presence.currentAgent()
+			}
+		}
+
+		agent := presence.currentAgent()
+		if agentChanged {
 			pending.clear()
 			hasLastScanSeq = false
 			hasRefresh = false
