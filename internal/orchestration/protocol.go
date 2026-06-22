@@ -40,6 +40,7 @@ const (
 	// Go → Rust (events).
 	MsgWelcome    MessageType = "welcome"
 	MsgPaneFrame  MessageType = "pane_frame"
+	MsgPaneCwd    MessageType = "pane_cwd"
 	MsgPaneExited MessageType = "pane_exited"
 	MsgError      MessageType = "error"
 )
@@ -121,6 +122,18 @@ type PaneFrame struct {
 
 func NewPaneFrame(id uint32, f *Frame) PaneFrame {
 	return PaneFrame{Type: MsgPaneFrame, PaneID: id, Frame: f}
+}
+
+// PaneCwd reports a pane's working directory (OSC 7) when it changes, so the
+// orchestrator can track per-pane cwd (new-pane inheritance, worktree).
+type PaneCwd struct {
+	Type   MessageType `json:"type"`
+	PaneID uint32      `json:"pane_id"`
+	Cwd    string      `json:"cwd"`
+}
+
+func NewPaneCwd(id uint32, cwd string) PaneCwd {
+	return PaneCwd{Type: MsgPaneCwd, PaneID: id, Cwd: cwd}
 }
 
 type PaneExited struct {

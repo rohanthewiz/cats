@@ -37,6 +37,11 @@ type pane struct {
 	prev   *terminal.Snapshot // last snapshot sent, for diffing
 	closed bool
 
+	// OSC passthrough state, owned exclusively by this pane's readPump goroutine
+	// (libghostty-vt does not surface OSC 7 cwd, so we scan the raw byte stream).
+	osc     oscScanner
+	lastPwd string // last OSC 7 cwd emitted, for change detection
+
 	// ptyMu serializes writes to the PTY master (user input + the emulator's
 	// query-response callback can both write).
 	ptyMu sync.Mutex
@@ -225,6 +230,11 @@ func (h *Host) readPump(p *pane) {
 		if n > 0 {
 			h.feed(p, buf[:n])
 			p.dirty.Store(true)
+			// Scan the raw stream for OSC passthrough (cwd) the emulator doesn't surface.
+			if cwd, ok := p.osc.scan(buf[:n]); ok && cwd != p.lastPwd {
+				p.lastPwd = cwd
+				h.emit(NewPaneCwd(p.id, cwd))
+			}
 		}
 		if err != nil { // EOF / EIO when the child exits or the PTY closes
 			break

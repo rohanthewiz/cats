@@ -102,6 +102,41 @@ func TestHostRunsCommandAndReportsFrames(t *testing.T) {
 	}
 }
 
+func TestHostReportsPaneCwd(t *testing.T) {
+	c := startTestHost(t)
+
+	cp := NewCreatePane(3, 40, 5)
+	cp.Command = "/bin/sh"
+	// Emit an OSC 7 working-directory report on stdout, then linger briefly so the
+	// flusher observes the pwd change before the child exits.
+	cp.Args = []string{"-c", `printf '\033]7;file://localhost/tmp\033\\'; sleep 0.3`}
+	if err := WriteMessage(c, cp); err != nil {
+		t.Fatalf("create_pane: %v", err)
+	}
+
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		typ, payload := readEvent(t, c)
+		switch typ {
+		case MsgPaneCwd:
+			var pc PaneCwd
+			if err := json.Unmarshal(payload, &pc); err != nil {
+				t.Fatalf("decode pane_cwd: %v", err)
+			}
+			if pc.PaneID != 3 {
+				t.Fatalf("pane_cwd for pane %d, want 3", pc.PaneID)
+			}
+			if pc.Cwd != "/tmp" {
+				t.Fatalf("pane_cwd = %q, want /tmp", pc.Cwd)
+			}
+			return
+		case MsgError:
+			t.Fatalf("unexpected error event: %s", string(payload))
+		}
+	}
+	t.Fatal("never received pane_cwd")
+}
+
 func TestHostInputEchoAndClose(t *testing.T) {
 	c := startTestHost(t)
 
