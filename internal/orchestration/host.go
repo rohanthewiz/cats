@@ -48,6 +48,12 @@ type pane struct {
 	osc     oscScanner
 	lastPwd string       // last OSC 7 cwd emitted, for change detection
 	osc52   osc52Scanner // OSC 52 clipboard writes (also not surfaced by go-libghostty)
+	osc9    osc9Scanner  // OSC 9 progress, owned by readPump; latest published to progress
+
+	// progress holds the latest OSC 9 progress payload (readPump writes, detectPump
+	// reads). nil = none retained; detectPump clears it on agent change so a new
+	// agent does not inherit the previous process's progress.
+	progress atomic.Pointer[string]
 
 	// ptyMu serializes writes to the PTY master (user input + the emulator's
 	// query-response callback can both write).
@@ -247,6 +253,9 @@ func (h *Host) readPump(p *pane) {
 			for _, clip := range p.osc52.scan(buf[:n]) {
 				h.emit(NewPaneClipboard(p.id, clip))
 			}
+			if prog, ok := p.osc9.scan(buf[:n]); ok {
+				p.progress.Store(&prog)
+			}
 		}
 		if err != nil { // EOF / EIO when the child exits or the PTY closes
 			break
@@ -362,6 +371,7 @@ func (h *Host) detectPump(p *pane) {
 			hasLastScanSeq = false
 			hasRefresh = false
 			lastVIdle, lastVBlocker, lastVWorking = false, false, false
+			p.progress.Store(nil) // don't let a new agent inherit the previous progress
 			if agent != "" {
 				// New agent acquired: publish Idle and hold for the startup grace
 				// window so startup paint doesn't register as Working.
@@ -405,7 +415,11 @@ func (h *Host) detectPump(p *pane) {
 		lastScanSeq = currentSeq
 		hasLastScanSeq = true
 
-		d := detect.Detect(agent, detect.Input{Screen: screen, OscTitle: title})
+		progress := ""
+		if pp := p.progress.Load(); pp != nil {
+			progress = *pp
+		}
+		d := detect.Detect(agent, detect.Input{Screen: screen, OscTitle: title, OscProgress: progress})
 		if d.SkipStateUpdate {
 			pending.clear()
 			continue // e.g. transcript viewer / model picker — keep last reported state
