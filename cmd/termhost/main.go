@@ -127,8 +127,14 @@ func runPersistent(socket string, idleTimeout time.Duration) error {
 	defer ln.Close()
 	defer os.Remove(socket)
 
+	// Persistent mode must outlive the orchestrator. When herdr dies its controlling
+	// terminal closes, which SIGHUPs every process still in that session — including
+	// us unless we ignore it. (The orchestrator also spawns us with setsid to detach,
+	// but ignoring SIGHUP is the portable backstop and covers a hand-launched daemon.)
+	// We still honor explicit SIGINT/SIGTERM as a shutdown.
+	signal.Ignore(syscall.SIGHUP)
 	ctx, stop := signal.NotifyContext(context.Background(),
-		syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+		syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
 	h := orchestration.NewHost()
