@@ -31,12 +31,13 @@ type MessageType string
 
 const (
 	// Rust → Go (commands).
-	MsgHello          MessageType = "hello"
-	MsgCreatePane     MessageType = "create_pane"
-	MsgInput          MessageType = "input"
-	MsgResize         MessageType = "resize"
-	MsgClosePane      MessageType = "close_pane"
-	MsgScrollViewport MessageType = "scroll_viewport"
+	MsgHello            MessageType = "hello"
+	MsgCreatePane       MessageType = "create_pane"
+	MsgInput            MessageType = "input"
+	MsgResize           MessageType = "resize"
+	MsgClosePane        MessageType = "close_pane"
+	MsgScrollViewport   MessageType = "scroll_viewport"
+	MsgRequestSelection MessageType = "request_selection"
 
 	// Go → Rust (events).
 	MsgWelcome       MessageType = "welcome"
@@ -45,6 +46,7 @@ const (
 	MsgPaneAgent     MessageType = "pane_agent"
 	MsgPaneClipboard MessageType = "pane_clipboard"
 	MsgPaneTitle     MessageType = "pane_title"
+	MsgPaneSelection MessageType = "pane_selection"
 	MsgPaneExited    MessageType = "pane_exited"
 	MsgError         MessageType = "error"
 )
@@ -118,6 +120,34 @@ type ScrollViewport struct {
 
 func NewScrollViewport(id uint32, delta int32) ScrollViewport {
 	return ScrollViewport{Type: MsgScrollViewport, PaneID: id, Delta: delta}
+}
+
+// SelectionPoint is one endpoint of a selection in screen-buffer (absolute)
+// coordinates: Row counts from the top of the scrollback buffer (so it is stable
+// while the pane scrolls), Col is the 0-based column. This mirrors herdr's
+// Selection endpoints (row, col), which it tracks in screen-buffer space.
+type SelectionPoint struct {
+	Row uint32 `json:"row"`
+	Col uint16 `json:"col"`
+}
+
+// RequestSelection asks the Go side to extract the text of the selection bounded
+// by Anchor and Cursor (in screen-buffer coordinates). The orchestrator holds
+// selection state and key/mouse handling; the Go daemon owns the emulator that
+// can resolve those coordinates to text, so this is a request/response: the Host
+// replies with a pane_selection event carrying the formatted text. The two
+// endpoints may be in any order (the Host orders them top-left → bottom-right);
+// Rectangle selects a block region rather than a linear (reading-order) range.
+type RequestSelection struct {
+	Type      MessageType    `json:"type"`
+	PaneID    uint32         `json:"pane_id"`
+	Anchor    SelectionPoint `json:"anchor"`
+	Cursor    SelectionPoint `json:"cursor"`
+	Rectangle bool           `json:"rectangle,omitempty"`
+}
+
+func NewRequestSelection(id uint32, anchor, cursor SelectionPoint, rectangle bool) RequestSelection {
+	return RequestSelection{Type: MsgRequestSelection, PaneID: id, Anchor: anchor, Cursor: cursor, Rectangle: rectangle}
 }
 
 // --- Events (Go → Rust) -----------------------------------------------------
@@ -206,6 +236,21 @@ type PaneTitle struct {
 
 func NewPaneTitle(id uint32, title string) PaneTitle {
 	return PaneTitle{Type: MsgPaneTitle, PaneID: id, Title: title}
+}
+
+// PaneSelection is the reply to a RequestSelection: the plain text of the
+// requested range, with soft-wrapped lines unwrapped and trailing whitespace
+// trimmed (matching herdr's own selection extraction). Text is "" when the range
+// has no selectable content. The orchestrator hands this to its clipboard writer
+// (AppEvent::ClipboardWrite). One pane_selection is emitted per request.
+type PaneSelection struct {
+	Type   MessageType `json:"type"`
+	PaneID uint32      `json:"pane_id"`
+	Text   string      `json:"text"`
+}
+
+func NewPaneSelection(id uint32, text string) PaneSelection {
+	return PaneSelection{Type: MsgPaneSelection, PaneID: id, Text: text}
 }
 
 type PaneExited struct {

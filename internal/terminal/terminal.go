@@ -85,6 +85,14 @@ type ScrollMetrics struct {
 	ViewportRows int
 }
 
+// SelectionEndpoint is one end of a text selection in screen-buffer (absolute)
+// coordinates: Row counts from the top of the scrollback buffer (stable while the
+// pane scrolls), Col is the 0-based column.
+type SelectionEndpoint struct {
+	Row uint32
+	Col uint16
+}
+
 // At returns the cell at (col,row), or the zero Cell if out of range.
 func (s *Snapshot) At(col, row uint16) Cell {
 	if int(row) >= len(s.Cells) || int(col) >= len(s.Cells[row]) {
@@ -117,6 +125,14 @@ type Emulator interface {
 
 	// ScrollMetrics reports the current scrollback position.
 	ScrollMetrics() (ScrollMetrics, error)
+
+	// FormatSelection returns the text of the selection bounded by the anchor and
+	// cursor endpoints (screen-buffer coordinates, in any order — the emulator
+	// orders them top-left → bottom-right). The result is plain text with
+	// soft-wrapped lines unwrapped and trailing whitespace trimmed. When rectangle
+	// is true the range is a block region rather than a linear reading-order range.
+	// Returns "" when the range has no selectable content.
+	FormatSelection(anchor, cursor SelectionEndpoint, rectangle bool) (string, error)
 
 	// Close releases the underlying terminal resources.
 	Close() error

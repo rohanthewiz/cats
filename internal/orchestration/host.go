@@ -206,6 +206,15 @@ func (h *Host) dispatch(typ MessageType, payload []byte) {
 		if err := h.scrollPane(c); err != nil {
 			h.emit(NewError(c.PaneID, err.Error()))
 		}
+	case MsgRequestSelection:
+		var c RequestSelection
+		if err := json.Unmarshal(payload, &c); err != nil {
+			h.emit(NewError(0, "bad request_selection: "+err.Error()))
+			return
+		}
+		if err := h.requestSelection(c); err != nil {
+			h.emit(NewError(c.PaneID, err.Error()))
+		}
 	default:
 		h.emit(NewError(0, "unknown message type: "+string(typ)))
 	}
@@ -555,6 +564,34 @@ func (h *Host) scrollPane(c ScrollViewport) error {
 		return fmt.Errorf("scroll: %w", err)
 	}
 	p.dirty.Store(true) // viewport moved ⇒ emit a frame at the new position
+	return nil
+}
+
+// requestSelection extracts the text of the selection bounded by the request's
+// endpoints and replies with a pane_selection event (always, so the caller gets a
+// definite response). The emulator resolves the screen-buffer coordinates to text
+// under emuMu.
+func (h *Host) requestSelection(c RequestSelection) error {
+	p := h.getPane(c.PaneID)
+	if p == nil {
+		return errors.New("no such pane")
+	}
+	anchor := terminal.SelectionEndpoint{Row: c.Anchor.Row, Col: c.Anchor.Col}
+	cursor := terminal.SelectionEndpoint{Row: c.Cursor.Row, Col: c.Cursor.Col}
+
+	p.emuMu.Lock()
+	var (
+		text string
+		err  error
+	)
+	if !p.closed {
+		text, err = p.emu.FormatSelection(anchor, cursor, c.Rectangle)
+	}
+	p.emuMu.Unlock()
+	if err != nil {
+		return fmt.Errorf("format selection: %w", err)
+	}
+	h.emit(NewPaneSelection(c.PaneID, text))
 	return nil
 }
 

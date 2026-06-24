@@ -150,6 +150,40 @@ func (e *ghosttyEmulator) ScrollMetrics() (ScrollMetrics, error) {
 	}, nil
 }
 
+// FormatSelection resolves the two screen-buffer endpoints to grid references and
+// formats the bounded selection as plain text. It mirrors herdr's Rust extraction
+// (read_text_screen): order endpoints top-left → bottom-right, resolve each via
+// PointTagScreen, then format with unwrap+trim. The grid references are borrowed
+// views of terminal internals, so they are built and consumed back-to-back with no
+// intervening terminal mutation (the Host holds emuMu across this call).
+func (e *ghosttyEmulator) FormatSelection(anchor, cursor SelectionEndpoint, rectangle bool) (string, error) {
+	start, end := anchor, cursor
+	if cursor.Row < anchor.Row || (cursor.Row == anchor.Row && cursor.Col < anchor.Col) {
+		start, end = cursor, anchor
+	}
+
+	startRef, err := e.term.GridRef(libghostty.Point{Tag: libghostty.PointTagScreen, X: start.Col, Y: start.Row})
+	if err != nil {
+		return "", fmt.Errorf("terminal: selection start ref: %w", err)
+	}
+	endRef, err := e.term.GridRef(libghostty.Point{Tag: libghostty.PointTagScreen, X: end.Col, Y: end.Row})
+	if err != nil {
+		return "", fmt.Errorf("terminal: selection end ref: %w", err)
+	}
+
+	sel := libghostty.Selection{Start: *startRef, End: *endRef, Rectangle: rectangle}
+	text, err := e.term.SelectionFormatString(
+		libghostty.WithSelection(&sel),
+		libghostty.WithSelectionFormat(libghostty.FormatterFormatPlain),
+		libghostty.WithSelectionUnwrap(true),
+		libghostty.WithSelectionTrim(true),
+	)
+	if err != nil {
+		return "", fmt.Errorf("terminal: selection format: %w", err)
+	}
+	return text, nil
+}
+
 func (e *ghosttyEmulator) Resize(cols, rows uint16) error {
 	if err := e.term.Resize(cols, rows, defaultCellWidthPx, defaultCellHeightPx); err != nil {
 		return fmt.Errorf("terminal: resize: %w", err)

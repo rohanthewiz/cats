@@ -372,6 +372,60 @@ func TestHostScrollbackReportsMetrics(t *testing.T) {
 	t.Fatal("never observed a scrolled-up frame with non-zero offset")
 }
 
+func TestHostReportsPaneSelection(t *testing.T) {
+	c := startTestHost(t)
+
+	cp := NewCreatePane(11, 40, 5)
+	cp.Command = "/bin/sh"
+	// Print a known line on row 0, then linger so the pane is still open when we
+	// request the selection. No scrollback happens, so screen row 0 == the line.
+	cp.Args = []string{"-c", `printf 'HELLO WORLD'; sleep 1`}
+	if err := WriteMessage(c, cp); err != nil {
+		t.Fatalf("create_pane: %v", err)
+	}
+
+	// Wait for a frame showing the line, then request "HELLO" (cols 0..4 inclusive).
+	requested := false
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		typ, payload := readEvent(t, c)
+		switch typ {
+		case MsgPaneFrame:
+			if requested {
+				continue
+			}
+			var pf PaneFrame
+			if err := json.Unmarshal(payload, &pf); err != nil {
+				t.Fatalf("decode pane_frame: %v", err)
+			}
+			if !strings.Contains(frameText(pf.Frame), "HELLO WORLD") {
+				continue
+			}
+			requested = true
+			req := NewRequestSelection(11,
+				SelectionPoint{Row: 0, Col: 0}, SelectionPoint{Row: 0, Col: 4}, false)
+			if err := WriteMessage(c, req); err != nil {
+				t.Fatalf("request_selection: %v", err)
+			}
+		case MsgPaneSelection:
+			var ps PaneSelection
+			if err := json.Unmarshal(payload, &ps); err != nil {
+				t.Fatalf("decode pane_selection: %v", err)
+			}
+			if ps.PaneID != 11 {
+				t.Fatalf("pane_selection for pane %d, want 11", ps.PaneID)
+			}
+			if ps.Text != "HELLO" {
+				t.Fatalf("pane_selection text = %q, want %q", ps.Text, "HELLO")
+			}
+			return
+		case MsgError:
+			t.Fatalf("unexpected error event: %s", string(payload))
+		}
+	}
+	t.Fatal("never received pane_selection")
+}
+
 func TestHostInputEchoAndClose(t *testing.T) {
 	c := startTestHost(t)
 

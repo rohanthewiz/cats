@@ -148,9 +148,11 @@ func TestCodecRoundTrip(t *testing.T) {
 		NewInput(42, []byte{0x1b, 'h', 'i', 0x00}),
 		NewResize(42, 100, 30),
 		NewClosePane(42),
+		NewRequestSelection(42, SelectionPoint{Row: 3, Col: 0}, SelectionPoint{Row: 1, Col: 7}, true),
 		NewWelcome(""),
 		NewPaneExited(42, 0),
 		NewError(42, "boom"),
+		NewPaneSelection(42, "hello world"),
 		NewPaneFrame(42, &Frame{
 			Cols: 1, Rows: 1, Full: true,
 			Cursor: &Cursor{X: 0, Y: 0, Visible: true, Shape: 2},
@@ -166,8 +168,8 @@ func TestCodecRoundTrip(t *testing.T) {
 	}
 
 	wantTypes := []MessageType{
-		MsgHello, MsgCreatePane, MsgInput, MsgResize, MsgClosePane,
-		MsgWelcome, MsgPaneExited, MsgError, MsgPaneFrame,
+		MsgHello, MsgCreatePane, MsgInput, MsgResize, MsgClosePane, MsgRequestSelection,
+		MsgWelcome, MsgPaneExited, MsgError, MsgPaneSelection, MsgPaneFrame,
 	}
 	for i, want := range wantTypes {
 		typ, payload, err := ReadMessage(&buf)
@@ -179,6 +181,23 @@ func TestCodecRoundTrip(t *testing.T) {
 		}
 		// spot-check a couple of payloads decode into their structs
 		switch typ {
+		case MsgRequestSelection:
+			var rs RequestSelection
+			if err := json.Unmarshal(payload, &rs); err != nil {
+				t.Fatalf("decode request_selection: %v", err)
+			}
+			if rs.PaneID != 42 || rs.Anchor != (SelectionPoint{Row: 3, Col: 0}) ||
+				rs.Cursor != (SelectionPoint{Row: 1, Col: 7}) || !rs.Rectangle {
+				t.Errorf("request_selection round-trip wrong: %+v", rs)
+			}
+		case MsgPaneSelection:
+			var ps PaneSelection
+			if err := json.Unmarshal(payload, &ps); err != nil {
+				t.Fatalf("decode pane_selection: %v", err)
+			}
+			if ps.PaneID != 42 || ps.Text != "hello world" {
+				t.Errorf("pane_selection round-trip wrong: %+v", ps)
+			}
 		case MsgInput:
 			var in Input
 			if err := json.Unmarshal(payload, &in); err != nil {
