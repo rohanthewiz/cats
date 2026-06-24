@@ -157,6 +157,62 @@ func (e *ghosttyEmulator) FormatSelection(anchor, cursor SelectionEndpoint, rect
 	return text, nil
 }
 
+// InputModes queries libghostty for the current input-affecting DEC modes. Mouse
+// tracking is a precedence ladder (any > button > normal > x10); encoding and the
+// boolean modes are independent flags.
+func (e *ghosttyEmulator) InputModes() (InputModes, error) {
+	get := func(m libghostty.Mode) bool {
+		v, err := e.term.ModeGet(m)
+		return err == nil && v
+	}
+
+	var mouse MouseMode
+	switch {
+	case get(libghostty.ModeAnyMouse):
+		mouse = MouseAnyMotion
+	case get(libghostty.ModeButtonMouse):
+		mouse = MouseButtonMotion
+	case get(libghostty.ModeNormalMouse):
+		mouse = MousePressRelease
+	case get(libghostty.ModeX10Mouse):
+		mouse = MouseX10
+	default:
+		mouse = MouseNone
+	}
+
+	var enc MouseEncoding
+	switch {
+	case get(libghostty.ModeSGRMouse):
+		enc = MouseEncodingSGR
+	case get(libghostty.ModeUTF8Mouse):
+		enc = MouseEncodingUTF8
+	default:
+		enc = MouseEncodingDefault
+	}
+
+	alt := false
+	if s, err := e.term.ActiveScreen(); err == nil {
+		alt = s == libghostty.ScreenAlternate
+	}
+
+	var kitty uint16
+	if f, err := e.term.KittyKeyboardFlags(); err == nil {
+		kitty = uint16(f)
+	}
+
+	return InputModes{
+		AlternateScreen:      alt,
+		ApplicationCursor:    get(libghostty.ModeDECCKM),
+		BracketedPaste:       get(libghostty.ModeBracketedPaste),
+		FocusReporting:       get(libghostty.ModeFocusEvent),
+		MouseMode:            mouse,
+		MouseEncoding:        enc,
+		MouseAlternateScroll: get(libghostty.ModeAltScroll),
+		SynchronizedOutput:   get(libghostty.ModeSyncOutput),
+		KittyKeyboardFlags:   kitty,
+	}, nil
+}
+
 func (e *ghosttyEmulator) Resize(cols, rows uint16) error {
 	if err := e.term.Resize(cols, rows, defaultCellWidthPx, defaultCellHeightPx); err != nil {
 		return fmt.Errorf("terminal: resize: %w", err)

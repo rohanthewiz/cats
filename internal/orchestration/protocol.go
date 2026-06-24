@@ -47,6 +47,7 @@ const (
 	MsgPaneClipboard MessageType = "pane_clipboard"
 	MsgPaneTitle     MessageType = "pane_title"
 	MsgPaneSelection MessageType = "pane_selection"
+	MsgPaneModes     MessageType = "pane_modes"
 	MsgPaneExited    MessageType = "pane_exited"
 	MsgError         MessageType = "error"
 )
@@ -251,6 +252,42 @@ type PaneSelection struct {
 
 func NewPaneSelection(id uint32, text string) PaneSelection {
 	return PaneSelection{Type: MsgPaneSelection, PaneID: id, Text: text}
+}
+
+// PaneModes reports a pane's input-affecting DEC mode state (mouse tracking,
+// bracketed paste, focus reporting, application cursor, alt-scroll, sync output,
+// kitty keyboard) when it changes. The Go emulator owns these; the orchestrator
+// mirrors them so its key/mouse encoders and its "is this event for the program or
+// for my UI" decisions match what the running program actually requested. Without
+// this the orchestrator would read its own unfed emulator and mis-encode input.
+type PaneModes struct {
+	Type                 MessageType `json:"type"`
+	PaneID               uint32      `json:"pane_id"`
+	AlternateScreen      bool        `json:"alternate_screen"`
+	ApplicationCursor    bool        `json:"application_cursor"`
+	BracketedPaste       bool        `json:"bracketed_paste"`
+	FocusReporting       bool        `json:"focus_reporting"`
+	MouseMode            uint8       `json:"mouse_mode"`     // terminal.MouseMode
+	MouseEncoding        uint8       `json:"mouse_encoding"` // terminal.MouseEncoding
+	MouseAlternateScroll bool        `json:"mouse_alternate_scroll"`
+	SynchronizedOutput   bool        `json:"synchronized_output"`
+	KittyKeyboardFlags   uint16      `json:"kitty_keyboard_flags"`
+}
+
+func NewPaneModes(id uint32, m terminal.InputModes) PaneModes {
+	return PaneModes{
+		Type:                 MsgPaneModes,
+		PaneID:               id,
+		AlternateScreen:      m.AlternateScreen,
+		ApplicationCursor:    m.ApplicationCursor,
+		BracketedPaste:       m.BracketedPaste,
+		FocusReporting:       m.FocusReporting,
+		MouseMode:            uint8(m.MouseMode),
+		MouseEncoding:        uint8(m.MouseEncoding),
+		MouseAlternateScroll: m.MouseAlternateScroll,
+		SynchronizedOutput:   m.SynchronizedOutput,
+		KittyKeyboardFlags:   m.KittyKeyboardFlags,
+	}
 }
 
 type PaneExited struct {

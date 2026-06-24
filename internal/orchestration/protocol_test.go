@@ -153,6 +153,10 @@ func TestCodecRoundTrip(t *testing.T) {
 		NewPaneExited(42, 0),
 		NewError(42, "boom"),
 		NewPaneSelection(42, "hello world"),
+		NewPaneModes(42, terminal.InputModes{
+			BracketedPaste: true, MouseMode: terminal.MouseAnyMotion,
+			MouseEncoding: terminal.MouseEncodingSGR, KittyKeyboardFlags: 5,
+		}),
 		NewPaneFrame(42, &Frame{
 			Cols: 1, Rows: 1, Full: true,
 			Cursor: &Cursor{X: 0, Y: 0, Visible: true, Shape: 2},
@@ -169,7 +173,7 @@ func TestCodecRoundTrip(t *testing.T) {
 
 	wantTypes := []MessageType{
 		MsgHello, MsgCreatePane, MsgInput, MsgResize, MsgClosePane, MsgRequestSelection,
-		MsgWelcome, MsgPaneExited, MsgError, MsgPaneSelection, MsgPaneFrame,
+		MsgWelcome, MsgPaneExited, MsgError, MsgPaneSelection, MsgPaneModes, MsgPaneFrame,
 	}
 	for i, want := range wantTypes {
 		typ, payload, err := ReadMessage(&buf)
@@ -197,6 +201,17 @@ func TestCodecRoundTrip(t *testing.T) {
 			}
 			if ps.PaneID != 42 || ps.Text != "hello world" {
 				t.Errorf("pane_selection round-trip wrong: %+v", ps)
+			}
+		case MsgPaneModes:
+			var pm PaneModes
+			if err := json.Unmarshal(payload, &pm); err != nil {
+				t.Fatalf("decode pane_modes: %v", err)
+			}
+			if pm.PaneID != 42 || !pm.BracketedPaste ||
+				pm.MouseMode != uint8(terminal.MouseAnyMotion) ||
+				pm.MouseEncoding != uint8(terminal.MouseEncodingSGR) ||
+				pm.KittyKeyboardFlags != 5 {
+				t.Errorf("pane_modes round-trip wrong: %+v", pm)
 			}
 		case MsgInput:
 			var in Input

@@ -53,6 +53,12 @@ type pane struct {
 	oscTitle  oscTitleScanner // OSC 0/2 window title, for the pane_title chrome event
 	lastTitle string          // last OSC 0/2 title emitted, for change detection
 
+	// lastModes is the input-mode state last reported via pane_modes; the flusher
+	// re-queries after a dirty frame and emits only on change. hasModes guards the
+	// first report. Owned by the single flusher goroutine (no lock needed).
+	lastModes terminal.InputModes
+	hasModes  bool
+
 	// progress holds the latest OSC 9 progress payload (readPump writes, detectPump
 	// reads). nil = none retained; detectPump clears it on agent change so a new
 	// agent does not inherit the previous process's progress.
@@ -615,7 +621,31 @@ func (h *Host) flushDirty() {
 		if f != nil {
 			h.emit(NewPaneFrame(p.id, f))
 		}
+		// Input modes can only change as a result of program output, so a pane that
+		// just produced a frame is exactly when to re-check them.
+		h.emitModeChanges(p)
 	}
+}
+
+// emitModeChanges re-reads the pane's input modes and emits pane_modes if they
+// changed since the last report (or on the first observation).
+func (h *Host) emitModeChanges(p *pane) {
+	p.emuMu.Lock()
+	if p.closed {
+		p.emuMu.Unlock()
+		return
+	}
+	modes, err := p.emu.InputModes()
+	p.emuMu.Unlock()
+	if err != nil {
+		return
+	}
+	if p.hasModes && modes == p.lastModes {
+		return
+	}
+	p.lastModes = modes
+	p.hasModes = true
+	h.emit(NewPaneModes(p.id, modes))
 }
 
 func (h *Host) closePane(p *pane) {

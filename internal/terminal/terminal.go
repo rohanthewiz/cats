@@ -93,6 +93,42 @@ type SelectionEndpoint struct {
 	Col uint16
 }
 
+// MouseMode is the active mouse-tracking mode (DEC private modes 9/1000/1002/1003).
+type MouseMode uint8
+
+const (
+	MouseNone         MouseMode = iota // tracking off
+	MouseX10                           // press only (mode 9)
+	MousePressRelease                  // press + release (mode 1000)
+	MouseButtonMotion                  // + motion while a button is held (mode 1002)
+	MouseAnyMotion                     // + all motion (mode 1003)
+)
+
+// MouseEncoding is the wire encoding for mouse reports (SGR / UTF-8 / legacy).
+type MouseEncoding uint8
+
+const (
+	MouseEncodingDefault MouseEncoding = iota
+	MouseEncodingUTF8                  // mode 1005
+	MouseEncodingSGR                   // mode 1006
+)
+
+// InputModes is the terminal's current input-affecting DEC mode state. The Go
+// daemon owns the emulator, so these reflect what the running program actually
+// requested; the orchestrator needs them to encode keys/mouse and to decide
+// whether a mouse/paste/focus event is for the program or for its own UI.
+type InputModes struct {
+	AlternateScreen      bool
+	ApplicationCursor    bool // DECCKM
+	BracketedPaste       bool
+	FocusReporting       bool
+	MouseMode            MouseMode
+	MouseEncoding        MouseEncoding
+	MouseAlternateScroll bool
+	SynchronizedOutput   bool
+	KittyKeyboardFlags   uint16 // 0 = legacy keyboard
+}
+
 // At returns the cell at (col,row), or the zero Cell if out of range.
 func (s *Snapshot) At(col, row uint16) Cell {
 	if int(row) >= len(s.Cells) || int(col) >= len(s.Cells[row]) {
@@ -133,6 +169,9 @@ type Emulator interface {
 	// is true the range is a block region rather than a linear reading-order range.
 	// Returns "" when the range has no selectable content.
 	FormatSelection(anchor, cursor SelectionEndpoint, rectangle bool) (string, error)
+
+	// InputModes reports the terminal's current input-affecting DEC mode state.
+	InputModes() (InputModes, error)
 
 	// Close releases the underlying terminal resources.
 	Close() error

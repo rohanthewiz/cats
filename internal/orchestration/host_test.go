@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/rohanthewiz/herdr-web/internal/terminal"
 )
 
 // startTestHost spins up a Host serving one end of an in-memory pipe and returns
@@ -424,6 +426,49 @@ func TestHostReportsPaneSelection(t *testing.T) {
 		}
 	}
 	t.Fatal("never received pane_selection")
+}
+
+func TestHostReportsPaneModes(t *testing.T) {
+	c := startTestHost(t)
+
+	cp := NewCreatePane(12, 40, 5)
+	cp.Command = "/bin/sh"
+	// Enable bracketed paste (DEC ?2004) and SGR mouse any-motion tracking (?1003,
+	// ?1006), then linger so the flusher observes the mode change.
+	cp.Args = []string{"-c", `printf '\033[?2004h\033[?1003h\033[?1006h'; sleep 0.5`}
+	if err := WriteMessage(c, cp); err != nil {
+		t.Fatalf("create_pane: %v", err)
+	}
+
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		typ, payload := readEvent(t, c)
+		switch typ {
+		case MsgPaneModes:
+			var pm PaneModes
+			if err := json.Unmarshal(payload, &pm); err != nil {
+				t.Fatalf("decode pane_modes: %v", err)
+			}
+			if pm.PaneID != 12 {
+				t.Fatalf("pane_modes for pane %d, want 12", pm.PaneID)
+			}
+			// Wait for the frame that carries our enabled modes (an initial all-off
+			// report may arrive first).
+			if !pm.BracketedPaste {
+				continue
+			}
+			if pm.MouseMode != uint8(terminal.MouseAnyMotion) {
+				t.Fatalf("mouse_mode = %d, want %d (any-motion)", pm.MouseMode, terminal.MouseAnyMotion)
+			}
+			if pm.MouseEncoding != uint8(terminal.MouseEncodingSGR) {
+				t.Fatalf("mouse_encoding = %d, want %d (sgr)", pm.MouseEncoding, terminal.MouseEncodingSGR)
+			}
+			return
+		case MsgError:
+			t.Fatalf("unexpected error event: %s", string(payload))
+		}
+	}
+	t.Fatal("never received pane_modes with bracketed paste enabled")
 }
 
 func TestHostInputEchoAndClose(t *testing.T) {
