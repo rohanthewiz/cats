@@ -471,6 +471,62 @@ func TestHostReportsPaneModes(t *testing.T) {
 	t.Fatal("never received pane_modes with bracketed paste enabled")
 }
 
+func TestHostReportsPaneText(t *testing.T) {
+	c := startTestHost(t)
+
+	cp := NewCreatePane(13, 20, 3) // 3 rows ⇒ output fills scrollback
+	cp.Command = "/bin/sh"
+	// Print 12 numbered lines (most scroll into history), then linger.
+	cp.Args = []string{"-c", `for i in $(seq 1 12); do printf "row%d\r\n" "$i"; done; sleep 1`}
+	if err := WriteMessage(c, cp); err != nil {
+		t.Fatalf("create_pane: %v", err)
+	}
+
+	// Wait for a frame showing the latest line, then request recent scrollback text.
+	requested := false
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		typ, payload := readEvent(t, c)
+		switch typ {
+		case MsgPaneFrame:
+			if requested {
+				continue
+			}
+			var pf PaneFrame
+			if err := json.Unmarshal(payload, &pf); err != nil {
+				t.Fatalf("decode pane_frame: %v", err)
+			}
+			if !strings.Contains(frameText(pf.Frame), "row12") {
+				continue
+			}
+			requested = true
+			// Whole buffer (lines=0), plain, unwrapped — the snapshot_history case;
+			// reaches into scrollback history.
+			req := NewRequestText(13, uint8(terminal.TextRecent), 0, false, true)
+			if err := WriteMessage(c, req); err != nil {
+				t.Fatalf("request_text: %v", err)
+			}
+		case MsgPaneText:
+			var pt PaneText
+			if err := json.Unmarshal(payload, &pt); err != nil {
+				t.Fatalf("decode pane_text: %v", err)
+			}
+			if pt.PaneID != 13 {
+				t.Fatalf("pane_text for pane %d, want 13", pt.PaneID)
+			}
+			// row1 is only in scrollback (only 3 rows visible), so its presence
+			// proves the Go side read history, not just the viewport.
+			if !strings.Contains(pt.Text, "row1\n") || !strings.Contains(pt.Text, "row12") {
+				t.Fatalf("pane_text missing scrollback rows; got %q", pt.Text)
+			}
+			return
+		case MsgError:
+			t.Fatalf("unexpected error event: %s", string(payload))
+		}
+	}
+	t.Fatal("never received pane_text")
+}
+
 func TestHostInputEchoAndClose(t *testing.T) {
 	c := startTestHost(t)
 

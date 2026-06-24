@@ -38,6 +38,7 @@ const (
 	MsgClosePane        MessageType = "close_pane"
 	MsgScrollViewport   MessageType = "scroll_viewport"
 	MsgRequestSelection MessageType = "request_selection"
+	MsgRequestText      MessageType = "request_text"
 
 	// Go → Rust (events).
 	MsgWelcome       MessageType = "welcome"
@@ -47,6 +48,7 @@ const (
 	MsgPaneClipboard MessageType = "pane_clipboard"
 	MsgPaneTitle     MessageType = "pane_title"
 	MsgPaneSelection MessageType = "pane_selection"
+	MsgPaneText      MessageType = "pane_text"
 	MsgPaneModes     MessageType = "pane_modes"
 	MsgPaneExited    MessageType = "pane_exited"
 	MsgError         MessageType = "error"
@@ -151,6 +153,24 @@ func NewRequestSelection(id uint32, anchor, cursor SelectionPoint, rectangle boo
 	return RequestSelection{Type: MsgRequestSelection, PaneID: id, Anchor: anchor, Cursor: cursor, Rectangle: rectangle}
 }
 
+// RequestText asks the Go side to extract buffer text from a pane (the orchestrator
+// holds an unfed local emulator for termhost panes, so it can't read text itself).
+// The Host replies with a pane_text event. Scope is terminal.TextScope (0 visible,
+// 1 recent); Lines bounds the recent scope (0 = whole buffer); Ansi selects VT vs
+// plain; Unwrap rejoins soft-wrapped lines.
+type RequestText struct {
+	Type   MessageType `json:"type"`
+	PaneID uint32      `json:"pane_id"`
+	Scope  uint8       `json:"scope"`
+	Lines  uint32      `json:"lines,omitempty"`
+	Ansi   bool        `json:"ansi,omitempty"`
+	Unwrap bool        `json:"unwrap,omitempty"`
+}
+
+func NewRequestText(id uint32, scope uint8, lines uint32, ansi, unwrap bool) RequestText {
+	return RequestText{Type: MsgRequestText, PaneID: id, Scope: scope, Lines: lines, Ansi: ansi, Unwrap: unwrap}
+}
+
 // --- Events (Go → Rust) -----------------------------------------------------
 
 type Welcome struct {
@@ -252,6 +272,18 @@ type PaneSelection struct {
 
 func NewPaneSelection(id uint32, text string) PaneSelection {
 	return PaneSelection{Type: MsgPaneSelection, PaneID: id, Text: text}
+}
+
+// PaneText is the reply to a RequestText: the extracted buffer text (empty when the
+// range has no content). One pane_text is emitted per request.
+type PaneText struct {
+	Type   MessageType `json:"type"`
+	PaneID uint32      `json:"pane_id"`
+	Text   string      `json:"text"`
+}
+
+func NewPaneText(id uint32, text string) PaneText {
+	return PaneText{Type: MsgPaneText, PaneID: id, Text: text}
 }
 
 // PaneModes reports a pane's input-affecting DEC mode state (mouse tracking,

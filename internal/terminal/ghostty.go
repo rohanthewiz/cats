@@ -144,17 +144,89 @@ func (e *ghosttyEmulator) FormatSelection(anchor, cursor SelectionEndpoint, rect
 		return "", fmt.Errorf("terminal: selection end ref: %w", err)
 	}
 
-	sel := libghostty.Selection{Start: *startRef, End: *endRef, Rectangle: rectangle}
+	return e.formatScreenRange(*startRef, *endRef, rectangle,
+		libghostty.FormatterFormatPlain, true, true)
+}
+
+// formatScreenRange formats the grid region between two resolved screen-coordinate
+// grid references. It is the shared core of FormatSelection and ExtractText: build
+// refs, build a Selection, run the libghostty formatter. The refs are borrowed
+// views of terminal internals, so callers resolve and pass them without an
+// intervening terminal mutation (the Host holds emuMu across the call).
+func (e *ghosttyEmulator) formatScreenRange(start, end libghostty.GridRef, rectangle bool, format libghostty.FormatterFormat, unwrap, trim bool) (string, error) {
+	sel := libghostty.Selection{Start: start, End: end, Rectangle: rectangle}
 	text, err := e.term.SelectionFormatString(
 		libghostty.WithSelection(&sel),
-		libghostty.WithSelectionFormat(libghostty.FormatterFormatPlain),
-		libghostty.WithSelectionUnwrap(true),
-		libghostty.WithSelectionTrim(true),
+		libghostty.WithSelectionFormat(format),
+		libghostty.WithSelectionUnwrap(unwrap),
+		libghostty.WithSelectionTrim(trim),
 	)
 	if err != nil {
-		return "", fmt.Errorf("terminal: selection format: %w", err)
+		return "", fmt.Errorf("terminal: format range: %w", err)
 	}
 	return text, nil
+}
+
+// screenRangeRefs resolves the two screen-coordinate endpoints of a full-width row
+// span [startRow, endRow] (cols 0..cols-1) to grid references.
+func (e *ghosttyEmulator) screenRangeRefs(startRow, endRow uint32, cols uint16) (libghostty.GridRef, libghostty.GridRef, error) {
+	var z libghostty.GridRef
+	startRef, err := e.term.GridRef(libghostty.Point{Tag: libghostty.PointTagScreen, X: 0, Y: startRow})
+	if err != nil {
+		return z, z, fmt.Errorf("terminal: range start ref: %w", err)
+	}
+	endRef, err := e.term.GridRef(libghostty.Point{Tag: libghostty.PointTagScreen, X: cols - 1, Y: endRow})
+	if err != nil {
+		return z, z, fmt.Errorf("terminal: range end ref: %w", err)
+	}
+	return *startRef, *endRef, nil
+}
+
+// ExtractText formats buffer text for the given scope, mirroring herdr's
+// recent_*/visible_* extraction (read_text_screen / read_ansi_screen): a
+// full-width screen-coordinate range formatted plain or VT, optionally unwrapped,
+// trailing-trimmed.
+func (e *ghosttyEmulator) ExtractText(scope TextScope, lines int, ansi, unwrap bool) (string, error) {
+	cols, err := e.term.Cols()
+	if err != nil {
+		return "", fmt.Errorf("terminal: cols: %w", err)
+	}
+	total, err := e.term.TotalRows()
+	if err != nil {
+		return "", fmt.Errorf("terminal: total rows: %w", err)
+	}
+	if cols == 0 || total == 0 {
+		return "", nil
+	}
+
+	var startRow, endRow uint32
+	switch scope {
+	case TextVisible:
+		// The viewport occupies the bottom ViewportRows, offset up by the current
+		// scroll position. Derive it from the live scrollbar (top = history above the
+		// viewport; len = visible rows).
+		sb, err := e.term.Scrollbar()
+		if err != nil {
+			return "", fmt.Errorf("terminal: scrollbar: %w", err)
+		}
+		startRow = uint32(sb.Offset)
+		endRow = uint32(min(sb.Offset+sb.Len, sb.Total)) - 1
+	default: // TextRecent
+		endRow = uint32(total - 1)
+		if lines > 0 && uint(lines) < total {
+			startRow = uint32(total - uint(lines))
+		}
+	}
+
+	startRef, endRef, err := e.screenRangeRefs(startRow, endRow, cols)
+	if err != nil {
+		return "", err
+	}
+	format := libghostty.FormatterFormatPlain
+	if ansi {
+		format = libghostty.FormatterFormatVT
+	}
+	return e.formatScreenRange(startRef, endRef, false, format, unwrap, true)
 }
 
 // InputModes queries libghostty for the current input-affecting DEC modes. Mouse

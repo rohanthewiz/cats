@@ -93,6 +93,17 @@ type SelectionEndpoint struct {
 	Col uint16
 }
 
+// TextScope selects which part of the buffer ExtractText reads.
+type TextScope uint8
+
+const (
+	// TextVisible is the current viewport (what is on screen now).
+	TextVisible TextScope = iota
+	// TextRecent is the last N lines of the screen buffer (scrollback + active),
+	// where N is the request's Lines (0 = the whole buffer).
+	TextRecent
+)
+
 // MouseMode is the active mouse-tracking mode (DEC private modes 9/1000/1002/1003).
 type MouseMode uint8
 
@@ -172,6 +183,12 @@ type Emulator interface {
 
 	// InputModes reports the terminal's current input-affecting DEC mode state.
 	InputModes() (InputModes, error)
+
+	// ExtractText returns buffer text for the given scope. ansi selects VT (styled
+	// escape sequences) vs plain text; unwrap rejoins soft-wrapped lines (only
+	// meaningful for TextRecent). Trailing whitespace is trimmed. lines bounds
+	// TextRecent (0 = the whole buffer) and is ignored for TextVisible.
+	ExtractText(scope TextScope, lines int, ansi, unwrap bool) (string, error)
 
 	// Close releases the underlying terminal resources.
 	Close() error

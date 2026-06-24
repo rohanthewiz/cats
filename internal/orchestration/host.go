@@ -221,6 +221,15 @@ func (h *Host) dispatch(typ MessageType, payload []byte) {
 		if err := h.requestSelection(c); err != nil {
 			h.emit(NewError(c.PaneID, err.Error()))
 		}
+	case MsgRequestText:
+		var c RequestText
+		if err := json.Unmarshal(payload, &c); err != nil {
+			h.emit(NewError(0, "bad request_text: "+err.Error()))
+			return
+		}
+		if err := h.requestText(c); err != nil {
+			h.emit(NewError(c.PaneID, err.Error()))
+		}
 	default:
 		h.emit(NewError(0, "unknown message type: "+string(typ)))
 	}
@@ -598,6 +607,29 @@ func (h *Host) requestSelection(c RequestSelection) error {
 		return fmt.Errorf("format selection: %w", err)
 	}
 	h.emit(NewPaneSelection(c.PaneID, text))
+	return nil
+}
+
+// requestText extracts buffer text for a pane and replies with a pane_text event
+// (always, so the caller gets a definite response). Reads under emuMu.
+func (h *Host) requestText(c RequestText) error {
+	p := h.getPane(c.PaneID)
+	if p == nil {
+		return errors.New("no such pane")
+	}
+	p.emuMu.Lock()
+	var (
+		text string
+		err  error
+	)
+	if !p.closed {
+		text, err = p.emu.ExtractText(terminal.TextScope(c.Scope), int(c.Lines), c.Ansi, c.Unwrap)
+	}
+	p.emuMu.Unlock()
+	if err != nil {
+		return fmt.Errorf("extract text: %w", err)
+	}
+	h.emit(NewPaneText(c.PaneID, text))
 	return nil
 }
 

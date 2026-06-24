@@ -149,10 +149,12 @@ func TestCodecRoundTrip(t *testing.T) {
 		NewResize(42, 100, 30),
 		NewClosePane(42),
 		NewRequestSelection(42, SelectionPoint{Row: 3, Col: 0}, SelectionPoint{Row: 1, Col: 7}, true),
+		NewRequestText(42, uint8(terminal.TextRecent), 100, true, true),
 		NewWelcome(""),
 		NewPaneExited(42, 0),
 		NewError(42, "boom"),
 		NewPaneSelection(42, "hello world"),
+		NewPaneText(42, "scrollback"),
 		NewPaneModes(42, terminal.InputModes{
 			BracketedPaste: true, MouseMode: terminal.MouseAnyMotion,
 			MouseEncoding: terminal.MouseEncodingSGR, KittyKeyboardFlags: 5,
@@ -172,8 +174,8 @@ func TestCodecRoundTrip(t *testing.T) {
 	}
 
 	wantTypes := []MessageType{
-		MsgHello, MsgCreatePane, MsgInput, MsgResize, MsgClosePane, MsgRequestSelection,
-		MsgWelcome, MsgPaneExited, MsgError, MsgPaneSelection, MsgPaneModes, MsgPaneFrame,
+		MsgHello, MsgCreatePane, MsgInput, MsgResize, MsgClosePane, MsgRequestSelection, MsgRequestText,
+		MsgWelcome, MsgPaneExited, MsgError, MsgPaneSelection, MsgPaneText, MsgPaneModes, MsgPaneFrame,
 	}
 	for i, want := range wantTypes {
 		typ, payload, err := ReadMessage(&buf)
@@ -201,6 +203,23 @@ func TestCodecRoundTrip(t *testing.T) {
 			}
 			if ps.PaneID != 42 || ps.Text != "hello world" {
 				t.Errorf("pane_selection round-trip wrong: %+v", ps)
+			}
+		case MsgRequestText:
+			var rt RequestText
+			if err := json.Unmarshal(payload, &rt); err != nil {
+				t.Fatalf("decode request_text: %v", err)
+			}
+			if rt.PaneID != 42 || rt.Scope != uint8(terminal.TextRecent) ||
+				rt.Lines != 100 || !rt.Ansi || !rt.Unwrap {
+				t.Errorf("request_text round-trip wrong: %+v", rt)
+			}
+		case MsgPaneText:
+			var pt PaneText
+			if err := json.Unmarshal(payload, &pt); err != nil {
+				t.Fatalf("decode pane_text: %v", err)
+			}
+			if pt.PaneID != 42 || pt.Text != "scrollback" {
+				t.Errorf("pane_text round-trip wrong: %+v", pt)
 			}
 		case MsgPaneModes:
 			var pm PaneModes
