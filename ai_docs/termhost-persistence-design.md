@@ -116,9 +116,10 @@ instead of re-spawning, then `request_resync` repaints.
 
 ### Remaining 3b follow-ups (not blockers for #4)
 
-- **Orphan panes:** panes the daemon has but the restored session does *not* adopt
-  (session/daemon drift) are left running until the idle timeout. Add a post-restore
-  `close` for `surviving_panes − adopted`.
+- ~~**Orphan panes:**~~ DONE (Rust `ed1a8be`). `client.close_orphans()` closes
+  `surviving_panes − adopted` after restore (`close_restored_orphans()` wired into
+  both server startup paths). Reaps a live shell the daemon kept that the restored
+  session doesn't reference (e.g. spawned just before the prior herdr crashed).
 - **Server-mode clean-quit shutdown:** `run_server()` never calls
   `termhost::shutdown()` (only the monolithic TUI path does). This is *correct* for
   handoff (daemon must survive) but means a clean server exit leaves the daemon until
