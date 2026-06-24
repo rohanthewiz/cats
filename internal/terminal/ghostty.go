@@ -30,12 +30,6 @@ const (
 type ghosttyEmulator struct {
 	term *libghostty.Terminal
 
-	// scrollOffset is the viewport's distance (lines) above the live bottom; 0 =
-	// pinned to the bottom. libghostty exposes no current-offset query, so we track
-	// it ourselves (as herdr's Rust side does) and keep it in sync with Scroll and
-	// with new output (which snaps the viewport back to the bottom).
-	scrollOffset int
-
 	// Reusable render-state scratch, to avoid per-snapshot allocation.
 	rs *libghostty.RenderState
 	ri *libghostty.RenderStateRowIterator
@@ -95,58 +89,37 @@ func New(cols, rows uint16, opts ...Option) (Emulator, error) {
 }
 
 // Write feeds raw VT bytes through the parser. It always consumes all bytes.
-// New output snaps the viewport back to the live bottom (no scroll-lock yet —
-// pinning the view during streaming output is a follow-up).
+//
+// Scroll-lock is libghostty's native behavior: when the viewport is pinned to the
+// active area (the user is at the bottom) new output follows to the live bottom;
+// when the user has scrolled up into history the viewport stays pinned to that
+// content as output accumulates below (its offset-from-bottom grows). Matches the
+// Rust in-process path, which likewise does nothing special on the write path.
 func (e *ghosttyEmulator) Write(p []byte) (int, error) {
-	n, err := e.term.Write(p)
-	if n > 0 && e.scrollOffset != 0 {
-		e.term.ScrollViewportBottom()
-		e.scrollOffset = 0
-	}
-	return n, err
+	return e.term.Write(p)
 }
 
-// Scroll moves the viewport by delta lines (negative = up into history), clamped
-// to the available scrollback, and tracks the resulting offset-from-bottom.
+// Scroll moves the viewport by delta lines: negative scrolls up into history,
+// positive scrolls back down toward the live bottom. libghostty clamps to the
+// scrollable range, so a large positive delta is a reliable "scroll to bottom".
 func (e *ghosttyEmulator) Scroll(delta int) error {
-	max, err := e.term.ScrollbackRows()
-	if err != nil {
-		return fmt.Errorf("terminal: scrollback rows: %w", err)
-	}
-	target := e.scrollOffset - delta // delta<0 (up) raises the offset
-	if target < 0 {
-		target = 0
-	}
-	if target > int(max) {
-		target = int(max)
-	}
-	// ScrollViewportDelta: up is negative. Moving offset cur→target needs a delta
-	// of (cur-target): negative when target>cur (scrolling up), positive otherwise.
-	if move := e.scrollOffset - target; move != 0 {
-		e.term.ScrollViewportDelta(move)
-	}
-	e.scrollOffset = target
+	e.term.ScrollViewportDelta(delta)
 	return nil
 }
 
-// ScrollMetrics reports the current scrollback position.
+// ScrollMetrics reports the current scrollback position from libghostty's live
+// scrollbar (no self-tracking), mirroring herdr's Rust scroll_metrics. The
+// scrollbar gives Total rows, the viewport Offset into them, and the visible Len;
+// offset-from-bottom is the rows below the viewport, max is the whole history.
 func (e *ghosttyEmulator) ScrollMetrics() (ScrollMetrics, error) {
-	max, err := e.term.ScrollbackRows()
+	sb, err := e.term.Scrollbar()
 	if err != nil {
-		return ScrollMetrics{}, fmt.Errorf("terminal: scrollback rows: %w", err)
-	}
-	rows, err := e.term.Rows()
-	if err != nil {
-		return ScrollMetrics{}, fmt.Errorf("terminal: rows: %w", err)
-	}
-	off := e.scrollOffset
-	if off > int(max) { // history was pruned below our tracked offset
-		off = int(max)
+		return ScrollMetrics{}, fmt.Errorf("terminal: scrollbar: %w", err)
 	}
 	return ScrollMetrics{
-		OffsetFromBottom:    off,
-		MaxOffsetFromBottom: int(max),
-		ViewportRows:        int(rows),
+		OffsetFromBottom:    int(sb.Total - min(sb.Offset+sb.Len, sb.Total)),
+		MaxOffsetFromBottom: int(sb.Total - min(sb.Len, sb.Total)),
+		ViewportRows:        int(sb.Len),
 	}, nil
 }
 

@@ -9,8 +9,8 @@ import (
 )
 
 // TestScrollback drives the libghostty scroll API end to end: it builds history,
-// scrolls up to reveal it, checks the reported metrics, and confirms new output
-// snaps the viewport back to the bottom.
+// scrolls up to reveal it, checks the reported metrics, and confirms scroll-lock —
+// new output while scrolled up keeps the viewport pinned instead of snapping down.
 func TestScrollback(t *testing.T) {
 	e, _ := newEmu(t, 20, 3, "")
 
@@ -72,14 +72,38 @@ func TestScrollback(t *testing.T) {
 		t.Errorf("after scroll-down offset = %d, want 0", down.OffsetFromBottom)
 	}
 
-	// New output while scrolled up snaps the viewport back to the bottom.
+	// Scroll-lock: new output while scrolled up keeps the viewport pinned to the
+	// same content rather than snapping to the bottom. After scrolling to the top
+	// (L1) and emitting a line, L1 must still be at the top and the offset must stay
+	// non-zero (it grows by the line pushed into history).
 	if err := e.Scroll(-up.MaxOffsetFromBottom); err != nil {
 		t.Fatalf("Scroll up again: %v", err)
 	}
+	before, _ := e.ScrollMetrics()
 	if _, err := e.Write([]byte("L11\r\n")); err != nil {
 		t.Fatalf("Write: %v", err)
 	}
-	if after, _ := e.ScrollMetrics(); after.OffsetFromBottom != 0 {
-		t.Errorf("after new output offset = %d, want 0 (snap to bottom)", after.OffsetFromBottom)
+	after, _ := e.ScrollMetrics()
+	if after.OffsetFromBottom == 0 {
+		t.Errorf("after new output offset = 0 (snapped); want pinned (>0)")
+	}
+	if after.OffsetFromBottom != before.OffsetFromBottom+1 {
+		t.Errorf("pinned offset = %d, want %d (grew by the pushed line)",
+			after.OffsetFromBottom, before.OffsetFromBottom+1)
+	}
+	pinned, err := e.Snapshot()
+	if err != nil {
+		t.Fatalf("Snapshot (pinned): %v", err)
+	}
+	if got := rowText(pinned, 0); got != "L1" {
+		t.Errorf("pinned top row0 = %q, want L1 (viewport stayed put)", got)
+	}
+
+	// Scrolling all the way back down still snaps to the live bottom (L11 visible).
+	if err := e.Scroll(after.MaxOffsetFromBottom + 5); err != nil {
+		t.Fatalf("Scroll to bottom: %v", err)
+	}
+	if m2, _ := e.ScrollMetrics(); m2.OffsetFromBottom != 0 {
+		t.Errorf("after scroll-to-bottom offset = %d, want 0", m2.OffsetFromBottom)
 	}
 }
