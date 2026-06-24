@@ -64,20 +64,27 @@
 - Rust: `cargo test --bin herdr` = **1892**; `--features termhost` = **1911**; clippy
   clean in changed files.
 
-## ⚠ Pre-existing finding (NOT caused by this work, NOT yet fixed)
+## ✅ Render e2e failure — RESOLVED (herdr `bb1de5f`)
 
-The **render** e2e tests (`termhost_pane_renders_shell_output_to_client` and the new
-managed test's original render assertion) **fail to see the echoed marker** in a
-client frame — and the *socket-mode* test fails the same way, so this predates the
-daemon-lifecycle change. The daemon spawns, herdr connects, the pane is created
-(server log confirms termhost-backed) — but `wait_for_rendered_text` never matches.
-Most likely **test-harness rot**: the test hardcodes client protocol **v13** and
-decodes `SemanticFrame` via `bincode`, which may have drifted from the current wire
-format / workspace-activation behavior. Could also (less likely) be a real
-frame-delivery regression. **Worth a dedicated look** — unit/integration suites all
-pass, so the seam itself is exercised, but the end-to-end render path through the
-client protocol is currently unverified by these tests. The managed lifecycle test
-was deliberately scoped to socket spawn/teardown to avoid this flaky path.
+Investigated immediately after this session. **It was a test-harness bug, not a
+product regression — the seam's render path is fine.** Root cause: the server
+auto-creates a default workspace (focused), so the workspace the test creates is a
+*second*, unfocused one. A client renders the **focused** workspace, so the test's
+echo went to its pane while the client kept rendering the default workspace's pane →
+the marker never appeared. (Protocol v13 / `bincode` `SemanticFrame` decode were
+fine — `workspace.list` + frame dumps showed two workspaces, `w1` "kro" focused vs
+the test's `w2` "e2e".)
+
+**Fix:** `workspace.focus` the created workspace before attaching the client/driving
+input. With that, the marker renders (`sh-3.2$ echo … → marker`) and **all four
+termhost e2e tests pass against the real daemon in ~6.5s**. The agent/cwd tests poll
+`pane.get` (no rendering), so they were unaffected.
+
+Debugging aids that paid off: dumping every received frame's text, then
+`workspace.list` — which immediately showed the focused-vs-created mismatch. Also
+noted the daemon spawns *its own* `$SHELL` (panes run the daemon's shell, not
+herdr's), so a heavy interactive rc shows up in socket-mode runs — harmless given
+the 15s timeout, but launch the daemon with a simple `SHELL` for fast repro.
 
 ## Key facts for future me
 
@@ -99,8 +106,7 @@ Rust (roh/phase-b-termhost-client): 273b818 feat: spawn and supervise the Go ter
 
 ## Remaining termhost work
 
-- **Investigate the render e2e failure** (above) — most pressing, since it leaves the
-  client-protocol render path unverified.
+- ~~Investigate the render e2e failure~~ — ✅ done (herdr `bb1de5f`, see above).
 - **Kitty graphics** — deferred (experimental/off-by-default/high-cost). Back-burner.
 - Optionally: surface `HERDR_TERMHOST_BIN` as a config field; PATH discovery of the
   daemon binary so neither env is needed; restart-on-crash supervision (today a
