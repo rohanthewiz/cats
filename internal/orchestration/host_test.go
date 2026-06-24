@@ -527,6 +527,38 @@ func TestHostReportsPaneText(t *testing.T) {
 	t.Fatal("never received pane_text")
 }
 
+func TestHostSeedsInitialHistory(t *testing.T) {
+	c := startTestHost(t)
+
+	cp := NewCreatePane(14, 40, 5)
+	cp.Command = "/bin/sh"
+	cp.Args = []string{"-c", "sleep 1"} // quiet shell; the history is what we assert
+	cp.InitialHistory = "restored-line-A\r\nrestored-line-B\r\n"
+	if err := WriteMessage(c, cp); err != nil {
+		t.Fatalf("create_pane: %v", err)
+	}
+
+	// The seeded history must show in a frame (it was written before the child ran).
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		typ, payload := readEvent(t, c)
+		switch typ {
+		case MsgPaneFrame:
+			var pf PaneFrame
+			if err := json.Unmarshal(payload, &pf); err != nil {
+				t.Fatalf("decode pane_frame: %v", err)
+			}
+			if strings.Contains(frameText(pf.Frame), "restored-line-A") &&
+				strings.Contains(frameText(pf.Frame), "restored-line-B") {
+				return
+			}
+		case MsgError:
+			t.Fatalf("unexpected error event: %s", string(payload))
+		}
+	}
+	t.Fatal("seeded history never rendered")
+}
+
 func TestHostInputEchoAndClose(t *testing.T) {
 	c := startTestHost(t)
 

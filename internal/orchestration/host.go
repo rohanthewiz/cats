@@ -262,6 +262,13 @@ func (h *Host) createPane(c CreatePane) error {
 	}
 	p.emu = emu
 
+	// Seed restored scrollback before the child's output starts rendering, so it
+	// appears as history above the live shell. Safe to write directly: the read
+	// pump isn't running yet, so nothing else touches the emulator.
+	if c.InitialHistory != "" {
+		_, _ = emu.Write([]byte(c.InitialHistory))
+	}
+
 	h.mu.Lock()
 	h.panes[p.id] = p
 	h.mu.Unlock()

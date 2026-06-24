@@ -74,6 +74,10 @@ type CreatePane struct {
 	Command      string            `json:"command,omitempty"` // empty ⇒ default shell
 	Args         []string          `json:"args,omitempty"`
 	Env          map[string]string `json:"env,omitempty"`
+	// InitialHistory is VT-encoded scrollback to seed the emulator with before the
+	// child's first output, so a restored session shows its prior history above the
+	// freshly spawned shell (the analogue of herdr's seed_history_ansi).
+	InitialHistory string `json:"initial_history,omitempty"`
 }
 
 func NewCreatePane(id uint32, cols, rows uint16) CreatePane {
