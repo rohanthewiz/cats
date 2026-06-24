@@ -745,6 +745,48 @@ func TestHostPersistsPanesAcrossReconnect(t *testing.T) {
 	waitForText(t, c2, 7, "MARK2")
 }
 
+// TestHostRequestResync verifies request_resync forces a fresh full frame for a
+// pane on demand — the deterministic repaint a reconnecting client uses after
+// adopting a surviving pane, without racing the daemon's post-hello replay.
+func TestHostRequestResync(t *testing.T) {
+	h, ctx := newPersistentHost(t)
+	c, _ := attachClient(t, h, ctx)
+	if err := WriteMessage(c, NewHello()); err != nil {
+		t.Fatalf("hello: %v", err)
+	}
+	if typ, _ := readEvent(t, c); typ != MsgWelcome {
+		t.Fatalf("first event = %q, want welcome", typ)
+	}
+	cp := NewCreatePane(11, 40, 6)
+	cp.Command = "/bin/sh"
+	if err := WriteMessage(c, cp); err != nil {
+		t.Fatalf("create_pane: %v", err)
+	}
+	if err := WriteMessage(c, NewInput(11, []byte("printf RSMARK\n"))); err != nil {
+		t.Fatalf("input: %v", err)
+	}
+	waitForText(t, c, 11, "RSMARK")
+
+	// On demand, request a resync and confirm a full frame replays the screen.
+	if err := WriteMessage(c, NewRequestResync(11)); err != nil {
+		t.Fatalf("request_resync: %v", err)
+	}
+	deadline := time.Now().Add(4 * time.Second)
+	for time.Now().Before(deadline) {
+		typ, payload := readEvent(t, c)
+		if typ == MsgPaneFrame {
+			var pf PaneFrame
+			if err := json.Unmarshal(payload, &pf); err != nil {
+				t.Fatalf("decode pane_frame: %v", err)
+			}
+			if pf.PaneID == 11 && pf.Frame.Full && strings.Contains(frameText(pf.Frame), "RSMARK") {
+				return
+			}
+		}
+	}
+	t.Fatal("request_resync did not produce a full frame with the prior screen")
+}
+
 // TestHostShutdownCommand verifies a clean-quit shutdown triggers daemon exit.
 func TestHostShutdownCommand(t *testing.T) {
 	h, ctx := newPersistentHost(t)

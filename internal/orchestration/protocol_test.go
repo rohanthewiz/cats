@@ -150,6 +150,7 @@ func TestCodecRoundTrip(t *testing.T) {
 		NewClosePane(42),
 		NewRequestSelection(42, SelectionPoint{Row: 3, Col: 0}, SelectionPoint{Row: 1, Col: 7}, true),
 		NewRequestText(42, uint8(terminal.TextRecent), 100, true, true),
+		NewRequestResync(42),
 		NewShutdown(),
 		NewWelcome("", []uint32{1, 2, 3}),
 		NewPaneExited(42, 0),
@@ -176,7 +177,7 @@ func TestCodecRoundTrip(t *testing.T) {
 
 	wantTypes := []MessageType{
 		MsgHello, MsgCreatePane, MsgInput, MsgResize, MsgClosePane, MsgRequestSelection, MsgRequestText,
-		MsgShutdown, MsgWelcome, MsgPaneExited, MsgError, MsgPaneSelection, MsgPaneText, MsgPaneModes, MsgPaneFrame,
+		MsgRequestResync, MsgShutdown, MsgWelcome, MsgPaneExited, MsgError, MsgPaneSelection, MsgPaneText, MsgPaneModes, MsgPaneFrame,
 	}
 	for i, want := range wantTypes {
 		typ, payload, err := ReadMessage(&buf)

@@ -39,6 +39,7 @@ const (
 	MsgScrollViewport   MessageType = "scroll_viewport"
 	MsgRequestSelection MessageType = "request_selection"
 	MsgRequestText      MessageType = "request_text"
+	MsgRequestResync    MessageType = "request_resync"
 	MsgShutdown         MessageType = "shutdown"
 
 	// Go → Rust (events).
@@ -174,6 +175,20 @@ type RequestText struct {
 
 func NewRequestText(id uint32, scope uint8, lines uint32, ansi, unwrap bool) RequestText {
 	return RequestText{Type: MsgRequestText, PaneID: id, Scope: scope, Lines: lines, Ansi: ansi, Unwrap: unwrap}
+}
+
+// RequestResync asks the daemon to replay a single pane's current state (full
+// frame + modes + cwd + title + agent). A reconnecting client sends this after
+// adopting a surviving pane reported in welcome.panes, so the pane repaints
+// deterministically regardless of when the client registered it (it doesn't have
+// to race the daemon's post-hello replay). Unknown pane IDs are ignored.
+type RequestResync struct {
+	Type   MessageType `json:"type"`
+	PaneID uint32      `json:"pane_id"`
+}
+
+func NewRequestResync(id uint32) RequestResync {
+	return RequestResync{Type: MsgRequestResync, PaneID: id}
 }
 
 // Shutdown asks a persistent daemon to exit and tear down all panes. The

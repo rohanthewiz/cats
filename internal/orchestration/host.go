@@ -313,6 +313,15 @@ func (h *Host) dispatch(typ MessageType, payload []byte) {
 		h.handleHello()
 	case MsgShutdown:
 		h.requestExit()
+	case MsgRequestResync:
+		var c RequestResync
+		if err := json.Unmarshal(payload, &c); err != nil {
+			h.emit(NewError(0, "bad request_resync: "+err.Error()))
+			return
+		}
+		if p := h.getPane(c.PaneID); p != nil {
+			h.resyncPane(p)
+		}
 	case MsgCreatePane:
 		var c CreatePane
 		if err := json.Unmarshal(payload, &c); err != nil {
