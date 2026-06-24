@@ -95,7 +95,42 @@ change.
 
 ---
 
-## Open decisions (need a call before 3b)
+## 3b status — SHIPPED (2026-06-24)
+
+The persistent daemon + reconnect/resync landed and is e2e-proven: a termhost
+shell **survives a full herdr restart** (scenario B at live-process fidelity —
+strictly better than in-process cold restore). Commits: Go `c2710bc` (lifecycle),
+`35207c0` (request_resync), `f7752c8` (SIGHUP); Rust `222f0cb`.
+
+Resolved decisions: socket keyed by **session** (`data_dir()/herdr-termhost.sock`);
+GC = clean-quit `shutdown` command **+** 10-min idle timeout; daemon detached via
+**setsid** and ignores **SIGHUP** so it outlives herdr; reconnect repaint via an
+explicit per-pane **`request_resync`** (avoids the connect-time replay race);
+single-writer enforced by the daemon's **serial Attach**.
+
+How it works: persistent daemon decouples pane lifetime from the connection
+(`Start`/`Attach`/`Stop`); on `hello` it returns `welcome.panes` (live ids) and
+replays each pane's state; a restarted herdr's restore reconciles its session
+against `surviving_panes()` and **adopts** matches (`adopt_pane`, no `create_pane`)
+instead of re-spawning, then `request_resync` repaints.
+
+### Remaining 3b follow-ups (not blockers for #4)
+
+- **Orphan panes:** panes the daemon has but the restored session does *not* adopt
+  (session/daemon drift) are left running until the idle timeout. Add a post-restore
+  `close` for `surviving_panes − adopted`.
+- **Server-mode clean-quit shutdown:** `run_server()` never calls
+  `termhost::shutdown()` (only the monolithic TUI path does). This is *correct* for
+  handoff (daemon must survive) but means a clean server exit leaves the daemon until
+  idle timeout. Wire a server-mode shutdown that distinguishes clean-quit from handoff.
+- **Live handoff (scenario C):** shares the reconnect/adopt path and works because the
+  old server doesn't kill the daemon; not yet separately e2e'd (restart/SIGKILL = B is).
+- **Single-writer hardening:** serial Attach gives the core guarantee; no explicit
+  token/lock against two concurrent herdrs yet.
+- **Socket path length:** `data_dir()`-based socket can exceed `sockaddr_un`'s ~104B
+  limit in pathologically deep config dirs (fine for normal `~/.config`).
+
+## Open decisions (resolved — see 3b status above)
 
 - **Daemon socket keying & discovery:** session-id vs user vs workspace. How does a
   new herdr know *which* daemon is "its" daemon? (Probably: one daemon per herdr
