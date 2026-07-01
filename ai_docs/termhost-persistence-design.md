@@ -126,8 +126,28 @@ instead of re-spawning, then `request_resync` repaints.
   shutdown tears the daemon down; a completed handoff leaves it running; a crash skips
   teardown entirely. e2e `termhost_clean_server_quit_stops_daemon` (SIGINT → daemon
   exits) pairs with the SIGKILL-survives and restart-adopts tests.
-- **Live handoff (scenario C):** shares the reconnect/adopt path and works because the
-  old server doesn't kill the daemon; not yet separately e2e'd (restart/SIGKILL = B is).
+- ~~**Live handoff (scenario C):**~~ DONE (Rust, this session). The prior note claimed
+  it "works because the old server doesn't kill the daemon" — **that was wrong**; the
+  new e2e (`termhost_pane_survives_live_handoff`) proved it was doubly broken:
+  1. `perform_live_handoff` dup'd a PTY fd for *every* pane, so a termhost pane (no fd)
+     failed the whole handoff with "termhost backend has no PTY master fd".
+  2. Even past that, the daemon's **single-writer serial Attach** (`cmd/termhost/main.go`)
+     deadlocks the handoff: the replacement can't adopt until the old server detaches,
+     but the old server can't exit (and detach) until the replacement is ready. And the
+     old server's clean exit drops its termhost runtimes → `ClosePane` → kills the very
+     shells the replacement needs.
+
+  Fix (Rust-only — the daemon already keeps panes on disconnect):
+  - `perform_live_handoff` skips termhost panes (`TerminalRuntime::is_termhost`) in the
+    fd-dup / manifest / pause / preserve machinery; the captured snapshot still carries
+    them so restore re-adopts via the daemon.
+  - After snapshot capture, the old server `termhost::detach_for_handoff()`s — shuts its
+    daemon socket so the daemon returns from `Attach` and frees the single-writer slot
+    for the replacement to connect + resync + adopt. Detach does **not** close panes; the
+    later `ClosePane` sends from dropping runtimes hit the dead socket and are no-ops, so
+    the shells survive. This is the "old herdr disconnects → new connects" of step 5/7.
+  - e2e: handoff via `server.live_handoff`, then assert the pre-handoff marker survived
+    (adoption) and the adopted shell runs a new command; daemon stays reachable throughout.
 - **Single-writer hardening:** serial Attach gives the core guarantee; no explicit
   token/lock against two concurrent herdrs yet.
 - **Socket path length:** `data_dir()`-based socket can exceed `sockaddr_un`'s ~104B
