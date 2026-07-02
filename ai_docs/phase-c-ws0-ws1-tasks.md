@@ -147,13 +147,14 @@ coupling**, gated behind a `PaneSpawner` seam, validated by the ported Rust test
   **Acceptance:** all 10 pass.
 
 ## Stage 2 — public numbering helpers
-- [ ] **N1.** Port base32 id + public-number logic (`workspace.rs`): `generate_workspace_id`(75)
+- [x] **N1.** Port base32 id + public-number logic (`workspace.rs`): `generate_workspace_id`(75)
   `encode_public_number`(80) `decode_public_number`(94) `public_workspace_number`(107)
-  `reserve_workspace_ids`(115) `register_new_pane_with_number`(851) `unregister_pane`(856)
-  `public_pane_number`(713) `public_tab_number`(717). Alphabet at `:73`.
-- [ ] **N2.** Port the id/number tests (`workspace.rs:954-1039`): base32 handling, encode/decode
-  round-trip, `reserve_workspace_ids`, pane & tab numbers stable + not reused after close.
-  **Acceptance:** pass.
+  `reserve_workspace_ids`(115) → `internal/workspace/ids.go`. Alphabet at `:73`.
+  *(`register_new_pane_with_number`(851) `unregister_pane`(856) `public_pane_number`(713)
+  `public_tab_number`(717) are `Workspace`-struct methods → land with Stage 3/W3.)*
+- [x] **N2.** Port the id/number tests (`workspace.rs:954-1039`): base32 handling, encode/decode
+  round-trip, `reserve_workspace_ids` (3 tests, pass under `-shuffle`). *(Pane & tab numbers
+  stable + not reused after close need the spawner seam → covered by Stage 3/W5.)*
 
 ## Stage 3 — `internal/workspace` (Tab/Workspace pure bookkeeping + spawner seam)
 - [ ] **W1. `PaneSpawner` interface** — `Spawn(spec) (PaneID, TerminalID, error)` / `Despawn(PaneID)`
