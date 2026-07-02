@@ -119,28 +119,28 @@ coupling**, gated behind a `PaneSpawner` seam, validated by the ported Rust test
   `src/app`/`src/session.rs`, not WS1).
 
 ## Stage 1 — `internal/layout` (pure BSP core; port FIRST)
-- [ ] **L1. Value types** (replace ratatui with own structs): `Rect`, `Direction{Horizontal,
+- [x] **L1. Value types** (replace ratatui with own structs): `Rect`, `Direction{Horizontal,
   Vertical}`, `NavDirection{Left,Right,Up,Down}` (`layout.rs:60`), `PaneID` (typed `uint32` +
   **injectable allocator** for deterministic tests, cf. atomic `NEXT_PANE_ID` `:11`), `Node`
   (sealed iface `PaneNode`/`SplitNode`, or tagged struct — `layout.rs:68`), `TileLayout{root,
   focus}` (`:79`), `PaneInfo{id, rect, innerRect, scrollbarRect, isFocused}` (`:31`),
   `SplitBorder{pos, direction, ratio, area, path []bool}` (`:45`).
-- [ ] **L2. Geometry core** `splitRect(area, dir, ratio)` (`layout.rs:588`): `first =
+- [x] **L2. Geometry core** `splitRect(area, dir, ratio)` (`layout.rs:588`): `first =
   round(len*ratio)`, `second = len - first`, **saturating subtraction**. Match `u16` rounding/
   saturation exactly — correctness-critical.
-- [ ] **L3. Tree recursion** (all pure): `countPanes`(377) `collectPanes`(384) `collectSplits`(409)
+- [x] **L3. Tree recursion** (all pure): `countPanes`(377) `collectPanes`(384) `collectSplits`(409)
   `collectIDs`(438) `splitRatios`(448) `swapPaneIDs`(474) `splitAt`(490) `removePane`(527, collapse
   = promote surviving sibling) `setRatioAt`(550) `getRatioAt`(568).
-- [ ] **L4. `TileLayout` public API:** `New`(87) `Panes(area)`(107) `Splits(area)`(114)
+- [x] **L4. `TileLayout` public API:** `New`(87) `Panes(area)`(107) `Splits(area)`(114)
   `SplitFocused[WithRatio]`(121/126) `CloseFocused`(136, incl. next-focus pick) `FocusPane`(159)
   `SwapPanes`(167) `SetRatioAt`(180) `ResizeFocused`(186) `ResizePane`(212) `PaneIDs`(230)
   `PaneCount`(102) `Root`(237) `FromSaved`(243). Clamp ratios **0.1–0.9** (`valid_split_ratio` :519).
-- [ ] **L5. `FindInDirection`** (`layout.rs:251`) — directional focus nav; tuple tiebreak
+- [x] **L5. `FindInDirection`** (`layout.rs:251`) — directional focus nav; tuple tiebreak
   `(edgeDistance, -overlap, centerDistance, index)`; helpers `rangesOverlap`(308)
   `rangeOverlapAmount`(363) `rangeCenterDistance`(369). **Subtle — match tiebreak order exactly.**
-- [ ] **L6. Resize helpers:** `splitOnRequestedEdge`(312) `splitAreaOverlapsFocusedPane`(316)
+- [x] **L6. Resize helpers:** `splitOnRequestedEdge`(312) `splitAreaOverlapsFocusedPane`(316)
   `nearestResizeSplit`(327) `oppositeDirection`(341) `splitEdgeDistance`(350).
-- [ ] **L7. Port the 10 `layout.rs` tests** (`:609` mod) as Go table tests, incl. fixtures
+- [x] **L7. Port the 10 `layout.rs` tests** (`:609` mod) as Go table tests, incl. fixtures
   `sample_layout`(617) + `split_snapshot`(654). Crown jewels: `resize_outer_edges_shrink_
   focused_pane`(751, all 4 dirs), `resize_outer_edge_falls_back_to_{horizontal,vertical}_ancestor_
   split`(786/815), `find_in_direction_tiebreaks_by_larger_overlap_before_layout_order`(875).
