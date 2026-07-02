@@ -48,20 +48,24 @@ in-process emulator so `cargo build` no longer needs a Zig toolchain / never lin
   discovery→spawn→connect (daemon survives herdr death), the hard error at startup-workspace
   creation, and the escape hatch spawning in-process.
 
-## Stage B — Relocate shared plain-data types out of `src/ghostty/`
-These leak onto the app/termhost surface and must move before ghostty can be deleted.
-- [ ] **B1.** Create a ghostty-free module (e.g. `src/terminal/types.rs`, or fold into
-  `protocol/wire.rs`) and move: `FocusEvent` (`ghostty/mod.rs:107`) + `encode_focus` (`:531`),
-  `KittyImageFormat` (`:185`), `KittyImagePlacement` (`:192`), `KittyImageDescriptor` (`:208`),
-  `KittyPlacementRenderInfo` (`:219`). Repoint consumers: `kitty_graphics.rs:14,799`;
-  `app/api.rs:592,595,631`; `terminal/runtime.rs:342-344,369`; `pane.rs:2759-2761,2800,2809`.
-- [ ] **B2. Replace the residual `PaneTerminal` uses on the termhost path.** `PaneRuntime.terminal`
-  currently holds an *unfed* `GhosttyPaneTerminal` even for termhost panes, used only for
-  input-mode mirroring + key/mouse encoding (`pane/terminal.rs:193,754`, `#[cfg(feature=
-  "termhost")]`). Provide a ghostty-free key/mouse encoder + input-mode state so `.terminal` no
-  longer needs `GhosttyPaneTerminal`. **Decision to record:** keep a minimal Rust encoder now, or
-  move key encoding to Go (WS9) — recommend a small Rust encoder for WS0, revisit in WS9.
-- [ ] **B3. Verify.** `cargo build`/`cargo test` green (still linking Zig at this stage).
+## Stage B — Relocate shared plain-data types out of `src/ghostty/` — DONE (herdr `c789343`)
+- [x] **B1.** `src/terminal/types.rs` now owns `FocusEvent` + `encode_focus` (**pure** CSI I/O
+  pair — ghostty's FFI `ghostty_focus_encode` wrapper deleted outright) and the `KittyImage*`/
+  `KittyPlacementRenderInfo` structs. All consumers repointed; ghostty imports them back.
+- [x] **B2. DECIDED & DONE: small Rust encoder now (revisit in WS9).** `PaneTerminal` is an enum:
+  `Ghostty(emulator)` in-process / `Mirror(InputMirror)` termhost — termhost panes construct **no
+  Zig terminal at all**. New `src/pane/input_mirror.rs` mirrors the Go-reported modes
+  (`PaneSignal::Modes`) + pure `crate::input` encoders + pure `KittyKeyboardTracker`. Parity
+  pinned by a **differential test** (mirror vs ghostty-backed mirror, 45 combos × key/mouse
+  matrix); pure-encoder fixes it forced: Esc→`CSI 27 u` under kitty, Shift+Tab→`CSI 9;2u`,
+  DECCKM SS3 only under legacy protocol, no wheel in X10. *Known divergence:* kitty
+  report-event-types/report-all-keys (bits 2/8) degrade to legacy-compatible output until WS9.
+- [x] **B3. Verified.** Build + clippy clean; 1923 unit tests; `termhost_e2e` 12/12 vs live
+  daemon (keys now encode through the mirror). **Stage-A gap found & fixed:** the non-termhost
+  integration suites (20 spawn sites) now pin `HERDR_TERMHOST_INPROCESS=1` — post-flip they'd
+  hard-error without a discoverable daemon (C6 rewires them properly). Pre-existing environmental
+  failures on this machine (fail identically at `417b4b1` in isolation): `api_ping::events_
+  subscribe_streams_output_and_agent_status_events` + 2 `cross_area` agent-survival tests.
 
 ## Stage C — Remove selection/fallback + the in-process arms
 - [ ] **C1.** Drop the `client_if_enabled()` guard (`pane.rs:1804`) so termhost is unconditional;
