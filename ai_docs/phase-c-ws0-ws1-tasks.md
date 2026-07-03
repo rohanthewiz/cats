@@ -119,21 +119,35 @@ in-process emulator so `cargo build` no longer needs a Zig toolchain / never lin
   verified failing identically at the stage-B commit). `auto_detect`/`cli_wrapper` are
   Linux-gated. Requires the herdr-web daemon at `21f65ce`+ next to the herdr binary.
 
-## Stage D — Delete dead modules + drop the Zig/ghostty build
-- [ ] **D1.** Delete `src/pty/`, `src/ghostty/`, `src/pane/terminal.rs`; remove `mod pty;`/
-  `mod ghostty;` (`main.rs:56,69`) and `mod terminal;`/`use self::terminal::…` (`pane.rs:32,42-43`).
-- [ ] **D2.** `Cargo.toml`: drop `portable-pty` (line 28); collapse/remove the `termhost` feature
-  if you made it unconditional.
-- [ ] **D3.** `build.rs`: delete the Zig invocation (lines ~65-83) + link directives (85-96) +
-  `vendor/libghostty-vt` `rerun-if-changed`. Reduce to build-info stamping, or remove `build.rs`
-  and the `build = "build.rs"` Cargo line.
-- [ ] **D4. ACCEPTANCE.** On a no-Zig environment (`env -u ZIG`, PATH without `zig`):
-  `cargo build --release` succeeds with **no** `libghostty-vt` link step; `cargo test` passes;
-  `tests/termhost_e2e.rs` passes against a live daemon; `cargo tree` shows no `portable-pty`;
-  link logs / `nm` show no `ghostty-vt`.
+## Stage D — Delete dead modules + drop the Zig/ghostty build — DONE (herdr `4bc4d39`)
+- [x] **D1.** `src/pty/` and `src/ghostty/` deleted (+ the PTY-era
+  `foreground_process_group_id_for_tty_fd` platform helpers). `src/pane/terminal.rs` SURVIVES —
+  the stage-C rewrite already reduced it to the shared plain-data types + the Mirror/Fake
+  dispatch (the emulator half died in C4).
+- [x] **D2.** `portable-pty` is a **dev-dependency only** (tests drive herdr/fake agents under
+  real PTYs; `cargo tree -e normal` is clean). Prod uses the new
+  `pane/command.rs::CommandBuilder` — a plain launch description (argv/cwd/extra env; empty
+  argv = default shell) serialized into the daemon `PaneSpec`. The `termhost` feature is
+  removed; all ~40 cfg gates collapsed.
+- [x] **D3.** `build.rs` reduced to the `HERDR_BUILD_*` rerun-if-env-changed triggers for
+  build-info stamping. **`vendor/libghostty-vt` stays in-tree** solely as the source the Go
+  daemon (herdr-web `go build -tags ghostty ./cmd/termhost`) builds its CGO VT engine from —
+  the Rust build never touches it.
+- [x] **D4. ACCEPTANCE MET** (`env -u ZIG`, PATH without zig): `cargo build --release` with no
+  Zig/libghostty-vt step; `nm`/`otool` show zero ghostty symbols; `cargo tree -e normal` has no
+  portable-pty; unit suite 1701/1701 (the 35 deleted pty/ghostty module tests account for the
+  delta vs stage C); `termhost_e2e` 12/12 vs live daemon (socket + managed); live_handoff
+  16/16, client_mode 16/16, server_headless 15/15, detach_reattach 11/11; only the 4
+  pre-existing machine-environmental failures remain (api_ping, multi_client, cross_area ×2).
 
 **WS0 risk:** the test rewrite (C6) is the biggest effort, not the deletes. Sequence A→B→C→D so
 every stage compiles and tests independently.
+
+**WS0 is COMPLETE** (stages A–D shipped): `cargo build` needs no Zig toolchain and never links
+libghostty-vt; the Go termhost daemon is the sole terminal backend. Remaining Rust-side breadcrumbs
+for later workstreams: transitional `allow(dead_code)` markers on the detect/process-probe helpers
+(detect-port workstream), `terminal_theme::osc_set_default_color_sequence`, and
+`terminal/state.rs::stabilize_agent_detection`.
 
 ---
 
