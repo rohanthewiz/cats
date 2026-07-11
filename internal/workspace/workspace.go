@@ -313,6 +313,15 @@ func (w *Workspace) PublicPaneNumber(paneID layout.PaneID) (int, bool) {
 	return n, ok
 }
 
+// PublicPaneID renders a pane's stable public handle, e.g. "w1:p3".
+func (w *Workspace) PublicPaneID(paneID layout.PaneID) (string, bool) {
+	n, ok := w.PublicPaneNumbers[paneID]
+	if !ok {
+		return "", false
+	}
+	return publicPaneIDForNumber(w.ID, n), true
+}
+
 // PublicTabNumber returns the stable public number of the tab at tabIdx.
 func (w *Workspace) PublicTabNumber(tabIdx int) (int, bool) {
 	if tabIdx >= len(w.Tabs) {
