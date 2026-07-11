@@ -111,13 +111,21 @@ events up — consolidating today's three non-interoperating protocols:
 
 ## Stage 4 — Proof harness (the WS2/WS8 build-target)
 
-- [ ] **4.1** `cmd/gateway` spike mode (flag or new `cmd/gateway2`): speak the new protocol
-  to the browser and **source panes directly from the termhost daemon** via the existing
-  `internal/orchestration` client — no WS2 orchestrator yet: one hard-coded workspace/tab,
-  a fixed two-pane split from `internal/layout`, static `layout` message.
-- [ ] **4.2** Minimal JS: per-pane canvases positioned from the `layout` rects; packed-u32
-  color resolve (D2); structured key/mouse senders (D4); chrome rendered as plain HTML text
-  (title, cwd, agent state) — proving chrome-as-data, not styled UI (that's WS8).
+- [x] **4.1** (code landed 2026-07-11; live verification is 4.3) New `cmd/gateway2`
+  (`-tags ghostty`; untagged stub keeps `go build ./...` green): speaks browserproto to the
+  browser, sources panes directly from the termhost daemon (dial + hello/welcome +
+  `welcome.panes` reconcile: resync survivors / create missing / close orphans; auto-redial
+  with backoff). Hard-coded model: one workspace/tab, fixed two-pane horizontal split;
+  per-pane `inputenc.Encoder` fed by the β `pane_modes` mirror; per-connection
+  `FrameTranslator`s; commands `pane.focus` + `scroll`; top pane row reserved as an HTML
+  chrome strip (inner rect = rect minus 1 row). Plus `cmd/wsprobe2`: stdlib-only
+  browserproto WS client with scripted ops (type/key/mouse/wheel/focus/expect/dump) for
+  headless acceptance.
+- [x] **4.2** (code landed 2026-07-11; live verification is 4.3) `cmd/gateway2/web/index.html`:
+  per-pane canvases positioned from the `layout` rects; packed-u32 color resolve (D2, with
+  frame `def_fg`/`def_bg` fallback); structured key/mouse senders (D4 — no VT bytes, no key
+  table); wheel → mouse event when captured or alt-screen, else `cmd scroll`; chrome rendered
+  as plain HTML text (pub id, title, cwd, agent state, exit code) in the per-pane strip.
 - [ ] **4.3** Acceptance: two live shell panes in one page; focus switch routes input
   correctly; a TUI app (e.g. `htop`) gets correct mouse + kitty-negotiated keys through the
   server-side encoder; `pane_agent` state changes visibly (run a fake agent from the herdr

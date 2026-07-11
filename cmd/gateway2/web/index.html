@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+<title>herdr · gateway2</title>
+<style>
+  :root { --bg:#181818; --fg:#d4d4d4; --accent:#5b9dff; --chrome:#222; }
+  html,body { margin:0; height:100%; background:var(--bg); color:var(--fg);
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; overflow:hidden; }
+  #bar { position:fixed; left:0; top:0; right:0; height:24px; line-height:24px; font-size:12px;
+    background:#101010; color:#aaa; padding:0 8px; white-space:nowrap; overflow:hidden; z-index:4; }
+  #bar b { color:#ddd; }
+  #panes { position:fixed; left:0; top:24px; right:0; bottom:0; }
+  .pane { position:absolute; box-sizing:border-box; }
+  .pane .chrome { position:absolute; left:0; top:0; right:0; overflow:hidden; white-space:nowrap;
+    font-size:11px; color:#8f8f8f; background:var(--chrome); padding:0 6px; box-sizing:border-box; }
+  .pane.focused .chrome { color:#e8e8e8; background:#26314a; }
+  .pane .chrome .pub { color:var(--accent); }
+  .pane .chrome .agent { color:#e2b64e; }
+  .pane .chrome .exited { color:#ff6b6b; }
+  .pane canvas { position:absolute; display:block; }
+  .pane.focused canvas { outline:1px solid var(--accent); outline-offset:-1px; }
+  #status { position:fixed; left:8px; bottom:6px; font-size:11px; color:#888;
+    background:rgba(0,0,0,.45); padding:2px 6px; border-radius:4px; pointer-events:none; z-index:5; }
+  #status.err { color:#ff6b6b; }
+  #toasts { position:fixed; right:10px; top:34px; display:flex; flex-direction:column; gap:6px; z-index:6; }
+  .toast { background:#2a2a2a; color:#eee; border:1px solid #3a3a3a; border-left:3px solid #6aa0ff;
+    padding:6px 10px; border-radius:5px; font-size:12px; max-width:340px; box-shadow:0 2px 8px rgba(0,0,0,.4);
+    opacity:0; transform:translateX(8px); transition:opacity .2s, transform .2s; }
+  .toast.show { opacity:1; transform:none; }
+</style>
+</head>
+<body>
+<div id="bar">connecting…</div>
+<div id="panes"></div>
+<div id="status">connecting…</div>
+<div id="toasts"></div>
+<script>
+(() => {
+  const PV = 1, FONT_PX = 15, LINE = 1.25, BAR_H = 24;
+  const panesEl = document.getElementById("panes");
+  const barEl = document.getElementById("bar");
+  const statusEl = document.getElementById("status");
+  const toastsEl = document.getElementById("toasts");
+  const dpr = window.devicePixelRatio || 1;
+  const measureCtx = document.createElement("canvas").getContext("2d");
+
+  // Theme defaults used when a packed color is 0 (frame defaults unknown).
+  const THEME_FG = 0xd4d4d4, THEME_BG = 0x181818;
+
+  // ratatui Modifier bits (cell.m).
+  const M_BOLD = 0x1, M_DIM = 0x2, M_ITALIC = 0x4, M_UNDERLINED = 0x8, M_REVERSED = 0x40, M_HIDDEN = 0x80;
+
+  let ws = null, cellW = 9, cellH = 19, cols = 0, rows = 0;
+  let layoutMsg = null;          // last layout message
+  const panes = new Map();       // pane id -> pane state
+
+  function measure() {
+    measureCtx.font = `${FONT_PX}px ui-monospace, Menlo, monospace`;
+    cellW = Math.max(1, Math.round(measureCtx.measureText("M").width * 100) / 100);
+    cellH = Math.ceil(FONT_PX * LINE);
+  }
+
+  function gridSize() {
+    cols = Math.max(20, Math.floor(window.innerWidth / cellW));
+    rows = Math.max(6, Math.floor((window.innerHeight - BAR_H) / cellH));
+  }
+
+  // ---- Packed u32 colors (D2): 0x02_RR_GG_BB → CSS ----
+  function rgbOf(v) { return [(v >> 16) & 255, (v >> 8) & 255, v & 255]; }
+  function css(v) { const [r, g, b] = rgbOf(v); return `rgb(${r},${g},${b})`; }
+  function blend(a, b, t) { // mix packed a toward packed b
+    const pa = rgbOf(a), pb = rgbOf(b);
+    return `rgb(${Math.round(pa[0] + (pb[0] - pa[0]) * t)},${Math.round(pa[1] + (pb[1] - pa[1]) * t)},${Math.round(pa[2] + (pb[2] - pa[2]) * t)})`;
+  }
+
+  function newPane(id) {
+    const el = document.createElement("div");
+    el.className = "pane";
+    const chrome = document.createElement("div");
+    chrome.className = "chrome";
+    const canvas = document.createElement("canvas");
+    el.appendChild(chrome); el.appendChild(canvas);
+    panesEl.appendChild(el);
+    const p = { id, el, chrome, canvas, ctx: canvas.getContext("2d", { alpha: false }),
+      pub: "", info: null, W: 0, H: 0, cells: [], links: [], cur: null,
+      defFg: THEME_FG, defBg: THEME_BG, modes: { mouse: false, alt: false },
+      title: "", cwd: "", agent: "", agentState: "", exited: null,
+      pressed: -1, lastCell: "", dirty: false };
+    attachMouse(p);
+    panes.set(id, p);
+    return p;
+  }
+
+  function pane(id) { return panes.get(id) || newPane(id); }
+
+  // ---- Layout (D3): position pane DOM from computed rects ----
+  function applyLayout(msg) {
+    layoutMsg = msg;
+    const seen = new Set();
+    for (const pr of msg.panes) {
+      const p = pane(pr.pane);
+      seen.add(pr.pane);
+      p.pub = pr.pub; p.info = pr;
+      const [rx, ry, rw, rh] = pr.rect, [ix, iy, iw, ih] = pr.inner;
+      p.el.style.left = (rx * cellW) + "px";
+      p.el.style.top = (ry * cellH) + "px";
+      p.el.style.width = (rw * cellW) + "px";
+      p.el.style.height = (rh * cellH) + "px";
+      p.el.classList.toggle("focused", !!pr.focused);
+      p.chrome.style.height = ((iy - ry) * cellH) + "px";
+      p.chrome.style.lineHeight = ((iy - ry) * cellH) + "px";
+      p.canvas.style.left = ((ix - rx) * cellW) + "px";
+      p.canvas.style.top = ((iy - ry) * cellH) + "px";
+      p.canvas.style.width = (iw * cellW) + "px";
+      p.canvas.style.height = (ih * cellH) + "px";
+      p.canvas.width = Math.floor(iw * cellW * dpr);
+      p.canvas.height = Math.floor(ih * cellH * dpr);
+      p.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      renderChrome(p);
+      scheduleDraw(p);
+    }
+    for (const [id, p] of panes) {
+      if (!seen.has(id)) { p.el.remove(); panes.delete(id); }
+    }
+    const wsName = msg.workspaces.map(w => (w.active ? "●" : "○") + " " + w.name).join("  ");
+    const tabs = msg.tabs.map(t => (t.active ? "[" + t.name + "]" : t.name)).join(" ");
+    barEl.innerHTML = "";
+    const b = document.createElement("b");
+    b.textContent = "herdr gateway2 · " + wsName + " · tabs: " + tabs;
+    barEl.appendChild(b);
+  }
+
+  // ---- Chrome as data (4.2): plain text, no styled UI ----
+  function renderChrome(p) {
+    p.chrome.innerHTML = "";
+    const add = (cls, text) => {
+      const s = document.createElement("span");
+      if (cls) s.className = cls;
+      s.textContent = text;
+      p.chrome.appendChild(s);
+    };
+    add("pub", p.pub || ("#" + p.id));
+    if (p.title) add("", "  " + p.title);
+    if (p.cwd) add("", "  " + p.cwd);
+    if (p.agent) add("agent", "  " + p.agent + ":" + p.agentState);
+    if (p.exited !== null) add("exited", "  exited (" + p.exited + ")");
+  }
+
+  // ---- Rendering ----
+  function scheduleDraw(p) {
+    if (p.dirty) return;
+    p.dirty = true;
+    requestAnimationFrame(() => { p.dirty = false; draw(p); });
+  }
+
+  function draw(p) {
+    const ctx = p.ctx;
+    const defFg = p.defFg || THEME_FG, defBg = p.defBg || THEME_BG;
+    ctx.fillStyle = css(defBg);
+    ctx.fillRect(0, 0, p.W * cellW + cellW, p.H * cellH + cellH);
+    ctx.textBaseline = "top";
+    for (let y = 0; y < p.H; y++) {
+      for (let x = 0; x < p.W; x++) {
+        const c = p.cells[y * p.W + x];
+        if (!c) continue;
+        const m = c.m || 0;
+        let fg = c.f || defFg, bg = c.b || defBg;
+        if (m & M_REVERSED) { const t = fg; fg = bg; bg = t; }
+        const px = x * cellW, py = y * cellH;
+        if (bg !== defBg) { ctx.fillStyle = css(bg); ctx.fillRect(px, py, cellW + 0.5, cellH + 0.5); }
+        const ch = c.s;
+        if (ch && ch !== " " && !(m & M_HIDDEN)) {
+          let font = "";
+          if (m & M_BOLD) font += "bold ";
+          if (m & M_ITALIC) font += "italic ";
+          ctx.font = `${font}${FONT_PX}px ui-monospace, Menlo, monospace`;
+          ctx.fillStyle = (m & M_DIM) ? blend(fg, bg, 0.5) : css(fg);
+          ctx.fillText(ch, px, py + 1);
+          if ((m & M_UNDERLINED) || c.h) ctx.fillRect(px, py + cellH - 2, cellW, 1);
+        }
+      }
+    }
+    if (p.cur && p.cur.vis && p.info && p.info.focused) {
+      ctx.fillStyle = css(defFg); ctx.globalAlpha = 0.7;
+      ctx.fillRect(p.cur.x * cellW, p.cur.y * cellH, cellW, cellH);
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  // ---- Down messages ----
+  function onMessage(msg) {
+    switch (msg.t) {
+      case "welcome":
+        if (msg.error) setStatus("rejected: " + msg.error, true);
+        else setStatus(`connected · ${cols}×${rows}`);
+        break;
+      case "layout": applyLayout(msg); break;
+      case "pane_frame": {
+        const p = pane(msg.pane);
+        p.W = msg.w; p.H = msg.h; p.cells = msg.cells; p.links = msg.links || [];
+        p.cur = msg.cur || null; p.defFg = msg.def_fg; p.defBg = msg.def_bg;
+        scheduleDraw(p); break;
+      }
+      case "pane_diff": {
+        const p = pane(msg.pane);
+        if (msg.cells) for (const dc of msg.cells) p.cells[dc.i] = dc;
+        if (msg.cur) p.cur = msg.cur;
+        scheduleDraw(p); break;
+      }
+      case "pane_title": { const p = pane(msg.pane); p.title = msg.title; renderChrome(p); break; }
+      case "pane_cwd": { const p = pane(msg.pane); p.cwd = msg.cwd; renderChrome(p); break; }
+      case "pane_agent": {
+        const p = pane(msg.pane); p.agent = msg.agent; p.agentState = msg.state;
+        renderChrome(p); break;
+      }
+      case "pane_modes": {
+        const p = pane(msg.pane); p.modes = { mouse: !!msg.mouse, alt: !!msg.alt_screen };
+        break;
+      }
+      case "pane_exited": { const p = pane(msg.pane); p.exited = msg.code; renderChrome(p); break; }
+      case "agents": break; // sidebar rollup: per-pane chrome already shows it in the spike
+      case "clipboard":
+        try { navigator.clipboard.writeText(b64decode(msg.data)); } catch (e) {}
+        break;
+      case "notify": toast(msg.message + (msg.body ? ": " + msg.body : "")); break;
+      case "title": document.title = msg.title ? ("herdr · " + msg.title) : "herdr · gateway2"; break;
+      case "error": toast("error: " + msg.msg); break;
+      case "shutdown": setStatus("server shut down", true); break;
+      case "cmd_result": if (!msg.ok) toast("cmd failed: " + (msg.error || "unknown")); break;
+    }
+  }
+
+  function b64decode(s) {
+    try { return decodeURIComponent(escape(atob(s))); } catch (e) { return atob(s); }
+  }
+
+  // ---- Send helpers ----
+  function sendMsg(m) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(m)); }
+  function sendCmd(name, params) { sendMsg({ t: "cmd", name, params }); }
+
+  // ---- Keyboard (D4: structured, never pre-encoded) ----
+  function mods(e) {
+    return (e.shiftKey ? 1 : 0) | (e.altKey ? 2 : 0) | (e.ctrlKey ? 4 : 0) | (e.metaKey ? 8 : 0);
+  }
+
+  function onKey(e) {
+    const isV = e.key === "v" || e.key === "V";
+    if (e.type === "keydown" && e.metaKey && !e.ctrlKey && isV) { e.preventDefault(); pasteText(); return; }
+    if (e.metaKey && !e.ctrlKey) return;  // leave other Cmd shortcuts to the browser
+    if (e.code === "F12") return;         // devtools
+    e.preventDefault();
+    const kind = e.type === "keyup" ? "u" : (e.repeat ? "r" : "d");
+    sendMsg({ t: "key", code: e.code, key: e.key, mods: mods(e), kind });
+  }
+  window.addEventListener("keydown", onKey);
+  window.addEventListener("keyup", onKey);
+
+  // ---- Paste ----
+  function pasteText() {
+    if (!navigator.clipboard || !navigator.clipboard.readText) { toast("clipboard read unavailable"); return; }
+    navigator.clipboard.readText()
+      .then((t) => { if (t) sendMsg({ t: "paste", data: t }); else toast("clipboard has no text"); })
+      .catch((err) => toast("paste blocked: " + ((err && err.name) || err)));
+  }
+  document.addEventListener("paste", (e) => {
+    const text = (e.clipboardData || window.clipboardData).getData("text");
+    if (text) { e.preventDefault(); sendMsg({ t: "paste", data: text }); }
+  });
+
+  // ---- Mouse (structured cell coords; server applies the pane's encoding) ----
+  function cellOf(p, ev) {
+    const r = p.canvas.getBoundingClientRect();
+    const x = Math.min(Math.max(0, Math.floor((ev.clientX - r.left) / cellW)), Math.max(0, p.W - 1));
+    const y = Math.min(Math.max(0, Math.floor((ev.clientY - r.top) / cellH)), Math.max(0, p.H - 1));
+    return [x, y];
+  }
+
+  function sendMouse(p, kind, btn, ev, dx, dy) {
+    const [x, y] = cellOf(p, ev);
+    const m = { t: "mouse", pane: p.id, x, y, btn, kind, mods: mods(ev) };
+    if (dx) m.dx = dx;
+    if (dy) m.dy = dy;
+    sendMsg(m);
+  }
+
+  function attachMouse(p) {
+    p.canvas.addEventListener("mousedown", (ev) => {
+      if (p.info && !p.info.focused) sendCmd("pane.focus", { pane: p.id });
+      if (!p.modes.mouse) {
+        // No capture: click-to-open hyperlinks, like α.
+        const [x, y] = cellOf(p, ev);
+        const c = p.cells[y * p.W + x];
+        if (c && c.h && p.links[c.h - 1]) window.open(p.links[c.h - 1], "_blank", "noopener");
+        return;
+      }
+      if (ev.button > 2) return;
+      ev.preventDefault();
+      p.pressed = ev.button;
+      sendMouse(p, "d", ev.button, ev);
+    });
+    window.addEventListener("mouseup", (ev) => {
+      if (p.pressed < 0 || ev.button !== p.pressed) return;
+      const btn = p.pressed;
+      p.pressed = -1;
+      if (p.modes.mouse) sendMouse(p, "u", btn, ev);
+    });
+    p.canvas.addEventListener("mousemove", (ev) => {
+      if (!p.modes.mouse) return;
+      const key = cellOf(p, ev).join(":");
+      if (key === p.lastCell) return; // one report per cell
+      p.lastCell = key;
+      sendMouse(p, "m", p.pressed >= 0 ? p.pressed : 3, ev);
+    });
+    p.canvas.addEventListener("wheel", (ev) => {
+      ev.preventDefault();
+      const lines = ev.deltaMode === 1 ? Math.round(ev.deltaY)
+        : Math.sign(ev.deltaY) * Math.max(1, Math.round(Math.abs(ev.deltaY) / cellH));
+      if (!lines) return;
+      if (p.modes.mouse || p.modes.alt) sendMouse(p, "w", 3, ev, 0, lines);
+      else sendCmd("scroll", { pane: p.id, delta: lines });
+    }, { passive: false });
+    p.canvas.addEventListener("contextmenu", (ev) => { if (p.modes.mouse) ev.preventDefault(); });
+  }
+
+  // ---- Status & toasts ----
+  function setStatus(t, err) { statusEl.textContent = t; statusEl.className = err ? "err" : ""; }
+  function toast(text) {
+    const el = document.createElement("div");
+    el.className = "toast"; el.textContent = text;
+    toastsEl.appendChild(el);
+    requestAnimationFrame(() => el.classList.add("show"));
+    setTimeout(() => { el.classList.remove("show"); setTimeout(() => el.remove(), 250); }, 4000);
+  }
+
+  // ---- Session ----
+  function connect() {
+    const proto = location.protocol === "https:" ? "wss" : "ws";
+    ws = new WebSocket(`${proto}://${location.host}/ws`);
+    ws.onopen = () => {
+      sendMsg({ t: "init", v: PV, cols, rows, dpr,
+        cell_w_px: Math.round(cellW * dpr), cell_h_px: Math.round(cellH * dpr) });
+    };
+    ws.onmessage = (ev) => onMessage(JSON.parse(ev.data));
+    ws.onclose = () => { setStatus("disconnected — retrying…", true); setTimeout(connect, 1500); };
+    ws.onerror = () => ws.close();
+  }
+
+  let resizeTimer = null;
+  window.addEventListener("resize", () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => {
+      gridSize();
+      sendMsg({ t: "resize", cols, rows });
+      setStatus(`connected · ${cols}×${rows}`);
+    }, 120);
+  });
+
+  measure();
+  gridSize();
+  connect();
+})();
+</script>
+</body>
+</html>
