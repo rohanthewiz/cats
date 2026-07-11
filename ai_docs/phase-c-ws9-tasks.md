@@ -82,20 +82,32 @@ events up — consolidating today's three non-interoperating protocols:
   (surfaced β's link-removal-without-content-change non-propagation — resolveCell's skip
   compare ignores Link; the test models it, β unchanged per out-of-scope rule).
 
-## Stage 3 — Structured input encoding (D4)
+## Stage 3 — Structured input encoding (D4) — DONE (2026-07-11)
 
-- [ ] **3.1** Spike first: confirm whether go-libghostty exposes the key-event VT encoder
-  (kitty protocol + legacy + modifyOtherKeys). If yes, wrap it. If no, port the **pure Rust
-  encoders** from herdr `src/pane/input_mirror.rs` + `src/input` — they are spec-grade
-  (pinned by the Stage-B differential test: 45 combos × key/mouse matrix; fixes recorded in
-  `phase-c-ws0-ws1-tasks.md` B2).
-- [ ] **3.2** `key`/`mouse`/`paste` events → bytes, driven by the pane's live mode state
-  (β `pane_modes` / `terminal.InputModes`, `internal/terminal/terminal.go:131`): kitty
-  flags **including bits 2/8** (report-event-types/report-all-keys — the degradation WS9
-  exists to retire), DECCKM, bracketed paste, mouse encodings (X10/UTF-8/SGR + alternate
-  scroll). Table tests keyed to the same combo matrix as the Rust differential test.
-- [ ] **3.3** Keep a `raw` input message in the protocol as an escape hatch during
-  transition (α's current behavior); mark deprecated in the spec.
+- [x] **3.1** Spike outcome: **go-libghostty exposes the full encoder surface — wrapped,
+  no Rust port.** `KeyEncoder` (all five kitty flag bits incl. 2/8/16, modifyOtherKeys
+  state 2, DECCKM, keypad app, alt-ESC-prefix, macOS option-as-alt), `MouseEncoder`
+  (X10/UTF-8/SGR/URxvt/SGR-Pixels formats, all tracking modes, wheel = buttons 4-7 →
+  64-67), `PasteEncode` (bracketed wrap + sanitization). Symbols verified present in the
+  vendored `libghostty-vt.a`. The C encoder covers strictly more than the Rust pure
+  encoders (whose differential matrix deliberately omitted bits 2/8). CGO implication:
+  the server binary builds with `-tags ghostty` — same prebuilt-lib prerequisite as the
+  daemon, no Zig at Go-build time.
+- [x] **3.2** `internal/inputenc`: `Encoder` (one per pane, `SetModes` from the β
+  pane_modes mirror) — `Key(browserproto.Key)` (W3C code→libghostty key via mechanical
+  snake_case mapping; layout-aware unshifted codepoint: letters from key text unless alt
+  held, then physical code so option-compose undoes to ESC-a), `Mouse` (cell coords via
+  1px-cell size context; wheel one press/line, buttons 64-67; alternate scroll fallback
+  matching ghostty Surface byte-for-byte: `\x1b[A/B` or SS3 under DECCKM, only when
+  alt-screen + 1007 + no reporting), `Paste`. Two encoder defaults pinned to terminal
+  defaults the standalone encoder misses: option-as-alt=true, alt_esc_prefix=true (mode
+  1036, `modes.zig:289`; β doesn't mirror 1036 — same as herdr's Rust encoder). Golden
+  tests (`-tags ghostty`) keyed to the B2 matrix dimensions PLUS the previously-degraded
+  cases: kitty event-types suffixes (`:2`/`:3`), report-all (`\x1b[97u`),
+  alternates (`\x1b[97:65;2u`), modifyOtherKeys `\x1b[27;5;13~` (retires the Rust Enter
+  special-case), X10 mod-stripping, UTF-8 wide coords, legacy release-as-3.
+- [x] **3.3** `raw` escape hatch: already landed in Stage 2 (`browserproto.Raw`, marked
+  deprecated in spec §6).
 
 ## Stage 4 — Proof harness (the WS2/WS8 build-target)
 
