@@ -133,10 +133,13 @@
 
   // Translucent wash for a browser-local drag selection (non-mouse panes, §7 read).
   const SEL_FILL = "rgba(88,148,255,0.32)";
+  // Outline for the keyboard copy-mode cursor (hjkl/arrows), distinct from the wash.
+  const CM_CURSOR = "rgba(120,170,255,0.95)";
 
   let ws = null, cellW = 9, cellH = 19, cols = 0, rows = 0;
   let layoutMsg = null;          // last layout message
   const panes = new Map();       // pane id -> pane state
+  let copyModePane = null;       // the pane in keyboard copy-mode, or null
 
   function measure() {
     measureCtx.font = `${FONT_PX}px ui-monospace, Menlo, monospace`;
@@ -173,6 +176,8 @@
     ctl.appendChild(mkBtn("⊟", "split left/right", "", () => sendCmd("pane.split", { pane: id, direction: "h" })));
     ctl.appendChild(mkBtn("⊞", "split top/bottom", "", () => sendCmd("pane.split", { pane: id, direction: "v" })));
     ctl.appendChild(mkBtn("⤢", "toggle zoom", "", () => sendCmd("pane.zoom", { pane: id })));
+    ctl.appendChild(mkBtn("⬚", "copy mode (keyboard select)", "", () => enterCopyMode(id)));
+    ctl.appendChild(mkBtn("⧉", "copy scrollback to clipboard", "", () => copyScrollback(id)));
     ctl.appendChild(mkBtn("✎", "rename pane", "", () => {
       const name = prompt("Rename pane (empty to clear):", pane(id).title || "");
       if (name !== null) sendCmd("pane.rename", { pane: id, name });
@@ -186,7 +191,7 @@
       pub: "", info: null, W: 0, H: 0, cells: [], links: [], cur: null,
       defFg: THEME_FG, defBg: THEME_BG, modes: { mouse: false, alt: false },
       title: "", cwd: "", agent: "", agentState: "", exited: null,
-      pressed: -1, lastCell: "", dirty: false, scroll: null, sel: null };
+      pressed: -1, lastCell: "", dirty: false, scroll: null, sel: null, cm: null };
     // Clicking the header (not its buttons) focuses the pane.
     chrome.addEventListener("mousedown", () => { if (p.info && !p.info.focused) sendCmd("pane.focus", { pane: id }); });
     attachMouse(p);
@@ -230,7 +235,10 @@
       scheduleDraw(p);
     }
     for (const [id, p] of panes) {
-      if (!seen.has(id)) { p.el.remove(); panes.delete(id); }
+      if (!seen.has(id)) {
+        if (p === copyModePane) exitCopyMode();
+        p.el.remove(); panes.delete(id);
+      }
     }
     renderWorkspaces(msg);
     renderPaneList(msg);
@@ -384,6 +392,17 @@
       ctx.globalAlpha = 1;
     }
     if (p.sel) drawSelection(p, ctx);
+    if (p.cm) drawCopyCursor(p, ctx);
+  }
+
+  // drawCopyCursor outlines the keyboard copy-mode cursor cell (the wash, if a
+  // selection is anchored, is drawn by drawSelection via p.sel).
+  function drawCopyCursor(p, ctx) {
+    const { x, y } = p.cm.cursor;
+    ctx.save();
+    ctx.strokeStyle = CM_CURSOR; ctx.lineWidth = 2;
+    ctx.strokeRect(x * cellW + 1, y * cellH + 1, cellW - 2, cellH - 2);
+    ctx.restore();
   }
 
   // drawSelection washes the pane-local drag range (viewport cells). Linear mode
@@ -482,11 +501,19 @@
   }
 
   function onKey(e) {
+    // Copy-mode captures the keyboard entirely — motions/yank, nothing to the PTY.
+    if (copyModePane) {
+      e.preventDefault();
+      if (e.type === "keydown") copyModeKey(copyModePane, e);
+      return;
+    }
     const isV = e.key === "v" || e.key === "V";
     if (e.type === "keydown" && e.metaKey && !e.ctrlKey && isV) { e.preventDefault(); pasteText(); return; }
     if (e.metaKey && !e.ctrlKey) return;  // leave other Cmd shortcuts to the browser
     if (e.code === "F12") return;         // devtools
     e.preventDefault();
+    // Typing to the terminal dismisses a lingering (stale) copy wash.
+    if (e.type === "keydown") clearStaleSelections();
     const kind = e.type === "keyup" ? "u" : (e.repeat ? "r" : "d");
     sendMsg({ t: "key", code: e.code, key: e.key, mods: mods(e), kind });
   }
@@ -531,15 +558,13 @@
     return [max - off + cell.y, cell.x];
   }
 
-  // finishSelection issues a read for the pane's drag range and copies the
-  // extracted text to the clipboard. Endpoints are absolute; rect selects a block.
-  function finishSelection(p) {
-    const sel = p.sel;
+  // readAndCopy issues a §7 read over a viewport cell range and writes the
+  // extracted text to the clipboard. Endpoints are inclusive viewport cells,
+  // mapped to absolute buffer coords; rect selects a block. Shared by the mouse
+  // drag path and keyboard copy-mode.
+  function readAndCopy(p, aCell, bCell, rect) {
     sendCmdAwait("read", {
-      pane: p.id,
-      anchor: absPoint(p, sel.anchor),
-      cursor: absPoint(p, sel.cursor),
-      rect: sel.rect,
+      pane: p.id, anchor: absPoint(p, aCell), cursor: absPoint(p, bCell), rect,
     }, (res) => {
       if (!res.ok) { toast("read failed: " + (res.error || "unknown")); return; }
       const text = res.data && res.data.text;
@@ -550,8 +575,115 @@
     });
   }
 
+  // finishSelection copies the pane's completed drag range, marking the wash done
+  // so a later keystroke (clearStaleSelections) dismisses the now-stale highlight.
+  function finishSelection(p) {
+    readAndCopy(p, p.sel.anchor, p.sel.cursor, p.sel.rect);
+    p.sel.done = true;
+  }
+
+  // copyScrollback captures the pane's whole buffer (§7 capture, soft-wraps
+  // rejoined) and copies it — the chrome ⧉ button, distinct from a range read.
+  function copyScrollback(id) {
+    const p = panes.get(id);
+    if (!p) return;
+    sendCmdAwait("capture", { pane: id, scope: 1, lines: 0, unwrap: true }, (res) => {
+      if (!res.ok) { toast("capture failed: " + (res.error || "unknown")); return; }
+      const text = res.data && res.data.text;
+      if (!text) { toast("nothing to copy"); return; }
+      navigator.clipboard.writeText(text).then(
+        () => toast("copied " + text.length + " chars (scrollback)"),
+        () => toast("clipboard write blocked"));
+    });
+  }
+
+  // clearStaleSelections drops any completed drag wash (p.sel.done) — a fixed
+  // viewport highlight goes stale once new output or the cursor moves, so the
+  // next keystroke to the terminal dismisses it. Active drags are left alone.
+  function clearStaleSelections() {
+    for (const p of panes.values()) {
+      if (p.sel && p.sel.done) { p.sel = null; scheduleDraw(p); }
+    }
+  }
+
+  // ---- Keyboard copy-mode (§7 read via hjkl/arrows, no mouse needed) ----
+  //
+  // A tmux-style selection driven from the keyboard: enter on a pane, move the
+  // cursor, press v to begin selecting, y/Enter to yank into the clipboard, Esc
+  // to leave. Motions operate on viewport cells; k/j past the top/bottom scroll
+  // the pane so the selection can reach into scrollback.
+
+  function enterCopyMode(id) {
+    const p = panes.get(id);
+    if (!p) return;
+    sendCmd("pane.focus", { pane: id });
+    exitCopyMode(); // only one pane at a time
+    const start = (p.cur && p.cur.vis) ? { x: p.cur.x, y: p.cur.y } : { x: 0, y: 0 };
+    p.cm = { cursor: start, anchor: null, rect: false };
+    copyModePane = p;
+    p.sel = null;
+    toast("copy mode — hjkl/arrows move · v select · r rect · y copy · Esc exit");
+    scheduleDraw(p);
+  }
+
+  function exitCopyMode() {
+    const p = copyModePane;
+    copyModePane = null;
+    if (!p) return;
+    p.cm = null; p.sel = null;
+    scheduleDraw(p);
+  }
+
+  // cmSyncSel mirrors the copy-mode range onto p.sel so drawSelection washes it
+  // (only once an anchor is set with v).
+  function cmSyncSel(p) {
+    const cm = p.cm;
+    p.sel = cm.anchor ? { anchor: cm.anchor, cursor: cm.cursor, rect: cm.rect, moved: true } : null;
+  }
+
+  // copyModeKey handles one keydown while in copy-mode; returns without touching
+  // the terminal (onKey has already swallowed the event).
+  function copyModeKey(p, e) {
+    const cm = p.cm;
+    if (!cm) return;
+    const clampX = (x) => Math.min(Math.max(0, x), Math.max(0, p.W - 1));
+    const clampY = (y) => Math.min(Math.max(0, y), Math.max(0, p.H - 1));
+    const move = (dx, dy) => {
+      let ny = cm.cursor.y + dy;
+      if (ny < 0) { sendCmd("scroll", { pane: p.id, delta: -1 }); ny = 0; }
+      else if (ny > p.H - 1) { sendCmd("scroll", { pane: p.id, delta: 1 }); ny = p.H - 1; }
+      cm.cursor = { x: clampX(cm.cursor.x + dx), y: clampY(ny) };
+    };
+    switch (e.key) {
+      case "ArrowLeft": case "h": move(-1, 0); break;
+      case "ArrowRight": case "l": move(1, 0); break;
+      case "ArrowUp": case "k": move(0, -1); break;
+      case "ArrowDown": case "j": move(0, 1); break;
+      case "0": case "Home": cm.cursor = { x: 0, y: cm.cursor.y }; break;
+      case "$": case "End": cm.cursor = { x: Math.max(0, p.W - 1), y: cm.cursor.y }; break;
+      case "g": cm.cursor = { x: cm.cursor.x, y: 0 }; break;
+      case "G": cm.cursor = { x: cm.cursor.x, y: Math.max(0, p.H - 1) }; break;
+      case "v": cm.anchor = cm.anchor ? null : { x: cm.cursor.x, y: cm.cursor.y }; break;
+      case "r": cm.rect = !cm.rect; break;
+      case "y": case "Enter": copyModeYank(p); return;
+      case "Escape": case "q": exitCopyMode(); return;
+      default: return; // unrecognised key: stay in copy-mode, do nothing
+    }
+    cmSyncSel(p);
+    scheduleDraw(p);
+  }
+
+  // copyModeYank reads the current copy-mode range (anchor→cursor, or just the
+  // cursor cell if nothing is anchored yet) into the clipboard, then exits.
+  function copyModeYank(p) {
+    const cm = p.cm;
+    readAndCopy(p, cm.anchor || cm.cursor, cm.cursor, cm.rect);
+    exitCopyMode();
+  }
+
   function attachMouse(p) {
     p.canvas.addEventListener("mousedown", (ev) => {
+      if (copyModePane) exitCopyMode(); // a mouse drag supersedes keyboard copy-mode
       if (p.info && !p.info.focused) sendCmd("pane.focus", { pane: p.id });
       if (!p.modes.mouse) {
         // No capture: left-drag originates a browser-local selection (§7 read);
