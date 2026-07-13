@@ -7,6 +7,7 @@
 //
 //	wait:MS                 sleep
 //	focus:PANE              cmd pane.focus
+//	focusdir:left|right|up|down  cmd pane.focus_direction (nearest neighbour)
 //	type:TEXT               structured key events per rune (\n = Enter)
 //	key:CODE[:MODS]         one named key, MODS letters c/s/a/m (e.g. key:F10, key:KeyC:c)
 //	mouse:PANE:X:Y[:BTN]    click (down+up) at cell x,y (btn default 0 = left)
@@ -336,6 +337,18 @@ func (p *probe) exec(op string, timeout time.Duration) error {
 			return err
 		}
 		fmt.Printf("→ cmd pane.focus %d\n", pane)
+		return p.send(cmd)
+
+	case "focusdir":
+		if _, ok := browserproto.NavDirection(arg); !ok {
+			return fmt.Errorf("focusdir needs left|right|up|down, got %q", arg)
+		}
+		cmd, err := browserproto.NewCmd("", browserproto.CmdPaneFocusDirection,
+			browserproto.DirParams{Dir: arg})
+		if err != nil {
+			return err
+		}
+		fmt.Printf("→ cmd pane.focus_direction %s\n", arg)
 		return p.send(cmd)
 
 	case "type":

@@ -73,6 +73,57 @@ func TestSplitAndClosePane(t *testing.T) {
 	}
 }
 
+func TestFocusPaneDirection(t *testing.T) {
+	s := newTestSession(t)
+	area := layout.Rect{Width: 120, Height: 32}
+	left, _ := s.FocusedPane()
+
+	// Horizontal split → left|right; the new (right) pane is focused.
+	right, err := s.SplitPane(nil, layout.Horizontal)
+	if err != nil {
+		t.Fatalf("SplitPane: %v", err)
+	}
+	if f, _ := s.FocusedPane(); f != right {
+		t.Fatalf("after split focused=%d, want right %d", f, right)
+	}
+
+	// Move focus left → lands on the left pane.
+	moved, err := s.FocusPaneDirection(layout.Left, area)
+	if err != nil {
+		t.Fatalf("FocusPaneDirection(Left): %v", err)
+	}
+	if !moved {
+		t.Fatal("FocusPaneDirection(Left) reported no move")
+	}
+	if f, _ := s.FocusedPane(); f != left {
+		t.Fatalf("after focus-left focused=%d, want left %d", f, left)
+	}
+
+	// No neighbour further left → no-op, no error, focus unchanged.
+	moved, err = s.FocusPaneDirection(layout.Left, area)
+	if err != nil {
+		t.Fatalf("FocusPaneDirection(Left) at edge: %v", err)
+	}
+	if moved {
+		t.Error("FocusPaneDirection(Left) at the left edge should not move")
+	}
+	if f, _ := s.FocusedPane(); f != left {
+		t.Errorf("focus drifted to %d after edge no-op, want %d", f, left)
+	}
+
+	// Move focus right → back to the right pane. Direction stays within the tab.
+	moved, err = s.FocusPaneDirection(layout.Right, area)
+	if err != nil {
+		t.Fatalf("FocusPaneDirection(Right): %v", err)
+	}
+	if !moved {
+		t.Fatal("FocusPaneDirection(Right) reported no move")
+	}
+	if f, _ := s.FocusedPane(); f != right {
+		t.Fatalf("after focus-right focused=%d, want right %d", f, right)
+	}
+}
+
 func TestSplitUnknownPane(t *testing.T) {
 	s := newTestSession(t)
 	bogus := layout.PaneID(9999)

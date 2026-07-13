@@ -104,6 +104,35 @@ func (s *Session) FocusPane(id layout.PaneID) error {
 	return nil
 }
 
+// FocusPaneDirection moves focus to the nearest pane in the given cardinal
+// direction within the active tab, resolving neighbours from the viewport
+// geometry (area). It reports whether focus actually moved: false with no error
+// means no pane lies that way (a no-op). Like FocusPane it stays within the
+// current viewport, so it never changes the active workspace/tab.
+func (s *Session) FocusPaneDirection(nav layout.NavDirection, area layout.Rect) (bool, error) {
+	tab := s.ActiveWorkspace().ActiveTab()
+	if tab == nil {
+		return false, errors.New("no active tab")
+	}
+	panes := tab.Layout.Panes(area)
+	var focused *layout.PaneInfo
+	for i := range panes {
+		if panes[i].IsFocused {
+			focused = &panes[i]
+			break
+		}
+	}
+	if focused == nil {
+		return false, errors.New("no focused pane")
+	}
+	target, ok := layout.FindInDirection(focused, nav, panes)
+	if !ok {
+		return false, nil // no neighbour in that direction
+	}
+	tab.Layout.FocusPane(target)
+	return true, nil
+}
+
 // SplitPane splits target (the focused pane if nil) in dir, focusing the new
 // pane, and returns its id.
 func (s *Session) SplitPane(target *layout.PaneID, dir layout.Direction) (layout.PaneID, error) {

@@ -39,6 +39,27 @@ func (o *orch) handleCmd(c *client, m *browserproto.Cmd) {
 		o.broadcast(o.viewportLayout()) // focus flag moved; pane set unchanged
 		reply(true, "")
 
+	case browserproto.CmdPaneFocusDirection:
+		var p browserproto.DirParams
+		if err := unmarshalParams(m.Params, &p); err != nil {
+			reply(false, "bad params: "+err.Error())
+			return
+		}
+		nav, ok := browserproto.NavDirection(p.Dir)
+		if !ok {
+			reply(false, fmt.Sprintf("bad direction %q", p.Dir))
+			return
+		}
+		moved, err := o.session.FocusPaneDirection(nav, o.area)
+		if err != nil {
+			reply(false, err.Error())
+			return
+		}
+		if moved {
+			o.broadcast(o.viewportLayout()) // focus flag moved; pane set unchanged
+		}
+		reply(true, "")
+
 	case browserproto.CmdPaneSplit:
 		var sp browserproto.SplitParams
 		if err := unmarshalParams(m.Params, &sp); err != nil {
