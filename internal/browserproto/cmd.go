@@ -17,6 +17,7 @@ const (
 	CmdPaneResizeBorder   = "pane.resize_border"
 	CmdScroll             = "scroll"
 	CmdRead               = "read"
+	CmdCapture            = "capture"
 	CmdTabCreate          = "tab.create"
 	CmdTabClose           = "tab.close"
 	CmdTabFocus           = "tab.focus"
@@ -129,6 +130,24 @@ type ReadParams struct {
 
 // ReadResult is CmdResult.Data for a successful read.
 type ReadResult struct {
+	Text string `json:"text"`
+}
+
+// CaptureParams: capture — extract a pane's buffer text (β RequestText). Scope
+// 0 = visible (the on-screen viewport), 1 = recent (the last Lines rows of
+// scrollback+active, 0 = the whole buffer). Ansi keeps VT styling; Unwrap rejoins
+// soft-wrapped lines. Unlike read, this needs no coordinates — it captures whole
+// rows, e.g. for "copy scrollback" or feeding an agent the terminal contents.
+type CaptureParams struct {
+	Pane   uint32 `json:"pane"`
+	Scope  uint8  `json:"scope,omitempty"`
+	Lines  uint32 `json:"lines,omitempty"`
+	Ansi   bool   `json:"ansi,omitempty"`
+	Unwrap bool   `json:"unwrap,omitempty"`
+}
+
+// CaptureResult is CmdResult.Data for a successful capture.
+type CaptureResult struct {
 	Text string `json:"text"`
 }
 

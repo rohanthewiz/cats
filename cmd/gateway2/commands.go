@@ -208,7 +208,26 @@ func (o *orch) handleCmd(c *client, m *browserproto.Cmd) {
 			reply(false, "termhost daemon not connected")
 			return
 		}
-		o.startRead(c, m.ID, p) // async: resolveRead sends the cmd_result when the daemon replies
+		o.startRead(c, m.ID, p) // async: resolvePending sends the cmd_result when the daemon replies
+
+	case browserproto.CmdCapture:
+		var p browserproto.CaptureParams
+		if err := unmarshalParams(m.Params, &p); err != nil {
+			reply(false, "bad params: "+err.Error())
+			return
+		}
+		if m.ID == "" {
+			return // capture yields only a result; with no id there's nowhere to send it
+		}
+		if o.panes[p.Pane] == nil {
+			reply(false, fmt.Sprintf("unknown pane %d", p.Pane))
+			return
+		}
+		if !o.daemon.connected() {
+			reply(false, "termhost daemon not connected")
+			return
+		}
+		o.startCapture(c, m.ID, p) // async: resolvePending sends the cmd_result when the daemon replies
 
 	case browserproto.CmdTabCreate:
 		if _, err := o.session.CreateTab(); err != nil {
