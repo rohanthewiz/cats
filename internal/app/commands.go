@@ -1,6 +1,7 @@
 package app
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -74,6 +75,19 @@ type ParamDecoder interface {
 
 // ErrNoParams signals that the caller supplied no params for a command.
 var ErrNoParams = errors.New("missing params")
+
+// JSONParamDecoder is the ParamDecoder for any JSON-params protocol — the
+// browser cmd envelope and the control-API request both carry their params as a
+// json.RawMessage. Empty params report ErrNoParams so the dispatcher can treat
+// them as the zero value for optional commands, or an error for required ones.
+type JSONParamDecoder struct{ Raw json.RawMessage }
+
+func (d JSONParamDecoder) Decode(v any) error {
+	if len(d.Raw) == 0 {
+		return ErrNoParams
+	}
+	return json.Unmarshal(d.Raw, v)
+}
 
 // Dispatcher runs the §7 command table against a Session and a Backend. It
 // borrows the same *Session the backend holds (single-goroutine, no locking).

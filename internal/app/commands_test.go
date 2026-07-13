@@ -3,6 +3,7 @@ package app
 import (
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/rohanthewiz/herdr-web/internal/layout"
@@ -332,6 +333,23 @@ func TestDispatchReloadConfig(t *testing.T) {
 
 	if got := *h.log; len(got) != 2 || got[0] != "reload" || got[1] != "ok" {
 		t.Fatalf("reload_config effects = %v, want [reload ok]", got)
+	}
+}
+
+// Every name CommandNames() advertises must actually be routed by Dispatch —
+// none may fall through to the unknown-command default. This guards the
+// enumeration (which CLI/control-API clients trust) against drifting from the
+// switch. A command may still fail for a domain/params reason on empty input;
+// we only reject the "not supported yet" fall-through.
+func TestCommandNamesAllRouted(t *testing.T) {
+	const unknown = "not supported yet"
+	for _, name := range CommandNames() {
+		h := newCmdHarness(t) // fresh session per command; order-independent
+		r := h.resp()
+		h.d.Dispatch(name, noParams(), r)
+		if r.failCall && strings.Contains(r.errMsg, unknown) {
+			t.Errorf("command %q is enumerated but not routed by Dispatch (%q)", name, r.errMsg)
+		}
 	}
 }
 

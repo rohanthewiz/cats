@@ -38,6 +38,21 @@ const (
 	CmdServerStop         = "server.stop"
 )
 
+// CommandNames returns every §7 command name Dispatcher.Dispatch accepts, in a
+// stable order. Front-ends enumerate/validate the vocabulary against it — a CLI's
+// help text, a control-API client — without re-listing the commands. Keep it in
+// sync with the Dispatch switch; TestCommandNamesAllRouted guards against drift.
+func CommandNames() []string {
+	return []string{
+		CmdPaneSplit, CmdPaneClose, CmdPaneFocus, CmdPaneFocusDirection,
+		CmdPaneCycle, CmdPaneLast, CmdPaneSwap, CmdPaneZoom, CmdPaneRename,
+		CmdPaneResizeBorder, CmdScroll, CmdRead, CmdCapture,
+		CmdTabCreate, CmdTabClose, CmdTabFocus, CmdTabRename,
+		CmdWorkspaceCreate, CmdWorkspaceClose, CmdWorkspaceFocus, CmdWorkspaceRename,
+		CmdAgentFocus, CmdServerReloadConfig, CmdServerStop,
+	}
+}
+
 // Split direction wire values (pane.split).
 const (
 	SplitH = "h" // side-by-side (layout.Horizontal)
