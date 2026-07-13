@@ -109,6 +109,24 @@ func (s *Session) FocusPane(id layout.PaneID) error {
 	return nil
 }
 
+// RevealPane brings a pane into the active viewport and focuses it: it makes the
+// pane's owning workspace active, switches that workspace to the pane's tab, and
+// focuses the pane within the tab. Unlike FocusPane (click-to-focus, always
+// already within the current viewport), RevealPane may cross workspace AND tab
+// boundaries — the agents sidebar is global (§8), so agent.focus can target a
+// pane the browser cannot currently see.
+func (s *Session) RevealPane(id layout.PaneID) error {
+	idx, ws := s.workspaceIndexOf(id)
+	if ws == nil {
+		return fmt.Errorf("unknown pane %d", id)
+	}
+	tabIdx, _ := ws.FindTabIndexForPane(id)
+	ws.SwitchTab(tabIdx)
+	ws.Tabs[tabIdx].Layout.FocusPane(id)
+	s.active = idx
+	return nil
+}
+
 // FocusPaneDirection moves focus to the nearest pane in the given cardinal
 // direction within the active tab, resolving neighbours from the viewport
 // geometry (area). It reports whether focus actually moved: false with no error

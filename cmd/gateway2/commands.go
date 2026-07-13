@@ -304,6 +304,21 @@ func (o *orch) handleCmd(c *client, m *browserproto.Cmd) {
 		o.broadcast(o.viewportLayout())
 		reply(true, "")
 
+	case browserproto.CmdAgentFocus:
+		var p browserproto.PaneParams
+		if err := unmarshalParams(m.Params, &p); err != nil {
+			reply(false, "bad params: "+err.Error())
+			return
+		}
+		// Unlike pane.focus, the agents sidebar is global (§8): the target pane
+		// may live in another workspace/tab, so reveal it into the viewport.
+		if err := o.session.RevealPane(layout.PaneID(p.Pane)); err != nil {
+			reply(false, err.Error())
+			return
+		}
+		o.applyModel() // viewport may have changed (different workspace/tab)
+		reply(true, "")
+
 	default:
 		reply(false, fmt.Sprintf("command %q not supported yet (WS2 in progress)", m.Name))
 	}

@@ -27,6 +27,7 @@
 //	tabnew                  cmd tab.create        tabfocus:NUM  cmd tab.focus
 //	tabclose[:NUM]          cmd tab.close         wsnew         cmd workspace.create
 //	wsfocus:ID              cmd workspace.focus (ID e.g. w1)
+//	agentfocus:PANE         cmd agent.focus — reveal+focus a pane (may cross ws/tab)
 //	panes:N|tabs:N|workspaces:N  poll until the layout reports N of that kind
 //	expect:PANE:TEXT        poll until TEXT appears (PANE may be "f" = focused pane)
 //	absent:PANE:TEXT        assert TEXT is NOT currently in the pane grid
@@ -812,6 +813,20 @@ func (p *probe) exec(op string, timeout time.Duration) error {
 		fmt.Printf("→ cmd workspace.focus %s\n", arg)
 		return p.send(cmd)
 
+	case "agentfocus":
+		// agentfocus:PANE — reveal+focus a pane by id, which (unlike focus) may
+		// live in another workspace/tab. Awaits the cmd_result ack.
+		pane, err := strconv.Atoi(arg)
+		if err != nil {
+			return fmt.Errorf("agentfocus needs PANE, got %q", arg)
+		}
+		fmt.Printf("→ cmd agent.focus pane=%d\n", pane)
+		if err := p.awaitCmd(browserproto.CmdAgentFocus, browserproto.PaneParams{Pane: uint32(pane)}, timeout); err != nil {
+			return err
+		}
+		fmt.Printf("✓ agent.focus pane=%d acked\n", pane)
+		return nil
+
 	case "expect":
 		pane, want, err := p.paneText(arg)
 		if err != nil {
@@ -938,6 +953,40 @@ func (p *probe) parsePoint(pane uint32, s string) ([2]uint32, error) {
 		return [2]uint32{}, fmt.Errorf("bad row %q: %w", rowSpec, err)
 	}
 	return [2]uint32{uint32(row), uint32(col)}, nil
+}
+
+// awaitCmd sends a command under a fresh id and blocks until its cmd_result
+// arrives, failing on a not-ok result, a dead connection, or timeout. Used by
+// ops that assert a command was accepted (agent.focus, server.*).
+func (p *probe) awaitCmd(name string, params any, timeout time.Duration) error {
+	id := p.nextID()
+	cmd, err := browserproto.NewCmd(id, name, params)
+	if err != nil {
+		return err
+	}
+	if err := p.send(cmd); err != nil {
+		return err
+	}
+	deadline := time.Now().Add(timeout)
+	for {
+		p.mu.Lock()
+		res, ok := p.reads[id]
+		dead := p.dead
+		p.mu.Unlock()
+		if ok {
+			if !res.Ok {
+				return fmt.Errorf("%s failed: %s", name, res.Error)
+			}
+			return nil
+		}
+		if dead != nil {
+			return fmt.Errorf("connection died awaiting %s: %w", name, dead)
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("timeout awaiting %s result id=%s", name, id)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 }
 
 // nextID mints a unique command id so read results don't collide across ops.

@@ -463,6 +463,54 @@ func TestClosingWorkspaceLastPaneDropsWorkspace(t *testing.T) {
 	}
 }
 
+func TestRevealPaneCrossWorkspaceAndTab(t *testing.T) {
+	s := newTestSession(t)
+	ws1 := s.ActiveWorkspace().ID
+
+	// ws1 gets a second tab holding the pane we will later reveal, then we focus
+	// tab 1 again so the target's tab is inactive.
+	if _, err := s.CreateTab(); err != nil { // tab 2 now active in ws1
+		t.Fatalf("CreateTab: %v", err)
+	}
+	target := s.VisiblePaneIDs()[0]
+	if err := s.FocusTab(1); err != nil { // back to tab 1 → target's tab is inactive
+		t.Fatalf("FocusTab(1): %v", err)
+	}
+
+	// A second workspace becomes active, so the target is now off-viewport in
+	// both the workspace and the tab dimension — pane.focus wouldn't surface it,
+	// but agent.focus (RevealPane) must.
+	if _, err := s.CreateWorkspace(); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	if got := s.VisiblePaneIDs(); len(got) == 1 && got[0] == target {
+		t.Fatal("precondition: target should be off-viewport before reveal")
+	}
+
+	if err := s.RevealPane(target); err != nil {
+		t.Fatalf("RevealPane: %v", err)
+	}
+	if s.ActiveWorkspace().ID != ws1 {
+		t.Errorf("active workspace = %s, want %s", s.ActiveWorkspace().ID, ws1)
+	}
+	if idx := s.ActiveWorkspace().ActiveTabIndex(); idx != 1 {
+		t.Errorf("active tab index = %d, want 1 (target's tab)", idx)
+	}
+	if fp, ok := s.FocusedPane(); !ok || fp != target {
+		t.Errorf("focused pane = %v (ok=%v), want %d", fp, ok, target)
+	}
+	if got := s.VisiblePaneIDs(); len(got) != 1 || got[0] != target {
+		t.Errorf("visible = %v, want [%d]", got, target)
+	}
+}
+
+func TestRevealUnknownPane(t *testing.T) {
+	s := newTestSession(t)
+	if err := s.RevealPane(9999); err == nil {
+		t.Error("revealing an unknown pane should error")
+	}
+}
+
 func TestPublicPaneIDAcrossWorkspaces(t *testing.T) {
 	s := newTestSession(t)
 	p1, _ := s.FocusedPane()
