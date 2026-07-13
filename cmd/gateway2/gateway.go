@@ -41,6 +41,11 @@ type pane struct {
 	// pane is (or will be, on reconcile) sized to.
 	cols, rows uint16
 	exited     *int
+	// created reports whether the daemon has spawned this pane's PTY. A
+	// brand-new split pane starts false so applyLayoutLocked issues a
+	// CreatePane instead of a Resize; reconcile resets it from the daemon's
+	// surviving-pane set on every (re)connect.
+	created bool
 }
 
 // gateway owns the hard-coded session model (one workspace, one tab, two
@@ -132,15 +137,33 @@ func (g *gateway) applyLayoutLocked() browserproto.Layout {
 		if cols == 0 || rows == 0 {
 			continue
 		}
-		if cols != p.cols || rows != p.rows {
+		changed := cols != p.cols || rows != p.rows
+		if changed {
 			p.cols, p.rows = cols, rows
 			p.enc.SetGrid(cols, rows)
+		}
+		switch {
+		case !p.created:
+			// The daemon has never seen this pane (fresh gateway or a new
+			// split): spawn it at the desired grid rather than resize.
+			g.createPaneLocked(p)
+		case changed:
 			r := orchestration.NewResize(p.id, cols, rows)
 			r.CellWidthPx, r.CellHeightPx = g.cellW, g.cellH
 			g.daemon.send(r)
 		}
 	}
 	return msg
+}
+
+// createPaneLocked asks the daemon to spawn a pane's PTY at its desired grid
+// and marks it created. Callers hold g.mu.
+func (g *gateway) createPaneLocked(p *pane) {
+	cp := orchestration.NewCreatePane(p.id, p.cols, p.rows)
+	cp.Cwd = g.cwd
+	cp.CellWidthPx, cp.CellHeightPx = g.cellW, g.cellH
+	g.daemon.send(cp)
+	p.created = true
 }
 
 // focusedPaneLocked resolves the model's focused pane. Callers hold g.mu.
@@ -459,6 +482,12 @@ func (g *gateway) handleCmdLocked(c *client, m *browserproto.Cmd) {
 		g.broadcastLocked(g.layoutMsgLocked())
 		reply(true, "")
 
+	case browserproto.CmdPaneSplit:
+		g.handleSplitLocked(m, reply)
+
+	case browserproto.CmdPaneClose:
+		g.handleCloseLocked(m, reply)
+
 	case browserproto.CmdScroll:
 		var p browserproto.ScrollParams
 		if err := unmarshalParams(m.Params, &p); err != nil {
@@ -475,4 +504,89 @@ func (g *gateway) handleCmdLocked(c *client, m *browserproto.Cmd) {
 	default:
 		reply(false, fmt.Sprintf("command %q not supported by the gateway2 spike", m.Name))
 	}
+}
+
+// paneTargetLocked resolves an optional pane param to a target: the given pane
+// if present and known, else the focused pane. Shared by split and close.
+// Callers hold g.mu.
+func (g *gateway) paneTargetLocked(p *uint32) (layout.PaneID, bool) {
+	if p != nil {
+		if g.panes[*p] == nil {
+			return 0, false
+		}
+		return layout.PaneID(*p), true
+	}
+	fp := g.focusedPaneLocked()
+	if fp == nil {
+		return 0, false
+	}
+	return layout.PaneID(fp.id), true
+}
+
+// handleSplitLocked splits a pane (WS8), wiring the new pane's model entry and
+// input encoder; applyLayoutLocked then spawns its PTY on the daemon (the pane
+// starts uncreated) and resizes the shrunken sibling(s). Callers hold g.mu.
+func (g *gateway) handleSplitLocked(m *browserproto.Cmd, reply func(bool, string)) {
+	var sp browserproto.SplitParams
+	if err := unmarshalParams(m.Params, &sp); err != nil {
+		reply(false, "bad params: "+err.Error())
+		return
+	}
+	dir, ok := browserproto.SplitDirection(sp.Direction)
+	if !ok {
+		reply(false, fmt.Sprintf("bad split direction %q", sp.Direction))
+		return
+	}
+	target, ok := g.paneTargetLocked(sp.Pane)
+	if !ok {
+		reply(false, "unknown pane")
+		return
+	}
+
+	_, np, err := g.ws.SplitPane(target, dir, true, workspace.SpawnSpec{})
+	if err != nil {
+		reply(false, "split: "+err.Error())
+		return
+	}
+	enc, err := inputenc.New()
+	if err != nil {
+		reply(false, "encoder: "+err.Error())
+		return
+	}
+	pub, _ := g.ws.PublicPaneID(np.PaneID)
+	g.panes[uint32(np.PaneID)] = &pane{id: uint32(np.PaneID), pub: pub, enc: enc}
+	g.broadcastLocked(g.applyLayoutLocked())
+	reply(true, "")
+}
+
+// handleCloseLocked closes a pane (WS8): drops it from the model, tells the
+// daemon to close its PTY, and re-lays-out the survivors. The gateway model
+// keeps at least one pane (never collapses its sole tab). Callers hold g.mu.
+func (g *gateway) handleCloseLocked(m *browserproto.Cmd, reply func(bool, string)) {
+	var cp browserproto.OptPaneParams
+	if err := optUnmarshalParams(m.Params, &cp); err != nil {
+		reply(false, "bad params: "+err.Error())
+		return
+	}
+	target, ok := g.paneTargetLocked(cp.Pane)
+	if !ok {
+		reply(false, "unknown pane")
+		return
+	}
+	if len(g.panes) <= 1 {
+		reply(false, "cannot close the last pane")
+		return
+	}
+	// The guard above means this close never empties the sole tab, so
+	// ClosePane must not report a workspace close; treat one as an error.
+	if g.ws.ClosePane(target) {
+		reply(false, "cannot close the last pane")
+		return
+	}
+	id := uint32(target)
+	delete(g.panes, id)
+	g.daemon.send(orchestration.NewClosePane(id))
+	g.broadcastLocked(g.applyLayoutLocked())
+	g.broadcastLocked(g.agentsMsgLocked())
+	reply(true, "")
 }

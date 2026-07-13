@@ -5,43 +5,113 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
 <title>herdr · gateway2</title>
 <style>
-  :root { --bg:#181818; --fg:#d4d4d4; --accent:#5b9dff; --chrome:#222; }
+  :root {
+    --bg:#181818; --fg:#d4d4d4; --accent:#5b9dff; --panel:#141414; --panel2:#1d1d1d;
+    --line:#2a2a2a; --muted:#8a8a8a; --chrome:#202430; --chrome-focus:#26314a;
+    --ok:#6ac47a; --warn:#e2b64e; --err:#ff6b6b;
+  }
   html,body { margin:0; height:100%; background:var(--bg); color:var(--fg);
     font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; overflow:hidden; }
-  #bar { position:fixed; left:0; top:0; right:0; height:24px; line-height:24px; font-size:12px;
-    background:#101010; color:#aaa; padding:0 8px; white-space:nowrap; overflow:hidden; z-index:4; }
-  #bar b { color:#ddd; }
-  #panes { position:fixed; left:0; top:24px; right:0; bottom:0; }
+  #app { position:fixed; inset:0; display:grid; grid-template-columns:220px 1fr; }
+
+  /* ---- Sidebar ---- */
+  #sidebar { background:var(--panel); border-right:1px solid var(--line);
+    display:flex; flex-direction:column; overflow-y:auto; min-height:0; }
+  #brand { font-size:13px; font-weight:600; letter-spacing:.5px; color:#e8e8e8;
+    padding:12px 14px; border-bottom:1px solid var(--line); }
+  #brand small { color:var(--muted); font-weight:400; margin-left:6px; }
+  #sidebar section { padding:10px 6px 4px; }
+  #sidebar h2 { font-size:10px; text-transform:uppercase; letter-spacing:.8px; color:var(--muted);
+    margin:0 0 6px; padding:0 8px; }
+  #sidebar ul { list-style:none; margin:0; padding:0; }
+  #sidebar li { font-size:12px; padding:4px 8px; border-radius:4px; white-space:nowrap;
+    overflow:hidden; text-overflow:ellipsis; cursor:default; display:flex; align-items:baseline; gap:6px; }
+  #ws-list li.active { color:#e8e8e8; }
+  #ws-list li .sum { color:var(--muted); font-size:10px; margin-left:auto; }
+  #pane-list li, #agent-list li { cursor:pointer; }
+  #pane-list li:hover, #agent-list li:hover { background:var(--panel2); }
+  #pane-list li.focused { background:var(--chrome-focus); color:#e8e8e8; }
+  #pane-list .dot { color:var(--accent); width:8px; display:inline-block; }
+  #pane-list .pub { color:var(--accent); }
+  #pane-list .ttl { color:var(--muted); overflow:hidden; text-overflow:ellipsis; }
+  #pane-list .ag, #agent-list .aname { margin-left:auto; }
+  .ag, .adot, .aname { font-size:11px; }
+  .st-working { color:var(--warn); } .st-blocked { color:var(--err); }
+  .st-idle { color:var(--ok); } .st-unknown { color:var(--muted); }
+  #agent-list li { gap:6px; }
+  #agent-list .aname { color:#e8e8e8; margin-left:0; }
+  #agent-list .ameta { color:var(--muted); font-size:10px; margin-left:auto; }
+  #agent-list li.empty { color:var(--muted); font-style:italic; cursor:default; }
+  #agent-list li.empty:hover { background:none; }
+
+  /* ---- Main area ---- */
+  #main { display:grid; grid-template-rows:30px 1fr 24px; min-width:0; min-height:0; }
+  #tabbar { display:flex; align-items:stretch; gap:2px; padding:0 6px; background:var(--panel);
+    border-bottom:1px solid var(--line); overflow-x:auto; }
+  #tabbar .tab { font-size:12px; color:var(--muted); padding:0 12px; display:flex; align-items:center;
+    border-bottom:2px solid transparent; white-space:nowrap; }
+  #tabbar .tab.active { color:#e8e8e8; border-bottom-color:var(--accent); }
+
+  #panes { position:relative; overflow:hidden; }
   .pane { position:absolute; box-sizing:border-box; }
-  .pane .chrome { position:absolute; left:0; top:0; right:0; overflow:hidden; white-space:nowrap;
-    font-size:11px; color:#8f8f8f; background:var(--chrome); padding:0 6px; box-sizing:border-box; }
-  .pane.focused .chrome { color:#e8e8e8; background:#26314a; }
-  .pane .chrome .pub { color:var(--accent); }
-  .pane .chrome .agent { color:#e2b64e; }
-  .pane .chrome .exited { color:#ff6b6b; }
+  .pane .chrome { position:absolute; left:0; top:0; right:0; overflow:hidden; display:flex;
+    align-items:center; gap:0; font-size:11px; color:#9a9a9a; background:var(--chrome);
+    padding:0 4px 0 8px; box-sizing:border-box; }
+  .pane.focused .chrome { color:#e8e8e8; background:var(--chrome-focus); }
+  .pane .chrome .info { flex:1; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+  .pane .chrome .info .pub { color:var(--accent); }
+  .pane .chrome .info .agent { color:var(--warn); }
+  .pane .chrome .info .exited { color:var(--err); }
+  .pane .chrome .ctl { display:flex; gap:1px; flex:none; }
+  .pane .chrome .ctl button { background:none; border:none; color:#9a9a9a; cursor:pointer;
+    font-size:12px; line-height:1; padding:2px 4px; border-radius:3px; font-family:inherit; }
+  .pane .chrome .ctl button:hover { background:rgba(255,255,255,.12); color:#fff; }
+  .pane .chrome .ctl button.close:hover { background:var(--err); color:#fff; }
   .pane canvas { position:absolute; display:block; }
   .pane.focused canvas { outline:1px solid var(--accent); outline-offset:-1px; }
-  #status { position:fixed; left:8px; bottom:6px; font-size:11px; color:#888;
-    background:rgba(0,0,0,.45); padding:2px 6px; border-radius:4px; pointer-events:none; z-index:5; }
-  #status.err { color:#ff6b6b; }
-  #toasts { position:fixed; right:10px; top:34px; display:flex; flex-direction:column; gap:6px; z-index:6; }
-  .toast { background:#2a2a2a; color:#eee; border:1px solid #3a3a3a; border-left:3px solid #6aa0ff;
+
+  /* ---- Status bar ---- */
+  #statusbar { display:flex; align-items:center; gap:14px; padding:0 12px; font-size:11px;
+    color:var(--muted); background:var(--panel); border-top:1px solid var(--line); }
+  #statusbar .err { color:var(--err); }
+  #statusbar #conn.ok { color:var(--ok); }
+
+  /* ---- Toasts ---- */
+  #toasts { position:fixed; right:10px; top:38px; display:flex; flex-direction:column; gap:6px; z-index:6; }
+  .toast { background:#2a2a2a; color:#eee; border:1px solid #3a3a3a; border-left:3px solid var(--accent);
     padding:6px 10px; border-radius:5px; font-size:12px; max-width:340px; box-shadow:0 2px 8px rgba(0,0,0,.4);
     opacity:0; transform:translateX(8px); transition:opacity .2s, transform .2s; }
   .toast.show { opacity:1; transform:none; }
 </style>
 </head>
 <body>
-<div id="bar">connecting…</div>
-<div id="panes"></div>
-<div id="status">connecting…</div>
+<div id="app">
+  <aside id="sidebar">
+    <div id="brand">herdr <small>gateway2</small></div>
+    <section><h2>Workspaces</h2><ul id="ws-list"></ul></section>
+    <section><h2>Panes</h2><ul id="pane-list"></ul></section>
+    <section><h2>Agents</h2><ul id="agent-list"><li class="empty">none</li></ul></section>
+  </aside>
+  <div id="main">
+    <div id="tabbar"></div>
+    <div id="panes"></div>
+    <div id="statusbar">
+      <span id="conn">connecting…</span>
+      <span id="grid"></span>
+    </div>
+  </div>
+</div>
 <div id="toasts"></div>
 <script>
 (() => {
-  const PV = 1, FONT_PX = 15, LINE = 1.25, BAR_H = 24;
+  const PV = 1, FONT_PX = 15, LINE = 1.25;
   const panesEl = document.getElementById("panes");
-  const barEl = document.getElementById("bar");
-  const statusEl = document.getElementById("status");
+  const wsListEl = document.getElementById("ws-list");
+  const paneListEl = document.getElementById("pane-list");
+  const agentListEl = document.getElementById("agent-list");
+  const tabbarEl = document.getElementById("tabbar");
+  const connEl = document.getElementById("conn");
+  const gridEl = document.getElementById("grid");
   const toastsEl = document.getElementById("toasts");
   const dpr = window.devicePixelRatio || 1;
   const measureCtx = document.createElement("canvas").getContext("2d");
@@ -62,9 +132,13 @@
     cellH = Math.ceil(FONT_PX * LINE);
   }
 
+  // The grid is the size of the #panes container (chrome is real HTML around
+  // it), so the server's layout rects map straight onto it.
   function gridSize() {
-    cols = Math.max(20, Math.floor(window.innerWidth / cellW));
-    rows = Math.max(6, Math.floor((window.innerHeight - BAR_H) / cellH));
+    const w = panesEl.clientWidth || window.innerWidth;
+    const h = panesEl.clientHeight || window.innerHeight;
+    cols = Math.max(20, Math.floor(w / cellW));
+    rows = Math.max(6, Math.floor(h / cellH));
   }
 
   // ---- Packed u32 colors (D2): 0x02_RR_GG_BB → CSS ----
@@ -80,22 +154,40 @@
     el.className = "pane";
     const chrome = document.createElement("div");
     chrome.className = "chrome";
+    const info = document.createElement("div");
+    info.className = "info";
+    const ctl = document.createElement("div");
+    ctl.className = "ctl";
+    ctl.appendChild(mkBtn("⊟", "split left/right", "", () => sendCmd("pane.split", { pane: id, direction: "h" })));
+    ctl.appendChild(mkBtn("⊞", "split top/bottom", "", () => sendCmd("pane.split", { pane: id, direction: "v" })));
+    ctl.appendChild(mkBtn("✕", "close pane", "close", () => sendCmd("pane.close", { pane: id })));
+    chrome.appendChild(info); chrome.appendChild(ctl);
     const canvas = document.createElement("canvas");
     el.appendChild(chrome); el.appendChild(canvas);
     panesEl.appendChild(el);
-    const p = { id, el, chrome, canvas, ctx: canvas.getContext("2d", { alpha: false }),
+    const p = { id, el, chrome, chromeInfo: info, canvas, ctx: canvas.getContext("2d", { alpha: false }),
       pub: "", info: null, W: 0, H: 0, cells: [], links: [], cur: null,
       defFg: THEME_FG, defBg: THEME_BG, modes: { mouse: false, alt: false },
       title: "", cwd: "", agent: "", agentState: "", exited: null,
       pressed: -1, lastCell: "", dirty: false };
+    // Clicking the header (not its buttons) focuses the pane.
+    chrome.addEventListener("mousedown", () => { if (p.info && !p.info.focused) sendCmd("pane.focus", { pane: id }); });
     attachMouse(p);
     panes.set(id, p);
     return p;
   }
 
+  function mkBtn(label, title, cls, fn) {
+    const b = document.createElement("button");
+    b.textContent = label; b.title = title; if (cls) b.className = cls;
+    b.addEventListener("mousedown", (e) => e.stopPropagation());
+    b.addEventListener("click", (e) => { e.stopPropagation(); e.preventDefault(); fn(); });
+    return b;
+  }
+
   function pane(id) { return panes.get(id) || newPane(id); }
 
-  // ---- Layout (D3): position pane DOM from computed rects ----
+  // ---- Layout (D3): position pane DOM from computed rects + render chrome ----
   function applyLayout(msg) {
     layoutMsg = msg;
     const seen = new Set();
@@ -110,7 +202,6 @@
       p.el.style.height = (rh * cellH) + "px";
       p.el.classList.toggle("focused", !!pr.focused);
       p.chrome.style.height = ((iy - ry) * cellH) + "px";
-      p.chrome.style.lineHeight = ((iy - ry) * cellH) + "px";
       p.canvas.style.left = ((ix - rx) * cellW) + "px";
       p.canvas.style.top = ((iy - ry) * cellH) + "px";
       p.canvas.style.width = (iw * cellW) + "px";
@@ -124,22 +215,19 @@
     for (const [id, p] of panes) {
       if (!seen.has(id)) { p.el.remove(); panes.delete(id); }
     }
-    const wsName = msg.workspaces.map(w => (w.active ? "●" : "○") + " " + w.name).join("  ");
-    const tabs = msg.tabs.map(t => (t.active ? "[" + t.name + "]" : t.name)).join(" ");
-    barEl.innerHTML = "";
-    const b = document.createElement("b");
-    b.textContent = "herdr gateway2 · " + wsName + " · tabs: " + tabs;
-    barEl.appendChild(b);
+    renderWorkspaces(msg);
+    renderPaneList(msg);
+    renderTabbar(msg);
   }
 
-  // ---- Chrome as data (4.2): plain text, no styled UI ----
+  // ---- Chrome: per-pane header (styled HTML, WS8) ----
   function renderChrome(p) {
-    p.chrome.innerHTML = "";
+    p.chromeInfo.innerHTML = "";
     const add = (cls, text) => {
       const s = document.createElement("span");
       if (cls) s.className = cls;
       s.textContent = text;
-      p.chrome.appendChild(s);
+      p.chromeInfo.appendChild(s);
     };
     add("pub", p.pub || ("#" + p.id));
     if (p.title) add("", "  " + p.title);
@@ -147,6 +235,79 @@
     if (p.agent) add("agent", "  " + p.agent + ":" + p.agentState);
     if (p.exited !== null) add("exited", "  exited (" + p.exited + ")");
   }
+
+  // ---- Sidebar (WS8) ----
+  function stClass(state) {
+    return state === "working" ? "st-working" : state === "blocked" ? "st-blocked"
+      : state === "idle" ? "st-idle" : "st-unknown";
+  }
+
+  function renderWorkspaces(msg) {
+    wsListEl.innerHTML = "";
+    for (const w of msg.workspaces) {
+      const li = document.createElement("li");
+      li.className = "ws" + (w.active ? " active" : "");
+      const name = document.createElement("span");
+      name.textContent = (w.active ? "● " : "○ ") + w.name;
+      li.appendChild(name);
+      if (w.agent_summary) {
+        const s = document.createElement("span"); s.className = "sum"; s.textContent = w.agent_summary;
+        li.appendChild(s);
+      }
+      wsListEl.appendChild(li);
+    }
+  }
+
+  function renderPaneList(msg) {
+    paneListEl.innerHTML = "";
+    for (const pr of msg.panes) {
+      const p = panes.get(pr.pane);
+      const li = document.createElement("li");
+      li.className = "pn" + (pr.focused ? " focused" : "");
+      const dot = document.createElement("span"); dot.className = "dot"; dot.textContent = pr.focused ? "▸" : "";
+      const pub = document.createElement("span"); pub.className = "pub"; pub.textContent = pr.pub || ("#" + pr.pane);
+      li.appendChild(dot); li.appendChild(pub);
+      if (p && p.title) { const t = document.createElement("span"); t.className = "ttl"; t.textContent = p.title; li.appendChild(t); }
+      if (p && p.agent) {
+        const a = document.createElement("span"); a.className = "ag " + stClass(p.agentState); a.textContent = p.agent;
+        li.appendChild(a);
+      }
+      li.addEventListener("click", () => { if (!pr.focused) sendCmd("pane.focus", { pane: pr.pane }); });
+      paneListEl.appendChild(li);
+    }
+  }
+
+  function renderTabbar(msg) {
+    tabbarEl.innerHTML = "";
+    for (const t of msg.tabs) {
+      const el = document.createElement("div");
+      el.className = "tab" + (t.active ? " active" : "");
+      el.textContent = t.name + (t.zoomed ? " ⤢" : "");
+      tabbarEl.appendChild(el);
+    }
+  }
+
+  // ---- Agents rollup (WS8): the `agents` message, previously dropped ----
+  function renderAgents(items) {
+    agentListEl.innerHTML = "";
+    if (!items || !items.length) {
+      const li = document.createElement("li"); li.className = "empty"; li.textContent = "none";
+      agentListEl.appendChild(li); return;
+    }
+    for (const it of items) {
+      const li = document.createElement("li"); li.className = "agent";
+      const dot = document.createElement("span"); dot.className = "adot " + stClass(it.state); dot.textContent = "●";
+      const name = document.createElement("span"); name.className = "aname"; name.textContent = it.agent;
+      const meta = document.createElement("span"); meta.className = "ameta";
+      meta.textContent = (it.pub || ("#" + it.pane)) + " · " + (it.seen ? it.state : "done");
+      li.appendChild(dot); li.appendChild(name); li.appendChild(meta);
+      li.addEventListener("click", () => sendCmd("pane.focus", { pane: it.pane }));
+      agentListEl.appendChild(li);
+    }
+  }
+
+  // Refresh the sidebar pane list when a pane's title/agent changed out of band.
+  function refreshPaneList() { if (layoutMsg) renderPaneList(layoutMsg); }
 
   // ---- Rendering ----
   function scheduleDraw(p) {
@@ -194,7 +355,7 @@
     switch (msg.t) {
       case "welcome":
         if (msg.error) setStatus("rejected: " + msg.error, true);
-        else setStatus(`connected · ${cols}×${rows}`);
+        else setStatus("connected");
         break;
       case "layout": applyLayout(msg); break;
       case "pane_frame": {
@@ -209,18 +370,18 @@
         if (msg.cur) p.cur = msg.cur;
         scheduleDraw(p); break;
       }
-      case "pane_title": { const p = pane(msg.pane); p.title = msg.title; renderChrome(p); break; }
+      case "pane_title": { const p = pane(msg.pane); p.title = msg.title; renderChrome(p); refreshPaneList(); break; }
       case "pane_cwd": { const p = pane(msg.pane); p.cwd = msg.cwd; renderChrome(p); break; }
       case "pane_agent": {
         const p = pane(msg.pane); p.agent = msg.agent; p.agentState = msg.state;
-        renderChrome(p); break;
+        renderChrome(p); refreshPaneList(); break;
       }
       case "pane_modes": {
         const p = pane(msg.pane); p.modes = { mouse: !!msg.mouse, alt: !!msg.alt_screen };
         break;
       }
       case "pane_exited": { const p = pane(msg.pane); p.exited = msg.code; renderChrome(p); break; }
-      case "agents": break; // sidebar rollup: per-pane chrome already shows it in the spike
+      case "agents": renderAgents(msg.items); break;
       case "clipboard":
         try { navigator.clipboard.writeText(b64decode(msg.data)); } catch (e) {}
         break;
@@ -325,7 +486,11 @@
   }
 
   // ---- Status & toasts ----
-  function setStatus(t, err) { statusEl.textContent = t; statusEl.className = err ? "err" : ""; }
+  function setStatus(t, err) {
+    connEl.textContent = t;
+    connEl.className = err ? "err" : (t.startsWith("connected") ? "ok" : "");
+    gridEl.textContent = cols && rows ? `${cols}×${rows}` : "";
+  }
   function toast(text) {
     const el = document.createElement("div");
     el.className = "toast"; el.textContent = text;
@@ -353,7 +518,7 @@
     resizeTimer = setTimeout(() => {
       gridSize();
       sendMsg({ t: "resize", cols, rows });
-      setStatus(`connected · ${cols}×${rows}`);
+      setStatus("connected");
     }, 120);
   });
 

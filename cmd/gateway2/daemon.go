@@ -125,12 +125,16 @@ func (d *daemon) reconcile(alivePanes []uint32) {
 	}
 	for id, p := range g.panes {
 		if alive[id] {
+			p.created = true
 			r := orchestration.NewResize(id, p.cols, p.rows)
 			r.CellWidthPx, r.CellHeightPx = g.cellW, g.cellH
 			d.send(r)
 			d.send(orchestration.NewRequestResync(id))
 			continue
 		}
+		// The daemon doesn't have this pane (fresh or restarted daemon):
+		// recreate it and mark it created so later resizes go through as resizes.
+		p.created = true
 		cp := orchestration.NewCreatePane(id, p.cols, p.rows)
 		cp.Cwd = g.cwd
 		cp.CellWidthPx, cp.CellHeightPx = g.cellW, g.cellH
@@ -268,6 +272,15 @@ func inputModesFrom(m orchestration.PaneModes) terminal.InputModes {
 func unmarshalParams(raw json.RawMessage, v any) error {
 	if len(raw) == 0 {
 		return errors.New("missing params")
+	}
+	return json.Unmarshal(raw, v)
+}
+
+// optUnmarshalParams is unmarshalParams for commands whose fields are all
+// optional: empty params decode to the zero value rather than an error.
+func optUnmarshalParams(raw json.RawMessage, v any) error {
+	if len(raw) == 0 {
+		return nil
 	}
 	return json.Unmarshal(raw, v)
 }

@@ -13,10 +13,16 @@
 //	click_text:PANE:TEXT    poll until TEXT appears, then click its first cell
 //	wheel:PANE:X:Y:DY       wheel event (negative DY = up)
 //	scrollcmd:PANE:DELTA    cmd scroll (viewport scrollback)
+//	split:PANE:h|v          cmd pane.split (h = left/right, v = top/bottom)
+//	close:PANE              cmd pane.close
+//	panes:N                 poll until the layout reports N panes (fails after --timeout)
 //	expect:PANE:TEXT        poll until TEXT appears in the pane grid (fails after --timeout)
 //	absent:PANE:TEXT        assert TEXT is NOT currently in the pane grid
 //	dump:PANE               print the pane grid
 //	modes:PANE:mouse|nomouse poll until the pane's mouse-capture mode matches
+//
+// Auth: pass --token to send Authorization: Bearer for a WS10-gated gateway;
+// use a wss:// URL for TLS (the probe skips cert verification).
 //
 // Example:
 //
@@ -25,6 +31,7 @@ package main
 
 import (
 	"bufio"
+	"crypto/tls"
 	"encoding/base64"
 	"encoding/binary"
 	"flag"
@@ -48,9 +55,10 @@ func main() {
 	script := flag.String("script", "wait:1000; dump:0", "op script (see doc comment)")
 	timeout := flag.Duration("timeout", 8*time.Second, "expect/modes poll timeout")
 	life := flag.Duration("life", 120*time.Second, "connection lifetime limit")
+	token := flag.String("token", "", "shared access token sent as Authorization: Bearer (WS10 auth)")
 	flag.Parse()
 
-	if err := run(*rawURL, *cols, *rows, *script, *timeout, *life); err != nil {
+	if err := run(*rawURL, *cols, *rows, *script, *timeout, *life, *token); err != nil {
 		fmt.Fprintf(os.Stderr, "wsprobe2: FAIL: %v\n", err)
 		os.Exit(1)
 	}
@@ -84,12 +92,19 @@ type probe struct {
 	dead   error
 }
 
-func run(rawURL string, cols, rows int, script string, timeout, life time.Duration) error {
+func run(rawURL string, cols, rows int, script string, timeout, life time.Duration, token string) error {
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		return err
 	}
-	conn, err := net.DialTimeout("tcp", u.Host, 5*time.Second)
+	var conn net.Conn
+	if u.Scheme == "wss" {
+		// Self-signed dev certs: skip verification (the probe is a test client).
+		conn, err = tls.DialWithDialer(&net.Dialer{Timeout: 5 * time.Second}, "tcp", u.Host,
+			&tls.Config{InsecureSkipVerify: true})
+	} else {
+		conn, err = net.DialTimeout("tcp", u.Host, 5*time.Second)
+	}
 	if err != nil {
 		return err
 	}
@@ -97,7 +112,7 @@ func run(rawURL string, cols, rows int, script string, timeout, life time.Durati
 	_ = conn.SetDeadline(time.Now().Add(life))
 
 	br := bufio.NewReader(conn)
-	if err := handshake(conn, br, u); err != nil {
+	if err := handshake(conn, br, u, token); err != nil {
 		return err
 	}
 
@@ -131,10 +146,14 @@ func run(rawURL string, cols, rows int, script string, timeout, life time.Durati
 	return nil
 }
 
-func handshake(conn net.Conn, br *bufio.Reader, u *url.URL) error {
+func handshake(conn net.Conn, br *bufio.Reader, u *url.URL, token string) error {
 	key := base64.StdEncoding.EncodeToString([]byte("0123456789abcdef"))
+	auth := ""
+	if token != "" {
+		auth = "Authorization: Bearer " + token + "\r\n"
+	}
 	req := fmt.Sprintf("GET %s HTTP/1.1\r\nHost: %s\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"+
-		"Sec-WebSocket-Key: %s\r\nSec-WebSocket-Version: 13\r\n\r\n", u.RequestURI(), u.Host, key)
+		"%sSec-WebSocket-Key: %s\r\nSec-WebSocket-Version: 13\r\n\r\n", u.RequestURI(), u.Host, auth, key)
 	if _, err := conn.Write([]byte(req)); err != nil {
 		return err
 	}
@@ -429,6 +448,59 @@ func (p *probe) exec(op string, timeout time.Duration) error {
 		fmt.Printf("→ cmd scroll pane=%d delta=%d\n", pane, delta)
 		return p.send(cmd)
 
+	case "split":
+		id, dir, ok := strings.Cut(arg, ":")
+		if !ok {
+			return fmt.Errorf("split needs PANE:h|v (PANE empty or 'f' = focused)")
+		}
+		pane, err := optPane(id)
+		if err != nil {
+			return err
+		}
+		cmd, err := browserproto.NewCmd("", browserproto.CmdPaneSplit,
+			browserproto.SplitParams{Pane: pane, Direction: dir})
+		if err != nil {
+			return err
+		}
+		fmt.Printf("→ cmd pane.split pane=%s dir=%s\n", id, dir)
+		return p.send(cmd)
+
+	case "close":
+		pane, err := optPane(arg)
+		if err != nil {
+			return err
+		}
+		cmd, err := browserproto.NewCmd("", browserproto.CmdPaneClose,
+			browserproto.OptPaneParams{Pane: pane})
+		if err != nil {
+			return err
+		}
+		fmt.Printf("→ cmd pane.close pane=%s\n", arg)
+		return p.send(cmd)
+
+	case "panes":
+		want, err := strconv.Atoi(arg)
+		if err != nil {
+			return err
+		}
+		deadline := time.Now().Add(timeout)
+		for {
+			p.mu.Lock()
+			n := 0
+			if p.layout != nil {
+				n = len(p.layout.Panes)
+			}
+			p.mu.Unlock()
+			if n == want {
+				fmt.Printf("✓ panes = %d\n", want)
+				return nil
+			}
+			if time.Now().After(deadline) {
+				return fmt.Errorf("timeout: want %d panes, have %d", want, n)
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+
 	case "expect":
 		pane, want, err := paneText(arg)
 		if err != nil {
@@ -522,6 +594,20 @@ func (p *probe) exec(op string, timeout time.Duration) error {
 		return nil
 	}
 	return fmt.Errorf("unknown op %q", name)
+}
+
+// optPane parses a pane id, returning nil (meaning "the focused pane") for an
+// empty id or "f" — used by split/close whose pane param is optional.
+func optPane(id string) (*uint32, error) {
+	if id == "" || id == "f" {
+		return nil, nil
+	}
+	n, err := strconv.Atoi(id)
+	if err != nil {
+		return nil, err
+	}
+	pp := uint32(n)
+	return &pp, nil
 }
 
 func paneText(arg string) (uint32, string, error) {
