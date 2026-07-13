@@ -16,12 +16,13 @@ import (
 	"github.com/rohanthewiz/herdr-web/internal/terminal"
 )
 
-// daemon manages the gateway's single connection to the termhost daemon:
+// daemon manages the orchestrator's single connection to the termhost daemon:
 // dial + hello/welcome, reconciling the daemon's surviving panes against the
-// model, then pumping events until the connection drops — and redialing.
-// The daemon accepts one client at a time; gateway2 stays attached for life.
+// model, then pumping events until the connection drops — and redialing. All
+// state that the pump touches beyond the raw socket lives in orch and is
+// reached by posting closures onto the orchestrator loop (never a lock).
 type daemon struct {
-	g      *gateway
+	o      *orch
 	socket string
 
 	mu   sync.Mutex // serializes writes; guards conn
@@ -35,7 +36,8 @@ func (d *daemon) connected() bool {
 }
 
 // send writes one command to the daemon. Disconnected sends are dropped —
-// reconcile replays the model when the connection comes back.
+// reconcile replays the model when the connection comes back. Called from the
+// orchestrator loop (which owns the decision to send).
 func (d *daemon) send(m any) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -54,8 +56,7 @@ func (d *daemon) setConn(c net.Conn) {
 	d.mu.Unlock()
 }
 
-// run dials the daemon forever, with backoff. Each established session
-// reconciles panes and pumps events until it fails.
+// run dials the daemon forever, with backoff.
 func (d *daemon) run() {
 	backoff := time.Second
 	for {
@@ -72,7 +73,9 @@ func (d *daemon) run() {
 		}
 		_ = conn.Close()
 		d.setConn(nil)
-		d.g.broadcast(browserproto.NewError(0, "termhost connection lost — reconnecting"))
+		d.o.post(func() {
+			d.o.broadcast(browserproto.NewError(0, "termhost connection lost — reconnecting"))
+		})
 	}
 }
 
@@ -111,135 +114,152 @@ func (d *daemon) session(conn net.Conn) error {
 	}
 }
 
-// reconcile syncs the daemon's pane set to the model: surviving model panes
-// get a resync (full frame + chrome replay) and a resize to the model grid,
-// missing ones are created, and daemon panes outside the model are closed.
+// reconcile syncs the daemon's surviving pane set to the model: mark survivors
+// created, drop the created flag on the rest so syncDaemon respawns them, close
+// daemon panes outside the model, then re-apply the model and resync the
+// visible panes for any attached browser. Runs on the orchestrator loop.
 func (d *daemon) reconcile(alivePanes []uint32) {
-	g := d.g
-	g.mu.Lock()
-	defer g.mu.Unlock()
-
-	alive := make(map[uint32]bool, len(alivePanes))
-	for _, id := range alivePanes {
-		alive[id] = true
-	}
-	for id, p := range g.panes {
-		if alive[id] {
-			p.created = true
-			r := orchestration.NewResize(id, p.cols, p.rows)
-			r.CellWidthPx, r.CellHeightPx = g.cellW, g.cellH
-			d.send(r)
-			d.send(orchestration.NewRequestResync(id))
-			continue
+	d.o.post(func() {
+		o := d.o
+		alive := make(map[uint32]bool, len(alivePanes))
+		for _, id := range alivePanes {
+			alive[id] = true
 		}
-		// The daemon doesn't have this pane (fresh or restarted daemon):
-		// recreate it and mark it created so later resizes go through as resizes.
-		p.created = true
-		cp := orchestration.NewCreatePane(id, p.cols, p.rows)
-		cp.Cwd = g.cwd
-		cp.CellWidthPx, cp.CellHeightPx = g.cellW, g.cellH
-		d.send(cp)
-		p.exited = nil
-	}
-	for _, id := range alivePanes {
-		if g.panes[id] == nil {
-			d.send(orchestration.NewClosePane(id))
+		model := make(map[uint32]bool)
+		for _, id := range o.session.AllPaneIDs() {
+			pid := uint32(id)
+			model[pid] = true
+			rt := o.panes[pid]
+			if rt == nil {
+				continue // syncDaemon (in applyModel) creates missing runtimes
+			}
+			rt.created = alive[pid]
 		}
-	}
-	g.broadcastLocked(g.layoutMsgLocked())
+		for _, id := range alivePanes {
+			if !model[id] {
+				d.send(orchestration.NewClosePane(id))
+			}
+		}
+		o.applyModel()
+		for _, id := range o.session.VisiblePaneIDs() {
+			o.resyncPane(uint32(id))
+		}
+	})
 }
 
-// dispatch translates one daemon event into browser messages (and model
-// updates). It runs on the single pump goroutine, so per-connection frame
-// translator state and enqueue order are safe.
+// dispatch translates one daemon β event into browser messages and model
+// updates, posted onto the orchestrator loop. Chrome is cached on the pane
+// runtime regardless of visibility (§8), but only forwarded to browsers when
+// the pane is in the current viewport; the agents rollup is always global.
 func (d *daemon) dispatch(mt orchestration.MessageType, payload []byte) {
-	g := d.g
+	o := d.o
 	switch mt {
 	case orchestration.MsgPaneFrame:
 		var ev orchestration.PaneFrame
 		if err := json.Unmarshal(payload, &ev); err != nil || ev.Frame == nil {
 			return
 		}
-		g.mu.Lock()
-		if g.panes[ev.PaneID] != nil {
-			for c := range g.conns {
+		o.post(func() {
+			if o.panes[ev.PaneID] == nil || !o.visible[ev.PaneID] {
+				return
+			}
+			for c := range o.conns {
 				msg := c.translator(ev.PaneID).Translate(ev.Frame)
 				if b, err := browserproto.Marshal(msg); err == nil {
-					c.enqueue(b)
+					o.enqueue(c, b)
 				}
 			}
-		}
-		g.mu.Unlock()
+		})
 
 	case orchestration.MsgPaneModes:
 		var ev orchestration.PaneModes
 		if err := json.Unmarshal(payload, &ev); err != nil {
 			return
 		}
-		g.mu.Lock()
-		if p := g.panes[ev.PaneID]; p != nil {
-			p.modes = inputModesFrom(ev)
-			p.enc.SetModes(p.modes)
-			g.broadcastLocked(browserproto.ModesFrom(ev))
-		}
-		g.mu.Unlock()
+		o.post(func() {
+			rt := o.panes[ev.PaneID]
+			if rt == nil {
+				return
+			}
+			rt.modes = inputModesFrom(ev)
+			rt.enc.SetModes(rt.modes)
+			if o.visible[ev.PaneID] {
+				o.broadcast(browserproto.ModesFrom(ev))
+			}
+		})
 
 	case orchestration.MsgPaneTitle:
 		var ev orchestration.PaneTitle
 		if err := json.Unmarshal(payload, &ev); err != nil {
 			return
 		}
-		g.mu.Lock()
-		if p := g.panes[ev.PaneID]; p != nil {
-			p.title = ev.Title
-			g.broadcastLocked(browserproto.NewPaneTitle(ev.PaneID, ev.Title))
-		}
-		g.mu.Unlock()
+		o.post(func() {
+			rt := o.panes[ev.PaneID]
+			if rt == nil {
+				return
+			}
+			rt.title = ev.Title
+			if o.visible[ev.PaneID] {
+				o.broadcast(browserproto.NewPaneTitle(ev.PaneID, ev.Title))
+			}
+		})
 
 	case orchestration.MsgPaneCwd:
 		var ev orchestration.PaneCwd
 		if err := json.Unmarshal(payload, &ev); err != nil {
 			return
 		}
-		g.mu.Lock()
-		if p := g.panes[ev.PaneID]; p != nil {
-			p.cwd = ev.Cwd
-			g.broadcastLocked(browserproto.NewPaneCwd(ev.PaneID, ev.Cwd))
-		}
-		g.mu.Unlock()
+		o.post(func() {
+			rt := o.panes[ev.PaneID]
+			if rt == nil {
+				return
+			}
+			rt.cwd = ev.Cwd
+			if o.visible[ev.PaneID] {
+				o.broadcast(browserproto.NewPaneCwd(ev.PaneID, ev.Cwd))
+			}
+		})
 
 	case orchestration.MsgPaneAgent:
 		var ev orchestration.PaneAgent
 		if err := json.Unmarshal(payload, &ev); err != nil {
 			return
 		}
-		g.mu.Lock()
-		if p := g.panes[ev.PaneID]; p != nil {
-			p.agent = &ev
-			g.broadcastLocked(browserproto.NewPaneAgent(ev.PaneID, ev.Agent, ev.State, true))
-			g.broadcastLocked(g.agentsMsgLocked())
-		}
-		g.mu.Unlock()
+		o.post(func() {
+			rt := o.panes[ev.PaneID]
+			if rt == nil {
+				return
+			}
+			rt.agent = &ev
+			if o.visible[ev.PaneID] {
+				o.broadcast(browserproto.NewPaneAgent(ev.PaneID, ev.Agent, ev.State, true))
+			}
+			o.broadcast(o.agentsMsg())
+		})
 
 	case orchestration.MsgPaneClipboard:
 		var ev orchestration.PaneClipboard
 		if err := json.Unmarshal(payload, &ev); err != nil {
 			return
 		}
-		g.broadcast(browserproto.NewClipboard(ev.Data))
+		o.post(func() { o.broadcast(browserproto.NewClipboard(ev.Data)) })
 
 	case orchestration.MsgPaneExited:
 		var ev orchestration.PaneExited
 		if err := json.Unmarshal(payload, &ev); err != nil {
 			return
 		}
-		g.mu.Lock()
-		if p := g.panes[ev.PaneID]; p != nil {
+		o.post(func() {
+			rt := o.panes[ev.PaneID]
+			if rt == nil {
+				return
+			}
 			code := ev.ExitCode
-			p.exited = &code
-			g.broadcastLocked(browserproto.NewPaneExited(ev.PaneID, ev.ExitCode))
-		}
-		g.mu.Unlock()
+			rt.exited = &code
+			if o.visible[ev.PaneID] {
+				o.broadcast(browserproto.NewPaneExited(ev.PaneID, ev.ExitCode))
+			}
+		})
 
 	case orchestration.MsgError:
 		var ev orchestration.Error
@@ -247,9 +267,9 @@ func (d *daemon) dispatch(mt orchestration.MessageType, payload []byte) {
 			return
 		}
 		log.Printf("gateway2: daemon error (pane %d): %s", ev.PaneID, ev.Message)
-		g.broadcast(browserproto.NewError(ev.PaneID, ev.Message))
+		o.post(func() { o.broadcast(browserproto.NewError(ev.PaneID, ev.Message)) })
 	}
-	// pane_selection / pane_text: nothing requests them in the spike.
+	// pane_selection / pane_text: nothing requests them yet.
 }
 
 // inputModesFrom rehydrates the β pane_modes mirror into the emulator-side

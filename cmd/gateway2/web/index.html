@@ -26,8 +26,12 @@
   #sidebar ul { list-style:none; margin:0; padding:0; }
   #sidebar li { font-size:12px; padding:4px 8px; border-radius:4px; white-space:nowrap;
     overflow:hidden; text-overflow:ellipsis; cursor:default; display:flex; align-items:baseline; gap:6px; }
+  #ws-list li.ws { cursor:pointer; }
+  #ws-list li.ws:hover { background:var(--panel2); }
   #ws-list li.active { color:#e8e8e8; }
   #ws-list li .sum { color:var(--muted); font-size:10px; margin-left:auto; }
+  #ws-list li.add { color:var(--muted); font-style:italic; cursor:pointer; }
+  #ws-list li.add:hover { color:var(--accent); background:none; }
   #pane-list li, #agent-list li { cursor:pointer; }
   #pane-list li:hover, #agent-list li:hover { background:var(--panel2); }
   #pane-list li.focused { background:var(--chrome-focus); color:#e8e8e8; }
@@ -48,9 +52,14 @@
   #main { display:grid; grid-template-rows:30px 1fr 24px; min-width:0; min-height:0; }
   #tabbar { display:flex; align-items:stretch; gap:2px; padding:0 6px; background:var(--panel);
     border-bottom:1px solid var(--line); overflow-x:auto; }
-  #tabbar .tab { font-size:12px; color:var(--muted); padding:0 12px; display:flex; align-items:center;
-    border-bottom:2px solid transparent; white-space:nowrap; }
+  #tabbar .tab { font-size:12px; color:var(--muted); padding:0 10px; display:flex; align-items:center; gap:6px;
+    border-bottom:2px solid transparent; white-space:nowrap; cursor:pointer; }
+  #tabbar .tab:hover { color:#ddd; }
   #tabbar .tab.active { color:#e8e8e8; border-bottom-color:var(--accent); }
+  #tabbar .tab .x { color:var(--muted); font-size:10px; }
+  #tabbar .tab .x:hover { color:var(--err); }
+  #tabbar .tab.add { color:var(--muted); font-weight:600; padding:0 12px; }
+  #tabbar .tab.add:hover { color:var(--accent); }
 
   #panes { position:relative; overflow:hidden; }
   .pane { position:absolute; box-sizing:border-box; }
@@ -254,8 +263,13 @@
         const s = document.createElement("span"); s.className = "sum"; s.textContent = w.agent_summary;
         li.appendChild(s);
       }
+      li.addEventListener("click", () => { if (!w.active) sendCmd("workspace.focus", { id: w.id }); });
       wsListEl.appendChild(li);
     }
+    const add = document.createElement("li");
+    add.className = "add"; add.textContent = "+ workspace"; add.title = "new workspace";
+    add.addEventListener("click", () => sendCmd("workspace.create", {}));
+    wsListEl.appendChild(add);
   }
 
   function renderPaneList(msg) {
@@ -282,9 +296,22 @@
     for (const t of msg.tabs) {
       const el = document.createElement("div");
       el.className = "tab" + (t.active ? " active" : "");
-      el.textContent = t.name + (t.zoomed ? " ⤢" : "");
+      const label = document.createElement("span");
+      label.textContent = t.name + (t.zoomed ? " ⤢" : "");
+      el.appendChild(label);
+      el.addEventListener("click", () => { if (!t.active) sendCmd("tab.focus", { num: t.num }); });
+      if (msg.tabs.length > 1) {
+        const x = document.createElement("span");
+        x.className = "x"; x.textContent = "✕"; x.title = "close tab";
+        x.addEventListener("click", (e) => { e.stopPropagation(); sendCmd("tab.close", { num: t.num }); });
+        el.appendChild(x);
+      }
       tabbarEl.appendChild(el);
     }
+    const add = document.createElement("div");
+    add.className = "tab add"; add.textContent = "+"; add.title = "new tab";
+    add.addEventListener("click", () => sendCmd("tab.create", {}));
+    tabbarEl.appendChild(add);
   }
 
   // ---- Agents rollup (WS8): the `agents` message, previously dropped ----

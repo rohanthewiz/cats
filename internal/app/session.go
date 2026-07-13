@@ -1,0 +1,317 @@
+// Package app is the WS2 orchestrator's domain layer: the session state (an
+// ordered set of workspaces, WS1) plus the command table (§7 of
+// ai_docs/phase-c-ws9-protocol.md) that mutates it. It sits ABOVE the daemon
+// seam (internal/orchestration) — it owns *what* the session looks like and
+// *how* commands change it, never *how* PTYs are driven. That keeps it pure:
+// no daemon, no I/O, no goroutines, so it unit-tests like the layout/workspace
+// models it composes (the Rust src/app actions are the spec).
+//
+// The orchestrator runtime (the event-loop actor in cmd/gateway2) owns exactly
+// one Session and is its only caller, so Session needs no synchronization.
+package app
+
+import (
+	"errors"
+	"fmt"
+
+	"github.com/rohanthewiz/herdr-web/internal/layout"
+	"github.com/rohanthewiz/herdr-web/internal/workspace"
+)
+
+// Session is the multi-workspace session state. active indexes the workspace
+// whose active tab is the current viewport (§8). All panes across all
+// workspaces/tabs are live PTYs on the daemon; only the viewport's panes stream
+// frames to the browser.
+type Session struct {
+	spawner    workspace.PaneSpawner
+	cwd        string
+	workspaces []*workspace.Workspace
+	active     int
+}
+
+// NewSession starts a session with one workspace (one tab, one pane).
+func NewSession(spawner workspace.PaneSpawner, cwd string) (*Session, error) {
+	ws, err := workspace.New(spawner, cwd, workspace.SpawnSpec{})
+	if err != nil {
+		return nil, err
+	}
+	return &Session{spawner: spawner, cwd: cwd, workspaces: []*workspace.Workspace{ws}}, nil
+}
+
+// --- Queries -----------------------------------------------------------------
+
+// Workspaces returns the ordered workspaces (for BuildLayout / the sidebar).
+func (s *Session) Workspaces() []*workspace.Workspace { return s.workspaces }
+
+// ActiveIndex is the active workspace's position.
+func (s *Session) ActiveIndex() int { return s.active }
+
+// ActiveWorkspace returns the active workspace.
+func (s *Session) ActiveWorkspace() *workspace.Workspace { return s.workspaces[s.active] }
+
+// Cwd is the session's default working directory for new panes.
+func (s *Session) Cwd() string { return s.cwd }
+
+// FocusedPane resolves the active workspace's active tab's focused pane.
+func (s *Session) FocusedPane() (layout.PaneID, bool) {
+	return s.ActiveWorkspace().FocusedPaneID()
+}
+
+// AllPaneIDs lists every pane across all workspaces and tabs — the panes the
+// daemon must hold PTYs for.
+func (s *Session) AllPaneIDs() []layout.PaneID {
+	var ids []layout.PaneID
+	for _, ws := range s.workspaces {
+		for _, tab := range ws.Tabs {
+			ids = append(ids, tab.Layout.PaneIDs()...)
+		}
+	}
+	return ids
+}
+
+// VisiblePaneIDs lists panes in the current viewport (active workspace's active
+// tab) — the only panes whose frames stream to the browser (§8).
+func (s *Session) VisiblePaneIDs() []layout.PaneID {
+	tab := s.ActiveWorkspace().ActiveTab()
+	if tab == nil {
+		return nil
+	}
+	return tab.Layout.PaneIDs()
+}
+
+// PublicPaneID resolves a pane's public handle ("w1:p3") from whichever
+// workspace owns it.
+func (s *Session) PublicPaneID(id layout.PaneID) (string, bool) {
+	for _, ws := range s.workspaces {
+		if pub, ok := ws.PublicPaneID(id); ok {
+			return pub, true
+		}
+	}
+	return "", false
+}
+
+// --- Pane commands (§7) ------------------------------------------------------
+
+// FocusPane focuses a pane within its owning tab (browser click-to-focus).
+func (s *Session) FocusPane(id layout.PaneID) error {
+	idx, ws := s.workspaceIndexOf(id)
+	if ws == nil {
+		return fmt.Errorf("unknown pane %d", id)
+	}
+	tabIdx, _ := ws.FindTabIndexForPane(id)
+	ws.Tabs[tabIdx].Layout.FocusPane(id)
+	s.active = idx
+	return nil
+}
+
+// SplitPane splits target (the focused pane if nil) in dir, focusing the new
+// pane, and returns its id.
+func (s *Session) SplitPane(target *layout.PaneID, dir layout.Direction) (layout.PaneID, error) {
+	id, err := s.resolvePaneTarget(target)
+	if err != nil {
+		return 0, err
+	}
+	_, ws := s.workspaceIndexOf(id)
+	_, np, err := ws.SplitPane(id, dir, true, workspace.SpawnSpec{})
+	if err != nil {
+		return 0, err
+	}
+	return np.PaneID, nil
+}
+
+// ClosePane closes target (the focused pane if nil), returning the closed id.
+// The session always keeps at least one pane; closing a workspace's last pane
+// drops that workspace (when another remains).
+func (s *Session) ClosePane(target *layout.PaneID) (layout.PaneID, error) {
+	id, err := s.resolvePaneTarget(target)
+	if err != nil {
+		return 0, err
+	}
+	if s.totalPanes() <= 1 {
+		return 0, errors.New("cannot close the last pane")
+	}
+	idx, ws := s.workspaceIndexOf(id)
+	if ws.ClosePane(id) {
+		// The workspace closed its last pane in its last tab → drop it.
+		s.dropWorkspace(idx)
+	}
+	return id, nil
+}
+
+// --- Tab commands (§7) — operate on the active workspace ---------------------
+
+// CreateTab appends a tab to the active workspace and switches to it. Returns
+// the new tab's public number.
+func (s *Session) CreateTab() (int, error) {
+	ws := s.ActiveWorkspace()
+	idx, err := ws.CreateTab(s.cwd, workspace.SpawnSpec{})
+	if err != nil {
+		return 0, err
+	}
+	ws.SwitchTab(idx)
+	num, _ := ws.PublicTabNumber(idx)
+	return num, nil
+}
+
+// CloseTab closes a tab (the active tab if num is nil) of the active workspace.
+// Closing a workspace's last tab drops the workspace (when another remains).
+func (s *Session) CloseTab(num *int) error {
+	ws := s.ActiveWorkspace()
+	idx := ws.ActiveTabIndex()
+	if num != nil {
+		i, ok := s.tabIndexByNumber(ws, *num)
+		if !ok {
+			return fmt.Errorf("unknown tab %d", *num)
+		}
+		idx = i
+	}
+	if len(ws.Tabs) > 1 {
+		ws.CloseTab(idx)
+		return nil
+	}
+	if len(s.workspaces) <= 1 {
+		return errors.New("cannot close the last tab")
+	}
+	s.dropWorkspace(s.active)
+	return nil
+}
+
+// FocusTab switches the active workspace to the tab with the given public
+// number (a viewport change).
+func (s *Session) FocusTab(num int) error {
+	ws := s.ActiveWorkspace()
+	idx, ok := s.tabIndexByNumber(ws, num)
+	if !ok {
+		return fmt.Errorf("unknown tab %d", num)
+	}
+	ws.SwitchTab(idx)
+	return nil
+}
+
+// RenameTab pins (or clears, with "") a tab's display name.
+func (s *Session) RenameTab(num int, name string) error {
+	ws := s.ActiveWorkspace()
+	idx, ok := s.tabIndexByNumber(ws, num)
+	if !ok {
+		return fmt.Errorf("unknown tab %d", num)
+	}
+	ws.Tabs[idx].SetCustomName(name)
+	return nil
+}
+
+// --- Workspace commands (§7) -------------------------------------------------
+
+// CreateWorkspace appends a new workspace (one tab, one pane) and makes it
+// active. Returns its public id ("w2").
+func (s *Session) CreateWorkspace() (string, error) {
+	ws, err := workspace.New(s.spawner, s.cwd, workspace.SpawnSpec{})
+	if err != nil {
+		return "", err
+	}
+	s.workspaces = append(s.workspaces, ws)
+	s.active = len(s.workspaces) - 1
+	return ws.ID, nil
+}
+
+// CloseWorkspace drops a workspace (the active one if id is nil); the session
+// always keeps at least one.
+func (s *Session) CloseWorkspace(id *string) error {
+	if len(s.workspaces) <= 1 {
+		return errors.New("cannot close the last workspace")
+	}
+	idx := s.active
+	if id != nil {
+		i, ok := s.workspaceIndexByID(*id)
+		if !ok {
+			return fmt.Errorf("unknown workspace %s", *id)
+		}
+		idx = i
+	}
+	s.dropWorkspace(idx)
+	return nil
+}
+
+// FocusWorkspace makes the workspace with the given id active (a viewport
+// change).
+func (s *Session) FocusWorkspace(id string) error {
+	i, ok := s.workspaceIndexByID(id)
+	if !ok {
+		return fmt.Errorf("unknown workspace %s", id)
+	}
+	s.active = i
+	return nil
+}
+
+// RenameWorkspace pins (or clears, with "") a workspace's display name.
+func (s *Session) RenameWorkspace(id, name string) error {
+	i, ok := s.workspaceIndexByID(id)
+	if !ok {
+		return fmt.Errorf("unknown workspace %s", id)
+	}
+	s.workspaces[i].SetCustomName(name)
+	return nil
+}
+
+// --- Internal helpers --------------------------------------------------------
+
+func (s *Session) resolvePaneTarget(target *layout.PaneID) (layout.PaneID, error) {
+	if target != nil {
+		if _, ws := s.workspaceIndexOf(*target); ws == nil {
+			return 0, fmt.Errorf("unknown pane %d", *target)
+		}
+		return *target, nil
+	}
+	id, ok := s.FocusedPane()
+	if !ok {
+		return 0, errors.New("no focused pane")
+	}
+	return id, nil
+}
+
+func (s *Session) totalPanes() int {
+	n := 0
+	for _, ws := range s.workspaces {
+		for _, tab := range ws.Tabs {
+			n += tab.Layout.PaneCount()
+		}
+	}
+	return n
+}
+
+func (s *Session) workspaceIndexOf(id layout.PaneID) (int, *workspace.Workspace) {
+	for i, ws := range s.workspaces {
+		if _, ok := ws.FindTabIndexForPane(id); ok {
+			return i, ws
+		}
+	}
+	return -1, nil
+}
+
+func (s *Session) workspaceIndexByID(id string) (int, bool) {
+	for i, ws := range s.workspaces {
+		if ws.ID == id {
+			return i, true
+		}
+	}
+	return -1, false
+}
+
+func (s *Session) tabIndexByNumber(ws *workspace.Workspace, num int) (int, bool) {
+	for i, tab := range ws.Tabs {
+		if tab.Number == num {
+			return i, true
+		}
+	}
+	return -1, false
+}
+
+// dropWorkspace removes the workspace at idx and keeps active valid.
+func (s *Session) dropWorkspace(idx int) {
+	s.workspaces = append(s.workspaces[:idx], s.workspaces[idx+1:]...)
+	switch {
+	case s.active >= len(s.workspaces):
+		s.active = len(s.workspaces) - 1
+	case idx < s.active:
+		s.active--
+	}
+}

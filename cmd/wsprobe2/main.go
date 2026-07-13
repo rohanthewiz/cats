@@ -15,8 +15,11 @@
 //	scrollcmd:PANE:DELTA    cmd scroll (viewport scrollback)
 //	split:PANE:h|v          cmd pane.split (h = left/right, v = top/bottom)
 //	close:PANE              cmd pane.close
-//	panes:N                 poll until the layout reports N panes (fails after --timeout)
-//	expect:PANE:TEXT        poll until TEXT appears in the pane grid (fails after --timeout)
+//	tabnew                  cmd tab.create        tabfocus:NUM  cmd tab.focus
+//	tabclose[:NUM]          cmd tab.close         wsnew         cmd workspace.create
+//	wsfocus:ID              cmd workspace.focus (ID e.g. w1)
+//	panes:N|tabs:N|workspaces:N  poll until the layout reports N of that kind
+//	expect:PANE:TEXT        poll until TEXT appears (PANE may be "f" = focused pane)
 //	absent:PANE:TEXT        assert TEXT is NOT currently in the pane grid
 //	dump:PANE               print the pane grid
 //	modes:PANE:mouse|nomouse poll until the pane's mouse-capture mode matches
@@ -388,7 +391,7 @@ func (p *probe) exec(op string, timeout time.Duration) error {
 		return nil
 
 	case "click_text":
-		pane, want, err := paneText(arg)
+		pane, want, err := p.paneText(arg)
 		if err != nil {
 			return err
 		}
@@ -478,31 +481,78 @@ func (p *probe) exec(op string, timeout time.Duration) error {
 		fmt.Printf("→ cmd pane.close pane=%s\n", arg)
 		return p.send(cmd)
 
-	case "panes":
+	case "panes", "tabs", "workspaces":
 		want, err := strconv.Atoi(arg)
 		if err != nil {
 			return err
 		}
 		deadline := time.Now().Add(timeout)
 		for {
-			p.mu.Lock()
-			n := 0
-			if p.layout != nil {
-				n = len(p.layout.Panes)
-			}
-			p.mu.Unlock()
+			n := p.layoutCount(name)
 			if n == want {
-				fmt.Printf("✓ panes = %d\n", want)
+				fmt.Printf("✓ %s = %d\n", name, want)
 				return nil
 			}
 			if time.Now().After(deadline) {
-				return fmt.Errorf("timeout: want %d panes, have %d", want, n)
+				return fmt.Errorf("timeout: want %d %s, have %d", want, name, n)
 			}
 			time.Sleep(100 * time.Millisecond)
 		}
 
+	case "tabnew":
+		cmd, err := browserproto.NewCmd("", browserproto.CmdTabCreate, struct{}{})
+		if err != nil {
+			return err
+		}
+		fmt.Println("→ cmd tab.create")
+		return p.send(cmd)
+
+	case "tabfocus":
+		num, err := strconv.Atoi(arg)
+		if err != nil {
+			return err
+		}
+		cmd, err := browserproto.NewCmd("", browserproto.CmdTabFocus, browserproto.TabParams{Num: num})
+		if err != nil {
+			return err
+		}
+		fmt.Printf("→ cmd tab.focus %d\n", num)
+		return p.send(cmd)
+
+	case "tabclose":
+		var params browserproto.OptTabParams
+		if arg != "" {
+			n, err := strconv.Atoi(arg)
+			if err != nil {
+				return err
+			}
+			params.Num = &n
+		}
+		cmd, err := browserproto.NewCmd("", browserproto.CmdTabClose, params)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("→ cmd tab.close %s\n", arg)
+		return p.send(cmd)
+
+	case "wsnew":
+		cmd, err := browserproto.NewCmd("", browserproto.CmdWorkspaceCreate, struct{}{})
+		if err != nil {
+			return err
+		}
+		fmt.Println("→ cmd workspace.create")
+		return p.send(cmd)
+
+	case "wsfocus":
+		cmd, err := browserproto.NewCmd("", browserproto.CmdWorkspaceFocus, browserproto.WorkspaceParams{ID: arg})
+		if err != nil {
+			return err
+		}
+		fmt.Printf("→ cmd workspace.focus %s\n", arg)
+		return p.send(cmd)
+
 	case "expect":
-		pane, want, err := paneText(arg)
+		pane, want, err := p.paneText(arg)
 		if err != nil {
 			return err
 		}
@@ -529,7 +579,7 @@ func (p *probe) exec(op string, timeout time.Duration) error {
 		}
 
 	case "absent":
-		pane, want, err := paneText(arg)
+		pane, want, err := p.paneText(arg)
 		if err != nil {
 			return err
 		}
@@ -610,16 +660,55 @@ func optPane(id string) (*uint32, error) {
 	return &pp, nil
 }
 
-func paneText(arg string) (uint32, string, error) {
+// paneText parses PANE:TEXT. PANE may be "f" for the currently-focused pane
+// (from the last layout), so content checks survive pane-id churn.
+func (p *probe) paneText(arg string) (uint32, string, error) {
 	id, rest, ok := strings.Cut(arg, ":")
 	if !ok {
 		return 0, "", fmt.Errorf("need PANE:TEXT")
+	}
+	if id == "f" {
+		if pane, ok := p.focusedPane(); ok {
+			return pane, rest, nil
+		}
+		return 0, "", fmt.Errorf("no focused pane in layout yet")
 	}
 	pane, err := strconv.Atoi(id)
 	if err != nil {
 		return 0, "", err
 	}
 	return uint32(pane), rest, nil
+}
+
+// layoutCount returns the number of panes/tabs/workspaces in the last layout.
+func (p *probe) layoutCount(kind string) int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.layout == nil {
+		return 0
+	}
+	switch kind {
+	case "tabs":
+		return len(p.layout.Tabs)
+	case "workspaces":
+		return len(p.layout.Workspaces)
+	default:
+		return len(p.layout.Panes)
+	}
+}
+
+// focusedPane resolves the focused pane id from the last layout.
+func (p *probe) focusedPane() (uint32, bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.layout != nil {
+		for _, pr := range p.layout.Panes {
+			if pr.Focused {
+				return pr.Pane, true
+			}
+		}
+	}
+	return 0, false
 }
 
 // --- Key mapping (probe-side convenience; the browser sends real W3C values) ----

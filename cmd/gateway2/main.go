@@ -64,11 +64,12 @@ func main() {
 	}
 
 	cwd, _ := os.Getwd()
-	g, err := newGateway(*socket, cwd)
+	o, err := newOrch(*socket, cwd)
 	if err != nil {
 		log.Fatalf("gateway2: %v", err)
 	}
-	go g.daemon.run()
+	go o.run()        // the orchestrator event loop (sole state owner)
+	go o.daemon.run() // dial the termhost daemon
 
 	// TLS: operator PEMs, or an auto-generated self-signed pair.
 	tlsOn := *useTLS || *tlsCert != "" || *tlsKey != ""
@@ -97,7 +98,7 @@ func main() {
 		return ctx.WriteHTML(string(indexHTML))
 	})
 	s.WebSocket("/ws", func(ws *rweb.WSConn) error {
-		return g.serve(ws)
+		return o.serve(ws)
 	})
 
 	scheme := "http"
