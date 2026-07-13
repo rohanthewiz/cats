@@ -142,14 +142,23 @@ func innerGrid(r browserproto.Rect) (cols, rows uint16) {
 // the shared window area.
 func (o *orch) desiredGrids() map[uint32][2]uint16 {
 	grids := make(map[uint32][2]uint16)
+	gridRows := func(h uint16) uint16 {
+		if h > chromeRows {
+			return h - chromeRows
+		}
+		return h
+	}
 	for _, ws := range o.session.Workspaces() {
 		for _, tab := range ws.Tabs {
 			for _, info := range tab.Layout.Panes(o.area) {
-				rows := info.Rect.Height
-				if rows > chromeRows {
-					rows -= chromeRows
-				}
-				grids[uint32(info.ID)] = [2]uint16{info.Rect.Width, rows}
+				grids[uint32(info.ID)] = [2]uint16{info.Rect.Width, gridRows(info.Rect.Height)}
+			}
+			// A zoomed tab renders its focused pane at the full area (§8, the
+			// browser only sees that one), so it must be sized to fill it. The
+			// hidden siblings keep their split-rect sizes above — they stay live
+			// PTYs so syncDaemon won't close them, and don't stream while hidden.
+			if tab.Zoomed {
+				grids[uint32(tab.Layout.Focused())] = [2]uint16{o.area.Width, gridRows(o.area.Height)}
 			}
 		}
 	}

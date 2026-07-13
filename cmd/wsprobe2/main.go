@@ -16,6 +16,9 @@
 //	scrollcmd:PANE:DELTA    cmd scroll (viewport scrollback)
 //	split:PANE:h|v          cmd pane.split (h = left/right, v = top/bottom)
 //	close:PANE              cmd pane.close
+//	cycle[:next|prev]       cmd pane.cycle (default next)   swap:DIR  cmd pane.swap
+//	zoom:PANE               cmd pane.zoom (toggle)          resizeborder:BORDER:RATIO
+//	rect:PANE:x|y|w|h:eq|lt|gt:N  poll until a pane rect field matches (PANE may be "f")
 //	tabnew                  cmd tab.create        tabfocus:NUM  cmd tab.focus
 //	tabclose[:NUM]          cmd tab.close         wsnew         cmd workspace.create
 //	wsfocus:ID              cmd workspace.focus (ID e.g. w1)
@@ -494,6 +497,58 @@ func (p *probe) exec(op string, timeout time.Duration) error {
 		fmt.Printf("→ cmd pane.close pane=%s\n", arg)
 		return p.send(cmd)
 
+	case "cycle":
+		next := arg != "prev" // anything but "prev" cycles forward
+		cmd, err := browserproto.NewCmd("", browserproto.CmdPaneCycle,
+			browserproto.CycleParams{Next: next})
+		if err != nil {
+			return err
+		}
+		fmt.Printf("→ cmd pane.cycle next=%v\n", next)
+		return p.send(cmd)
+
+	case "swap":
+		if _, ok := browserproto.NavDirection(arg); !ok {
+			return fmt.Errorf("swap needs left|right|up|down, got %q", arg)
+		}
+		cmd, err := browserproto.NewCmd("", browserproto.CmdPaneSwap,
+			browserproto.DirParams{Dir: arg})
+		if err != nil {
+			return err
+		}
+		fmt.Printf("→ cmd pane.swap %s\n", arg)
+		return p.send(cmd)
+
+	case "zoom":
+		pane, err := optPane(arg) // empty/f = focused
+		if err != nil {
+			return err
+		}
+		cmd, err := browserproto.NewCmd("", browserproto.CmdPaneZoom,
+			browserproto.OptPaneParams{Pane: pane})
+		if err != nil {
+			return err
+		}
+		fmt.Printf("→ cmd pane.zoom pane=%s\n", arg)
+		return p.send(cmd)
+
+	case "resizeborder":
+		bid, ratioStr, ok := strings.Cut(arg, ":")
+		if !ok {
+			return fmt.Errorf("resizeborder needs BORDER:RATIO (e.g. r:0.3)")
+		}
+		ratio, err := strconv.ParseFloat(ratioStr, 32)
+		if err != nil {
+			return fmt.Errorf("bad ratio %q: %w", ratioStr, err)
+		}
+		cmd, err := browserproto.NewCmd("", browserproto.CmdPaneResizeBorder,
+			browserproto.ResizeBorderParams{Border: bid, Ratio: float32(ratio)})
+		if err != nil {
+			return err
+		}
+		fmt.Printf("→ cmd pane.resize_border border=%s ratio=%s\n", bid, ratioStr)
+		return p.send(cmd)
+
 	case "panes", "tabs", "workspaces":
 		want, err := strconv.Atoi(arg)
 		if err != nil {
@@ -508,6 +563,50 @@ func (p *probe) exec(op string, timeout time.Duration) error {
 			}
 			if time.Now().After(deadline) {
 				return fmt.Errorf("timeout: want %d %s, have %d", want, name, n)
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+
+	case "rect":
+		// rect:PANE:FIELD:CMP:VALUE — poll a pane rect from the last layout.
+		// PANE may be "f" (focused); FIELD x|y|w|h; CMP eq|lt|gt.
+		f := strings.Split(arg, ":")
+		if len(f) != 4 {
+			return fmt.Errorf("rect needs PANE:x|y|w|h:eq|lt|gt:VALUE")
+		}
+		fieldIdx := map[string]int{"x": 0, "y": 1, "w": 2, "h": 3}
+		fi, ok := fieldIdx[f[1]]
+		if !ok {
+			return fmt.Errorf("rect field must be x|y|w|h, got %q", f[1])
+		}
+		want, err := strconv.Atoi(f[3])
+		if err != nil {
+			return fmt.Errorf("bad rect value %q: %w", f[3], err)
+		}
+		deadline := time.Now().Add(timeout)
+		for {
+			var pane uint32
+			if f[0] == "f" {
+				pane, ok = p.focusedPane()
+			} else {
+				n, e := strconv.Atoi(f[0])
+				pane, ok = uint32(n), e == nil
+			}
+			var got int
+			have := false
+			if ok {
+				if r, okr := p.paneRect(pane); okr {
+					got, have = int(r[fi]), true
+				}
+			}
+			pass := have && ((f[2] == "eq" && got == want) ||
+				(f[2] == "lt" && got < want) || (f[2] == "gt" && got > want))
+			if pass {
+				fmt.Printf("✓ rect pane=%s %s %s %d (got %d)\n", f[0], f[1], f[2], want, got)
+				return nil
+			}
+			if time.Now().After(deadline) {
+				return fmt.Errorf("timeout: rect pane=%s %s %s %d, got %d (have=%v)", f[0], f[1], f[2], want, got, have)
 			}
 			time.Sleep(100 * time.Millisecond)
 		}
@@ -722,6 +821,20 @@ func (p *probe) focusedPane() (uint32, bool) {
 		}
 	}
 	return 0, false
+}
+
+// paneRect returns a pane's [x,y,w,h] rect from the last layout.
+func (p *probe) paneRect(id uint32) (browserproto.Rect, bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.layout != nil {
+		for _, pr := range p.layout.Panes {
+			if pr.Pane == id {
+				return pr.Rect, true
+			}
+		}
+	}
+	return browserproto.Rect{}, false
 }
 
 // --- Key mapping (probe-side convenience; the browser sends real W3C values) ----

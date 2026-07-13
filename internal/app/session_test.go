@@ -124,6 +124,162 @@ func TestFocusPaneDirection(t *testing.T) {
 	}
 }
 
+func TestCyclePane(t *testing.T) {
+	s := newTestSession(t)
+	// Single pane → nothing to cycle to.
+	if s.CyclePane(true) {
+		t.Fatal("CyclePane on a single pane should report no move")
+	}
+	a, _ := s.FocusedPane()
+	b, err := s.SplitPane(nil, layout.Horizontal) // focus now on b
+	if err != nil {
+		t.Fatalf("SplitPane: %v", err)
+	}
+	// Two panes [a, b], focus on b. next wraps b→a; next again a→b.
+	if !s.CyclePane(true) {
+		t.Fatal("CyclePane(next) reported no move")
+	}
+	if f, _ := s.FocusedPane(); f != a {
+		t.Fatalf("after cycle-next focused=%d, want %d", f, a)
+	}
+	s.CyclePane(true) // a → b (wrap)
+	if f, _ := s.FocusedPane(); f != b {
+		t.Fatalf("after 2nd cycle-next focused=%d, want %d", f, b)
+	}
+	// prev from b → a.
+	s.CyclePane(false)
+	if f, _ := s.FocusedPane(); f != a {
+		t.Fatalf("after cycle-prev focused=%d, want %d", f, a)
+	}
+}
+
+func TestSwapPaneDirection(t *testing.T) {
+	s := newTestSession(t)
+	area := layout.Rect{Width: 120, Height: 32}
+	left, _ := s.FocusedPane()
+	right, err := s.SplitPane(nil, layout.Horizontal) // left | right, focus=right
+	if err != nil {
+		t.Fatalf("SplitPane: %v", err)
+	}
+	xOf := func(id layout.PaneID) uint16 {
+		for _, info := range s.ActiveWorkspace().ActiveTab().Layout.Panes(area) {
+			if info.ID == id {
+				return info.Rect.X
+			}
+		}
+		t.Fatalf("pane %d not found", id)
+		return 0
+	}
+	if xOf(left) != 0 {
+		t.Fatalf("pre-swap left pane x=%d, want 0", xOf(left))
+	}
+	// Swap the focused (right) pane leftward: it travels to x=0, keeps focus.
+	swapped, err := s.SwapPaneDirection(layout.Left, area)
+	if err != nil {
+		t.Fatalf("SwapPaneDirection: %v", err)
+	}
+	if !swapped {
+		t.Fatal("SwapPaneDirection(Left) reported no swap")
+	}
+	if xOf(right) != 0 {
+		t.Errorf("post-swap right pane x=%d, want 0 (it moved left)", xOf(right))
+	}
+	if f, _ := s.FocusedPane(); f != right {
+		t.Errorf("focus=%d after swap, want the travelling pane %d", f, right)
+	}
+	// No neighbour further left of the (now leftmost) focused pane → no-op.
+	if swapped, _ := s.SwapPaneDirection(layout.Left, area); swapped {
+		t.Error("SwapPaneDirection(Left) at the edge should not swap")
+	}
+}
+
+func TestToggleZoom(t *testing.T) {
+	s := newTestSession(t)
+	if _, err := s.SplitPane(nil, layout.Horizontal); err != nil {
+		t.Fatalf("SplitPane: %v", err)
+	}
+	if len(s.VisiblePaneIDs()) != 2 {
+		t.Fatalf("pre-zoom visible=%d, want 2", len(s.VisiblePaneIDs()))
+	}
+	focus, _ := s.FocusedPane()
+
+	on, err := s.ToggleZoom(nil)
+	if err != nil {
+		t.Fatalf("ToggleZoom: %v", err)
+	}
+	if !on {
+		t.Fatal("ToggleZoom did not turn zoom on")
+	}
+	// Zoomed → the viewport is just the focused pane; all panes still live.
+	if got := s.VisiblePaneIDs(); len(got) != 1 || got[0] != focus {
+		t.Fatalf("zoomed visible=%v, want [%d]", got, focus)
+	}
+	if len(s.AllPaneIDs()) != 2 {
+		t.Fatalf("zoomed all=%d, want 2 (siblings stay live)", len(s.AllPaneIDs()))
+	}
+
+	off, err := s.ToggleZoom(nil)
+	if err != nil {
+		t.Fatalf("ToggleZoom (off): %v", err)
+	}
+	if off {
+		t.Fatal("second ToggleZoom did not turn zoom off")
+	}
+	if len(s.VisiblePaneIDs()) != 2 {
+		t.Fatalf("post-unzoom visible=%d, want 2", len(s.VisiblePaneIDs()))
+	}
+
+	// Zooming a specific pane focuses it first.
+	other := layout.PaneID(0)
+	for _, id := range s.VisiblePaneIDs() {
+		if id != focus {
+			other = id
+		}
+	}
+	if _, err := s.ToggleZoom(&other); err != nil {
+		t.Fatalf("ToggleZoom(target): %v", err)
+	}
+	if got := s.VisiblePaneIDs(); len(got) != 1 || got[0] != other {
+		t.Fatalf("targeted zoom visible=%v, want [%d]", got, other)
+	}
+	bogus := layout.PaneID(9999)
+	s.ToggleZoom(nil) // unzoom before testing the error path
+	if _, err := s.ToggleZoom(&bogus); err == nil {
+		t.Error("zooming an unknown pane should error")
+	}
+}
+
+func TestResizeBorder(t *testing.T) {
+	s := newTestSession(t)
+	area := layout.Rect{Width: 120, Height: 32}
+	left, _ := s.FocusedPane()
+	if _, err := s.SplitPane(nil, layout.Horizontal); err != nil { // 50/50
+		t.Fatalf("SplitPane: %v", err)
+	}
+	wOf := func(id layout.PaneID) uint16 {
+		for _, info := range s.ActiveWorkspace().ActiveTab().Layout.Panes(area) {
+			if info.ID == id {
+				return info.Rect.Width
+			}
+		}
+		t.Fatalf("pane %d not found", id)
+		return 0
+	}
+	before := wOf(left)
+	// Root split, first child = left. Shrink it to 0.3 → narrower left pane.
+	if err := s.ResizeBorder([]bool{}, 0.3); err != nil {
+		t.Fatalf("ResizeBorder: %v", err)
+	}
+	after := wOf(left)
+	if after >= before {
+		t.Fatalf("left width %d→%d, want it to shrink", before, after)
+	}
+	// Roughly 30% of 120 (allowing for chrome/gaps): sanity bound.
+	if after == 0 || after > 60 {
+		t.Errorf("left width=%d after 0.3 resize, want ~30%% of 120", after)
+	}
+}
+
 func TestSplitUnknownPane(t *testing.T) {
 	s := newTestSession(t)
 	bogus := layout.PaneID(9999)

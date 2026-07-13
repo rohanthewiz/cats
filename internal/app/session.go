@@ -13,6 +13,7 @@ package app
 import (
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/rohanthewiz/herdr-web/internal/layout"
 	"github.com/rohanthewiz/herdr-web/internal/workspace"
@@ -70,11 +71,15 @@ func (s *Session) AllPaneIDs() []layout.PaneID {
 }
 
 // VisiblePaneIDs lists panes in the current viewport (active workspace's active
-// tab) — the only panes whose frames stream to the browser (§8).
+// tab) — the only panes whose frames stream to the browser (§8). A zoomed tab
+// shows only its focused pane, so that is the whole viewport.
 func (s *Session) VisiblePaneIDs() []layout.PaneID {
 	tab := s.ActiveWorkspace().ActiveTab()
 	if tab == nil {
 		return nil
+	}
+	if tab.Zoomed {
+		return []layout.PaneID{tab.Layout.Focused()}
 	}
 	return tab.Layout.PaneIDs()
 }
@@ -131,6 +136,91 @@ func (s *Session) FocusPaneDirection(nav layout.NavDirection, area layout.Rect) 
 	}
 	tab.Layout.FocusPane(target)
 	return true, nil
+}
+
+// CyclePane moves focus to the next (next=true) or previous pane in the active
+// tab's in-order pane list, wrapping around. Reports whether focus moved (false
+// only when the tab has a single pane). Like FocusPane it stays within the
+// viewport.
+func (s *Session) CyclePane(next bool) bool {
+	tab := s.ActiveWorkspace().ActiveTab()
+	if tab == nil {
+		return false
+	}
+	ids := tab.Layout.PaneIDs()
+	if len(ids) < 2 {
+		return false
+	}
+	pos := slices.Index(ids, tab.Layout.Focused())
+	if pos < 0 {
+		pos = 0
+	}
+	n := len(ids)
+	step := 1
+	if !next {
+		step = -1
+	}
+	tab.Layout.FocusPane(ids[(pos+step+n)%n])
+	return true
+}
+
+// SwapPaneDirection swaps the focused pane with its nearest neighbour in the
+// given direction within the active tab: the focused pane travels to the
+// neighbour's slot and keeps focus. Reports whether a swap happened (false with
+// no error means no neighbour that way). Needs the viewport geometry to resolve
+// the neighbour.
+func (s *Session) SwapPaneDirection(nav layout.NavDirection, area layout.Rect) (bool, error) {
+	tab := s.ActiveWorkspace().ActiveTab()
+	if tab == nil {
+		return false, errors.New("no active tab")
+	}
+	panes := tab.Layout.Panes(area)
+	var focused *layout.PaneInfo
+	for i := range panes {
+		if panes[i].IsFocused {
+			focused = &panes[i]
+			break
+		}
+	}
+	if focused == nil {
+		return false, errors.New("no focused pane")
+	}
+	target, ok := layout.FindInDirection(focused, nav, panes)
+	if !ok {
+		return false, nil // no neighbour in that direction
+	}
+	tab.Layout.SwapPanes(focused.ID, target)
+	return true, nil
+}
+
+// ToggleZoom flips the active tab's zoom. When zooming, target (or the focused
+// pane if nil) becomes the sole visible pane at full size; when already zoomed,
+// it unzooms (target ignored). Reports the resulting zoom state.
+func (s *Session) ToggleZoom(target *layout.PaneID) (bool, error) {
+	tab := s.ActiveWorkspace().ActiveTab()
+	if tab == nil {
+		return false, errors.New("no active tab")
+	}
+	if !tab.Zoomed && target != nil {
+		if !slices.Contains(tab.Layout.PaneIDs(), *target) {
+			return false, fmt.Errorf("pane %d not in the active tab", *target)
+		}
+		tab.Layout.FocusPane(*target)
+	}
+	tab.Zoomed = !tab.Zoomed
+	return tab.Zoomed, nil
+}
+
+// ResizeBorder sets the first-child ratio of the split identified by path
+// (decoded from the wire border id) in the active tab, changing the sizes of
+// the panes either side. A path that resolves to no split is a silent no-op.
+func (s *Session) ResizeBorder(path []bool, ratio float32) error {
+	tab := s.ActiveWorkspace().ActiveTab()
+	if tab == nil {
+		return errors.New("no active tab")
+	}
+	tab.Layout.SetRatioAt(path, ratio)
+	return nil
 }
 
 // SplitPane splits target (the focused pane if nil) in dir, focusing the new

@@ -60,6 +60,69 @@ func (o *orch) handleCmd(c *client, m *browserproto.Cmd) {
 		}
 		reply(true, "")
 
+	case browserproto.CmdPaneCycle:
+		var p browserproto.CycleParams
+		if err := unmarshalParams(m.Params, &p); err != nil {
+			reply(false, "bad params: "+err.Error())
+			return
+		}
+		if o.session.CyclePane(p.Next) {
+			o.broadcast(o.viewportLayout()) // focus flag moved; pane set unchanged
+		}
+		reply(true, "")
+
+	case browserproto.CmdPaneSwap:
+		var p browserproto.DirParams
+		if err := unmarshalParams(m.Params, &p); err != nil {
+			reply(false, "bad params: "+err.Error())
+			return
+		}
+		nav, ok := browserproto.NavDirection(p.Dir)
+		if !ok {
+			reply(false, fmt.Sprintf("bad direction %q", p.Dir))
+			return
+		}
+		swapped, err := o.session.SwapPaneDirection(nav, o.area)
+		if err != nil {
+			reply(false, err.Error())
+			return
+		}
+		if swapped {
+			o.applyModel() // panes changed slots/sizes
+		}
+		reply(true, "")
+
+	case browserproto.CmdPaneZoom:
+		var p browserproto.OptPaneParams
+		if err := optUnmarshalParams(m.Params, &p); err != nil {
+			reply(false, "bad params: "+err.Error())
+			return
+		}
+		if _, err := o.session.ToggleZoom(optPaneID(p.Pane)); err != nil {
+			reply(false, err.Error())
+			return
+		}
+		o.applyModel() // viewport pane set + zoomed pane size changed
+		reply(true, "")
+
+	case browserproto.CmdPaneResizeBorder:
+		var p browserproto.ResizeBorderParams
+		if err := unmarshalParams(m.Params, &p); err != nil {
+			reply(false, "bad params: "+err.Error())
+			return
+		}
+		path, ok := browserproto.BorderPath(p.Border)
+		if !ok {
+			reply(false, fmt.Sprintf("bad border id %q", p.Border))
+			return
+		}
+		if err := o.session.ResizeBorder(path, p.Ratio); err != nil {
+			reply(false, err.Error())
+			return
+		}
+		o.applyModel() // split ratio changed → panes resize
+		reply(true, "")
+
 	case browserproto.CmdPaneSplit:
 		var sp browserproto.SplitParams
 		if err := unmarshalParams(m.Params, &sp); err != nil {
