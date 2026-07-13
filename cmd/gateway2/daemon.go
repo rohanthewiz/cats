@@ -200,7 +200,7 @@ func (d *daemon) dispatch(mt orchestration.MessageType, payload []byte) {
 			}
 			rt.title = ev.Title
 			if o.visible[ev.PaneID] {
-				o.broadcast(browserproto.NewPaneTitle(ev.PaneID, ev.Title))
+				o.broadcast(browserproto.NewPaneTitle(ev.PaneID, o.effectiveTitle(ev.PaneID)))
 			}
 		})
 

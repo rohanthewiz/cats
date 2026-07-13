@@ -123,6 +123,29 @@ func (o *orch) handleCmd(c *client, m *browserproto.Cmd) {
 		o.applyModel() // split ratio changed → panes resize
 		reply(true, "")
 
+	case browserproto.CmdPaneLast:
+		if o.session.FocusLastPane() {
+			o.broadcast(o.viewportLayout()) // focus flag moved; pane set unchanged
+		}
+		reply(true, "")
+
+	case browserproto.CmdPaneRename:
+		var p browserproto.RenamePaneParams
+		if err := unmarshalParams(m.Params, &p); err != nil {
+			reply(false, "bad params: "+err.Error())
+			return
+		}
+		if err := o.session.RenamePane(layout.PaneID(p.Pane), p.Name); err != nil {
+			reply(false, err.Error())
+			return
+		}
+		// Push the new effective title if the pane is on screen; otherwise it
+		// rides the chrome resend when the pane next becomes visible.
+		if o.visible[p.Pane] {
+			o.broadcast(browserproto.NewPaneTitle(p.Pane, o.effectiveTitle(p.Pane)))
+		}
+		reply(true, "")
+
 	case browserproto.CmdPaneSplit:
 		var sp browserproto.SplitParams
 		if err := unmarshalParams(m.Params, &sp); err != nil {

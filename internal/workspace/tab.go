@@ -15,6 +15,10 @@ type PaneState struct {
 	// change to Idle. False = "Done" (agent finished while the user was in
 	// another workspace).
 	Seen bool
+	// CustomName, when non-empty, is a user-provided pane title that overrides
+	// the terminal-reported title (pane.rename). It is durable session state, so
+	// it survives a daemon restart (unlike the cached terminal title).
+	CustomName string
 }
 
 // NewPaneState returns a pane state attached to the given terminal, marked seen.

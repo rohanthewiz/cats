@@ -18,7 +18,9 @@
 //	close:PANE              cmd pane.close
 //	cycle[:next|prev]       cmd pane.cycle (default next)   swap:DIR  cmd pane.swap
 //	zoom:PANE               cmd pane.zoom (toggle)          resizeborder:BORDER:RATIO
+//	last                    cmd pane.last                   rename:PANE:NAME  cmd pane.rename
 //	rect:PANE:x|y|w|h:eq|lt|gt:N  poll until a pane rect field matches (PANE may be "f")
+//	title:PANE:TEXT         poll until a pane's title equals TEXT (PANE may be "f")
 //	tabnew                  cmd tab.create        tabfocus:NUM  cmd tab.focus
 //	tabclose[:NUM]          cmd tab.close         wsnew         cmd workspace.create
 //	wsfocus:ID              cmd workspace.focus (ID e.g. w1)
@@ -549,6 +551,38 @@ func (p *probe) exec(op string, timeout time.Duration) error {
 		fmt.Printf("→ cmd pane.resize_border border=%s ratio=%s\n", bid, ratioStr)
 		return p.send(cmd)
 
+	case "last":
+		cmd, err := browserproto.NewCmd("", browserproto.CmdPaneLast, struct{}{})
+		if err != nil {
+			return err
+		}
+		fmt.Println("→ cmd pane.last")
+		return p.send(cmd)
+
+	case "rename":
+		id, newName, ok := strings.Cut(arg, ":")
+		if !ok {
+			return fmt.Errorf("rename needs PANE:NAME (PANE numeric or 'f' = focused)")
+		}
+		pane, err := optPane(id)
+		if err != nil {
+			return err
+		}
+		if pane == nil { // resolve "f"/empty to the focused pane id
+			fp, ok := p.focusedPane()
+			if !ok {
+				return fmt.Errorf("no focused pane in layout yet")
+			}
+			pane = &fp
+		}
+		cmd, err := browserproto.NewCmd("", browserproto.CmdPaneRename,
+			browserproto.RenamePaneParams{Pane: *pane, Name: newName})
+		if err != nil {
+			return err
+		}
+		fmt.Printf("→ cmd pane.rename pane=%d name=%q\n", *pane, newName)
+		return p.send(cmd)
+
 	case "panes", "tabs", "workspaces":
 		want, err := strconv.Atoi(arg)
 		if err != nil {
@@ -607,6 +641,33 @@ func (p *probe) exec(op string, timeout time.Duration) error {
 			}
 			if time.Now().After(deadline) {
 				return fmt.Errorf("timeout: rect pane=%s %s %s %d, got %d (have=%v)", f[0], f[1], f[2], want, got, have)
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+
+	case "title":
+		// title:PANE:TEXT — poll until a pane's title equals TEXT exactly (PANE
+		// may be "f" = focused). Exact match proves a custom name (pane.rename)
+		// overrides — and isn't overwritten by later terminal title events.
+		id, want, err := p.paneText(arg)
+		if err != nil {
+			return err
+		}
+		deadline := time.Now().Add(timeout)
+		for {
+			p.mu.Lock()
+			g := p.panes[id]
+			got := ""
+			if g != nil {
+				got = g.Title
+			}
+			p.mu.Unlock()
+			if got == want {
+				fmt.Printf("✓ title pane=%d = %q\n", id, want)
+				return nil
+			}
+			if time.Now().After(deadline) {
+				return fmt.Errorf("timeout: want title %q in pane %d, got %q", want, id, got)
 			}
 			time.Sleep(100 * time.Millisecond)
 		}

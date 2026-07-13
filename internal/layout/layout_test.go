@@ -410,3 +410,40 @@ func TestFindInDirectionTiebreaksByLargerOverlapBeforeLayoutOrder(t *testing.T) 
 		t.Fatalf("got pane %d, want 3", got)
 	}
 }
+
+func TestFocusLastTogglesAndTracksPrev(t *testing.T) {
+	var next PaneID
+	l, root := NewWithAllocator(func() PaneID { next++; return next })
+
+	if l.FocusLast() {
+		t.Fatal("FocusLast on a single pane should fail")
+	}
+	b := l.SplitFocused(Horizontal) // focus root→b, prev=root
+	if l.Focused() != b {
+		t.Fatalf("focus=%d, want new pane %d", l.Focused(), b)
+	}
+
+	// Ping-pong: back to root, then forward to b.
+	if !l.FocusLast() || l.Focused() != root {
+		t.Fatalf("after last focus=%d, want root %d", l.Focused(), root)
+	}
+	if !l.FocusLast() || l.Focused() != b {
+		t.Fatalf("after 2nd last focus=%d, want %d", l.Focused(), b)
+	}
+
+	// A no-op self-focus must not overwrite prev.
+	l.FocusPane(b) // == current focus → setFocus no-op, prev stays root
+	if !l.FocusLast() || l.Focused() != root {
+		t.Fatalf("self-focus polluted prev; focus=%d, want root %d", l.Focused(), root)
+	}
+
+	// ResizePane's transient focus swap must not overwrite prev either.
+	l.FocusPane(b) // focus=b, prev=root
+	l.ResizePane(root, Left, 0.1, Rect{0, 0, 100, 40})
+	if l.Focused() != b {
+		t.Fatalf("ResizePane left focus at %d, want %d", l.Focused(), b)
+	}
+	if !l.FocusLast() || l.Focused() != root {
+		t.Fatalf("ResizePane polluted prev; focus=%d, want root %d", l.Focused(), root)
+	}
+}

@@ -170,6 +170,10 @@
     ctl.appendChild(mkBtn("⊟", "split left/right", "", () => sendCmd("pane.split", { pane: id, direction: "h" })));
     ctl.appendChild(mkBtn("⊞", "split top/bottom", "", () => sendCmd("pane.split", { pane: id, direction: "v" })));
     ctl.appendChild(mkBtn("⤢", "toggle zoom", "", () => sendCmd("pane.zoom", { pane: id })));
+    ctl.appendChild(mkBtn("✎", "rename pane", "", () => {
+      const name = prompt("Rename pane (empty to clear):", pane(id).title || "");
+      if (name !== null) sendCmd("pane.rename", { pane: id, name });
+    }));
     ctl.appendChild(mkBtn("✕", "close pane", "close", () => sendCmd("pane.close", { pane: id })));
     chrome.appendChild(info); chrome.appendChild(ctl);
     const canvas = document.createElement("canvas");

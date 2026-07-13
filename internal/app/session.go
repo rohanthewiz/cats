@@ -223,6 +223,46 @@ func (s *Session) ResizeBorder(path []bool, ratio float32) error {
 	return nil
 }
 
+// FocusLastPane toggles focus back to the active tab's previously-focused pane
+// (LastPane). Reports whether focus moved. A focus-only change, like FocusPane.
+func (s *Session) FocusLastPane() bool {
+	tab := s.ActiveWorkspace().ActiveTab()
+	if tab == nil {
+		return false
+	}
+	return tab.Layout.FocusLast()
+}
+
+// RenamePane pins (or clears, with "") a pane's custom title, overriding the
+// terminal-reported one. The pane may live in any workspace/tab.
+func (s *Session) RenamePane(id layout.PaneID, name string) error {
+	if st := s.paneState(id); st != nil {
+		st.CustomName = name
+		return nil
+	}
+	return fmt.Errorf("unknown pane %d", id)
+}
+
+// PaneCustomName returns a pane's custom title and whether the pane exists.
+func (s *Session) PaneCustomName(id layout.PaneID) (string, bool) {
+	if st := s.paneState(id); st != nil {
+		return st.CustomName, true
+	}
+	return "", false
+}
+
+// paneState finds a pane's viewport state across every workspace and tab.
+func (s *Session) paneState(id layout.PaneID) *workspace.PaneState {
+	for _, ws := range s.workspaces {
+		for _, tab := range ws.Tabs {
+			if st := tab.Panes[id]; st != nil {
+				return st
+			}
+		}
+	}
+	return nil
+}
+
 // SplitPane splits target (the focused pane if nil) in dir, focusing the new
 // pane, and returns its id.
 func (s *Session) SplitPane(target *layout.PaneID, dir layout.Direction) (layout.PaneID, error) {

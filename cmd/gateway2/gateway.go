@@ -308,6 +308,19 @@ func (o *orch) send(c *client, m any) {
 	o.enqueue(c, b)
 }
 
+// effectiveTitle is what the browser should show for a pane: the user's custom
+// name (pane.rename) when set, otherwise the terminal-reported title cached on
+// the runtime.
+func (o *orch) effectiveTitle(pid uint32) string {
+	if name, ok := o.session.PaneCustomName(layout.PaneID(pid)); ok && name != "" {
+		return name
+	}
+	if rt := o.panes[pid]; rt != nil {
+		return rt.title
+	}
+	return ""
+}
+
 // broadcastPaneChrome resends a pane's cached chrome to all connections (used
 // when a pane becomes visible after a viewport switch).
 func (o *orch) broadcastPaneChrome(pid uint32) {
@@ -317,8 +330,8 @@ func (o *orch) broadcastPaneChrome(pid uint32) {
 	}
 	o.broadcast(browserproto.PaneModes{T: browserproto.MsgPaneModes, Pane: pid,
 		Mouse: rt.modes.MouseMode != terminal.MouseNone, AltScreen: rt.modes.AlternateScreen})
-	if rt.title != "" {
-		o.broadcast(browserproto.NewPaneTitle(pid, rt.title))
+	if t := o.effectiveTitle(pid); t != "" {
+		o.broadcast(browserproto.NewPaneTitle(pid, t))
 	}
 	if rt.cwd != "" {
 		o.broadcast(browserproto.NewPaneCwd(pid, rt.cwd))

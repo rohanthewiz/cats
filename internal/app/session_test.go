@@ -280,6 +280,70 @@ func TestResizeBorder(t *testing.T) {
 	}
 }
 
+func TestFocusLastPane(t *testing.T) {
+	s := newTestSession(t)
+	// Single pane → no previous pane to toggle to.
+	if s.FocusLastPane() {
+		t.Fatal("FocusLastPane with one pane should report no move")
+	}
+	a, _ := s.FocusedPane()
+	b, err := s.SplitPane(nil, layout.Horizontal) // focus a→b (prev=a)
+	if err != nil {
+		t.Fatalf("SplitPane: %v", err)
+	}
+	// last toggles back to a, then again forward to b (ping-pong).
+	if !s.FocusLastPane() {
+		t.Fatal("FocusLastPane reported no move")
+	}
+	if f, _ := s.FocusedPane(); f != a {
+		t.Fatalf("after last focused=%d, want %d", f, a)
+	}
+	if !s.FocusLastPane() {
+		t.Fatal("second FocusLastPane reported no move")
+	}
+	if f, _ := s.FocusedPane(); f != b {
+		t.Fatalf("after 2nd last focused=%d, want %d", f, b)
+	}
+
+	// Closing the previous pane invalidates the toggle target.
+	s.FocusPane(a)       // focus a (prev=b)
+	if _, err := s.ClosePane(&b); err != nil {
+		t.Fatalf("ClosePane: %v", err)
+	}
+	if s.FocusLastPane() {
+		t.Error("FocusLastPane should not jump to a closed pane")
+	}
+}
+
+func TestRenamePane(t *testing.T) {
+	s := newTestSession(t)
+	id, _ := s.FocusedPane()
+
+	if name, ok := s.PaneCustomName(id); !ok || name != "" {
+		t.Fatalf("initial custom name = %q/%v, want \"\"/true", name, ok)
+	}
+	if err := s.RenamePane(id, "builder"); err != nil {
+		t.Fatalf("RenamePane: %v", err)
+	}
+	if name, _ := s.PaneCustomName(id); name != "builder" {
+		t.Errorf("custom name = %q, want builder", name)
+	}
+	// Clearing reverts to terminal-derived titles.
+	if err := s.RenamePane(id, ""); err != nil {
+		t.Fatalf("RenamePane clear: %v", err)
+	}
+	if name, _ := s.PaneCustomName(id); name != "" {
+		t.Errorf("custom name after clear = %q, want empty", name)
+	}
+	// Unknown pane errors; its name query reports not-found.
+	if err := s.RenamePane(layout.PaneID(9999), "x"); err == nil {
+		t.Error("renaming an unknown pane should error")
+	}
+	if _, ok := s.PaneCustomName(layout.PaneID(9999)); ok {
+		t.Error("PaneCustomName for an unknown pane should report not-found")
+	}
+}
+
 func TestSplitUnknownPane(t *testing.T) {
 	s := newTestSession(t)
 	bogus := layout.PaneID(9999)

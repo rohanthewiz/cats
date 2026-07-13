@@ -104,9 +104,22 @@ func (*SplitNode) isNode() {}
 type TileLayout struct {
 	root  Node
 	focus PaneID
+	// prev is the pane focused before the current one (0 = none), enabling
+	// FocusLast. Maintained by setFocus, through which every real focus change
+	// routes; ResizePane's transient focus swap deliberately bypasses it.
+	prev PaneID
 	// alloc overrides PaneID allocation when non-nil (deterministic tests);
 	// nil means AllocPaneID.
 	alloc func() PaneID
+}
+
+// setFocus moves focus to id, remembering the pane left behind (prev) so
+// FocusLast can toggle back. A no-op self-focus leaves prev untouched.
+func (l *TileLayout) setFocus(id PaneID) {
+	if id != l.focus {
+		l.prev = l.focus
+		l.focus = id
+	}
 }
 
 // New creates a layout with a single pane (globally unique ID).
@@ -170,7 +183,7 @@ func (l *TileLayout) SplitFocused(direction Direction) PaneID {
 func (l *TileLayout) SplitFocusedWithRatio(direction Direction, ratio float32) PaneID {
 	newID := l.allocID()
 	l.root = splitAt(l.root, l.focus, direction, newID, validSplitRatio(ratio))
-	l.focus = newID
+	l.setFocus(newID)
 	return newID
 }
 
@@ -200,15 +213,25 @@ func (l *TileLayout) CloseFocused() bool {
 		return false
 	}
 	l.root = newRoot
-	l.focus = newFocus
+	l.setFocus(newFocus)
 	return true
 }
 
 // FocusPane focuses the given pane if it exists in the tree.
 func (l *TileLayout) FocusPane(id PaneID) {
 	if slices.Contains(l.PaneIDs(), id) {
-		l.focus = id
+		l.setFocus(id)
 	}
+}
+
+// FocusLast toggles focus back to the previously-focused pane (LastPane).
+// Reports false when there is no distinct, still-present previous pane.
+func (l *TileLayout) FocusLast() bool {
+	if l.prev == 0 || l.prev == l.focus || !slices.Contains(l.PaneIDs(), l.prev) {
+		return false
+	}
+	l.focus, l.prev = l.prev, l.focus
+	return true
 }
 
 // SwapPanes swaps two pane ids in the layout tree while preserving split
