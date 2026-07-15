@@ -431,6 +431,43 @@ func (d *Dispatcher) Dispatch(name string, dec ParamDecoder, r Responder) {
 		r.OK(nil)
 		d.backend.Shutdown()
 
+	case CmdSessionGet:
+		// Read-only queries below answer straight from the session — no Backend
+		// effect, no async round-trip.
+		r.OK(d.session.Info())
+
+	case CmdWorkspaceList:
+		r.OK(WorkspaceListResult{Workspaces: d.session.ListWorkspaces()})
+
+	case CmdTabList:
+		var p TabListParams
+		if err := decodeOptional(dec, &p); err != nil {
+			bad(err)
+			return
+		}
+		tabs, resolved, ok := d.session.ListTabs(p.Workspace)
+		if !ok {
+			r.Fail(fmt.Sprintf("unknown workspace %q", p.Workspace))
+			return
+		}
+		r.OK(TabListResult{Workspace: resolved, Tabs: tabs})
+
+	case CmdPaneList:
+		r.OK(PaneListResult{Panes: d.session.ListPanes()})
+
+	case CmdPaneGet:
+		var p OptPaneParams
+		if err := decodeOptional(dec, &p); err != nil {
+			bad(err)
+			return
+		}
+		info, ok := d.session.PaneInfoFor(optPaneID(p.Pane))
+		if !ok {
+			r.Fail("no such pane")
+			return
+		}
+		r.OK(info)
+
 	default:
 		r.Fail(fmt.Sprintf("command %q not supported yet (WS2 in progress)", name))
 	}

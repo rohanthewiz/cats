@@ -33,6 +33,11 @@ const (
 	CmdAgentFocus         = app.CmdAgentFocus
 	CmdServerReloadConfig = app.CmdServerReloadConfig
 	CmdServerStop         = app.CmdServerStop
+	CmdSessionGet         = app.CmdSessionGet
+	CmdWorkspaceList      = app.CmdWorkspaceList
+	CmdTabList            = app.CmdTabList
+	CmdPaneList           = app.CmdPaneList
+	CmdPaneGet            = app.CmdPaneGet
 )
 
 // Split / cardinal direction wire values.

@@ -36,6 +36,15 @@ const (
 	CmdAgentFocus         = "agent.focus"
 	CmdServerReloadConfig = "server.reload_config"
 	CmdServerStop         = "server.stop"
+
+	// Read-only query commands (§7): they return a snapshot of session state
+	// and mutate nothing, so the dispatcher answers them straight from the
+	// Session with no Backend effects.
+	CmdSessionGet    = "session.get"
+	CmdWorkspaceList = "workspace.list"
+	CmdTabList       = "tab.list"
+	CmdPaneList      = "pane.list"
+	CmdPaneGet       = "pane.get"
 )
 
 // CommandNames returns every §7 command name Dispatcher.Dispatch accepts, in a
@@ -50,6 +59,7 @@ func CommandNames() []string {
 		CmdTabCreate, CmdTabClose, CmdTabFocus, CmdTabRename,
 		CmdWorkspaceCreate, CmdWorkspaceClose, CmdWorkspaceFocus, CmdWorkspaceRename,
 		CmdAgentFocus, CmdServerReloadConfig, CmdServerStop,
+		CmdSessionGet, CmdWorkspaceList, CmdTabList, CmdPaneList, CmdPaneGet,
 	}
 }
 
@@ -220,6 +230,70 @@ type WorkspaceParams struct {
 type RenameWorkspaceParams struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
+}
+
+// --- Query params & results (§7 read-only commands) --------------------------
+
+// TabListParams: tab.list. Workspace "" = the active workspace.
+type TabListParams struct {
+	Workspace string `json:"workspace,omitempty"`
+}
+
+// SessionInfoResult is CmdResult.Data for session.get: a one-shot snapshot of the
+// whole session. FocusedPane is the public handle of the globally focused pane
+// (the active workspace's active tab's focused pane), empty if there is none.
+type SessionInfoResult struct {
+	ActiveWorkspace string `json:"active_workspace"`
+	FocusedPane     string `json:"focused_pane,omitempty"`
+	Workspaces      int    `json:"workspaces"`
+	Panes           int    `json:"panes"` // total live panes across all workspaces/tabs
+	Cwd             string `json:"cwd"`
+}
+
+// WorkspaceInfo describes one workspace for workspace.list.
+type WorkspaceInfo struct {
+	ID     string `json:"id"`   // stable public handle, e.g. "w1"
+	Name   string `json:"name"` // display name (custom or auto)
+	Active bool   `json:"active"`
+	Tabs   int    `json:"tabs"` // tab count
+}
+
+// WorkspaceListResult is CmdResult.Data for workspace.list.
+type WorkspaceListResult struct {
+	Workspaces []WorkspaceInfo `json:"workspaces"`
+}
+
+// TabInfo describes one tab for tab.list.
+type TabInfo struct {
+	Num    int    `json:"num"`  // stable public tab number
+	Name   string `json:"name"` // display name (custom or the number)
+	Active bool   `json:"active"`
+	Zoomed bool   `json:"zoomed"`
+	Panes  int    `json:"panes"` // pane count in this tab
+}
+
+// TabListResult is CmdResult.Data for tab.list. Workspace echoes the resolved
+// workspace id (useful when the request omitted it and got the active one).
+type TabListResult struct {
+	Workspace string    `json:"workspace"`
+	Tabs      []TabInfo `json:"tabs"`
+}
+
+// PaneInfo describes one pane for pane.list / pane.get. Pane is the internal id
+// used to address the pane in every other command; Handle is its human public
+// label ("w1:p3"). Focused marks the pane focused within its own tab (each tab
+// has one); Visible marks the panes in the current viewport.
+type PaneInfo struct {
+	Pane    uint32 `json:"pane"`
+	Handle  string `json:"handle,omitempty"`
+	Name    string `json:"name,omitempty"` // custom name; empty if auto-named
+	Focused bool   `json:"focused"`
+	Visible bool   `json:"visible"`
+}
+
+// PaneListResult is CmdResult.Data for pane.list.
+type PaneListResult struct {
+	Panes []PaneInfo `json:"panes"`
 }
 
 // optPaneID converts an optional wire pane id into an optional layout.PaneID
