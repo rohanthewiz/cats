@@ -19,8 +19,13 @@ import (
 	"github.com/rohanthewiz/herdr-web/internal/terminal"
 )
 
-// ProtocolVersion is bumped on any breaking change to the message shapes.
-const ProtocolVersion = 1
+// ProtocolVersion is bumped on any breaking change to the message shapes. v2
+// added the raw pane-output stream (set_output_stream command + pane_output
+// event) that pane.wait_for_output matches against, so a v1 daemon can't serve a
+// v2 orchestrator's waits — the handshake rejects the mismatch rather than
+// silently degrading (an old daemon would ignore set_output_stream and never
+// stream, so waits would miss all post-registration output).
+const ProtocolVersion = 2
 
 // MaxFrameSize caps a single length-prefixed frame. A host frame is one pane
 // (smaller than a full composited UI); 8 MiB leaves headroom for large grids.
@@ -40,11 +45,13 @@ const (
 	MsgRequestSelection MessageType = "request_selection"
 	MsgRequestText      MessageType = "request_text"
 	MsgRequestResync    MessageType = "request_resync"
+	MsgSetOutputStream  MessageType = "set_output_stream"
 	MsgShutdown         MessageType = "shutdown"
 
 	// Go → Rust (events).
 	MsgWelcome       MessageType = "welcome"
 	MsgPaneFrame     MessageType = "pane_frame"
+	MsgPaneOutput    MessageType = "pane_output"
 	MsgPaneCwd       MessageType = "pane_cwd"
 	MsgPaneAgent     MessageType = "pane_agent"
 	MsgPaneClipboard MessageType = "pane_clipboard"
@@ -191,6 +198,24 @@ func NewRequestResync(id uint32) RequestResync {
 	return RequestResync{Type: MsgRequestResync, PaneID: id}
 }
 
+// SetOutputStream toggles a pane's raw-output stream: while Enabled, the Host
+// emits a pane_output event carrying each chunk of raw PTY bytes it reads (on top
+// of the usual diffed frames). The orchestrator turns this on for a pane only
+// while a pane.wait_for_output waiter is active — matching against the byte stream
+// catches fast-scrolling transient output the diffed frames coalesce away, and the
+// final pre-exit output (emitted before pane_exited) that a post-exit capture
+// can't reach. It is off by default, so a pane with no waiter never pays the
+// raw-stream cost.
+type SetOutputStream struct {
+	Type    MessageType `json:"type"`
+	PaneID  uint32      `json:"pane_id"`
+	Enabled bool        `json:"enabled"`
+}
+
+func NewSetOutputStream(id uint32, enabled bool) SetOutputStream {
+	return SetOutputStream{Type: MsgSetOutputStream, PaneID: id, Enabled: enabled}
+}
+
 // Shutdown asks a persistent daemon to exit and tear down all panes. The
 // orchestrator sends this on a *clean* quit so the daemon doesn't linger; a
 // crash or binary handoff instead just drops the connection (the daemon keeps
@@ -228,6 +253,23 @@ type PaneFrame struct {
 
 func NewPaneFrame(id uint32, f *Frame) PaneFrame {
 	return PaneFrame{Type: MsgPaneFrame, PaneID: id, Frame: f}
+}
+
+// PaneOutput carries a chunk of raw PTY bytes exactly as the pane's child emitted
+// them (Data marshals as base64), streamed only while the pane's output stream is
+// enabled (SetOutputStream). Unlike a diffed frame this is the unmodified byte
+// stream — VT escapes and all — so a consumer sees every byte the program wrote,
+// including transient output that never lands on a rendered frame. The
+// orchestrator uses it for pane.wait_for_output pattern matching; it is not a
+// browser-facing message.
+type PaneOutput struct {
+	Type   MessageType `json:"type"`
+	PaneID uint32      `json:"pane_id"`
+	Data   []byte      `json:"data"`
+}
+
+func NewPaneOutput(id uint32, data []byte) PaneOutput {
+	return PaneOutput{Type: MsgPaneOutput, PaneID: id, Data: data}
 }
 
 // PaneCwd reports a pane's working directory (OSC 7) when it changes, so the

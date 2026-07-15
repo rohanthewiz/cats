@@ -269,3 +269,54 @@ func TestCodecRoundTrip(t *testing.T) {
 		t.Errorf("%d trailing bytes after reading all messages", buf.Len())
 	}
 }
+
+// TestOutputStreamMessagesRoundTrip covers the v2 raw-output-stream additions: the
+// set_output_stream command and the pane_output event, whose Data must survive the
+// base64 wire encoding byte-for-byte (VT escapes and all).
+func TestOutputStreamMessagesRoundTrip(t *testing.T) {
+	if ProtocolVersion < 2 {
+		t.Fatalf("raw output stream needs protocol >= 2, got %d", ProtocolVersion)
+	}
+
+	var buf bytes.Buffer
+	raw := []byte{0x1b, '[', '3', '2', 'm', 'O', 'K', 0x1b, '[', '0', 'm', '\r', '\n', 0x00}
+	if err := WriteMessage(&buf, NewSetOutputStream(42, true)); err != nil {
+		t.Fatalf("write set_output_stream: %v", err)
+	}
+	if err := WriteMessage(&buf, NewPaneOutput(42, raw)); err != nil {
+		t.Fatalf("write pane_output: %v", err)
+	}
+
+	typ, payload, err := ReadMessage(&buf)
+	if err != nil {
+		t.Fatalf("read set_output_stream: %v", err)
+	}
+	if typ != MsgSetOutputStream {
+		t.Fatalf("first type = %q, want set_output_stream", typ)
+	}
+	var sub SetOutputStream
+	if err := json.Unmarshal(payload, &sub); err != nil {
+		t.Fatalf("decode set_output_stream: %v", err)
+	}
+	if sub.PaneID != 42 || !sub.Enabled {
+		t.Fatalf("set_output_stream round-trip wrong: %+v", sub)
+	}
+
+	typ, payload, err = ReadMessage(&buf)
+	if err != nil {
+		t.Fatalf("read pane_output: %v", err)
+	}
+	if typ != MsgPaneOutput {
+		t.Fatalf("second type = %q, want pane_output", typ)
+	}
+	var po PaneOutput
+	if err := json.Unmarshal(payload, &po); err != nil {
+		t.Fatalf("decode pane_output: %v", err)
+	}
+	if po.PaneID != 42 || !bytes.Equal(po.Data, raw) {
+		t.Fatalf("pane_output round-trip wrong: pane=%d data=%v", po.PaneID, po.Data)
+	}
+	if buf.Len() != 0 {
+		t.Errorf("%d trailing bytes after reading both messages", buf.Len())
+	}
+}

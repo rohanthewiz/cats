@@ -20,6 +20,7 @@ func newWaiterHarness() *orch {
 	return &orch{
 		waiters:     map[uint32][]*waiter{},
 		waiterCheck: map[uint32]bool{},
+		outAccum:    map[uint32]*outputScanner{},
 		subs:        map[*ctlSubscriber]struct{}{},
 	}
 }
@@ -67,6 +68,58 @@ func TestWaiterMatchResolves(t *testing.T) {
 	}
 	if _, ok := o.waiters[1]; ok {
 		t.Fatalf("resolved waiter should be removed, have %v", o.waiters[1])
+	}
+}
+
+// A raw pane_output chunk is stripped of VT escapes and matched against the pane's
+// waiters: a colour-wrapped pattern resolves the waiter Matched:true with a clean
+// line, and the last waiter's departure tears down the accumulator.
+func TestWaiterMatchesStream(t *testing.T) {
+	o := newWaiterHarness()
+	rw := &recWaiter{}
+	o.waiters[1] = []*waiter{{resp: rw, match: matcher(t, "READY")}}
+	o.outAccum[1] = &outputScanner{}
+
+	// Escape sequences wrap the pattern and split it from its line context.
+	o.onPaneOutput(1, []byte("boot\r\n\x1b[32mserver READY\x1b[0m now\r\n"))
+
+	if !rw.ok || !rw.res.Matched || rw.res.Text != "server READY now" {
+		t.Fatalf("stream match: ok=%v res=%+v", rw.ok, rw.res)
+	}
+	if _, ok := o.waiters[1]; ok {
+		t.Fatalf("resolved waiter should be removed, have %v", o.waiters[1])
+	}
+	if _, ok := o.outAccum[1]; ok {
+		t.Fatalf("accumulator should be dropped when the last waiter goes")
+	}
+}
+
+// A pattern split across two pane_output chunks still matches: the accumulator
+// carries text between chunks (and the escape state machine between them).
+func TestWaiterMatchesStreamAcrossChunks(t *testing.T) {
+	o := newWaiterHarness()
+	rw := &recWaiter{}
+	o.waiters[1] = []*waiter{{resp: rw, match: matcher(t, "DEPLOYED")}}
+	o.outAccum[1] = &outputScanner{}
+
+	o.onPaneOutput(1, []byte("status: DEP"))
+	if rw.ok {
+		t.Fatalf("partial pattern should not match yet: %+v", rw.res)
+	}
+	o.onPaneOutput(1, []byte("LOYED\r\n"))
+	if !rw.ok || !rw.res.Matched || rw.res.Text != "status: DEPLOYED" {
+		t.Fatalf("cross-chunk match: ok=%v res=%+v", rw.ok, rw.res)
+	}
+}
+
+// A pane_output chunk arriving after the last waiter resolved (accumulator already
+// dropped) is ignored — the daemon's set_output_stream(false) races the tail of
+// the stream.
+func TestWaiterStreamAfterResolveIgnored(t *testing.T) {
+	o := newWaiterHarness()
+	o.onPaneOutput(7, []byte("late bytes")) // no waiter, no accumulator
+	if len(o.waiters) != 0 || len(o.outAccum) != 0 {
+		t.Fatalf("stream with no waiter should be a no-op, have %v / %v", o.waiters, o.outAccum)
 	}
 }
 

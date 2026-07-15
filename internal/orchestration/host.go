@@ -46,14 +46,21 @@ type pane struct {
 	// OSC passthrough scanners, owned exclusively by this pane's readPump goroutine
 	// (libghostty-vt does not surface OSC 7 cwd, so we scan the raw byte stream).
 	osc      oscScanner
-	osc52    osc52Scanner    // OSC 52 clipboard writes (also not surfaced by go-libghostty)
-	osc9     osc9Scanner     // OSC 9 progress, owned by readPump; latest published to progress
-	oscTitle oscTitleScanner // OSC 0/2 window title, for the pane_title chrome event
+	osc52    osc52Scanner     // OSC 52 clipboard writes (also not surfaced by go-libghostty)
+	osc9     osc9Scanner      // OSC 9 progress, owned by readPump; latest published to progress
+	oscTitle oscTitleScanner  // OSC 0/2 window title, for the pane_title chrome event
 	xtmod    xtmodkeysScanner // XTMODKEYS modifyOtherKeys (also not surfaced)
 
 	// modifyOtherKeys is the scanner's current state, published by readPump and
 	// read by the flusher/resync when reporting pane_modes.
 	modifyOtherKeys atomic.Bool
+
+	// streamOutput, when set (via set_output_stream), makes readPump emit a
+	// pane_output event carrying each raw PTY chunk it reads — the byte stream the
+	// orchestrator matches pane.wait_for_output against. Off by default so a pane
+	// with no waiter never streams raw bytes. Written by the dispatch goroutine,
+	// read by readPump.
+	streamOutput atomic.Bool
 
 	// metaMu guards the last-emitted "chrome" — cwd/title/agent — so a reconnecting
 	// client can be resynced with the pane's current state by another goroutine.
@@ -327,6 +334,15 @@ func (h *Host) dispatch(typ MessageType, payload []byte) {
 		if p := h.getPane(c.PaneID); p != nil {
 			h.resyncPane(p)
 		}
+	case MsgSetOutputStream:
+		var c SetOutputStream
+		if err := json.Unmarshal(payload, &c); err != nil {
+			h.emit(NewError(0, "bad set_output_stream: "+err.Error()))
+			return
+		}
+		if p := h.getPane(c.PaneID); p != nil {
+			p.streamOutput.Store(c.Enabled) // readPump picks it up on its next read
+		}
 	case MsgCreatePane:
 		var c CreatePane
 		if err := json.Unmarshal(payload, &c); err != nil {
@@ -519,6 +535,15 @@ func (h *Host) readPump(p *pane) {
 			h.feed(p, buf[:n])
 			p.dirty.Store(true)
 			p.detectSeq.Add(1) // mark new content for the detector's content-skip
+			// Stream the raw chunk to a subscribed orchestrator (pane.wait_for_output).
+			// Emitted here in the read loop — before the EOF break below emits
+			// pane_exited — so a pattern in the child's final output is delivered for
+			// matching ahead of the exit. Copy: buf is reused and emit is async.
+			if p.streamOutput.Load() {
+				chunk := make([]byte, n)
+				copy(chunk, buf[:n])
+				h.emit(NewPaneOutput(p.id, chunk))
+			}
 			// Scan the raw stream for OSC passthrough the emulator doesn't surface.
 			if cwd, ok := p.osc.scan(buf[:n]); ok && p.setCwdMeta(cwd) {
 				h.emit(NewPaneCwd(p.id, cwd))

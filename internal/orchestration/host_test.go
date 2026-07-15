@@ -613,6 +613,82 @@ func TestHostInputEchoAndClose(t *testing.T) {
 	}
 }
 
+// TestHostStreamsPaneOutput verifies the v2 raw-output stream: once
+// set_output_stream is enabled for a pane, the child's raw PTY bytes arrive as
+// pane_output events, and the final pre-exit output is streamed *before*
+// pane_exited (the edge a post-exit capture can't reach).
+func TestHostStreamsPaneOutput(t *testing.T) {
+	c := startTestHost(t)
+
+	cp := NewCreatePane(21, 40, 6)
+	cp.Command = "/bin/sh" // interactive: stays alive until we tell it to exit
+	if err := WriteMessage(c, cp); err != nil {
+		t.Fatalf("create_pane: %v", err)
+	}
+	// Enable the raw stream, then drive output over it. The command is sent after the
+	// enable, so its bytes are guaranteed to be streamed (no create/enable race).
+	if err := WriteMessage(c, NewSetOutputStream(21, true)); err != nil {
+		t.Fatalf("set_output_stream: %v", err)
+	}
+	if err := WriteMessage(c, NewInput(21, []byte("printf STREAMMARK\n"))); err != nil {
+		t.Fatalf("input: %v", err)
+	}
+
+	// Accumulate raw pane_output until the marker shows up in the byte stream.
+	var stream strings.Builder
+	sawMark := false
+	deadline := time.Now().Add(10 * time.Second)
+	for !sawMark && time.Now().Before(deadline) {
+		typ, payload := readEvent(t, c)
+		switch typ {
+		case MsgPaneOutput:
+			var po PaneOutput
+			if err := json.Unmarshal(payload, &po); err != nil {
+				t.Fatalf("decode pane_output: %v", err)
+			}
+			if po.PaneID != 21 {
+				t.Fatalf("pane_output for pane %d, want 21", po.PaneID)
+			}
+			stream.Write(po.Data)
+			if strings.Contains(stream.String(), "STREAMMARK") {
+				sawMark = true
+			}
+		case MsgError:
+			t.Fatalf("unexpected error event: %s", string(payload))
+		}
+	}
+	if !sawMark {
+		t.Fatalf("never saw STREAMMARK in pane_output; stream=%q", stream.String())
+	}
+
+	// The child's final output must stream before pane_exited: print FINALMARK, then
+	// exit. readPump emits the bytes (pane_output) ahead of the EOF-driven exit.
+	if err := WriteMessage(c, NewInput(21, []byte("printf FINALMARK; exit\n"))); err != nil {
+		t.Fatalf("input exit: %v", err)
+	}
+	sawFinalBeforeExit := false
+	for {
+		typ, payload := readEvent(t, c)
+		switch typ {
+		case MsgPaneOutput:
+			var po PaneOutput
+			if err := json.Unmarshal(payload, &po); err != nil {
+				t.Fatalf("decode pane_output: %v", err)
+			}
+			if strings.Contains(string(po.Data), "FINALMARK") {
+				sawFinalBeforeExit = true
+			}
+		case MsgPaneExited:
+			if !sawFinalBeforeExit {
+				t.Fatal("pane_exited arrived before FINALMARK streamed — final output edge not closed")
+			}
+			return
+		case MsgError:
+			t.Fatalf("unexpected error event: %s", string(payload))
+		}
+	}
+}
+
 // --- Persistence 3b: reconnect / resync ------------------------------------
 
 // newPersistentHost starts a persistent Host (panes outlive a connection) with

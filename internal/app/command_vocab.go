@@ -214,13 +214,16 @@ type CaptureResult struct {
 	Text string `json:"text"`
 }
 
-// WaitForOutputParams: pane.wait_for_output — block until the pane's recent
-// buffer text matches Pattern (a substring, or a regexp when Regex is set), or
-// until TimeoutMs elapses. Unlike read/capture (one round-trip), this rides the
-// unary envelope but resolves only when the match appears: the backend re-scans
-// the pane's captured text as it produces output. Lines bounds how many recent
-// rows are scanned (0 = the whole buffer); the scan is over plain text (no VT
-// styling, soft-wraps rejoined). TimeoutMs 0 uses the server default.
+// WaitForOutputParams: pane.wait_for_output — block until the pane's output
+// matches Pattern (a substring, or a regexp when Regex is set), or until TimeoutMs
+// elapses. Unlike read/capture (one round-trip), this rides the unary envelope but
+// resolves only when the match appears: the backend matches Pattern against the
+// pane's live output as it streams (VT escapes stripped to plain text), so it
+// never misses fast-scrolling transient output or the child's final pre-exit
+// output. It is additionally seeded once with the output already on screen when
+// the wait begins. Lines bounds only that initial-screen seed (recent rows,
+// 0 = the whole buffer); the live stream is matched in full. TimeoutMs 0 uses the
+// server default.
 type WaitForOutputParams struct {
 	Pane      uint32 `json:"pane"`
 	Pattern   string `json:"pattern"`

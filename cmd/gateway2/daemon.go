@@ -166,7 +166,6 @@ func (d *daemon) dispatch(mt orchestration.MessageType, payload []byte) {
 			if o.panes[ev.PaneID] == nil {
 				return
 			}
-			o.triggerWaiterCheck(ev.PaneID) // waiters observe a pane's output even when off-screen
 			if !o.visible[ev.PaneID] {
 				return
 			}
@@ -177,6 +176,15 @@ func (d *daemon) dispatch(mt orchestration.MessageType, payload []byte) {
 				}
 			}
 		})
+
+	case orchestration.MsgPaneOutput:
+		var ev orchestration.PaneOutput
+		if err := json.Unmarshal(payload, &ev); err != nil {
+			return
+		}
+		// Raw output stream for pane.wait_for_output: matched against the pane's
+		// waiters (loop goroutine). Only streamed while a waiter is active.
+		o.post(func() { o.onPaneOutput(ev.PaneID, ev.Data) })
 
 	case orchestration.MsgPaneModes:
 		var ev orchestration.PaneModes

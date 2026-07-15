@@ -71,12 +71,15 @@ type orch struct {
 	// awaiting their reply, FIFO per (pane, kind). Both replies carry no command
 	// id, so the kind picks the queue and per-pane order does the correlation.
 	pendingReqs map[reqKey][]*pending
-	// waiters holds active pane.wait_for_output waiters per pane; each re-scans the
-	// pane's captured text as it produces output and resolves on a match, its own
-	// timeout, or the pane exiting. waiterCheck marks a per-pane capture-check in
-	// flight so a burst of frames coalesces to one round-trip.
+	// waiters holds active pane.wait_for_output waiters per pane; each matches the
+	// pane's live output stream (plus a one-shot seed of the current screen) and
+	// resolves on a match, its own timeout, or the pane exiting. waiterCheck marks
+	// the seed capture-check in flight. outAccum is the per-pane rolling cleaned-text
+	// buffer fed by the β pane_output stream (enabled via set_output_stream while any
+	// waiter is active); it exists only for panes with a live waiter.
 	waiters     map[uint32][]*waiter
 	waiterCheck map[uint32]bool
+	outAccum    map[uint32]*outputScanner
 	// subs holds control-API event subscribers (events.subscribe); emitEvent fans
 	// a pane event out to the matching ones and drops any that can't keep up.
 	subs map[*ctlSubscriber]struct{}
@@ -166,6 +169,7 @@ func newOrch(socket, cwd string) (*orch, error) {
 		pendingReqs: make(map[reqKey][]*pending),
 		waiters:     make(map[uint32][]*waiter),
 		waiterCheck: make(map[uint32]bool),
+		outAccum:    make(map[uint32]*outputScanner),
 		subs:        make(map[*ctlSubscriber]struct{}),
 		mailbox:     make(chan func(), 256),
 	}
@@ -469,15 +473,19 @@ func (o *orch) replyPending(pr *pending, data any, errMsg string) {
 // --- pane.wait_for_output waiters (loop goroutine only) ----------------------
 //
 // wait_for_output rides the unary envelope but resolves only when the pane's
-// output matches. There is no raw-output stream from the daemon, so a waiter
-// re-scans the pane's captured recent text: registration kicks off one capture,
-// and each subsequent frame for the pane triggers another (coalesced to one
-// round-trip in flight). A match resolves the caller Matched:true; the wait's own
-// timer or the pane exiting resolves Matched:false; a daemon drop fails it.
+// output matches. Registering the first waiter for a pane turns on the daemon's
+// raw-output stream (set_output_stream); each β pane_output chunk is stripped to
+// plain text into a per-pane rolling buffer (outAccum) and matched against the
+// pane's waiters (onPaneOutput). Because it is the *byte* stream, it catches
+// fast-scrolling transient output the diffed frames coalesce away and the child's
+// final pre-exit output. A one-shot capture-check at registration seeds the match
+// with output already on screen (onWaiterText). A match resolves the caller
+// Matched:true; the wait's own timer or the pane exiting resolves Matched:false; a
+// daemon drop fails it. Removing the last waiter turns the stream back off.
 
-// waiter is one in-flight pane.wait_for_output. match runs over the pane's
-// captured recent text, returning the matched line (for the result's context) and
-// whether the pattern is present. done guards a single resolution.
+// waiter is one in-flight pane.wait_for_output. match runs over the pane's cleaned
+// output text, returning the matched line (for the result's context) and whether
+// the pattern is present. done guards a single resolution.
 type waiter struct {
 	resp  app.Responder
 	match func(text string) (line string, ok bool)
@@ -486,22 +494,40 @@ type waiter struct {
 	done  bool
 }
 
-// StartWaitForOutput registers a waiter (app.Backend) and kicks off the first
-// capture-check, so output already on screen resolves it at once; later checks are
-// driven by the pane's frames. The dispatcher has validated the pattern and gated
-// pane/daemon, so Matcher can't fail here (re-derived defensively).
+// StartWaitForOutput registers a waiter (app.Backend). Registering the first
+// waiter for a pane turns on the daemon's raw-output stream and starts a fresh
+// accumulator, so all subsequent output is matched byte-for-byte; a one-shot
+// capture-check then seeds the match with output already on screen. The dispatcher
+// has validated the pattern and gated pane/daemon, so Matcher can't fail here
+// (re-derived defensively).
 func (o *orch) StartWaitForOutput(r app.Responder, p app.WaitForOutputParams) {
 	match, err := p.Matcher()
 	if err != nil {
 		r.Fail(err.Error())
 		return
 	}
+	first := len(o.waiters[p.Pane]) == 0
 	w := &waiter{resp: r, match: match, lines: p.Lines}
 	o.waiters[p.Pane] = append(o.waiters[p.Pane], w)
 	w.timer = time.AfterFunc(app.WaitTimeout(p.TimeoutMs), func() {
 		o.post(func() { o.finishWaiter(p.Pane, w, false, "") })
 	})
-	o.triggerWaiterCheck(p.Pane)
+	if first {
+		o.outAccum[p.Pane] = &outputScanner{}
+		o.sendStreamSub(p.Pane, true) // enable the raw stream *before* the seed
+	}
+	o.triggerWaiterCheck(p.Pane) // seed with output already on screen
+}
+
+// sendStreamSub toggles the daemon's raw pane_output stream for a pane. A nil or
+// disconnected daemon drops the send (there is no stream to toggle); an enable is
+// only issued while connected — the dispatcher gates on DaemonConnected before a
+// waiter registers — and a disable on the last waiter is a best-effort cleanup.
+func (o *orch) sendStreamSub(pane uint32, enabled bool) {
+	if o.daemon == nil {
+		return
+	}
+	o.daemon.send(orchestration.NewSetOutputStream(pane, enabled))
 }
 
 // triggerWaiterCheck issues one capture-check for a pane's active waiters unless
@@ -547,15 +573,32 @@ func (waiterResponder) WantsReply() bool { return true }
 func (r waiterResponder) OK(data any)    { r.o.onWaiterText(r.pane, data) }
 func (r waiterResponder) Fail(string)    { r.o.waiterCheck[r.pane] = false }
 
-// onWaiterText matches a completed capture-check against the pane's waiters,
-// resolving those whose pattern now appears, and clears the in-flight flag.
+// onWaiterText matches the one-shot seed capture-check (output already on screen)
+// against the pane's waiters and clears the in-flight flag.
 func (o *orch) onWaiterText(pane uint32, data any) {
 	o.waiterCheck[pane] = false
-	text := ""
 	if cr, ok := data.(browserproto.CaptureResult); ok {
-		text = cr.Text
+		o.matchWaiters(pane, cr.Text)
 	}
-	for _, w := range append([]*waiter(nil), o.waiters[pane]...) { // finishWaiter mutates the slice
+}
+
+// onPaneOutput feeds a raw β pane_output chunk into the pane's accumulator and
+// matches the resulting cleaned text against its waiters. A chunk that arrives
+// after the last waiter resolved (outAccum already dropped) is ignored — the
+// daemon's set_output_stream(false) races the tail of the stream.
+func (o *orch) onPaneOutput(pane uint32, data []byte) {
+	sc := o.outAccum[pane]
+	if sc == nil {
+		return
+	}
+	o.matchWaiters(pane, sc.feed(data))
+}
+
+// matchWaiters resolves every still-pending waiter for a pane whose pattern now
+// appears in text (Matched:true, with the matched line). Iterates a copy because
+// finishWaiter mutates the pane's waiter slice.
+func (o *orch) matchWaiters(pane uint32, text string) {
+	for _, w := range append([]*waiter(nil), o.waiters[pane]...) {
 		if w.done {
 			continue
 		}
@@ -580,8 +623,9 @@ func (o *orch) finishWaiter(pane uint32, w *waiter, matched bool, line string) {
 	w.resp.OK(app.WaitForOutputResult{Matched: matched, Text: line})
 }
 
-// removeWaiter drops w from the pane's waiter list, deleting the pane's entry when
-// the last one goes.
+// removeWaiter drops w from the pane's waiter list. When the last one goes it
+// tears down the pane's waiter state and turns the raw-output stream back off, so
+// a pane with no waiter stops paying the stream cost.
 func (o *orch) removeWaiter(pane uint32, w *waiter) {
 	q := o.waiters[pane]
 	for i, e := range q {
@@ -593,6 +637,8 @@ func (o *orch) removeWaiter(pane uint32, w *waiter) {
 	if len(q) == 0 {
 		delete(o.waiters, pane)
 		delete(o.waiterCheck, pane)
+		delete(o.outAccum, pane)
+		o.sendStreamSub(pane, false)
 	} else {
 		o.waiters[pane] = q
 	}
@@ -623,6 +669,7 @@ func (o *orch) flushWaiters(errMsg string) {
 		}
 		delete(o.waiters, pane)
 		delete(o.waiterCheck, pane)
+		delete(o.outAccum, pane)
 	}
 }
 

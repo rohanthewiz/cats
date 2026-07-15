@@ -44,10 +44,11 @@ type Backend interface {
 	// reply (or a timeout / disconnect) arrives — the dispatch returns first.
 	StartRead(r Responder, p ReadParams)
 	StartCapture(r Responder, p CaptureParams)
-	// StartWaitForOutput registers a waiter that resolves r when the pane's
-	// captured output matches p (WaitForOutputResult{Matched:true}), or on the
-	// wait's own timeout / pane exit (Matched:false). The dispatch returns first;
-	// the waiter re-scans as the pane produces output.
+	// StartWaitForOutput registers a waiter that resolves r when the pane's output
+	// matches p (WaitForOutputResult{Matched:true}), or on the wait's own timeout /
+	// pane exit (Matched:false). The dispatch returns first; the waiter matches
+	// against the pane's live output stream (plus a one-shot seed of the current
+	// screen).
 	StartWaitForOutput(r Responder, p WaitForOutputParams)
 
 	// ReloadConfig acknowledges a config reload (a no-op today).
