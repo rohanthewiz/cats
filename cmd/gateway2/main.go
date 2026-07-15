@@ -1,12 +1,13 @@
 //go:build ghostty
 
-// Command gateway2 is the WS9 Stage-4 proof harness: it speaks the browser
-// protocol (internal/browserproto, spec ai_docs/phase-c-ws9-protocol.md) over
-// WebSocket and sources pane content directly from the termhost daemon over
-// the β orchestration seam — no WS2 orchestrator yet. The model is hard-coded:
-// one workspace, one tab, a fixed two-pane split (internal/layout) that can be
-// split/closed at runtime (WS8). Structured key/mouse/paste input is encoded
-// server-side via internal/inputenc (D4).
+// Command gateway2 serves the browser front-end: it speaks the browser protocol
+// (internal/browserproto, spec ai_docs/phase-c-ws9-protocol.md) over WebSocket
+// and sources pane content from the termhost daemon over the β orchestration
+// seam. State is owned by the WS2 orchestrator (see gateway.go) — a single-owner
+// event loop over an app.Session that starts with one workspace, one tab, and one
+// pane; splits, tabs, and workspaces are created at runtime via the §7 command
+// table (WS8). Structured key/mouse/paste input is encoded server-side via
+// internal/inputenc (D4).
 //
 // Access control (WS10): a shared password gates the UI. Browsers sign in at
 // /login and receive an HMAC-signed session cookie; headless clients present
