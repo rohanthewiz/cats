@@ -79,8 +79,14 @@ type orch struct {
 	waiterCheck map[uint32]bool
 	// subs holds control-API event subscribers (events.subscribe); emitEvent fans
 	// a pane event out to the matching ones and drops any that can't keep up.
-	subs    map[*ctlSubscriber]struct{}
-	mailbox chan func()
+	subs map[*ctlSubscriber]struct{}
+	// structPanes (pane id → public handle) and structFocus snapshot the model's
+	// pane set and globally-focused pane at the last emit; emitStructuralEvents
+	// diffs against them after each mutation to derive pane_added / pane_removed /
+	// focus_changed. Seeded in newOrch so pre-existing panes never emit retroactively.
+	structPanes map[uint32]string
+	structFocus uint32
+	mailbox     chan func()
 	// stop is the process-shutdown hook wired by main (server.stop). It flushes
 	// pending browser writes, then exits — the persistent termhost daemon is a
 	// separate process and survives. nil in tests, where stop is a no-op.
@@ -172,6 +178,7 @@ func newOrch(socket, cwd string) (*orch, error) {
 	o.session = sess
 	o.syncDaemon()      // desired sizes; no daemon/conns yet, sends are dropped
 	o.refreshViewport() // seed the visible set
+	o.seedStructure()   // snapshot the initial pane set/focus (no retroactive events)
 	return o, nil
 }
 
@@ -313,8 +320,8 @@ func (o *orch) refreshViewport() (added []uint32) {
 }
 
 // applyModel is the standard follow-up after a model-mutating command: sync the
-// daemon, recompute the viewport, broadcast the new layout + agents, and refresh
-// any newly-visible panes (chrome + full frame).
+// daemon, recompute the viewport, broadcast the new layout + agents, refresh any
+// newly-visible panes (chrome + full frame), and emit any structural events.
 func (o *orch) applyModel() {
 	o.syncDaemon()
 	added := o.refreshViewport()
@@ -324,6 +331,7 @@ func (o *orch) applyModel() {
 		o.broadcastPaneChrome(pid)
 		o.resyncPane(pid)
 	}
+	o.emitStructuralEvents()
 }
 
 // resyncPane forces every connection's translator for the pane to emit a full
@@ -633,6 +641,57 @@ func (o *orch) emitEvent(name string, pane uint32, data any) {
 	}
 }
 
+// seedStructure records the current pane set + focused pane without emitting, so
+// the first emitStructuralEvents diff reports only real changes — a subscriber
+// that connects later never gets a retroactive pane_added for a pane that already
+// existed. Called once at construction.
+func (o *orch) seedStructure() {
+	o.structPanes = make(map[uint32]string)
+	for _, id := range o.session.AllPaneIDs() {
+		h, _ := o.session.PublicPaneID(id)
+		o.structPanes[uint32(id)] = h
+	}
+	o.structFocus = o.focusedPaneID()
+}
+
+// focusedPaneID is the globally-focused pane's internal id (0 if none).
+func (o *orch) focusedPaneID() uint32 {
+	if id, ok := o.session.FocusedPane(); ok {
+		return uint32(id)
+	}
+	return 0
+}
+
+// emitStructuralEvents diffs the model's pane set + focused pane against the last
+// snapshot and emits pane_added / pane_removed / focus_changed for any change,
+// then updates the snapshot. Called at the end of every model mutation (applyModel,
+// BroadcastLayout); a no-op when nothing structural changed (a browser resize, a
+// rename, a re-focus of the same pane). Loop-goroutine only. The snapshot is kept
+// current even with no subscribers, so a later subscriber diffs from a live base.
+func (o *orch) emitStructuralEvents() {
+	cur := make(map[uint32]string, len(o.structPanes))
+	for _, id := range o.session.AllPaneIDs() {
+		pid := uint32(id)
+		h, _ := o.session.PublicPaneID(id)
+		cur[pid] = h
+		if _, existed := o.structPanes[pid]; !existed {
+			o.emitEvent(app.EventPaneAdded, pid, app.PaneRefEvent{Pane: pid, Handle: h})
+		}
+	}
+	for pid, h := range o.structPanes {
+		if _, still := cur[pid]; !still {
+			o.emitEvent(app.EventPaneRemoved, pid, app.PaneRefEvent{Pane: pid, Handle: h})
+		}
+	}
+	o.structPanes = cur
+
+	if focus := o.focusedPaneID(); focus != o.structFocus {
+		o.structFocus = focus
+		h, _ := o.session.PublicPaneID(layout.PaneID(focus))
+		o.emitEvent(app.EventFocusChanged, focus, app.PaneRefEvent{Pane: focus, Handle: h})
+	}
+}
+
 // --- app.Backend adapters (the runtime-effect seam) --------------------------
 //
 // orch implements app.Backend so the protocol-neutral app.Dispatcher can drive
@@ -647,8 +706,13 @@ func (o *orch) Area() layout.Rect { return o.area }
 // model-mutating command.
 func (o *orch) ApplyModel() { o.applyModel() }
 
-// BroadcastLayout rebroadcasts just the viewport layout (focus/rename moved).
-func (o *orch) BroadcastLayout() { o.broadcast(o.viewportLayout()) }
+// BroadcastLayout rebroadcasts just the viewport layout (focus/rename moved) and
+// emits any structural event — a focus_changed for the focus commands that route
+// here without touching the pane set (rename is a no-op diff).
+func (o *orch) BroadcastLayout() {
+	o.broadcast(o.viewportLayout())
+	o.emitStructuralEvents()
+}
 
 // BroadcastPaneTitle pushes a pane's effective title if it is on screen; else it
 // rides the chrome resend when the pane next becomes visible.

@@ -17,18 +17,27 @@ import "slices"
 // on the pane an event names.
 
 // Event names (events.subscribe). A subscription with no Events filter receives
-// all of them.
+// all of them. The first four are sourced from the terminal backend (a pane's
+// child); the last three are model-structure changes the orchestrator derives by
+// diffing its session after each mutation (split/close/focus/tab/workspace).
 const (
 	EventPaneExited = "pane_exited" // the pane's child process exited
 	EventPaneAgent  = "pane_agent"  // detected agent identity/state changed
 	EventPaneTitle  = "pane_title"  // the program set the pane's title (OSC 0/2)
 	EventPaneCwd    = "pane_cwd"    // the pane's working directory changed (OSC 7)
+
+	EventPaneAdded    = "pane_added"    // a pane entered the session (split / new tab / new workspace)
+	EventPaneRemoved  = "pane_removed"  // a pane left the session (close pane / tab / workspace)
+	EventFocusChanged = "focus_changed" // the globally-focused pane changed
 )
 
 // EventNames returns every event name events.subscribe can emit, in a stable
 // order — the vocabulary a client validates an Events filter against.
 func EventNames() []string {
-	return []string{EventPaneExited, EventPaneAgent, EventPaneTitle, EventPaneCwd}
+	return []string{
+		EventPaneExited, EventPaneAgent, EventPaneTitle, EventPaneCwd,
+		EventPaneAdded, EventPaneRemoved, EventFocusChanged,
+	}
 }
 
 // PaneExitedEvent is the payload for EventPaneExited.
@@ -55,6 +64,16 @@ type PaneTitleEvent struct {
 type PaneCwdEvent struct {
 	Pane uint32 `json:"pane"`
 	Cwd  string `json:"cwd"`
+}
+
+// PaneRefEvent is the payload for the three model-structure events
+// (EventPaneAdded / EventPaneRemoved / EventFocusChanged): they all just name a
+// pane. Pane is the internal id (as pane.list reports); Handle is its public label
+// ("w1:p3") at the moment of the event — for a removed pane, the handle it last
+// had. For focus_changed, Pane is the newly-focused pane (0 if none).
+type PaneRefEvent struct {
+	Pane   uint32 `json:"pane"`
+	Handle string `json:"handle,omitempty"`
 }
 
 // EventsSubscribeParams is the params object for events.subscribe. Both fields are

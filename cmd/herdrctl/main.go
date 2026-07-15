@@ -22,7 +22,8 @@
 //
 // Two verbs block/stream instead of returning at once: `wait <pane> <pattern>`
 // resolves when the pane's output contains the pattern (or times out), and
-// `events [pane]` streams pane events (exit/agent/title/cwd) until Ctrl-C:
+// `events [pane]` streams pane events (exit/agent/title/cwd, plus the structural
+// added/removed/focus_changed) until Ctrl-C:
 //
 //	herdrctl wait 1 "BUILD SUCCESSFUL" 120   → pane.wait_for_output (120s)
 //	herdrctl events 1                        → events.subscribe {"pane":1}

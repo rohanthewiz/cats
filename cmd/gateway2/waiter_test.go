@@ -3,10 +3,12 @@
 package main
 
 import (
+	"path/filepath"
 	"testing"
 
 	"github.com/rohanthewiz/herdr-web/internal/app"
 	"github.com/rohanthewiz/herdr-web/internal/browserproto"
+	"github.com/rohanthewiz/herdr-web/internal/layout"
 )
 
 // pane.wait_for_output waiters and control-API event subscribers both live on the
@@ -144,19 +146,37 @@ func TestWaiterFlushFails(t *testing.T) {
 	}
 }
 
-// recSub records the events a control-API subscriber is Send()t; full simulates a
-// slow/backed-up reader (Send returns false).
+// recSub records the events a control-API subscriber is Send()t (name + payload);
+// full simulates a slow/backed-up reader (Send returns false).
 type recSub struct {
 	names []string
+	datas []any
 	full  bool
 }
 
-func (r *recSub) Send(event string, _ any) bool {
+func (r *recSub) Send(event string, data any) bool {
 	if r.full {
 		return false
 	}
 	r.names = append(r.names, event)
+	r.datas = append(r.datas, data)
 	return true
+}
+
+// findRef returns the payload of the first event named name, failing if none.
+func findRef(t *testing.T, sub *recSub, name string) app.PaneRefEvent {
+	t.Helper()
+	for i, n := range sub.names {
+		if n == name {
+			ref, ok := sub.datas[i].(app.PaneRefEvent)
+			if !ok {
+				t.Fatalf("%s payload is %T, want app.PaneRefEvent", name, sub.datas[i])
+			}
+			return ref
+		}
+	}
+	t.Fatalf("no %s event emitted; got %v", name, sub.names)
+	return app.PaneRefEvent{}
 }
 
 // emitEvent honours each subscriber's pane/event filter.
@@ -191,5 +211,69 @@ func TestEmitEventDropsSlowSubscriber(t *testing.T) {
 	o.emitEvent(app.EventPaneExited, 1, app.PaneExitedEvent{Pane: 1})
 	if len(o.subs) != 0 {
 		t.Fatalf("slow subscriber should be dropped, have %d", len(o.subs))
+	}
+}
+
+// Structural events are derived by diffing the model: a split adds a pane,
+// re-focusing emits focus_changed, and a close removes it. The pre-existing pane
+// (seeded in newOrch) is never re-announced. Uses a real session over a bare orch
+// — the daemon socket never connects (sends drop), which is fine here.
+func TestStructuralEvents(t *testing.T) {
+	o, err := newOrch(filepath.Join(t.TempDir(), "s.sock"), t.TempDir())
+	if err != nil {
+		t.Fatalf("newOrch: %v", err)
+	}
+	sub := &recSub{}
+	o.subs[&ctlSubscriber{sub: sub}] = struct{}{}
+
+	initial := map[uint32]bool{}
+	for _, id := range o.session.AllPaneIDs() {
+		initial[uint32(id)] = true
+	}
+
+	// Split → pane_added for the new pane only.
+	if _, err := o.session.SplitPane(nil, layout.Horizontal); err != nil {
+		t.Fatalf("split: %v", err)
+	}
+	o.emitStructuralEvents()
+	added := findRef(t, sub, app.EventPaneAdded)
+	if initial[added.Pane] {
+		t.Fatalf("pane_added should name the new pane, got pre-existing %d", added.Pane)
+	}
+	if added.Handle == "" {
+		t.Fatalf("pane_added should carry a public handle, got empty")
+	}
+	for i, n := range sub.names {
+		if n == app.EventPaneAdded && sub.datas[i].(app.PaneRefEvent).Pane != added.Pane {
+			t.Fatalf("a pre-existing pane was re-announced: %v", sub.datas[i])
+		}
+	}
+
+	// Focus a pane other than whichever the split left focused → focus_changed.
+	var other uint32
+	cur := o.focusedPaneID()
+	for _, id := range o.session.AllPaneIDs() {
+		if uint32(id) != cur {
+			other = uint32(id)
+		}
+	}
+	sub.names, sub.datas = nil, nil
+	if err := o.session.FocusPane(layout.PaneID(other)); err != nil {
+		t.Fatalf("focus: %v", err)
+	}
+	o.emitStructuralEvents()
+	if foc := findRef(t, sub, app.EventFocusChanged); foc.Pane != other {
+		t.Fatalf("focus_changed should name %d, got %d", other, foc.Pane)
+	}
+
+	// Close the new pane → pane_removed for it (with the handle it last had).
+	sub.names, sub.datas = nil, nil
+	pid := layout.PaneID(added.Pane)
+	if _, err := o.session.ClosePane(&pid); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	o.emitStructuralEvents()
+	if rem := findRef(t, sub, app.EventPaneRemoved); rem.Pane != added.Pane || rem.Handle == "" {
+		t.Fatalf("pane_removed should name %d with a handle, got %+v", added.Pane, rem)
 	}
 }
