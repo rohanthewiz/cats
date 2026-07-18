@@ -14,6 +14,8 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strconv"
+	"strings"
 
 	"github.com/rohanthewiz/herdr-web/internal/layout"
 	"github.com/rohanthewiz/herdr-web/internal/workspace"
@@ -93,6 +95,36 @@ func (s *Session) PublicPaneID(id layout.PaneID) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// PaneByPublicID is the reverse of PublicPaneID: it resolves a public handle
+// back to the internal pane id. It accepts the two handle forms panes are given
+// in their environment (HERDR_PANE_ID): the public "w1:p3" form, and the
+// "p_<raw>" fallback that embeds the internal id directly (herdr's
+// apply_pane_env emits it when no public id is known). Reports false for a
+// handle that resolves to no live pane.
+func (s *Session) PaneByPublicID(handle string) (layout.PaneID, bool) {
+	if raw, ok := strings.CutPrefix(handle, "p_"); ok {
+		n, err := strconv.ParseUint(raw, 10, 32)
+		if err != nil {
+			return 0, false
+		}
+		id := layout.PaneID(n)
+		if _, ws := s.workspaceIndexOf(id); ws == nil {
+			return 0, false
+		}
+		return id, true
+	}
+	for _, ws := range s.workspaces {
+		for _, tab := range ws.Tabs {
+			for _, id := range tab.Layout.PaneIDs() {
+				if pub, ok := ws.PublicPaneID(id); ok && pub == handle {
+					return id, true
+				}
+			}
+		}
+	}
+	return 0, false
 }
 
 // --- Pane commands (§7) ------------------------------------------------------
@@ -269,6 +301,13 @@ func (s *Session) PaneCustomName(id layout.PaneID) (string, bool) {
 	return "", false
 }
 
+// PaneWorkspace returns the workspace owning a pane (nil when unknown) — the
+// runtime resolves per-workspace spawn cwds through it.
+func (s *Session) PaneWorkspace(id layout.PaneID) *workspace.Workspace {
+	_, ws := s.workspaceIndexOf(id)
+	return ws
+}
+
 // paneState finds a pane's viewport state across every workspace and tab.
 func (s *Session) paneState(id layout.PaneID) *workspace.PaneState {
 	for _, ws := range s.workspaces {
@@ -318,10 +357,15 @@ func (s *Session) ClosePane(target *layout.PaneID) (layout.PaneID, error) {
 // --- Tab commands (§7) — operate on the active workspace ---------------------
 
 // CreateTab appends a tab to the active workspace and switches to it. Returns
-// the new tab's public number.
+// the new tab's public number. The tab spawns in the workspace's identity cwd
+// (a worktree workspace's checkout), falling back to the session cwd.
 func (s *Session) CreateTab() (int, error) {
 	ws := s.ActiveWorkspace()
-	idx, err := ws.CreateTab(s.cwd, workspace.SpawnSpec{})
+	cwd := ws.IdentityCwd
+	if cwd == "" {
+		cwd = s.cwd
+	}
+	idx, err := ws.CreateTab(cwd, workspace.SpawnSpec{})
 	if err != nil {
 		return 0, err
 	}
@@ -376,12 +420,34 @@ func (s *Session) RenameTab(num int, name string) error {
 	return nil
 }
 
+// MoveTab moves the active workspace's tab with public number num to the
+// insertion point idx (a gap position, 0..=len: len means "to the end").
+// Reports whether the order actually changed (false = a no-op move).
+func (s *Session) MoveTab(num, insertIdx int) (bool, error) {
+	ws := s.ActiveWorkspace()
+	srcIdx, ok := s.tabIndexByNumber(ws, num)
+	if !ok {
+		return false, fmt.Errorf("unknown tab %d", num)
+	}
+	if insertIdx < 0 || insertIdx > len(ws.Tabs) {
+		return false, fmt.Errorf("bad insert index %d", insertIdx)
+	}
+	return ws.MoveTab(srcIdx, insertIdx), nil
+}
+
 // --- Workspace commands (§7) -------------------------------------------------
 
-// CreateWorkspace appends a new workspace (one tab, one pane) and makes it
-// active. Returns its public id ("w2").
+// CreateWorkspace appends a new workspace (one tab, one pane) rooted at the
+// session cwd and makes it active. Returns its public id ("w2").
 func (s *Session) CreateWorkspace() (string, error) {
-	ws, err := workspace.New(s.spawner, s.cwd, workspace.SpawnSpec{})
+	return s.CreateWorkspaceAt(s.cwd)
+}
+
+// CreateWorkspaceAt is CreateWorkspace with an explicit root directory — the
+// worktree commands open workspaces on a checkout, and the cwd becomes the
+// workspace's IdentityCwd so every pane spawned in it inherits the checkout.
+func (s *Session) CreateWorkspaceAt(cwd string) (string, error) {
+	ws, err := workspace.New(s.spawner, cwd, workspace.SpawnSpec{})
 	if err != nil {
 		return "", err
 	}
@@ -427,6 +493,40 @@ func (s *Session) RenameWorkspace(id, name string) error {
 	}
 	s.workspaces[i].SetCustomName(name)
 	return nil
+}
+
+// MoveWorkspace moves the workspace with the given public id to the insertion
+// point idx (a gap position, 0..=len: len means "to the end"). The active
+// workspace keeps its identity across the move. Reports whether the order
+// actually changed (false = a no-op move).
+func (s *Session) MoveWorkspace(id string, insertIdx int) (bool, error) {
+	srcIdx, ok := s.workspaceIndexByID(id)
+	if !ok {
+		return false, fmt.Errorf("unknown workspace %s", id)
+	}
+	if insertIdx < 0 || insertIdx > len(s.workspaces) {
+		return false, fmt.Errorf("bad insert index %d", insertIdx)
+	}
+	targetIdx := insertIdx
+	if srcIdx < insertIdx {
+		targetIdx = insertIdx - 1
+	}
+	targetIdx = min(targetIdx, len(s.workspaces)-1)
+	if srcIdx == targetIdx {
+		return false, nil
+	}
+	activeWS := s.workspaces[s.active]
+	ws := s.workspaces[srcIdx]
+	s.workspaces = append(s.workspaces[:srcIdx], s.workspaces[srcIdx+1:]...)
+	s.workspaces = append(s.workspaces[:targetIdx],
+		append([]*workspace.Workspace{ws}, s.workspaces[targetIdx:]...)...)
+	for i, w := range s.workspaces {
+		if w == activeWS {
+			s.active = i
+			break
+		}
+	}
+	return true, nil
 }
 
 // --- Internal helpers --------------------------------------------------------

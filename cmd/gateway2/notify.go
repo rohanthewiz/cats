@@ -4,6 +4,7 @@ package main
 
 import (
 	"strconv"
+	"time"
 
 	"github.com/rohanthewiz/herdr-web/internal/app"
 	"github.com/rohanthewiz/herdr-web/internal/browserproto"
@@ -20,35 +21,54 @@ import (
 // the server always sends and each client decides (herdr's rule: suppress when
 // the pane is on screen and the window is focused). Loop-goroutine only.
 
-// onPaneAgent caches a pane's agent chrome, forwards it to browsers and event
-// subscribers, and emits a notification on a notification-worthy transition.
+// onPaneAgent caches the daemon's detection result for a pane and republishes
+// the arbitrated agent state. Detection is one of two inputs — the hook-report
+// API (hooks.go) is the other — so the shared publish path below owns the
+// broadcast/notify decisions for both.
 func (o *orch) onPaneAgent(ev orchestration.PaneAgent) {
 	rt := o.panes[ev.PaneID]
 	if rt == nil {
 		return
 	}
-	prevState, prevAgent := "unknown", ""
-	if rt.agent != nil {
-		prevState, prevAgent = rt.agent.State, rt.agent.Agent
-	}
 	rt.agent = &ev
-	if o.visible[ev.PaneID] {
-		o.broadcast(browserproto.NewPaneAgent(ev.PaneID, ev.Agent, ev.State, true))
+	rt.agentAt = time.Now()
+	// A hook authority whose agent conflicts with a newly detected agent is
+	// dropped (herdr: the detector is looking at the live screen; the hook
+	// claim is stale).
+	if rt.hook != nil && ev.Agent != "" && ev.Agent != rt.hook.agent {
+		rt.hook = nil
+	}
+	o.publishAgent(rt)
+}
+
+// publishAgent forwards a pane's arbitrated agent state to browsers and event
+// subscribers, and emits a notification on a notification-worthy transition.
+// The previous *published* pair — not the raw detection — feeds the transition
+// check, so hook-driven and detection-driven changes dedupe against each other.
+func (o *orch) publishAgent(rt *paneRuntime) {
+	agent, state := rt.effectiveAgent()
+	prevState, prevAgent := rt.pubState, rt.pubAgent
+	if prevState == "" {
+		prevState = "unknown"
+	}
+	rt.pubAgent, rt.pubState = agent, state
+	if o.visible[rt.id] {
+		o.broadcast(browserproto.NewPaneAgent(rt.id, agent, state, true))
 	}
 	o.broadcast(o.agentsMsg())
-	o.emitEvent(app.EventPaneAgent, ev.PaneID, app.PaneAgentEvent{Pane: ev.PaneID, Agent: ev.Agent, State: ev.State})
+	o.emitEvent(app.EventPaneAgent, rt.id, app.PaneAgentEvent{Pane: rt.id, Agent: agent, State: state})
 
-	kind := notifyKind(prevState, prevAgent, ev.State, ev.Agent)
+	kind := notifyKind(prevState, prevAgent, state, agent)
 	if kind == "" {
 		return
 	}
-	msg := ev.Agent + " " + notifyEventText(kind)
-	n := browserproto.NewNotify(kind, msg, o.notifyContext(ev.PaneID))
-	n.Pane = ev.PaneID
-	n.Pub, _ = o.session.PublicPaneID(layout.PaneID(ev.PaneID))
+	msg := agent + " " + notifyEventText(kind)
+	n := browserproto.NewNotify(kind, msg, o.notifyContext(rt.id))
+	n.Pane = rt.id
+	n.Pub, _ = o.session.PublicPaneID(layout.PaneID(rt.id))
 	o.broadcast(n)
-	o.emitEvent(app.EventPaneNotify, ev.PaneID,
-		app.PaneNotifyEvent{Pane: ev.PaneID, Agent: ev.Agent, Kind: kind, Message: msg})
+	o.emitEvent(app.EventPaneNotify, rt.id,
+		app.PaneNotifyEvent{Pane: rt.id, Agent: agent, Kind: kind, Message: msg})
 }
 
 // notifyKind classifies an agent state transition (herdr's

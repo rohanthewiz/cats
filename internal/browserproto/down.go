@@ -29,7 +29,7 @@ type Rect [4]uint16
 type Layout struct {
 	T          Type            `json:"t"`
 	Workspaces []WorkspaceInfo `json:"workspaces"`
-	Tabs       []TabInfo       `json:"tabs"` // active workspace's tabs
+	Tabs       []TabInfo       `json:"tabs"`  // active workspace's tabs
 	Panes      []PaneRectInfo  `json:"panes"` // active tab only
 	Borders    []BorderInfo    `json:"borders"`
 }

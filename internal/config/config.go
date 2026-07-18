@@ -38,6 +38,7 @@ type Config struct {
 	Persistence Persistence `yaml:"persistence"`
 	Theme       Theme       `yaml:"theme"`
 	Keybindings Keybindings `yaml:"keybindings"`
+	Worktrees   Worktrees   `yaml:"worktrees"`
 }
 
 // Server mirrors the network/auth flags. Password is deliberately absent — a
@@ -47,6 +48,7 @@ type Server struct {
 	Addr           string `yaml:"addr"`
 	TermhostSocket string `yaml:"termhost_socket"`
 	ControlSocket  string `yaml:"control_socket"` // "" ⇒ ctlproto resolves env/default
+	HookSocket     string `yaml:"hook_socket"`    // agent hook-report API socket
 	Auth           string `yaml:"auth"`           // "password" | "none"
 	SessionTTL     string `yaml:"session_ttl"`    // a Go duration string, e.g. "24h"
 	TLS            TLS    `yaml:"tls"`
@@ -87,6 +89,13 @@ type Theme struct {
 // ("ArrowLeft", "h", "Escape", …).
 type Keybindings struct {
 	CopyMode map[string][]string `yaml:"copy_mode"`
+}
+
+// Worktrees configures the git-worktree feature (WS8 dialogs): where new
+// checkouts land. Directory may start with "~" — expanded where used, not here,
+// so the stored config stays portable.
+type Worktrees struct {
+	Directory string `yaml:"directory"`
 }
 
 // TTL parses SessionTTL into a duration.
@@ -137,12 +146,14 @@ func Default() Config {
 			Addr:           ":8421",
 			TermhostSocket: "/tmp/herdr-termhost.sock",
 			ControlSocket:  "",
+			HookSocket:     "/tmp/herdr-hooks.sock",
 			Auth:           "password",
 			SessionTTL:     "24h",
 		},
 		Persistence: Persistence{Enabled: true, HistoryLines: 2000},
 		Theme:       Theme{Colors: cloneStrMap(defaultColors), Font: defaultFont},
 		Keybindings: Keybindings{CopyMode: cloneKeyMap(defaultCopyMode)},
+		Worktrees:   Worktrees{Directory: "~/.herdr/worktrees"},
 	}
 }
 
@@ -196,6 +207,29 @@ func parse(data []byte) (Config, error) {
 	return cfg, nil
 }
 
+// --- saving ------------------------------------------------------------------
+
+// Save writes cfg as YAML to path, creating parent directories. The Config
+// struct is the whole schema, so marshalling it writes the complete file; any
+// comments in a hand-written config are lost on the first save (accepted — the
+// settings modal owns the file from then on). Callers validate first.
+func Save(path string, cfg Config) error {
+	if path == "" {
+		return errors.New("save config: empty path")
+	}
+	data, err := yaml.Marshal(cfg)
+	if err != nil {
+		return fmt.Errorf("marshal config: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("save config %s: %w", path, err)
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		return fmt.Errorf("save config %s: %w", path, err)
+	}
+	return nil
+}
+
 // Validate checks the enum/duration fields and the keybinding action names so a
 // bad config fails loudly (at startup or on reload) instead of silently.
 func (c Config) Validate() error {
@@ -235,13 +269,14 @@ func resolvePath(override string) (path string, explicit bool) {
 	if v := os.Getenv(EnvVar); v != "" {
 		return v, true
 	}
-	return defaultPath(), false
+	return DefaultPath(), false
 }
 
-// defaultPath is $XDG_CONFIG_HOME/herdr/config.yaml, falling back to
+// DefaultPath is $XDG_CONFIG_HOME/herdr/config.yaml, falling back to
 // ~/.config/herdr/config.yaml (the conventional location for a dev CLI tool, on
 // macOS too). Returns "" if neither the env var nor a home dir is available.
-func defaultPath() string {
+// Exported so config.set can create the file when no config was in use yet.
+func DefaultPath() string {
 	dir := os.Getenv("XDG_CONFIG_HOME")
 	if dir == "" {
 		home, err := os.UserHomeDir()

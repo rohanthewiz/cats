@@ -31,6 +31,7 @@
 //
 //	gateway2 [--addr :8421] [--socket /tmp/herdr-termhost.sock] \
 //	         [--control-socket /tmp/herdr-control.sock] \
+//	         [--hook-socket /tmp/herdr-hooks.sock] \
 //	         [--auth password|none] [--password SECRET] [--session-ttl 24h] \
 //	         [--tls] [--tls-cert cert.pem] [--tls-key key.pem] \
 //	         [--persist=false] [--state-dir DIR]
@@ -64,6 +65,7 @@ import (
 	"github.com/rohanthewiz/herdr-web/internal/gwauth"
 	"github.com/rohanthewiz/herdr-web/internal/gwtls"
 	"github.com/rohanthewiz/herdr-web/internal/persist"
+	"github.com/rohanthewiz/herdr-web/internal/worktree"
 )
 
 //go:embed web/index.html
@@ -76,6 +78,8 @@ func main() {
 	socket := flag.String("socket", "/tmp/herdr-termhost.sock", "termhost daemon socket path")
 	controlSocket := flag.String("control-socket", "",
 		"local control-API socket path (env "+ctlproto.SocketEnvVar+"; default "+ctlproto.DefaultSocket+")")
+	hookSocket := flag.String("hook-socket", "",
+		"agent hook-report API socket path (default "+defaultHookSocket+`; "none" disables)`)
 	authMode := flag.String("auth", "password", `auth mode: "password" (login + session cookie) or "none"`)
 	password := flag.String("password", "", "shared access password/token (env HERDR_PASSWORD; generated if unset)")
 	sessionTTL := flag.Duration("session-ttl", 24*time.Hour, "session cookie lifetime")
@@ -109,6 +113,12 @@ func main() {
 	}
 	if set["control-socket"] {
 		eff.ControlSocket = *controlSocket
+	}
+	if set["hook-socket"] {
+		eff.HookSocket = *hookSocket
+	}
+	if eff.HookSocket == "none" {
+		eff.HookSocket = ""
 	}
 	if set["auth"] {
 		eff.Auth = *authMode
@@ -145,8 +155,11 @@ func main() {
 	}
 	// Wire the config-driven served page: baseHTML + cfgPath let server.reload_config
 	// re-render it; the initial render is stored for the "/" handler to serve.
+	// o.cfg feeds config.get/config.set; the worktree root anchors worktree.create.
 	o.baseHTML = indexHTML
 	o.cfgPath = cfgPath
+	o.cfg = cfg
+	o.worktreeDir = worktree.ExpandTilde(cfg.Worktrees.Directory)
 	initialPage := renderPage(indexHTML, cfg)
 	o.page.Store(&initialPage)
 	if cfgPath != "" {
@@ -162,6 +175,17 @@ func main() {
 		controlCleanup = func() {}
 	}
 
+	// Hook-report API: installed agent integrations (herdrctl integration
+	// install) report state/session transitions here. o.hookSocket must be set
+	// before the loop starts — createPane injects it into every pane's env.
+	o.hookSocket = eff.HookSocket
+	hooksCleanup, err := serveHooks(o, eff.HookSocket)
+	if err != nil {
+		log.Printf("gateway2: hook-report API disabled: %v", err)
+		o.hookSocket = "" // don't point panes at a socket nobody serves
+		hooksCleanup = func() {}
+	}
+
 	// Process-exit hook, fired by orch.Shutdown (server.stop command or a
 	// SIGINT/SIGTERM) after the state save + final capture: rweb has no graceful
 	// shutdown, so exit after a short grace period that lets the final
@@ -170,6 +194,7 @@ func main() {
 	o.stop = func() {
 		log.Printf("gateway2: shutting down — session state saved; termhost daemon survives")
 		controlCleanup()
+		hooksCleanup()
 		time.AfterFunc(250*time.Millisecond, func() { os.Exit(0) })
 	}
 

@@ -306,7 +306,7 @@ func TestFocusLastPane(t *testing.T) {
 	}
 
 	// Closing the previous pane invalidates the toggle target.
-	s.FocusPane(a)       // focus a (prev=b)
+	s.FocusPane(a) // focus a (prev=b)
 	if _, err := s.ClosePane(&b); err != nil {
 		t.Fatalf("ClosePane: %v", err)
 	}
@@ -523,5 +523,105 @@ func TestPublicPaneIDAcrossWorkspaces(t *testing.T) {
 	pub2, ok2 := s.PublicPaneID(p2)
 	if !ok1 || !ok2 || pub1 == "" || pub2 == "" || pub1 == pub2 {
 		t.Errorf("public ids: %q/%v %q/%v (want two distinct non-empty)", pub1, ok1, pub2, ok2)
+	}
+}
+
+func TestMoveTab(t *testing.T) {
+	s := newTestSession(t)
+	ws := s.ActiveWorkspace()
+	for i := 0; i < 2; i++ {
+		if _, err := s.CreateTab(); err != nil {
+			t.Fatalf("CreateTab: %v", err)
+		}
+	}
+	nums := func() []int {
+		var ns []int
+		for _, tab := range ws.Tabs {
+			ns = append(ns, tab.Number)
+		}
+		return ns
+	}
+	// Tabs 1,2,3; active is 3 (last created). Move tab 1 to the end.
+	moved, err := s.MoveTab(1, 3)
+	if err != nil || !moved {
+		t.Fatalf("MoveTab(1,3) = %v, %v; want moved", moved, err)
+	}
+	if got := nums(); got[0] != 2 || got[1] != 3 || got[2] != 1 {
+		t.Errorf("order after move = %v, want [2 3 1]", got)
+	}
+	if ws.ActiveTab().Number != 3 {
+		t.Errorf("active tab = %d, want 3 (identity preserved)", ws.ActiveTab().Number)
+	}
+	// A move landing where it started is a no-op.
+	if moved, err = s.MoveTab(1, 3); err != nil || moved {
+		t.Errorf("no-op MoveTab = %v, %v; want false, nil", moved, err)
+	}
+	if _, err := s.MoveTab(99, 0); err == nil {
+		t.Error("unknown tab number should error")
+	}
+	if _, err := s.MoveTab(1, 4); err == nil {
+		t.Error("out-of-range insert index should error")
+	}
+}
+
+func TestMoveWorkspace(t *testing.T) {
+	s := newTestSession(t)
+	for i := 0; i < 2; i++ {
+		if _, err := s.CreateWorkspace(); err != nil {
+			t.Fatalf("CreateWorkspace: %v", err)
+		}
+	}
+	ids := func() []string {
+		var out []string
+		for _, ws := range s.Workspaces() {
+			out = append(out, ws.ID)
+		}
+		return out
+	}
+	start := ids() // [w1 w2 w3], active = w3
+	activeID := s.ActiveWorkspace().ID
+
+	// Move the first workspace to the end.
+	moved, err := s.MoveWorkspace(start[0], 3)
+	if err != nil || !moved {
+		t.Fatalf("MoveWorkspace = %v, %v; want moved", moved, err)
+	}
+	if got := ids(); got[0] != start[1] || got[1] != start[2] || got[2] != start[0] {
+		t.Errorf("order after move = %v, want [%s %s %s]", got, start[1], start[2], start[0])
+	}
+	if s.ActiveWorkspace().ID != activeID {
+		t.Errorf("active workspace = %s, want %s (identity preserved)", s.ActiveWorkspace().ID, activeID)
+	}
+	// No-op move reports false.
+	if moved, err = s.MoveWorkspace(start[0], 3); err != nil || moved {
+		t.Errorf("no-op MoveWorkspace = %v, %v; want false, nil", moved, err)
+	}
+	if _, err := s.MoveWorkspace("nope", 0); err == nil {
+		t.Error("unknown workspace id should error")
+	}
+	if _, err := s.MoveWorkspace(start[0], 4); err == nil {
+		t.Error("out-of-range insert index should error")
+	}
+}
+
+func TestPaneByPublicID(t *testing.T) {
+	s := newTestSession(t)
+	id, _ := s.FocusedPane()
+	pub, _ := s.PublicPaneID(id)
+
+	if got, ok := s.PaneByPublicID(pub); !ok || got != id {
+		t.Errorf("PaneByPublicID(%q) = %v/%v, want %d", pub, got, ok, id)
+	}
+	if got, ok := s.PaneByPublicID(fmt.Sprintf("p_%d", id)); !ok || got != id {
+		t.Errorf("fallback form = %v/%v, want %d", got, ok, id)
+	}
+	if _, ok := s.PaneByPublicID("w9:pz"); ok {
+		t.Error("unknown public handle should not resolve")
+	}
+	if _, ok := s.PaneByPublicID("p_9999"); ok {
+		t.Error("fallback form for a dead pane should not resolve")
+	}
+	if _, ok := s.PaneByPublicID("p_junk"); ok {
+		t.Error("malformed fallback should not resolve")
 	}
 }

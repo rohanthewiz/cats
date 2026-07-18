@@ -22,18 +22,26 @@ var errScroll = errors.New("unknown pane 7")
 // fakeBackend records the runtime effects the dispatcher drives and returns
 // canned answers for the gating queries.
 type fakeBackend struct {
-	log         *[]string
-	area        layout.Rect
-	paneExists  bool
-	daemonUp    bool
-	scrollErr   error
-	reloadErr   error
-	lastRead    Responder
-	lastCapture Responder
-	lastWait    Responder
-	lastWaitP   WaitForOutputParams
-	lastScroll  [2]int
-	lastTitle   uint32
+	log          *[]string
+	area         layout.Rect
+	paneExists   bool
+	daemonUp     bool
+	scrollErr    error
+	reloadErr    error
+	lastRead     Responder
+	lastCapture  Responder
+	lastWait     Responder
+	lastWaitP    WaitForOutputParams
+	lastScroll   [2]int
+	lastTitle    uint32
+	lastWtList   Responder
+	lastWtCreate Responder
+	lastWtCreP   WorktreeCreateParams
+	lastWtOpen   Responder
+	lastWtOpenP  WorktreeOpenParams
+	lastWtRemove Responder
+	lastWtRemP   WorktreeRemoveParams
+	lastCfgSetP  ConfigSetParams
 }
 
 func (b *fakeBackend) rec(s string)                { *b.log = append(*b.log, s) }
@@ -60,6 +68,31 @@ func (b *fakeBackend) StartWaitForOutput(r Responder, p WaitForOutputParams) {
 	b.rec("startWait")
 	b.lastWait = r
 	b.lastWaitP = p
+}
+func (b *fakeBackend) StartWorktreeList(r Responder, _ WorktreeListParams) {
+	b.rec("wtList")
+	b.lastWtList = r
+}
+func (b *fakeBackend) StartWorktreeCreate(r Responder, p WorktreeCreateParams) {
+	b.rec("wtCreate")
+	b.lastWtCreate = r
+	b.lastWtCreP = p
+}
+func (b *fakeBackend) StartWorktreeOpen(r Responder, p WorktreeOpenParams) {
+	b.rec("wtOpen")
+	b.lastWtOpen = r
+	b.lastWtOpenP = p
+}
+func (b *fakeBackend) StartWorktreeRemove(r Responder, p WorktreeRemoveParams) {
+	b.rec("wtRemove")
+	b.lastWtRemove = r
+	b.lastWtRemP = p
+}
+func (b *fakeBackend) ConfigGet(r Responder) { b.rec("cfgGet"); r.OK(ConfigGetResult{Path: "/cfg"}) }
+func (b *fakeBackend) ConfigSet(r Responder, p ConfigSetParams) {
+	b.rec("cfgSet")
+	b.lastCfgSetP = p
+	r.OK(nil)
 }
 
 // fakeResponder records the terminal reply (and its data), writing "ok"/"fail" to
@@ -464,6 +497,115 @@ func TestWaitForOutputMatcher(t *testing.T) {
 	}
 	if _, err := (WaitForOutputParams{Pattern: "(", Regex: true}).Matcher(); err == nil {
 		t.Fatalf("bad regex should error")
+	}
+}
+
+// --- worktree.* / config.* ----------------------------------------------------
+
+// worktree.list is result-only: with no reply channel it short-circuits before
+// starting the git round-trip; with one it forwards the caller's responder and
+// does not resolve synchronously.
+func TestDispatchWorktreeList(t *testing.T) {
+	silent := newCmdHarness(t)
+	r := &fakeResponder{log: silent.log, wants: false}
+	silent.d.Dispatch(CmdWorktreeList, noParams(), r)
+	if len(*silent.log) != 0 || silent.b.lastWtList != nil {
+		t.Fatalf("id-less worktree.list should do nothing, log=%v", *silent.log)
+	}
+
+	h := newCmdHarness(t)
+	rr := h.resp()
+	h.d.Dispatch(CmdWorktreeList, noParams(), rr)
+	if rr.okCall || rr.failCall {
+		t.Fatalf("worktree.list must not resolve synchronously")
+	}
+	if got := *h.log; len(got) != 1 || got[0] != "wtList" || h.b.lastWtList != Responder(rr) {
+		t.Fatalf("worktree.list effects = %v", got)
+	}
+}
+
+// worktree.create forwards its params (all optional — the backend defaults the
+// branch and path) and resolves asynchronously.
+func TestDispatchWorktreeCreateForwards(t *testing.T) {
+	h := newCmdHarness(t)
+	r := h.resp()
+	p := WorktreeCreateParams{Branch: "worktree/brave-river-0001", Path: "/w/repo/brave-river"}
+
+	h.d.Dispatch(CmdWorktreeCreate, params(t, p), r)
+
+	if r.okCall || r.failCall {
+		t.Fatalf("worktree.create must not resolve synchronously")
+	}
+	if h.b.lastWtCreate != Responder(r) || h.b.lastWtCreP != p {
+		t.Fatalf("worktree.create not forwarded: %+v", h.b.lastWtCreP)
+	}
+}
+
+// The required-field gates: worktree.open needs a path, worktree.remove a
+// workspace id — both fail before reaching the backend.
+func TestDispatchWorktreeRequiredFields(t *testing.T) {
+	for _, tc := range []struct {
+		name, cmd, want string
+	}{
+		{"open", CmdWorktreeOpen, "path is required"},
+		{"remove", CmdWorktreeRemove, "workspace is required"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newCmdHarness(t)
+			r := h.resp()
+			h.d.Dispatch(tc.cmd, noParams(), r)
+			if !r.failCall || !strings.Contains(r.errMsg, tc.want) {
+				t.Fatalf("fail=%v msg=%q, want %q", r.failCall, r.errMsg, tc.want)
+			}
+			if h.b.lastWtOpen != nil || h.b.lastWtRemove != nil {
+				t.Fatalf("missing required field must not reach the backend")
+			}
+		})
+	}
+}
+
+// worktree.open / worktree.remove forward their params to the backend.
+func TestDispatchWorktreeOpenRemoveForward(t *testing.T) {
+	h := newCmdHarness(t)
+	r := h.resp()
+	h.d.Dispatch(CmdWorktreeOpen, params(t, WorktreeOpenParams{Path: "/w/repo/x"}), r)
+	if h.b.lastWtOpen != Responder(r) || h.b.lastWtOpenP.Path != "/w/repo/x" {
+		t.Fatalf("worktree.open not forwarded: %+v", h.b.lastWtOpenP)
+	}
+
+	h = newCmdHarness(t)
+	r = h.resp()
+	h.d.Dispatch(CmdWorktreeRemove, params(t, WorktreeRemoveParams{Workspace: "w2", Force: true}), r)
+	if h.b.lastWtRemove != Responder(r) || h.b.lastWtRemP != (WorktreeRemoveParams{Workspace: "w2", Force: true}) {
+		t.Fatalf("worktree.remove not forwarded: %+v", h.b.lastWtRemP)
+	}
+}
+
+// config.get is result-only (short-circuits with no reply channel); config.set
+// forwards the decoded sections.
+func TestDispatchConfig(t *testing.T) {
+	silent := newCmdHarness(t)
+	r := &fakeResponder{log: silent.log, wants: false}
+	silent.d.Dispatch(CmdConfigGet, noParams(), r)
+	if len(*silent.log) != 0 {
+		t.Fatalf("id-less config.get should do nothing, log=%v", *silent.log)
+	}
+
+	h := newCmdHarness(t)
+	rr := h.resp()
+	h.d.Dispatch(CmdConfigGet, noParams(), rr)
+	if !rr.okCall {
+		t.Fatalf("config.get should resolve through the backend")
+	}
+	if res, ok := rr.data.(ConfigGetResult); !ok || res.Path != "/cfg" {
+		t.Fatalf("config.get data = %#v", rr.data)
+	}
+
+	h = newCmdHarness(t)
+	rr = h.resp()
+	h.d.Dispatch(CmdConfigSet, params(t, ConfigSetParams{Theme: &ConfigTheme{Font: "monospace"}}), rr)
+	if !rr.okCall || h.b.lastCfgSetP.Theme == nil || h.b.lastCfgSetP.Theme.Font != "monospace" {
+		t.Fatalf("config.set not forwarded: %+v", h.b.lastCfgSetP)
 	}
 }
 

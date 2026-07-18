@@ -51,6 +51,23 @@ type Backend interface {
 	// screen).
 	StartWaitForOutput(r Responder, p WaitForOutputParams)
 
+	// StartWorktreeList / StartWorktreeCreate / StartWorktreeOpen /
+	// StartWorktreeRemove run the git-worktree commands (WS8 dialogs). The git
+	// subprocess work happens off the loop goroutine and r resolves later;
+	// worktree.open needs no git and may resolve synchronously. The backend owns
+	// pane-cwd resolution, the worktree root, and the workspace effects
+	// (create/focus/close + reconcile).
+	StartWorktreeList(r Responder, p WorktreeListParams)
+	StartWorktreeCreate(r Responder, p WorktreeCreateParams)
+	StartWorktreeOpen(r Responder, p WorktreeOpenParams)
+	StartWorktreeRemove(r Responder, p WorktreeRemoveParams)
+
+	// ConfigGet resolves the live configuration snapshot (config.get); ConfigSet
+	// validates, persists, and applies a change (config.set). Both resolve r
+	// synchronously — the config file is small and local.
+	ConfigGet(r Responder)
+	ConfigSet(r Responder, p ConfigSetParams)
+
 	// ReloadConfig acknowledges a config reload (a no-op today).
 	ReloadConfig() error
 	// Shutdown notifies observers the server is going away and triggers the quit.
@@ -385,6 +402,22 @@ func (d *Dispatcher) Dispatch(name string, dec ParamDecoder, r Responder) {
 		d.backend.BroadcastLayout()
 		r.OK(nil)
 
+	case CmdTabMove:
+		var p MoveTabParams
+		if err := dec.Decode(&p); err != nil {
+			bad(err)
+			return
+		}
+		moved, err := d.session.MoveTab(p.Num, p.Index)
+		if err != nil {
+			r.Fail(err.Error())
+			return
+		}
+		if moved {
+			d.backend.BroadcastLayout() // order changed; pane set unchanged
+		}
+		r.OK(nil)
+
 	case CmdWorkspaceCreate:
 		if _, err := d.session.CreateWorkspace(); err != nil {
 			r.Fail(err.Error())
@@ -433,6 +466,22 @@ func (d *Dispatcher) Dispatch(name string, dec ParamDecoder, r Responder) {
 		d.backend.BroadcastLayout()
 		r.OK(nil)
 
+	case CmdWorkspaceMove:
+		var p MoveWorkspaceParams
+		if err := dec.Decode(&p); err != nil {
+			bad(err)
+			return
+		}
+		moved, err := d.session.MoveWorkspace(p.ID, p.Index)
+		if err != nil {
+			r.Fail(err.Error())
+			return
+		}
+		if moved {
+			d.backend.BroadcastLayout() // order changed; pane set unchanged
+		}
+		r.OK(nil)
+
 	case CmdAgentFocus:
 		var p PaneParams
 		if err := dec.Decode(&p); err != nil {
@@ -447,6 +496,63 @@ func (d *Dispatcher) Dispatch(name string, dec ParamDecoder, r Responder) {
 		}
 		d.backend.ApplyModel() // viewport may have changed (different workspace/tab)
 		r.OK(nil)
+
+	case CmdWorktreeList:
+		var p WorktreeListParams
+		if err := decodeOptional(dec, &p); err != nil {
+			bad(err)
+			return
+		}
+		if !r.WantsReply() {
+			return // list yields only a result; with no reply channel there's nowhere to send it
+		}
+		d.backend.StartWorktreeList(r, p) // async: git list resolves r later
+
+	case CmdWorktreeCreate:
+		var p WorktreeCreateParams
+		if err := decodeOptional(dec, &p); err != nil {
+			bad(err)
+			return
+		}
+		d.backend.StartWorktreeCreate(r, p) // async: git add + workspace create resolve r later
+
+	case CmdWorktreeOpen:
+		var p WorktreeOpenParams
+		if err := decodeOptional(dec, &p); err != nil {
+			bad(err)
+			return
+		}
+		if p.Path == "" {
+			r.Fail("worktree.open: path is required")
+			return
+		}
+		d.backend.StartWorktreeOpen(r, p)
+
+	case CmdWorktreeRemove:
+		var p WorktreeRemoveParams
+		if err := decodeOptional(dec, &p); err != nil {
+			bad(err)
+			return
+		}
+		if p.Workspace == "" {
+			r.Fail("worktree.remove: workspace is required")
+			return
+		}
+		d.backend.StartWorktreeRemove(r, p) // async: git remove + workspace close resolve r later
+
+	case CmdConfigGet:
+		if !r.WantsReply() {
+			return // config.get yields only a result
+		}
+		d.backend.ConfigGet(r)
+
+	case CmdConfigSet:
+		var p ConfigSetParams
+		if err := decodeOptional(dec, &p); err != nil {
+			bad(err)
+			return
+		}
+		d.backend.ConfigSet(r, p)
 
 	case CmdServerReloadConfig:
 		if err := d.backend.ReloadConfig(); err != nil {

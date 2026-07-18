@@ -278,6 +278,7 @@ func (d *daemon) dispatch(mt orchestration.MessageType, payload []byte) {
 			}
 			o.emitEvent(app.EventPaneExited, ev.PaneID, app.PaneExitedEvent{Pane: ev.PaneID, ExitCode: ev.ExitCode})
 			o.resolveWaitersOnExit(ev.PaneID) // no more output will come
+			o.clearHookOnExit(rt)             // a late hook packet must not resurrect a dead agent
 		})
 
 	case orchestration.MsgPaneSelection:

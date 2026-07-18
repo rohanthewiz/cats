@@ -24,13 +24,13 @@ type PaneSnapshot struct {
 // TabSnapshot is a tab's durable state: identity, the layout tree with its
 // split ratios, focus, zoom, and per-pane state.
 type TabSnapshot struct {
-	Number     int                                `json:"number"`
-	CustomName string                             `json:"custom_name,omitempty"`
-	RootPane   layout.PaneID                      `json:"root_pane"`
-	Focus      layout.PaneID                      `json:"focus"`
-	Zoomed     bool                               `json:"zoomed,omitempty"`
-	Tree       *layout.SavedNode                  `json:"tree"`
-	Panes      map[layout.PaneID]PaneSnapshot     `json:"panes"`
+	Number     int                            `json:"number"`
+	CustomName string                         `json:"custom_name,omitempty"`
+	RootPane   layout.PaneID                  `json:"root_pane"`
+	Focus      layout.PaneID                  `json:"focus"`
+	Zoomed     bool                           `json:"zoomed,omitempty"`
+	Tree       *layout.SavedNode              `json:"tree"`
+	Panes      map[layout.PaneID]PaneSnapshot `json:"panes"`
 }
 
 // Snapshot is a workspace's durable state.
@@ -163,8 +163,8 @@ func restoreTab(s PaneSpawner, wsnap Snapshot, snap TabSnapshot) (*Tab, error) {
 	for _, id := range ids {
 		ps := snap.Panes[id]
 		spec := SpawnSpec{
-			PaneID: id,
-			Cwd:    wsnap.IdentityCwd,
+			PaneID:       id,
+			Cwd:          wsnap.IdentityCwd,
 			PublicPaneID: publicPaneIDForNumber(wsnap.ID, wsnap.PaneNumbers[id]),
 		}
 		terminalID, err := s.Spawn(spec)

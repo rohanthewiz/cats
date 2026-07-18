@@ -43,6 +43,19 @@ type paneRuntime struct {
 	cols   uint16
 	rows   uint16
 	exited *int
+	// --- hook-report ingestion (hooks.go), all loop-goroutine only ---
+	// agentAt stamps when the daemon's detection last reported (hook-vs-detection
+	// recency in effectiveAgent). hook is the live hook authority; agentSession
+	// the resumable session identity; hookSeqs/hookSuppressed the per-source
+	// idempotency and release-suppression state. pubAgent/pubState are the last
+	// *published* arbitrated pair — the transition baseline for notifications.
+	agentAt        time.Time
+	hook           *hookAuthority
+	agentSession   *agentSessionRef
+	hookSeqs       map[string]uint64
+	hookSuppressed map[string]hookSuppression
+	pubAgent       string
+	pubState       string
 	// created reports whether the daemon holds this pane's PTY. reconcile
 	// resets it from the daemon's surviving-pane set on every (re)connect.
 	created bool
@@ -102,6 +115,10 @@ type orch struct {
 	// pending browser writes, then exits — the persistent termhost daemon is a
 	// separate process and survives. nil in tests, where stop is a no-op.
 	stop func()
+	// hookSocket is where the hook-report API listens (hooks.go); createPane
+	// injects it into every pane's environment so installed agent hooks can
+	// dial back. Wired by main before the loop starts; "" disables injection.
+	hookSocket string
 	// baseHTML is the un-injected served page; cfgPath is the config file to
 	// re-read on server.reload_config; page holds the config-injected page the
 	// HTTP handler serves. The handler (rweb goroutine) and ReloadConfig (loop
@@ -110,6 +127,12 @@ type orch struct {
 	baseHTML []byte
 	cfgPath  string
 	page     atomic.Pointer[[]byte]
+	// cfg is the loaded config-file state (defaults + file, not flag overrides —
+	// config.set marshals it back to disk, so flag values must never leak in).
+	// worktreeDir is the tilde-expanded worktrees root new checkouts land under.
+	// Both wired by main; loop-goroutine only after the loop starts.
+	cfg         config.Config
+	worktreeDir string
 	// --- session persistence (WS3), wired by main; zero values disable it ---
 	// sessionPath/historyPath are the state files ("" ⇒ persistence off). seeds
 	// and restoredCwds are loaded at startup and consumed by createPane for
@@ -343,8 +366,13 @@ func (o *orch) syncDaemon() {
 // daemon.send and retried by reconcile, which must still find them.
 func (o *orch) createPane(rt *paneRuntime) {
 	cp := orchestration.NewCreatePane(rt.id, rt.cols, rt.rows)
-	cp.Cwd = o.cwd
+	cp.Cwd = o.paneCwd(rt.id)
 	cp.CellWidthPx, cp.CellHeightPx = o.cellW, o.cellH
+	// Arm the integration hooks: every pane learns the hook-report socket and
+	// its own public handle (WS7's herdrctl installers plant hooks that read
+	// exactly these variables).
+	pub, _ := o.session.PublicPaneID(layout.PaneID(rt.id))
+	cp.Env = paneEnvMap(o.hookSocket, rt.id, pub)
 	if o.daemon.connected() {
 		if cwd, ok := o.restoredCwds[rt.id]; ok {
 			cp.Cwd = cwd
@@ -357,6 +385,16 @@ func (o *orch) createPane(rt *paneRuntime) {
 	}
 	o.daemon.send(cp)
 	rt.created = true
+}
+
+// paneCwd is the directory a pane's PTY spawns in: its owning workspace's
+// identity cwd (set for worktree-checkout workspaces) when present, else the
+// process cwd. A restored pane's saved cwd still overrides this in createPane.
+func (o *orch) paneCwd(pid uint32) string {
+	if ws := o.session.PaneWorkspace(layout.PaneID(pid)); ws != nil && ws.IdentityCwd != "" {
+		return ws.IdentityCwd
+	}
+	return o.cwd
 }
 
 // refreshViewport recomputes the visible-pane set and returns the panes that
@@ -412,13 +450,17 @@ func (o *orch) agentsMsg() browserproto.Agents {
 		for _, tab := range ws.Tabs {
 			for _, id := range tab.Layout.PaneIDs() {
 				rt := o.panes[uint32(id)]
-				if rt == nil || rt.agent == nil || rt.agent.Agent == "" {
+				if rt == nil {
+					continue
+				}
+				agent, state := rt.effectiveAgent()
+				if agent == "" {
 					continue
 				}
 				pub, _ := o.session.PublicPaneID(id)
 				items = append(items, browserproto.AgentItem{
 					Pane: rt.id, Pub: pub, Workspace: ws.ID,
-					Agent: rt.agent.Agent, State: rt.agent.State, Seen: true,
+					Agent: agent, State: state, Seen: true,
 				})
 			}
 		}
@@ -860,6 +902,7 @@ func (o *orch) ReloadConfig() error {
 		log.Printf("gateway2: server.reload_config failed: %v", err)
 		return err
 	}
+	o.cfg = cfg // keep config.get / config.set working from the reloaded state
 	page := renderPage(o.baseHTML, cfg)
 	o.page.Store(&page)
 	log.Printf("gateway2: reloaded config from %s — theme + keybindings apply to new page loads; server settings need a restart", path)
@@ -954,8 +997,8 @@ func (o *orch) broadcastPaneChrome(pid uint32) {
 	if rt.cwd != "" {
 		o.broadcast(browserproto.NewPaneCwd(pid, rt.cwd))
 	}
-	if rt.agent != nil {
-		o.broadcast(browserproto.NewPaneAgent(pid, rt.agent.Agent, rt.agent.State, true))
+	if agent, state := rt.effectiveAgent(); agent != "" {
+		o.broadcast(browserproto.NewPaneAgent(pid, agent, state, true))
 	}
 	if rt.exited != nil {
 		o.broadcast(browserproto.NewPaneExited(pid, *rt.exited))
@@ -1097,8 +1140,8 @@ func (o *orch) registerConn(c *client, init *browserproto.Init) {
 		if rt.cwd != "" {
 			o.send(c, browserproto.NewPaneCwd(pid, rt.cwd))
 		}
-		if rt.agent != nil {
-			o.send(c, browserproto.NewPaneAgent(pid, rt.agent.Agent, rt.agent.State, true))
+		if agent, state := rt.effectiveAgent(); agent != "" {
+			o.send(c, browserproto.NewPaneAgent(pid, agent, state, true))
 		}
 		if rt.exited != nil {
 			o.send(c, browserproto.NewPaneExited(pid, *rt.exited))

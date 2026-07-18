@@ -38,13 +38,27 @@ const (
 	CmdTabClose           = "tab.close"
 	CmdTabFocus           = "tab.focus"
 	CmdTabRename          = "tab.rename"
+	CmdTabMove            = "tab.move"
 	CmdWorkspaceCreate    = "workspace.create"
 	CmdWorkspaceClose     = "workspace.close"
 	CmdWorkspaceFocus     = "workspace.focus"
 	CmdWorkspaceRename    = "workspace.rename"
+	CmdWorkspaceMove      = "workspace.move"
 	CmdAgentFocus         = "agent.focus"
 	CmdServerReloadConfig = "server.reload_config"
 	CmdServerStop         = "server.stop"
+
+	// Git-worktree commands (WS8 dialogs): list/create/open/remove checkouts
+	// anchored on a pane's repo. The git work runs off-loop (Backend Start*).
+	CmdWorktreeList   = "worktree.list"
+	CmdWorktreeCreate = "worktree.create"
+	CmdWorktreeOpen   = "worktree.open"
+	CmdWorktreeRemove = "worktree.remove"
+
+	// Config commands (settings modal): read the live configuration and persist
+	// the live-appliable sections (theme, copy-mode keys).
+	CmdConfigGet = "config.get"
+	CmdConfigSet = "config.set"
 
 	// Read-only query commands (§7): they return a snapshot of session state
 	// and mutate nothing, so the dispatcher answers them straight from the
@@ -65,9 +79,12 @@ func CommandNames() []string {
 		CmdPaneSplit, CmdPaneClose, CmdPaneFocus, CmdPaneFocusDirection,
 		CmdPaneCycle, CmdPaneLast, CmdPaneSwap, CmdPaneZoom, CmdPaneRename,
 		CmdPaneResizeBorder, CmdScroll, CmdRead, CmdCapture, CmdWaitForOutput,
-		CmdTabCreate, CmdTabClose, CmdTabFocus, CmdTabRename,
+		CmdTabCreate, CmdTabClose, CmdTabFocus, CmdTabRename, CmdTabMove,
 		CmdWorkspaceCreate, CmdWorkspaceClose, CmdWorkspaceFocus, CmdWorkspaceRename,
+		CmdWorkspaceMove,
 		CmdAgentFocus, CmdServerReloadConfig, CmdServerStop,
+		CmdWorktreeList, CmdWorktreeCreate, CmdWorktreeOpen, CmdWorktreeRemove,
+		CmdConfigGet, CmdConfigSet,
 		CmdSessionGet, CmdWorkspaceList, CmdTabList, CmdPaneList, CmdPaneGet,
 	}
 }
@@ -319,6 +336,21 @@ type RenameTabParams struct {
 	Name string `json:"name"`
 }
 
+// MoveTabParams: tab.move — reorder the active workspace's tabs. Index is an
+// insertion point (a gap position 0..=len; len means "to the end"), the same
+// convention the drag-reorder UI computes from a drop location.
+type MoveTabParams struct {
+	Num   int `json:"num"`
+	Index int `json:"index"`
+}
+
+// MoveWorkspaceParams: workspace.move — reorder the workspace list. Index is an
+// insertion point (a gap position 0..=len).
+type MoveWorkspaceParams struct {
+	ID    string `json:"id"`
+	Index int    `json:"index"`
+}
+
 // WorkspaceParams: workspace.focus, workspace.close.
 type WorkspaceParams struct {
 	ID string `json:"id"` // public workspace id, e.g. "w1"
@@ -392,6 +424,112 @@ type PaneInfo struct {
 // PaneListResult is CmdResult.Data for pane.list.
 type PaneListResult struct {
 	Panes []PaneInfo `json:"panes"`
+}
+
+// --- Worktree params & results (§7, WS8 dialogs) ------------------------------
+
+// WorktreeListParams: worktree.list. Pane nil = the focused pane; the repo is
+// resolved from that pane's live cwd (Backend supplies pane cwds).
+type WorktreeListParams struct {
+	Pane *uint32 `json:"pane,omitempty"`
+}
+
+// WorktreeInfo describes one existing checkout for worktree.list. Current marks
+// the checkout the anchoring pane is in; OpenWorkspace is the public id of a
+// workspace already open on the checkout ("" when none).
+type WorktreeInfo struct {
+	Path          string `json:"path"`
+	Branch        string `json:"branch,omitempty"`
+	Detached      bool   `json:"detached,omitempty"`
+	Prunable      bool   `json:"prunable,omitempty"`
+	Current       bool   `json:"current,omitempty"`
+	OpenWorkspace string `json:"open_workspace,omitempty"`
+}
+
+// WorktreeListResult is CmdResult.Data for worktree.list. WorktreeRoot is the
+// configured (tilde-expanded) directory new checkouts land under, so the
+// new-worktree dialog can preview the derived checkout path client-side.
+type WorktreeListResult struct {
+	RepoRoot     string         `json:"repo_root"`
+	RepoName     string         `json:"repo_name"`
+	WorktreeRoot string         `json:"worktree_root"`
+	Worktrees    []WorktreeInfo `json:"worktrees"`
+}
+
+// WorktreeCreateParams: worktree.create. Branch "" generates a slug; Path ""
+// derives the default checkout path under the configured worktree root.
+type WorktreeCreateParams struct {
+	Pane   *uint32 `json:"pane,omitempty"`
+	Branch string  `json:"branch,omitempty"`
+	Path   string  `json:"path,omitempty"`
+}
+
+// WorktreeCreateResult is CmdResult.Data for worktree.create: the new
+// workspace's public id and the resolved branch/checkout.
+type WorktreeCreateResult struct {
+	Workspace string `json:"workspace"`
+	Branch    string `json:"branch"`
+	Path      string `json:"path"`
+}
+
+// WorktreeOpenParams: worktree.open — focus the workspace already open on Path,
+// or create a new one there.
+type WorktreeOpenParams struct {
+	Pane *uint32 `json:"pane,omitempty"`
+	Path string  `json:"path"`
+}
+
+// WorktreeOpenResult is CmdResult.Data for worktree.open.
+type WorktreeOpenResult struct {
+	Workspace   string `json:"workspace"`
+	AlreadyOpen bool   `json:"already_open,omitempty"`
+}
+
+// WorktreeRemoveParams: worktree.remove — delete the checkout behind a
+// workspace (by public id) and close the workspace. Without Force, a dirty
+// checkout fails with the "dirty_worktree_requires_force:" prefix so the
+// front-end can escalate to the delete-anyway confirm. The branch is never
+// deleted.
+type WorktreeRemoveParams struct {
+	Workspace string `json:"workspace"`
+	Force     bool   `json:"force,omitempty"`
+}
+
+// --- Config params & results (§7, settings modal) -----------------------------
+
+// ConfigTheme is the theme section on the wire (config.get/config.set).
+type ConfigTheme struct {
+	Colors map[string]string `json:"colors,omitempty"`
+	Font   string            `json:"font,omitempty"`
+}
+
+// ConfigServerInfo is the read-only server section of config.get: informational
+// only (these settings are flag/config driven and need a restart).
+type ConfigServerInfo struct {
+	Addr           string `json:"addr"`
+	Auth           string `json:"auth"`
+	TLS            bool   `json:"tls"`
+	TermhostSocket string `json:"termhost_socket"`
+	ControlSocket  string `json:"control_socket,omitempty"`
+	HookSocket     string `json:"hook_socket,omitempty"`
+	SessionTTL     string `json:"session_ttl"`
+}
+
+// ConfigGetResult is CmdResult.Data for config.get (and config.set, which
+// echoes the saved state). CopyMode's keys are the full known action set — the
+// settings modal derives its rows (and validation) from them.
+type ConfigGetResult struct {
+	Path     string              `json:"path"`
+	Theme    ConfigTheme         `json:"theme"`
+	CopyMode map[string][]string `json:"copy_mode"`
+	Server   ConfigServerInfo    `json:"server"`
+}
+
+// ConfigSetParams: config.set — only the live-appliable sections. Absent fields
+// keep their current values; colors and copy-mode actions merge key-wise.
+type ConfigSetParams struct {
+	Theme    *ConfigTheme        `json:"theme,omitempty"`
+	CopyMode map[string][]string `json:"copy_mode,omitempty"`
 }
 
 // optPaneID converts an optional wire pane id into an optional layout.PaneID

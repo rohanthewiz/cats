@@ -136,6 +136,49 @@ func TestLoad(t *testing.T) {
 	}
 }
 
+// Save writes a loadable file that round-trips to the same config (the settings
+// modal's persist path), creating parent directories as needed.
+func TestSaveRoundtrip(t *testing.T) {
+	cfg := Default()
+	cfg.Theme.Colors["bg"] = "#101010"
+	cfg.Theme.Font = "monospace"
+	cfg.Keybindings.CopyMode["yank"] = []string{"y", "c"}
+	cfg.Worktrees.Directory = "/tmp/wt"
+
+	path := filepath.Join(t.TempDir(), "nested", "config.yaml")
+	if err := Save(path, cfg); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	got, gotPath, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load after Save: %v", err)
+	}
+	if gotPath != path {
+		t.Fatalf("Load path = %q, want %q", gotPath, path)
+	}
+	if !reflect.DeepEqual(got, cfg) {
+		t.Fatalf("roundtrip mismatch:\n got  %+v\n want %+v", got, cfg)
+	}
+
+	if err := Save("", cfg); err == nil {
+		t.Fatal("Save with an empty path should error")
+	}
+}
+
+// The worktrees block defaults to ~/.herdr/worktrees and overrides cleanly.
+func TestParseWorktrees(t *testing.T) {
+	if got := Default().Worktrees.Directory; got != "~/.herdr/worktrees" {
+		t.Fatalf("default worktrees.directory = %q", got)
+	}
+	got, err := parse([]byte("worktrees:\n  directory: /tmp/checkouts\n"))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if got.Worktrees.Directory != "/tmp/checkouts" {
+		t.Fatalf("worktrees.directory override = %q", got.Worktrees.Directory)
+	}
+}
+
 // The persistence block: absent keys keep the on-by-default behaviour; present
 // keys override; a negative history_lines is rejected.
 func TestParsePersistence(t *testing.T) {
