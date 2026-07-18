@@ -15,9 +15,9 @@ import (
 // blocked, finished on completion transitions, nothing otherwise.
 func TestNotifyKind(t *testing.T) {
 	cases := []struct {
-		name                              string
+		name                               string
 		prevState, prevAgent, state, agent string
-		want                              string
+		want                               string
 	}{
 		{"working to blocked", "working", "claude", "blocked", "claude", "attention"},
 		{"idle to blocked", "idle", "claude", "blocked", "claude", "attention"},

@@ -93,7 +93,11 @@ type orch struct {
 	// focus_changed. Seeded in newOrch so pre-existing panes never emit retroactively.
 	structPanes map[uint32]string
 	structFocus uint32
-	mailbox     chan func()
+	// lastTitle is the app-level browser-tab title last broadcast (WS8):
+	// broadcastTitle dedupes against it so focus/title churn doesn't spam every
+	// connection with identical title messages.
+	lastTitle string
+	mailbox   chan func()
 	// stop is the process-shutdown hook wired by main (server.stop). It flushes
 	// pending browser writes, then exits — the persistent termhost daemon is a
 	// separate process and survives. nil in tests, where stop is a no-op.
@@ -385,6 +389,7 @@ func (o *orch) applyModel() {
 		o.resyncPane(pid)
 	}
 	o.emitStructuralEvents()
+	o.broadcastTitle()
 	o.saveSoon()
 }
 
@@ -810,6 +815,7 @@ func (o *orch) ApplyModel() { o.applyModel() }
 func (o *orch) BroadcastLayout() {
 	o.broadcast(o.viewportLayout())
 	o.emitStructuralEvents()
+	o.broadcastTitle()
 	o.saveSoon()
 }
 
@@ -820,6 +826,7 @@ func (o *orch) BroadcastPaneTitle(pane uint32) {
 	if o.visible[pane] {
 		o.broadcast(browserproto.NewPaneTitle(pane, o.effectiveTitle(pane)))
 	}
+	o.broadcastTitle()
 	o.saveSoon()
 }
 
@@ -906,6 +913,30 @@ func (o *orch) effectiveTitle(pid uint32) string {
 		return rt.title
 	}
 	return ""
+}
+
+// appTitle is the app-level browser-tab title (WS8): the focused pane's
+// effective title when it has one, otherwise the active workspace's name.
+func (o *orch) appTitle() string {
+	if id, ok := o.session.FocusedPane(); ok {
+		if t := o.effectiveTitle(uint32(id)); t != "" {
+			return t
+		}
+	}
+	wss := o.session.Workspaces()
+	if i := o.session.ActiveIndex(); i >= 0 && i < len(wss) {
+		return wss[i].DisplayName()
+	}
+	return ""
+}
+
+// broadcastTitle pushes the app title to every browser when it changed —
+// called after anything that can move focus or retitle the focused pane.
+func (o *orch) broadcastTitle() {
+	if t := o.appTitle(); t != o.lastTitle {
+		o.lastTitle = t
+		o.broadcast(browserproto.NewTitle(t))
+	}
 }
 
 // broadcastPaneChrome resends a pane's cached chrome to all connections (used
@@ -1058,8 +1089,10 @@ func (o *orch) registerConn(c *client, init *browserproto.Init) {
 		}
 		o.send(c, browserproto.PaneModes{T: browserproto.MsgPaneModes, Pane: pid,
 			Mouse: rt.modes.MouseMode != terminal.MouseNone, AltScreen: rt.modes.AlternateScreen})
-		if rt.title != "" {
-			o.send(c, browserproto.NewPaneTitle(pid, rt.title))
+		// Effective title, not rt.title: a pane.rename custom name must survive
+		// a page reload just like it survives a viewport switch.
+		if t := o.effectiveTitle(pid); t != "" {
+			o.send(c, browserproto.NewPaneTitle(pid, t))
 		}
 		if rt.cwd != "" {
 			o.send(c, browserproto.NewPaneCwd(pid, rt.cwd))
@@ -1074,6 +1107,7 @@ func (o *orch) registerConn(c *client, init *browserproto.Init) {
 		o.daemon.send(orchestration.NewRequestResync(pid))
 	}
 	o.send(c, o.agentsMsg())
+	o.send(c, browserproto.NewTitle(o.appTitle()))
 	if !o.daemon.connected() {
 		o.send(c, browserproto.NewError(0, "termhost daemon not connected — retrying"))
 	}

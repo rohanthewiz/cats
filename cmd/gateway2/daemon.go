@@ -225,6 +225,7 @@ func (d *daemon) dispatch(mt orchestration.MessageType, payload []byte) {
 			if o.visible[ev.PaneID] {
 				o.broadcast(browserproto.NewPaneTitle(ev.PaneID, o.effectiveTitle(ev.PaneID)))
 			}
+			o.broadcastTitle()
 			o.emitEvent(app.EventPaneTitle, ev.PaneID, app.PaneTitleEvent{Pane: ev.PaneID, Title: ev.Title})
 		})
 
