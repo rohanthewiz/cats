@@ -1,5 +1,6 @@
 # WS5 manifest-update fetcher + WS6 agent notifications
 
+**Session id:** `fb1af197-0a00-4cd1-babd-4353402f358a` (same session as the WS3 doc)
 **Date:** 2026-0717-2357 · **Branch:** `roh/phase-b` (herdr-web)
 **Continues:** `2026-0717-2257-ws3-session-persistence-restore.md` (same day; WS3
 closed → the status doc's remaining candidates were WS8 polish, WS5 tail, WS6

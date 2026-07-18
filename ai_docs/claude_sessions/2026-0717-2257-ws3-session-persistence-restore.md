@@ -1,5 +1,6 @@
 # WS3: session persistence & restore (gateway2)
 
+**Session id:** `fb1af197-0a00-4cd1-babd-4353402f358a`
 **Date:** 2026-0717-2257 · **Branch:** `roh/phase-b` (herdr-web)
 **Continues:** `2026-0715-1752-ws4-wait-for-output-raw-byte-stream.md`; picks up the
 recommendation of `ai_docs/2026-0715-1902-workstream-status-and-next.md` (WS4 done →
