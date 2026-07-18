@@ -25,6 +25,7 @@ const (
 	EventPaneAgent  = "pane_agent"  // detected agent identity/state changed
 	EventPaneTitle  = "pane_title"  // the program set the pane's title (OSC 0/2)
 	EventPaneCwd    = "pane_cwd"    // the pane's working directory changed (OSC 7)
+	EventPaneNotify = "pane_notify" // an agent state change warrants attention (blocked / background finish)
 
 	EventPaneAdded    = "pane_added"    // a pane entered the session (split / new tab / new workspace)
 	EventPaneRemoved  = "pane_removed"  // a pane left the session (close pane / tab / workspace)
@@ -35,7 +36,7 @@ const (
 // order — the vocabulary a client validates an Events filter against.
 func EventNames() []string {
 	return []string{
-		EventPaneExited, EventPaneAgent, EventPaneTitle, EventPaneCwd,
+		EventPaneExited, EventPaneAgent, EventPaneTitle, EventPaneCwd, EventPaneNotify,
 		EventPaneAdded, EventPaneRemoved, EventFocusChanged,
 	}
 }
@@ -64,6 +65,17 @@ type PaneTitleEvent struct {
 type PaneCwdEvent struct {
 	Pane uint32 `json:"pane"`
 	Cwd  string `json:"cwd"`
+}
+
+// PaneNotifyEvent is the payload for EventPaneNotify: a notification-worthy
+// agent state transition — the agent hit a blocker (kind "attention") or a
+// background run completed (kind "finished"). Mirrors the browser's notify
+// down-message so an automation client can react to the same moments.
+type PaneNotifyEvent struct {
+	Pane    uint32 `json:"pane"`
+	Agent   string `json:"agent"`
+	Kind    string `json:"kind"` // attention | finished
+	Message string `json:"message"`
 }
 
 // PaneRefEvent is the payload for the three model-structure events

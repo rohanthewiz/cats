@@ -251,18 +251,7 @@ func (d *daemon) dispatch(mt orchestration.MessageType, payload []byte) {
 		if err := json.Unmarshal(payload, &ev); err != nil {
 			return
 		}
-		o.post(func() {
-			rt := o.panes[ev.PaneID]
-			if rt == nil {
-				return
-			}
-			rt.agent = &ev
-			if o.visible[ev.PaneID] {
-				o.broadcast(browserproto.NewPaneAgent(ev.PaneID, ev.Agent, ev.State, true))
-			}
-			o.broadcast(o.agentsMsg())
-			o.emitEvent(app.EventPaneAgent, ev.PaneID, app.PaneAgentEvent{Pane: ev.PaneID, Agent: ev.Agent, State: ev.State})
-		})
+		o.post(func() { o.onPaneAgent(ev) })
 
 	case orchestration.MsgPaneClipboard:
 		var ev orchestration.PaneClipboard

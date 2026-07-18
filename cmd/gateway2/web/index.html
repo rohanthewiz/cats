@@ -464,7 +464,7 @@
       case "clipboard":
         try { navigator.clipboard.writeText(b64decode(msg.data)); } catch (e) {}
         break;
-      case "notify": toast(msg.message + (msg.body ? ": " + msg.body : "")); break;
+      case "notify": handleNotify(msg); break;
       case "title": document.title = msg.title ? ("herdr · " + msg.title) : "herdr · gateway2"; break;
       case "error": toast("error: " + msg.msg); break;
       case "shutdown": setStatus("server shut down", true); break;
@@ -779,6 +779,39 @@
     requestAnimationFrame(() => el.classList.add("show"));
     setTimeout(() => { el.classList.remove("show"); setTimeout(() => el.remove(), 250); }, 4000);
   }
+
+  // ---- Notifications (WS6): agent needs-attention / finished ----
+  // herdr parity: suppressed entirely when the pane is on screen and the window
+  // is focused (the user is already looking at it). Otherwise a toast; and when
+  // the page is unfocused/hidden, additionally a native Notification (if the
+  // user granted permission) whose click reveals the pane — agent.focus crosses
+  // workspaces and tabs.
+  function handleNotify(msg) {
+    const visible = msg.pane ? panes.has(msg.pane) : false;
+    const focused = document.hasFocus();
+    if (focused && visible) return;
+    toast(msg.message + (msg.body ? " — " + msg.body : ""));
+    if (focused || !("Notification" in window) || Notification.permission !== "granted") return;
+    const n = new Notification(msg.message, { body: msg.body || "", tag: "herdr-pane-" + (msg.pane || 0) });
+    n.onclick = () => {
+      window.focus();
+      if (msg.pane) sendCmd("agent.focus", { pane: msg.pane });
+      n.close();
+    };
+  }
+
+  // The Notification API only grants permission from a user gesture, so ask
+  // once on the first click/keypress.
+  (function armNotificationPermission() {
+    if (!("Notification" in window) || Notification.permission !== "default") return;
+    const req = () => {
+      window.removeEventListener("pointerdown", req);
+      window.removeEventListener("keydown", req);
+      Notification.requestPermission();
+    };
+    window.addEventListener("pointerdown", req);
+    window.addEventListener("keydown", req);
+  })();
 
   // ---- Session ----
   function connect() {

@@ -228,12 +228,18 @@ type Clipboard struct {
 
 func NewClipboard(data []byte) Clipboard { return Clipboard{T: MsgClipboard, Data: data} }
 
-// Notify renders a toast + (permission-gated) system notification.
+// Notify renders a toast + (permission-gated) system notification. Kind is
+// "attention" (an agent hit a blocker) or "finished" (a background agent run
+// completed). Pane/Pub name the pane so a notification click can reveal it;
+// the front-end suppresses the whole thing when that pane is visible and the
+// page is focused (the user is already looking at it).
 type Notify struct {
 	T       Type   `json:"t"`
 	Kind    string `json:"kind"`
 	Message string `json:"message"`
 	Body    string `json:"body,omitempty"`
+	Pane    uint32 `json:"pane,omitempty"`
+	Pub     string `json:"pub,omitempty"`
 }
 
 func NewNotify(kind, message, body string) Notify {
