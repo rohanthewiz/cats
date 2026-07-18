@@ -3,6 +3,8 @@ package detect
 import (
 	"embed"
 	"encoding/json"
+	"log"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -40,31 +42,41 @@ type Detection struct {
 	SkipStateUpdate bool
 }
 
-// --- raw (JSON) manifest types, mirroring herdr's TOML schema ---
+// --- raw manifest types, mirroring herdr's TOML schema ---
+//
+// The same structs decode both the embedded JSON manifests and the remote TOML
+// manifests fetched from the herdr.dev catalog (WS5) — the schemas are 1:1 (the
+// JSON files are converted from the Rust TOML sources), so each field carries
+// both tags.
 
 type rawManifest struct {
-	ID    string    `json:"id"`
-	Rules []rawRule `json:"rules"`
+	ID               string    `json:"id" toml:"id"`
+	Version          string    `json:"version" toml:"version"`
+	MinEngineVersion int       `json:"min_engine_version" toml:"min_engine_version"`
+	UpdatedAt        string    `json:"updated_at" toml:"updated_at"`
+	Aliases          []string  `json:"aliases" toml:"aliases"`
+	Rules            []rawRule `json:"rules" toml:"rules"`
 }
 
 type rawRule struct {
-	State           string `json:"state"`
-	Priority        int    `json:"priority"`
-	Region          string `json:"region"`
-	VisibleIdle     bool   `json:"visible_idle"`
-	VisibleBlocker  bool   `json:"visible_blocker"`
-	VisibleWorking  bool   `json:"visible_working"`
-	SkipStateUpdate bool   `json:"skip_state_update"`
+	ID              string `json:"id" toml:"id"`
+	State           string `json:"state" toml:"state"`
+	Priority        int    `json:"priority" toml:"priority"`
+	Region          string `json:"region" toml:"region"`
+	VisibleIdle     bool   `json:"visible_idle" toml:"visible_idle"`
+	VisibleBlocker  bool   `json:"visible_blocker" toml:"visible_blocker"`
+	VisibleWorking  bool   `json:"visible_working" toml:"visible_working"`
+	SkipStateUpdate bool   `json:"skip_state_update" toml:"skip_state_update"`
 	rawGate
 }
 
 type rawGate struct {
-	All       []rawGate `json:"all"`
-	Any       []rawGate `json:"any"`
-	Not       []rawGate `json:"not"`
-	Contains  []string  `json:"contains"`
-	Regex     []string  `json:"regex"`
-	LineRegex []string  `json:"line_regex"`
+	All       []rawGate `json:"all" toml:"all"`
+	Any       []rawGate `json:"any" toml:"any"`
+	Not       []rawGate `json:"not" toml:"not"`
+	Contains  []string  `json:"contains" toml:"contains"`
+	Regex     []string  `json:"regex" toml:"regex"`
+	LineRegex []string  `json:"line_regex" toml:"line_regex"`
 }
 
 // --- compiled types ---
@@ -91,16 +103,57 @@ type compiledManifest struct {
 	rules []compiledRule
 }
 
+// The manifest store: embedded manifests overlaid with any committed remote
+// manifests (WS5). Rebuilt lazily after SetRemoteManifestDir/Reload invalidate
+// it; Detect only takes the read lock on the hot path.
 var (
-	manifestsOnce sync.Once
-	manifests     map[string]*compiledManifest
+	manifestMu sync.RWMutex
+	manifests  map[string]*compiledManifest // nil ⇒ rebuild on next use
+	remoteDir  string                       // "" ⇒ embedded only
 )
 
-func loadManifests() {
-	manifests = make(map[string]*compiledManifest)
+// SetRemoteManifestDir points detection at the agent-detection state root
+// (containing remote/<agent>.toml overlays committed by the updater) and
+// invalidates the store. Call once at startup before detection begins.
+func SetRemoteManifestDir(dir string) {
+	manifestMu.Lock()
+	remoteDir = dir
+	manifests = nil
+	manifestMu.Unlock()
+}
+
+// Reload invalidates the manifest store so the next detection rebuilds it —
+// called by the updater after committing new remote manifests.
+func Reload() {
+	manifestMu.Lock()
+	manifests = nil
+	manifestMu.Unlock()
+}
+
+// ensureManifests returns the current store, rebuilding it if invalidated.
+func ensureManifests() map[string]*compiledManifest {
+	manifestMu.RLock()
+	m := manifests
+	manifestMu.RUnlock()
+	if m != nil {
+		return m
+	}
+	manifestMu.Lock()
+	defer manifestMu.Unlock()
+	if manifests == nil {
+		manifests = loadManifests(remoteDir)
+	}
+	return manifests
+}
+
+// loadManifests builds the store: every embedded manifest, each replaced by its
+// committed remote overlay when one parses and passes validation. A broken
+// remote file falls back to the bundled manifest — never a missing agent.
+func loadManifests(remoteRoot string) map[string]*compiledManifest {
+	m := make(map[string]*compiledManifest)
 	entries, err := manifestFS.ReadDir("manifests")
 	if err != nil {
-		return
+		return m
 	}
 	for _, e := range entries {
 		data, err := manifestFS.ReadFile("manifests/" + e.Name())
@@ -115,8 +168,29 @@ func loadManifests() {
 		if err != nil || rm.ID == "" {
 			continue
 		}
-		manifests[rm.ID] = cm
+		m[rm.ID] = cm
 	}
+	if remoteRoot == "" {
+		return m
+	}
+	for id := range m {
+		data, err := os.ReadFile(remoteManifestPath(remoteRoot, id))
+		if err != nil {
+			continue // no remote overlay for this agent
+		}
+		rm, err := parseRemoteManifest(id, data)
+		if err != nil {
+			log.Printf("detect: ignoring remote manifest for %s: %v", id, err)
+			continue
+		}
+		cm, err := compileManifest(rm)
+		if err != nil {
+			log.Printf("detect: ignoring remote manifest for %s: %v", id, err)
+			continue
+		}
+		m[id] = cm
+	}
+	return m
 }
 
 func compileManifest(rm *rawManifest) (*compiledManifest, error) {
@@ -219,8 +293,7 @@ func Detect(label string, in Input) Detection {
 	if label == "" {
 		return Detection{State: StateUnknown}
 	}
-	manifestsOnce.Do(loadManifests)
-	cm := manifests[label]
+	cm := ensureManifests()[label]
 	if cm == nil {
 		return Detection{State: StateIdle} // known agent, no manifest
 	}

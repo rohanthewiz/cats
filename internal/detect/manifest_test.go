@@ -3,9 +3,9 @@ package detect
 import "testing"
 
 func TestManifestsCompile(t *testing.T) {
-	manifestsOnce.Do(loadManifests)
+	m := ensureManifests()
 	for _, label := range []string{"claude", "codex", "pi", "copilot", "agy", "gemini"} {
-		if manifests[label] == nil {
+		if m[label] == nil {
 			t.Errorf("manifest for %q did not load", label)
 		}
 	}

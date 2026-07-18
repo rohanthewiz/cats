@@ -18,10 +18,13 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
+	"github.com/rohanthewiz/herdr-web/internal/detect"
 	"github.com/rohanthewiz/herdr-web/internal/orchestration"
+	"github.com/rohanthewiz/herdr-web/internal/persist"
 )
 
 func main() {
@@ -32,7 +35,21 @@ func main() {
 		"keep panes alive across client disconnects; a restarted/handed-off herdr reconnects and resyncs (overrides -exit-on-disconnect)")
 	idleTimeout := flag.Duration("idle-timeout", 10*time.Minute,
 		"in persistent mode, exit if no client is attached for this long (0 disables)")
+	manifestUpdate := flag.Bool("manifest-update", true,
+		"fetch agent-detection manifest updates from the herdr.dev catalog at startup (env "+detect.CatalogURLEnv+" overrides the URL)")
 	flag.Parse()
+
+	// Agent-detection manifests (WS5): layer any committed remote manifests over
+	// the embedded set, and kick off one background update pass. Detection runs
+	// in this daemon, so this is where the overlay lives. No resolvable state
+	// dir ⇒ embedded manifests only.
+	if stateRoot := persist.DefaultDir(); stateRoot != "" {
+		dir := filepath.Join(stateRoot, "agent-detection")
+		detect.SetRemoteManifestDir(dir)
+		if *manifestUpdate {
+			go detect.AutoUpdate(dir)
+		}
+	}
 
 	var err error
 	if *persistent {

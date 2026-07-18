@@ -10,6 +10,7 @@ require (
 )
 
 require (
+	github.com/pelletier/go-toml/v2 v2.4.3 // indirect
 	github.com/rohanthewiz/element v0.5.6 // indirect
 	github.com/rohanthewiz/serr v1.3.0 // indirect
 )
