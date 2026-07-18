@@ -10,6 +10,12 @@
 //	herdrctl [flags] <method> [--params '<json>']  raw §7 command (escape hatch)
 //	herdrctl help                               list the ergonomic verbs
 //	herdrctl commands                           list the raw §7 method names
+//	herdrctl integration <install|uninstall|status|help> ...  agent hook installers
+//
+// The integration family is the one offline verb: it installs/removes the
+// herdr shell-hook integrations for coding agents (claude, codex, kimi, ...)
+// by editing their config trees directly, and never dials the control socket
+// (internal/integration does the work).
 //
 // Ergonomic verbs build the params for you from positional args (`herdrctl help`
 // lists them). Examples:
@@ -73,6 +79,14 @@ func run() int {
 		return 2
 	}
 	method := rest[0]
+
+	// The integration verb family is fully offline (it edits agent config trees,
+	// never the socket) and takes positional args of its own — including flags
+	// like --outdated-only — so it must dispatch before the flag re-parse below.
+	if method == "integration" {
+		return runIntegration(rest[1:])
+	}
+
 	_ = flag.CommandLine.Parse(rest[1:])
 	pos := flag.Args() // positional args after the verb (an ergonomic verb's operands)
 
@@ -211,6 +225,8 @@ Usage:
   herdrctl [flags] <verb> [args...]            ergonomic subcommand
   herdrctl [flags] <method> [--params '<json>']   raw §7 command (escape hatch)
   herdrctl commands                            list the raw §7 method names
+  herdrctl integration install|uninstall <target>   install/remove agent hooks (offline)
+  herdrctl integration status [--outdated-only]     integration install states (offline)
 
 Verbs:
 `)
