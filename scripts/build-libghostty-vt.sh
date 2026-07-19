@@ -95,9 +95,13 @@ EOF
 fi
 
 # --- 3. build libghostty-vt --------------------------------------------------
+# -Dversion-string pins ghostty's own version (from its build.zig.zon) so its
+# build.zig skips git detection — otherwise it walks up into THIS repo and
+# panics when herdr-web has a vX.Y.Z tag checked out (release builds).
 echo ">> building libghostty-vt in $GHOSTTY_VT_DIR"
 ( cd "$GHOSTTY_VT_DIR" && \
-  zig build -Demit-lib-vt -Demit-exe=false -Demit-xcframework=false -Doptimize=ReleaseFast )
+  zig build -Demit-lib-vt -Demit-exe=false -Demit-xcframework=false \
+    -Dversion-string=1.3.2-dev -Doptimize=ReleaseFast )
 
 PC_DIR="$GHOSTTY_VT_DIR/zig-out/share/pkgconfig"
 LIB="$GHOSTTY_VT_DIR/zig-out/lib/libghostty-vt.a"
