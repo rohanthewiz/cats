@@ -199,6 +199,24 @@ func (d *Dispatcher) Dispatch(name string, dec ParamDecoder, r Responder) {
 		}
 		r.OK(nil)
 
+	case CmdPaneSwapWith:
+		var p SwapWithParams
+		if err := dec.Decode(&p); err != nil {
+			bad(err)
+			return
+		}
+		swapped, err := d.session.SwapPanes(layout.PaneID(p.Pane), layout.PaneID(p.Target))
+		if err != nil {
+			r.Fail(err.Error())
+			return
+		}
+		if !swapped {
+			r.Fail("panes must be two distinct panes of the active tab")
+			return
+		}
+		d.backend.ApplyModel() // panes changed slots/sizes
+		r.OK(nil)
+
 	case CmdPaneZoom:
 		var p OptPaneParams
 		if err := decodeOptional(dec, &p); err != nil {

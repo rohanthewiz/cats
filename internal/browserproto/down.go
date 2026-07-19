@@ -90,6 +90,7 @@ type AgentItem struct {
 	Pane      uint32 `json:"pane"`
 	Pub       string `json:"pub"`
 	Workspace string `json:"workspace"`
+	Tab       int    `json:"tab"` // owning tab's stable number (tab-bar activity markers)
 	Agent     string `json:"agent"`
 	State     string `json:"state"`
 	Seen      bool   `json:"seen"` // false renders as "Done"

@@ -27,6 +27,7 @@ const (
 	CmdPaneCycle          = "pane.cycle"
 	CmdPaneLast           = "pane.last"
 	CmdPaneSwap           = "pane.swap"
+	CmdPaneSwapWith       = "pane.swap_with"
 	CmdPaneZoom           = "pane.zoom"
 	CmdPaneRename         = "pane.rename"
 	CmdPaneResizeBorder   = "pane.resize_border"
@@ -77,7 +78,7 @@ const (
 func CommandNames() []string {
 	return []string{
 		CmdPaneSplit, CmdPaneClose, CmdPaneFocus, CmdPaneFocusDirection,
-		CmdPaneCycle, CmdPaneLast, CmdPaneSwap, CmdPaneZoom, CmdPaneRename,
+		CmdPaneCycle, CmdPaneLast, CmdPaneSwap, CmdPaneSwapWith, CmdPaneZoom, CmdPaneRename,
 		CmdPaneResizeBorder, CmdScroll, CmdRead, CmdCapture, CmdWaitForOutput,
 		CmdTabCreate, CmdTabClose, CmdTabFocus, CmdTabRename, CmdTabMove,
 		CmdWorkspaceCreate, CmdWorkspaceClose, CmdWorkspaceFocus, CmdWorkspaceRename,
@@ -170,6 +171,13 @@ type OptPaneParams struct {
 // DirParams: pane.focus_direction, pane.swap.
 type DirParams struct {
 	Dir string `json:"dir"` // DirLeft | DirRight | DirUp | DirDown
+}
+
+// SwapWithParams: pane.swap_with — exchange two panes' layout slots (the
+// drag-reorder drop; pane.swap is the directional keyboard variant).
+type SwapWithParams struct {
+	Pane   uint32 `json:"pane"`
+	Target uint32 `json:"target"`
 }
 
 // CycleParams: pane.cycle.

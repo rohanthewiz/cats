@@ -243,6 +243,17 @@ func (s *Session) SwapPaneDirection(nav layout.NavDirection, area layout.Rect) (
 	return true, nil
 }
 
+// SwapPanes exchanges two panes' slots in the active tab's layout (the
+// drag-reorder drop), preserving split shape and ratios. Reports whether a
+// swap happened; both panes must be distinct members of the active tab.
+func (s *Session) SwapPanes(a, b layout.PaneID) (bool, error) {
+	tab := s.ActiveWorkspace().ActiveTab()
+	if tab == nil {
+		return false, errors.New("no active tab")
+	}
+	return tab.Layout.SwapPanes(a, b), nil
+}
+
 // ToggleZoom flips the active tab's zoom. When zooming, target (or the focused
 // pane if nil) becomes the sole visible pane at full size; when already zoomed,
 // it unzooms (target ignored). Reports the resulting zoom state.

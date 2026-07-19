@@ -66,13 +66,25 @@ func (o *orch) publishAgent(rt *paneRuntime) {
 		prevState = "unknown"
 	}
 	rt.pubAgent, rt.pubState = agent, state
+
+	kind := notifyKind(prevState, prevAgent, state, agent)
+	// Attention marker (herdr's pane.seen, apply_pane_state_change): leaving
+	// idle always clears it; a completion sets it only when the pane is off
+	// the viewport. herdr also suppresses on-viewport completions only while
+	// the terminal has focus, but focus is per-client here (see the header
+	// note) — visibility is the server-side stand-in.
+	if state != "idle" {
+		rt.unseen = false
+	} else if kind == "finished" {
+		rt.unseen = !o.visible[rt.id]
+	}
+
 	if o.visible[rt.id] {
-		o.broadcast(browserproto.NewPaneAgent(rt.id, agent, state, true))
+		o.broadcast(browserproto.NewPaneAgent(rt.id, agent, state, !rt.unseen))
 	}
 	o.broadcast(o.agentsMsg())
 	o.emitEvent(app.EventPaneAgent, rt.id, app.PaneAgentEvent{Pane: rt.id, Agent: agent, State: state})
 
-	kind := notifyKind(prevState, prevAgent, state, agent)
 	if kind == "" {
 		return
 	}

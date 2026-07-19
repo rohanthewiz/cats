@@ -55,6 +55,7 @@ theme:
     ok: "#6ac47a"
     warn: "#e2b64e"
     err: "#ff6b6b"
+    done: "#4fd1c5"   # unseen agent-completion markers
   font: 'ui-monospace, "SF Mono", Menlo, Consolas, monospace'
 
 # Keyboard bindings. Keys are DOM KeyboardEvent.key values ("ArrowLeft", "h",

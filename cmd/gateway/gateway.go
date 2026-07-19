@@ -57,6 +57,12 @@ type paneRuntime struct {
 	hookSuppressed map[string]hookSuppression
 	pubAgent       string
 	pubState       string
+	// unseen marks an agent completion that landed while the pane was off the
+	// viewport (herdr's pane.seen, inverted so the zero value means seen).
+	// Set by publishAgent on a finished transition, cleared when the pane
+	// re-enters the viewport or the agent leaves idle; feeds the rollup's
+	// attention markers ("done" tier).
+	unseen bool
 	// created reports whether the daemon holds this pane's PTY. reconcile
 	// resets it from the daemon's surviving-pane set on every (re)connect.
 	created bool
@@ -443,6 +449,13 @@ func (o *orch) refreshViewport() (added []uint32) {
 func (o *orch) applyModel() {
 	o.syncDaemon()
 	added := o.refreshViewport()
+	// Entering the viewport marks a pane's completions seen (herdr: switching
+	// to a tab sets pane.seen on everything it shows).
+	for _, pid := range added {
+		if rt := o.panes[pid]; rt != nil {
+			rt.unseen = false
+		}
+	}
 	o.broadcast(o.viewportLayout())
 	o.broadcast(o.agentsMsg())
 	for _, pid := range added {
@@ -482,8 +495,8 @@ func (o *orch) agentsMsg() browserproto.Agents {
 				}
 				pub, _ := o.session.PublicPaneID(id)
 				items = append(items, browserproto.AgentItem{
-					Pane: rt.id, Pub: pub, Workspace: ws.ID,
-					Agent: agent, State: state, Seen: true,
+					Pane: rt.id, Pub: pub, Workspace: ws.ID, Tab: tab.Number,
+					Agent: agent, State: state, Seen: !rt.unseen,
 				})
 			}
 		}

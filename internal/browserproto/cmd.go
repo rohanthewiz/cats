@@ -16,6 +16,7 @@ const (
 	CmdPaneCycle          = app.CmdPaneCycle
 	CmdPaneLast           = app.CmdPaneLast
 	CmdPaneSwap           = app.CmdPaneSwap
+	CmdPaneSwapWith       = app.CmdPaneSwapWith
 	CmdPaneZoom           = app.CmdPaneZoom
 	CmdPaneRename         = app.CmdPaneRename
 	CmdPaneResizeBorder   = app.CmdPaneResizeBorder
@@ -72,6 +73,7 @@ type (
 	PaneParams            = app.PaneParams
 	OptPaneParams         = app.OptPaneParams
 	DirParams             = app.DirParams
+	SwapWithParams        = app.SwapWithParams
 	CycleParams           = app.CycleParams
 	RenamePaneParams      = app.RenamePaneParams
 	ResizeBorderParams    = app.ResizeBorderParams

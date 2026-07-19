@@ -209,6 +209,42 @@ func TestDispatchSplitBadDirection(t *testing.T) {
 	}
 }
 
+// pane.swap_with exchanges two panes' layout slots and reconciles; same-pane
+// or unknown ids fail without effects.
+func TestDispatchSwapWith(t *testing.T) {
+	h := newCmdHarness(t)
+	h.d.Dispatch(CmdPaneSplit, params(t, SplitParams{Direction: SplitH}), h.resp())
+	ids := h.s.VisiblePaneIDs()
+	if len(ids) != 2 {
+		t.Fatalf("setup: want 2 panes, got %d", len(ids))
+	}
+	before := make([]uint32, len(ids))
+	for i, id := range ids {
+		before[i] = uint32(id)
+	}
+
+	r := h.resp()
+	h.d.Dispatch(CmdPaneSwapWith, params(t, SwapWithParams{Pane: before[0], Target: before[1]}), r)
+	if !r.okCall || r.failCall {
+		t.Fatalf("swap_with should ack: ok=%v fail=%v (%q)", r.okCall, r.failCall, r.errMsg)
+	}
+	after := h.s.VisiblePaneIDs()
+	if uint32(after[0]) != before[1] || uint32(after[1]) != before[0] {
+		t.Fatalf("swap_with should exchange slots: before=%v after=%v", before, after)
+	}
+
+	r = h.resp()
+	h.d.Dispatch(CmdPaneSwapWith, params(t, SwapWithParams{Pane: before[0], Target: before[0]}), r)
+	if !r.failCall {
+		t.Fatal("same-pane swap should fail")
+	}
+	r = h.resp()
+	h.d.Dispatch(CmdPaneSwapWith, params(t, SwapWithParams{Pane: before[0], Target: 9999}), r)
+	if !r.failCall {
+		t.Fatal("unknown target swap should fail")
+	}
+}
+
 // A valid split mutates the session and reconciles exactly once, then acks.
 func TestDispatchSplitOK(t *testing.T) {
 	h := newCmdHarness(t)

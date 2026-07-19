@@ -8,7 +8,7 @@
   :root {
     --bg:#181818; --fg:#d4d4d4; --accent:#5b9dff; --panel:#141414; --panel2:#1d1d1d;
     --line:#2a2a2a; --muted:#8a8a8a; --chrome:#202430; --chrome-focus:#26314a;
-    --ok:#6ac47a; --warn:#e2b64e; --err:#ff6b6b;
+    --ok:#6ac47a; --warn:#e2b64e; --err:#ff6b6b; --done:#4fd1c5;
   }
   html,body { margin:0; height:100%; background:var(--bg); color:var(--fg);
     font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; overflow:hidden; }
@@ -44,6 +44,7 @@
   .ag, .adot, .aname { font-size:11px; }
   .st-working { color:var(--warn); } .st-blocked { color:var(--err); }
   .st-idle { color:var(--ok); } .st-unknown { color:var(--muted); }
+  .st-done { color:var(--done); } /* finished off-screen, not yet seen */
   #agent-list li { gap:6px; }
   #agent-list .aname { color:#e8e8e8; margin-left:0; }
   #agent-list .ameta { color:var(--muted); font-size:10px; margin-left:auto; }
@@ -60,11 +61,14 @@
   #tabbar .tab.active { color:#e8e8e8; border-bottom-color:var(--accent); }
   #tabbar .tab .x { color:var(--muted); font-size:10px; }
   #tabbar .tab .x:hover { color:var(--err); }
+  #tabbar .tab .tmark { font-size:8px; }
   #tabbar .tab.add { color:var(--muted); font-weight:600; padding:0 12px; }
   #tabbar .tab.add:hover { color:var(--accent); }
 
   #panes { position:relative; overflow:hidden; }
   .pane { position:absolute; box-sizing:border-box; }
+  .pane.dragging { opacity:.5; }
+  .pane.droptarget { outline:2px solid var(--accent); outline-offset:-2px; }
   .pane .chrome { position:absolute; left:0; top:0; right:0; overflow:hidden; display:flex;
     align-items:center; gap:0; font-size:11px; color:#9a9a9a; background:var(--chrome);
     padding:0 4px 0 8px; box-sizing:border-box; }
@@ -167,8 +171,10 @@
   #zoomind { color:var(--accent); cursor:pointer; display:none; }
   #palhint { margin-left:auto; color:var(--muted); cursor:pointer; }
   #palhint:hover { color:var(--accent); }
-  #gear { cursor:pointer; font-size:13px; }
+  #gear { cursor:pointer; font-size:13px; position:relative; }
   #gear:hover { color:var(--accent); }
+  #gear.badge::after { content:""; position:absolute; top:-1px; right:-4px; width:6px; height:6px;
+    border-radius:50%; background:var(--accent); }
 
   /* ---- Drag-reorder (tabs + workspaces) ---- */
   .dropbar { position:absolute; background:var(--accent); z-index:5; pointer-events:none; border-radius:1px; }
@@ -209,7 +215,7 @@
       <span id="modehint"></span>
       <span id="zoomind" title="zoomed — click to unzoom">ZOOM ⤢</span>
       <span id="palhint" title="command palette (⌘K / Ctrl+Alt+K)">⌘K palette</span>
-      <span id="gear" title="settings">⚙</span>
+      <span id="gear" title="menu">⚙</span>
     </div>
   </div>
 </div>
@@ -301,8 +307,12 @@
       title: "", cwd: "", agent: "", agentState: "", exited: null,
       pressed: -1, lastCell: "", dirty: false, scroll: null, sel: null, cm: null };
     // Clicking the header (not its buttons) focuses the pane; double-click
-    // renames, right-click opens the pane menu (chrome or canvas).
-    chrome.addEventListener("mousedown", () => { if (p.info && !p.info.focused) sendCmd("pane.focus", { pane: id }); });
+    // renames, right-click opens the pane menu (chrome or canvas); holding
+    // and moving drags the pane onto another to swap slots.
+    chrome.addEventListener("mousedown", (e) => {
+      if (p.info && !p.info.focused) sendCmd("pane.focus", { pane: id });
+      beginPaneSwapDrag(e, id);
+    });
     chrome.addEventListener("dblclick", () => renamePane(id));
     chrome.addEventListener("contextmenu", (e) => { e.preventDefault(); openCtx(e.clientX, e.clientY, paneMenuItems(id)); });
     attachMouse(p);
@@ -435,27 +445,59 @@
   // ---- Sidebar (WS8) ----
   function stClass(state) {
     return state === "working" ? "st-working" : state === "blocked" ? "st-blocked"
-      : state === "idle" ? "st-idle" : "st-unknown";
+      : state === "done" ? "st-done" : state === "idle" ? "st-idle" : "st-unknown";
+  }
+
+  // markerState folds a rollup item's seen flag into the display state:
+  // idle+unseen renders as the "done" attention tier (herdr's teal dot).
+  function markerState(it) { return it.state === "idle" && !it.seen ? "done" : it.state; }
+
+  // attentionRank orders marker states for aggregation (herdr's
+  // workspace_attention_priority): blocked > done(unseen) > working > idle.
+  function attentionRank(st) {
+    return st === "blocked" ? 4 : st === "done" ? 3 : st === "working" ? 2 : st === "idle" ? 1 : 0;
   }
 
   // workspaceSummary compresses a workspace's detected-agent states into a
   // compact badge ("●1 ●2" colored by state), computed client-side from the
   // agents rollup — the server's per-item workspace field keys the grouping.
   function workspaceSummary(wsId) {
-    const counts = { blocked: 0, working: 0, idle: 0 };
+    const counts = { blocked: 0, done: 0, working: 0, idle: 0 };
     for (const it of agentItems) {
-      if (it.workspace === wsId && counts[it.state] !== undefined) counts[it.state]++;
+      if (it.workspace !== wsId) continue;
+      const st = markerState(it);
+      if (counts[st] !== undefined) counts[st]++;
     }
     const frag = document.createDocumentFragment();
-    for (const st of ["blocked", "working", "idle"]) {
+    for (const st of ["blocked", "done", "working", "idle"]) {
       if (!counts[st]) continue;
       const s = document.createElement("span");
       s.className = stClass(st);
       s.textContent = "●" + counts[st];
-      s.title = counts[st] + " " + st;
+      s.title = counts[st] + " " + (st === "done" ? "done (unseen)" : st);
       frag.appendChild(s);
     }
     return frag.childNodes.length ? frag : null;
+  }
+
+  // tabMarker: the highest-attention agent state among a tab's panes, as a
+  // colored dot on the tab (herdr's bell/activity markers; the rollup's tab
+  // field keys the grouping — tab bar rows are the active workspace's tabs).
+  function tabMarker(tabNum) {
+    const aw = activeWorkspace();
+    if (!aw) return null;
+    let best = null;
+    for (const it of agentItems) {
+      if (it.workspace !== aw.id || it.tab !== tabNum) continue;
+      const st = markerState(it);
+      if (!best || attentionRank(st) > attentionRank(best)) best = st;
+    }
+    if (!best || best === "idle" || best === "unknown") return null;
+    const s = document.createElement("span");
+    s.className = "tmark " + stClass(best);
+    s.textContent = "●";
+    s.title = best === "done" ? "agent done (unseen)" : "agent " + best;
+    return s;
   }
 
   function renderWorkspaces(msg) {
@@ -513,6 +555,8 @@
       const label = document.createElement("span");
       label.textContent = t.name + (t.zoomed ? " ⤢" : "");
       el.appendChild(label);
+      const mark = tabMarker(t.num);
+      if (mark) el.appendChild(mark);
       el.addEventListener("click", () => { if (!dragConsumedClick && !t.active) sendCmd("tab.focus", { num: t.num }); });
       el.addEventListener("dblclick", () => renameTab(t));
       el.addEventListener("contextmenu", (e) => { e.preventDefault(); openCtx(e.clientX, e.clientY, tabMenuItems(t, msg.tabs.length)); });
@@ -605,10 +649,58 @@
     window.addEventListener("mouseup", up);
   }
 
+  // ---- Pane drag-reorder: drag a header onto another pane → pane.swap_with.
+  // Same shape as beginReorderDrag: mousedown arms a potential drag with a 4px
+  // threshold, so a plain press stays a click (focus). While dragging, the
+  // pane under the pointer highlights as the drop target; releasing anywhere
+  // else cancels. Layout rebroadcasts mid-drag are safe — the hit test reads
+  // live pane rects and the listeners live on window.
+  function beginPaneSwapDrag(ev, srcId) {
+    if (ev.button !== 0) return;
+    const sx = ev.clientX, sy = ev.clientY;
+    let dragging = false, target = null;
+    const clearTarget = () => { if (target) { target.el.classList.remove("droptarget"); target = null; } };
+    const paneAt = (x, y) => {
+      for (const [id, p] of panes) {
+        if (id === srcId || !p.info) continue;
+        const r = p.el.getBoundingClientRect();
+        if (x >= r.left && x < r.right && y >= r.top && y < r.bottom) return p;
+      }
+      return null;
+    };
+    const move = (e) => {
+      if (!dragging) {
+        if (Math.abs(e.clientX - sx) < 4 && Math.abs(e.clientY - sy) < 4) return;
+        dragging = true;
+        const src = panes.get(srcId);
+        if (src) src.el.classList.add("dragging");
+        document.body.classList.add("grabbing");
+      }
+      const p = paneAt(e.clientX, e.clientY);
+      if (p !== target) { clearTarget(); if (p) { target = p; p.el.classList.add("droptarget"); } }
+    };
+    const up = () => {
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", up);
+      const src = panes.get(srcId);
+      if (src) src.el.classList.remove("dragging");
+      document.body.classList.remove("grabbing");
+      const tgt = target;
+      clearTarget();
+      if (dragging && tgt) {
+        dragConsumedClick = true;
+        setTimeout(() => { dragConsumedClick = false; }, 0); // the click fires first, synchronously
+        sendCmd("pane.swap_with", { pane: srcId, target: tgt.id });
+      }
+    };
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up);
+  }
+
   // ---- Agents rollup (WS8): the `agents` message, previously dropped ----
   function renderAgents(items) {
     agentItems = items || [];
-    if (layoutMsg) renderWorkspaces(layoutMsg); // workspace badges derive from the rollup
+    if (layoutMsg) { renderWorkspaces(layoutMsg); renderTabbar(layoutMsg); } // ws badges + tab markers derive from the rollup
     agentListEl.innerHTML = "";
     if (!items || !items.length) {
       const li = document.createElement("li"); li.className = "empty"; li.textContent = "none";
@@ -616,7 +708,7 @@
     }
     for (const it of items) {
       const li = document.createElement("li"); li.className = "agent";
-      const dot = document.createElement("span"); dot.className = "adot " + stClass(it.state); dot.textContent = "●";
+      const dot = document.createElement("span"); dot.className = "adot " + stClass(markerState(it)); dot.textContent = "●";
       const name = document.createElement("span"); name.className = "aname"; name.textContent = it.agent;
       const meta = document.createElement("span"); meta.className = "ameta";
       meta.textContent = (it.pub || ("#" + it.pane)) + " · " + (it.seen ? it.state : "done");
@@ -764,8 +856,9 @@
       case "notify": handleNotify(msg); break;
       case "title": document.title = msg.title ? ("herdr-web · " + msg.title) : "herdr-web"; break;
       case "update_ready":
-        showBanner("herdr-web update ready" + (msg.version ? " — " + msg.version : "") +
-          (msg.command ? " · run: " + msg.command : ""));
+        updateInfo = { version: msg.version || "", command: msg.command || "" };
+        gearEl.classList.add("badge");
+        showUpdateBanner();
         break;
       case "error": toast("error: " + msg.msg); break;
       case "shutdown": setStatus("server shut down", true); break;
@@ -1729,8 +1822,11 @@
         ["rectangular selection", ["Alt+drag"]],
         ["pane / tab / workspace menu", ["right-click"]],
         ["resize splits", ["drag the border"]],
+        ["swap panes", ["drag a pane header onto another pane"]],
+        ["reorder tabs / workspaces", ["drag"]],
         ["rename pane / tab / workspace", ["double-click its title"]],
         ["scrollback", ["wheel", "drag the scrollbar"]],
+        ["launcher menu", ["⚙ in the status bar"]],
       ]));
       cols.appendChild(left);
 
@@ -1914,6 +2010,13 @@
   }
 
   // ---- Update banner (WS8): the update_ready message ----
+  // updateInfo persists past a dismissed banner so the launcher menu can
+  // re-surface it ("update ready" item + gear badge, herdr's launcher badge).
+  let updateInfo = null;
+  function showUpdateBanner() {
+    showBanner("herdr-web update ready" + (updateInfo.version ? " — " + updateInfo.version : "") +
+      (updateInfo.command ? " · run: " + updateInfo.command : ""));
+  }
   function showBanner(text) {
     bannerEl.innerHTML = "";
     const t = document.createElement("span"); t.textContent = text;
@@ -2000,10 +2103,23 @@
   });
 
   // Status-bar affordances: the zoom chip unzooms, the palette hint opens it,
-  // the gear opens settings.
+  // the gear opens the global launcher menu (herdr's bottom-corner menu:
+  // settings / keybinds / reload config / update line when one is pending /
+  // stop server standing in for detach — the web has no client to detach).
   zoomIndEl.addEventListener("click", () => sendCmd("pane.zoom", {}));
   palHintEl.addEventListener("click", () => openPalette());
-  gearEl.addEventListener("click", () => openSettings());
+  gearEl.addEventListener("click", (e) => {
+    const items = [
+      { label: "settings", fn: openSettings },
+      { label: "keybinds", fn: openHelp },
+      { label: "reload config", fn: () => sendCmd("server.reload_config", {}) },
+    ];
+    if (updateInfo) items.push({ label: "update ready" + (updateInfo.version ? " — " + updateInfo.version : ""), fn: showUpdateBanner });
+    items.push("-", { label: "stop server…", danger: true, fn: confirmStopServer });
+    const r = gearEl.getBoundingClientRect();
+    openCtx(r.right, r.top - 8, items);
+    e.stopPropagation();
+  });
 
   measure();
   gridSize();

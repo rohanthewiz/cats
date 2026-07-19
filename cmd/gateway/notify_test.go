@@ -125,3 +125,67 @@ func TestOnPaneAgentFinished(t *testing.T) {
 	}
 	t.Fatal("no notify for the completion transition")
 }
+
+// The attention marker (herdr's pane.seen): a completion while the pane is off
+// the viewport flags it unseen in the rollup; re-entering the viewport clears
+// it. On-viewport completions stay seen.
+func TestAgentSeenMarkers(t *testing.T) {
+	o, err := newOrch(filepath.Join(t.TempDir(), "s.sock"), t.TempDir())
+	if err != nil {
+		t.Fatalf("newOrch: %v", err)
+	}
+	c := &client{o: o, out: make(chan []byte, 256), trans: map[uint32]*browserproto.FrameTranslator{}}
+	o.conns[c] = struct{}{}
+	pid := uint32(o.session.AllPaneIDs()[0])
+
+	// An on-viewport completion stays seen.
+	o.onPaneAgent(orchestration.PaneAgent{PaneID: pid, Agent: "claude", State: "working"})
+	o.onPaneAgent(orchestration.PaneAgent{PaneID: pid, Agent: "claude", State: "idle"})
+	if item := rollupItem(t, o, pid); !item.Seen {
+		t.Fatal("visible completion should stay seen")
+	}
+
+	// Move the pane off the viewport (a second tab becomes active), then
+	// complete a run there: the rollup flags it unseen.
+	o.handleCmd(c, cmd(t, "t1", browserproto.CmdTabCreate, nil))
+	if o.visible[pid] {
+		t.Fatal("test setup: pane still visible after tab.create")
+	}
+	o.onPaneAgent(orchestration.PaneAgent{PaneID: pid, Agent: "claude", State: "working"})
+	o.onPaneAgent(orchestration.PaneAgent{PaneID: pid, Agent: "claude", State: "idle"})
+	item := rollupItem(t, o, pid)
+	if item.Seen {
+		t.Fatal("off-viewport completion should be unseen")
+	}
+	if item.Tab != 1 {
+		t.Fatalf("rollup tab: got %d want 1", item.Tab)
+	}
+
+	// A new run clears the marker even off-viewport (herdr: state != idle).
+	o.onPaneAgent(orchestration.PaneAgent{PaneID: pid, Agent: "claude", State: "working"})
+	if item := rollupItem(t, o, pid); !item.Seen {
+		t.Fatal("leaving idle should clear unseen")
+	}
+	o.onPaneAgent(orchestration.PaneAgent{PaneID: pid, Agent: "claude", State: "idle"})
+	if item := rollupItem(t, o, pid); item.Seen {
+		t.Fatal("second off-viewport completion should be unseen again")
+	}
+
+	// Switching back to the pane's tab marks it seen.
+	o.handleCmd(c, cmd(t, "t2", browserproto.CmdTabFocus, browserproto.TabParams{Num: 1}))
+	if item := rollupItem(t, o, pid); !item.Seen {
+		t.Fatal("entering the viewport should mark the pane seen")
+	}
+}
+
+// rollupItem finds a pane's row in the agents rollup.
+func rollupItem(t *testing.T, o *orch, pid uint32) browserproto.AgentItem {
+	t.Helper()
+	for _, it := range o.agentsMsg().Items {
+		if it.Pane == pid {
+			return it
+		}
+	}
+	t.Fatalf("pane %d not in agents rollup", pid)
+	return browserproto.AgentItem{}
+}
