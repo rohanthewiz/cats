@@ -26,11 +26,28 @@ const Version = 1
 // sessionFile is the session.json envelope. PaneCwds rides alongside the model
 // snapshot: each pane's last daemon-reported working directory (OSC 7), so a
 // cold restore re-spawns shells where they were — runtime chrome the domain
-// model deliberately doesn't own.
+// model deliberately doesn't own. PaneAgents is the same idea for resumable
+// agent sessions (herdr's PaneAgentSessionSnapshot): the hook-reported session
+// identity per pane, so a cold restore can relaunch the agent's native
+// conversation (`claude --resume <id>`). Additive fields — a version bump is
+// not needed, an old file simply has neither map.
 type sessionFile struct {
-	Version  int               `json:"version"`
-	Session  app.Snapshot      `json:"session"`
-	PaneCwds map[uint32]string `json:"pane_cwds,omitempty"`
+	Version    int                     `json:"version"`
+	Session    app.Snapshot            `json:"session"`
+	PaneCwds   map[uint32]string       `json:"pane_cwds,omitempty"`
+	PaneAgents map[uint32]AgentSession `json:"pane_agent_sessions,omitempty"`
+}
+
+// AgentSession is one pane's persisted resumable agent-session identity
+// (herdr's PaneAgentSessionSnapshot): the reporting source ("herdr:claude"),
+// the agent label it must match, and the session ref — Kind "id" for every
+// agent except pi, which may use an absolute "path". No timestamps, no TTL:
+// staleness is the agent's own problem at resume time, exactly as in herdr.
+type AgentSession struct {
+	Source string `json:"source"`
+	Agent  string `json:"agent"`
+	Kind   string `json:"kind"` // "id" | "path"
+	Value  string `json:"value"`
 }
 
 // historyFile is the history.json envelope: pane id → VT-encoded scrollback,
@@ -61,26 +78,30 @@ func DefaultDir() string {
 func SessionPath(dir string) string { return filepath.Join(dir, "session.json") }
 func HistoryPath(dir string) string { return filepath.Join(dir, "history.json") }
 
-// SaveSession writes the model snapshot (plus per-pane cwds) atomically.
-func SaveSession(path string, snap app.Snapshot, paneCwds map[uint32]string) error {
-	return writeJSON(path, sessionFile{Version: Version, Session: snap, PaneCwds: paneCwds})
+// SaveSession writes the model snapshot (plus per-pane cwds and agent
+// sessions) atomically.
+func SaveSession(path string, snap app.Snapshot, paneCwds map[uint32]string, paneAgents map[uint32]AgentSession) error {
+	return writeJSON(path, sessionFile{Version: Version, Session: snap, PaneCwds: paneCwds, PaneAgents: paneAgents})
 }
 
 // LoadSession reads a model snapshot. A missing file returns fs.ErrNotExist
 // (start fresh, silently); anything else — unreadable, unparseable, wrong
 // version — is an error the caller should log before starting fresh.
-func LoadSession(path string) (app.Snapshot, map[uint32]string, error) {
+func LoadSession(path string) (app.Snapshot, map[uint32]string, map[uint32]AgentSession, error) {
 	var f sessionFile
 	if err := readJSON(path, &f); err != nil {
-		return app.Snapshot{}, nil, err
+		return app.Snapshot{}, nil, nil, err
 	}
 	if f.Version != Version {
-		return app.Snapshot{}, nil, fmt.Errorf("%s: version %d, want %d", path, f.Version, Version)
+		return app.Snapshot{}, nil, nil, fmt.Errorf("%s: version %d, want %d", path, f.Version, Version)
 	}
 	if f.PaneCwds == nil {
 		f.PaneCwds = map[uint32]string{}
 	}
-	return f.Session, f.PaneCwds, nil
+	if f.PaneAgents == nil {
+		f.PaneAgents = map[uint32]AgentSession{}
+	}
+	return f.Session, f.PaneCwds, f.PaneAgents, nil
 }
 
 // SaveHistory writes the scrollback seeds atomically.

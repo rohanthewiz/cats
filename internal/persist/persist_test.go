@@ -34,7 +34,10 @@ func TestSessionSaveLoad(t *testing.T) {
 	path := SessionPath(dir)
 	snap := sampleSnapshot(t)
 
-	if err := SaveSession(path, snap, map[uint32]string{2: "/tmp/deep"}); err != nil {
+	agents := map[uint32]AgentSession{
+		2: {Source: "herdr:claude", Agent: "claude", Kind: "id", Value: "sess-abc123"},
+	}
+	if err := SaveSession(path, snap, map[uint32]string{2: "/tmp/deep"}, agents); err != nil {
 		t.Fatalf("SaveSession: %v", err)
 	}
 	fi, err := os.Stat(path)
@@ -45,7 +48,7 @@ func TestSessionSaveLoad(t *testing.T) {
 		t.Fatalf("perms: got %o want 600", fi.Mode().Perm())
 	}
 
-	got, cwds, err := LoadSession(path)
+	got, cwds, gotAgents, err := LoadSession(path)
 	if err != nil {
 		t.Fatalf("LoadSession: %v", err)
 	}
@@ -58,10 +61,33 @@ func TestSessionSaveLoad(t *testing.T) {
 	if cwds[2] != "/tmp/deep" {
 		t.Fatalf("pane cwds: %+v", cwds)
 	}
+	if gotAgents[2] != agents[2] {
+		t.Fatalf("pane agent sessions: %+v", gotAgents)
+	}
+}
+
+// A pre-agent-sessions file (no pane_agent_sessions key) loads with an empty,
+// non-nil map — additive fields must not invalidate old state files.
+func TestLoadSessionWithoutAgentSessions(t *testing.T) {
+	dir := t.TempDir()
+	path := SessionPath(dir)
+	if err := SaveSession(path, sampleSnapshot(t), nil, nil); err != nil {
+		t.Fatalf("SaveSession: %v", err)
+	}
+	_, cwds, agents, err := LoadSession(path)
+	if err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	if cwds == nil || agents == nil {
+		t.Fatalf("maps must be non-nil: cwds=%v agents=%v", cwds, agents)
+	}
+	if len(agents) != 0 {
+		t.Fatalf("agents: %+v", agents)
+	}
 }
 
 func TestLoadSessionMissing(t *testing.T) {
-	_, _, err := LoadSession(SessionPath(t.TempDir()))
+	_, _, _, err := LoadSession(SessionPath(t.TempDir()))
 	if !errors.Is(err, fs.ErrNotExist) {
 		t.Fatalf("want fs.ErrNotExist, got %v", err)
 	}
@@ -73,7 +99,7 @@ func TestLoadSessionCorrupt(t *testing.T) {
 	if err := os.WriteFile(path, []byte("{not json"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := LoadSession(path); err == nil || errors.Is(err, fs.ErrNotExist) {
+	if _, _, _, err := LoadSession(path); err == nil || errors.Is(err, fs.ErrNotExist) {
 		t.Fatalf("want parse error, got %v", err)
 	}
 }
@@ -84,7 +110,7 @@ func TestLoadSessionWrongVersion(t *testing.T) {
 	if err := os.WriteFile(path, []byte(`{"version":99,"session":{}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := LoadSession(path); err == nil {
+	if _, _, _, err := LoadSession(path); err == nil {
 		t.Fatal("want version error")
 	}
 }

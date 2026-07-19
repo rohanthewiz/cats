@@ -123,7 +123,11 @@ func TestHookReservedNativeSessionOnly(t *testing.T) {
 		t.Fatal("session report must not create authority")
 	}
 
-	// A state report from a reserved source is downgraded to a session record.
+	// A state report from a reserved source is downgraded to a session record —
+	// and a *different* id for the held conversation is ignored (herdr's
+	// conflicting_current_session_ref: a nested/sub-agent session must not
+	// clobber the resumable parent session; the held ref stays until detection
+	// or release clears it).
 	if herr := o.applyHookReport(methodReportAgent, hookReportParams{
 		PaneID: pub, Source: "herdr:claude", Agent: "claude", State: "working", Seq: seq(2),
 		AgentSessionID: "sess-def",
@@ -133,8 +137,8 @@ func TestHookReservedNativeSessionOnly(t *testing.T) {
 	if rt.hook != nil {
 		t.Fatal("reserved native source must not acquire state authority")
 	}
-	if rt.agentSession == nil || rt.agentSession.value != "sess-def" {
-		t.Fatalf("session ref not updated: %+v", rt.agentSession)
+	if rt.agentSession == nil || rt.agentSession.value != "sess-abc" {
+		t.Fatalf("conflicting session id must be ignored: %+v", rt.agentSession)
 	}
 
 	// Release from a reserved source is a no-op.

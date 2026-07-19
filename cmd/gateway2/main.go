@@ -282,7 +282,8 @@ func buildOrch(socket, cwd string, pc config.Persistence) (*orch, error) {
 
 	var sess *app.Session
 	var savedCwds map[uint32]string
-	snap, cwds, err := persist.LoadSession(sessionPath)
+	var savedAgents map[uint32]persist.AgentSession
+	snap, cwds, paneAgents, err := persist.LoadSession(sessionPath)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
 		// first run — start fresh, silently
@@ -294,6 +295,7 @@ func buildOrch(socket, cwd string, pc config.Persistence) (*orch, error) {
 			sess = nil
 		} else {
 			savedCwds = cwds
+			savedAgents = paneAgents
 			total := len(snap.Workspaces)
 			log.Printf("gateway2: restored session from %s (%d workspaces, %d panes)",
 				sessionPath, total, len(sess.AllPaneIDs()))
@@ -318,6 +320,18 @@ func buildOrch(socket, cwd string, pc config.Persistence) (*orch, error) {
 		o.capturedHist = maps.Clone(seeds) // partial sweeps must not wipe other panes' seeds
 	} else if !errors.Is(err, fs.ErrNotExist) {
 		log.Printf("gateway2: history state unusable, skipping scrollback seeds: %v", err)
+	}
+	// Agent resume (resume.go): validate the saved session refs, plan each
+	// cold-start pane's resume argv, and drop the saved scrollback of every
+	// resuming pane — the relaunched agent owns that screen, and replaying a
+	// stale transcript under it would masquerade as live output.
+	kept, plans, suppress := planResume(savedAgents, pc.ResumeAgents)
+	o.restoredAgents, o.resumePlans = kept, plans
+	for pid := range suppress {
+		delete(o.seeds, pid)
+	}
+	if n := len(plans); n > 0 {
+		log.Printf("gateway2: %d agent session(s) eligible for resume on cold start", n)
 	}
 	return o, nil
 }

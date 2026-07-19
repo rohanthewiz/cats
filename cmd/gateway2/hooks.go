@@ -325,6 +325,7 @@ func (o *orch) applyHookReport(method string, p hookReportParams) *hookError {
 		rt.hook = nil
 		if rt.agentSession != nil && rt.agentSession.source == source {
 			rt.agentSession = nil
+			o.noteSessionRefChanged(rt) // a released conversation must not resume
 		}
 		if changed {
 			o.publishAgent(rt)
@@ -335,8 +336,13 @@ func (o *orch) applyHookReport(method string, p hookReportParams) *hookError {
 
 // setSessionRef records a resumable session identity (herdr's
 // set_agent_session_ref): dropped when the label conflicts with the currently
-// detected agent; a changed session clears any release suppression for the
-// source (it is a new conversation).
+// detected agent, or when a different session id arrives for the conversation
+// already held (herdr's conflicting_current_session_ref — a sub-agent's or
+// nested session's id must not clobber the resumable parent session; the held
+// ref stays until detection or release clears it). A changed session clears
+// any release suppression for the source (it is a new conversation). An
+// actual change to the held ref marks the session state dirty — the ref is
+// what resume-on-restore persists.
 func (o *orch) setSessionRef(rt *paneRuntime, ref *agentSessionRef) {
 	if ref == nil {
 		return
@@ -344,10 +350,26 @@ func (o *orch) setSessionRef(rt *paneRuntime, ref *agentSessionRef) {
 	if rt.agent != nil && rt.agent.Agent != "" && rt.agent.Agent != ref.agent {
 		return
 	}
+	if cur := rt.agentSession; cur != nil && cur.kind == "id" && ref.kind == "id" &&
+		cur.source == ref.source && cur.agent == ref.agent && cur.value != ref.value {
+		return
+	}
 	if sup, ok := rt.hookSuppressed[ref.source]; ok && sup.session != ref.value {
 		delete(rt.hookSuppressed, ref.source)
 	}
-	rt.agentSession = ref
+	if cur := rt.agentSession; cur == nil || *cur != *ref {
+		rt.agentSession = ref
+		o.noteSessionRefChanged(rt)
+	}
+}
+
+// noteSessionRefChanged supersedes any restart-restored ref for the pane (the
+// live lifecycle owns the identity now — a later clear must not resurrect the
+// restored one at save time) and arms the debounced session save, since the
+// ref is part of what session.json persists.
+func (o *orch) noteSessionRefChanged(rt *paneRuntime) {
+	delete(o.restoredAgents, rt.id)
+	o.saveSoon()
 }
 
 // sessionRefFromReport validates a report's session fields into a ref (herdr's
@@ -482,10 +504,16 @@ func paneEnvMap(socket string, id uint32, publicID string) map[string]string {
 	return m
 }
 
-// clearHookOnExit wipes a pane's hook authority when its process exits (herdr:
-// a late in-flight hook packet must not resurrect a dead agent) and republishes
-// the arbitrated state. No-op for panes with no live authority.
+// clearHookOnExit wipes a pane's hook authority and resumable session ref when
+// its process exits (herdr: a late in-flight hook packet must not resurrect a
+// dead agent, and a dead pane's conversation must not resume on restore — for
+// a resumed pane the root process IS the agent) and republishes the arbitrated
+// state.
 func (o *orch) clearHookOnExit(rt *paneRuntime) {
+	if _, restored := o.restoredAgents[rt.id]; restored || rt.agentSession != nil {
+		rt.agentSession = nil
+		o.noteSessionRefChanged(rt)
+	}
 	if rt.hook == nil {
 		return
 	}

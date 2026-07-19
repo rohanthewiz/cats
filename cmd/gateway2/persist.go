@@ -66,9 +66,9 @@ func (o *orch) saveSoon() {
 }
 
 // saveNow writes the session snapshot synchronously (loop goroutine; the file
-// is small and local). Pane cwds merge the live daemon-reported values over any
-// not-yet-respawned restored ones, so a restart before the daemon reconnects
-// doesn't lose them.
+// is small and local). Pane cwds and agent-session refs merge the live values
+// over any not-yet-respawned restored ones, so a restart before the daemon
+// reconnects doesn't lose them.
 func (o *orch) saveNow() {
 	if o.sessionPath == "" {
 		return
@@ -79,12 +79,21 @@ func (o *orch) saveNow() {
 			cwds[pid] = cwd
 		}
 	}
+	agents := make(map[uint32]persist.AgentSession)
+	for pid, s := range o.restoredAgents {
+		if o.panes[pid] != nil {
+			agents[pid] = s
+		}
+	}
 	for pid, rt := range o.panes {
 		if rt.cwd != "" {
 			cwds[pid] = rt.cwd
 		}
+		if ref := rt.agentSession; ref != nil {
+			agents[pid] = persist.AgentSession{Source: ref.source, Agent: ref.agent, Kind: ref.kind, Value: ref.value}
+		}
 	}
-	if err := persist.SaveSession(o.sessionPath, o.session.Snapshot(), cwds); err != nil {
+	if err := persist.SaveSession(o.sessionPath, o.session.Snapshot(), cwds, agents); err != nil {
 		log.Printf("gateway2: save session state: %v", err)
 	}
 }

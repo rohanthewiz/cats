@@ -180,7 +180,7 @@ func TestSaveSoonWritesSessionFile(t *testing.T) {
 
 	deadline := time.Now().Add(3 * time.Second)
 	for {
-		snap, _, err := persist.LoadSession(o.sessionPath)
+		snap, _, _, err := persist.LoadSession(o.sessionPath)
 		if err == nil {
 			if _, err := app.RestoreSession(modelSpawner{}, snap); err != nil {
 				t.Fatalf("saved snapshot does not restore: %v", err)

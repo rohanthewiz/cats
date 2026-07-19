@@ -30,6 +30,20 @@ func (o *orch) onPaneAgent(ev orchestration.PaneAgent) {
 	if rt == nil {
 		return
 	}
+	// A resumable session ref is dropped when detection contradicts it
+	// (herdr's set_detected_state rules): a different agent is on screen, or
+	// the ref's own agent just changed/disappeared — its conversation ended,
+	// so it must not resume on restore.
+	if sess := rt.agentSession; sess != nil {
+		prev := ""
+		if rt.agent != nil {
+			prev = rt.agent.Agent
+		}
+		if (ev.Agent != "" && ev.Agent != sess.agent) || (ev.Agent != prev && prev == sess.agent) {
+			rt.agentSession = nil
+			o.noteSessionRefChanged(rt)
+		}
+	}
 	rt.agent = &ev
 	rt.agentAt = time.Now()
 	// A hook authority whose agent conflicts with a newly detected agent is

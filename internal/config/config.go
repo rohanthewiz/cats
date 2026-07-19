@@ -67,6 +67,11 @@ type Persistence struct {
 	// HistoryLines bounds the scrollback captured per pane for cold-restore
 	// seeds (0 = the whole buffer).
 	HistoryLines int `yaml:"history_lines"`
+	// ResumeAgents relaunches supported AI-agent panes into their native
+	// conversation sessions on a cold restore (herdr's
+	// session.resume_agents_on_restore, default true). Requires official
+	// integrations that report session refs over the hook API.
+	ResumeAgents bool `yaml:"resume_agents"`
 }
 
 // TLS is the HTTPS configuration. Enabled alone uses an auto self-signed cert;
@@ -150,7 +155,7 @@ func Default() Config {
 			Auth:           "password",
 			SessionTTL:     "24h",
 		},
-		Persistence: Persistence{Enabled: true, HistoryLines: 2000},
+		Persistence: Persistence{Enabled: true, HistoryLines: 2000, ResumeAgents: true},
 		Theme:       Theme{Colors: cloneStrMap(defaultColors), Font: defaultFont},
 		Keybindings: Keybindings{CopyMode: cloneKeyMap(defaultCopyMode)},
 		Worktrees:   Worktrees{Directory: "~/.herdr/worktrees"},

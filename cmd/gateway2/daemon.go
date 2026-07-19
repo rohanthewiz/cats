@@ -139,9 +139,19 @@ func (d *daemon) reconcile(alivePanes []uint32) {
 			rt.created = alive[pid]
 			if alive[pid] {
 				// An adopted survivor keeps its live PTY, real scrollback, and
-				// real cwd — the restored seeds would be stale duplicates.
+				// real cwd — the restored seeds would be stale duplicates, and
+				// resuming would double-launch an agent that never died. Its
+				// saved session ref goes live on the runtime instead: the agent
+				// is (presumably) still running that conversation, and the
+				// normal lifecycle rules (detection conflict, release, exit)
+				// now own clearing it.
 				delete(o.seeds, pid)
 				delete(o.restoredCwds, pid)
+				delete(o.resumePlans, pid)
+				if s, ok := o.restoredAgents[pid]; ok && rt.agentSession == nil {
+					rt.agentSession = &agentSessionRef{source: s.Source, agent: s.Agent, kind: s.Kind, value: s.Value}
+					delete(o.restoredAgents, pid)
+				}
 			}
 		}
 		for _, id := range alivePanes {

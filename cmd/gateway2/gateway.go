@@ -17,6 +17,7 @@ import (
 	"github.com/rohanthewiz/herdr-web/internal/inputenc"
 	"github.com/rohanthewiz/herdr-web/internal/layout"
 	"github.com/rohanthewiz/herdr-web/internal/orchestration"
+	"github.com/rohanthewiz/herdr-web/internal/persist"
 	"github.com/rohanthewiz/herdr-web/internal/terminal"
 	"github.com/rohanthewiz/herdr-web/internal/workspace"
 )
@@ -142,14 +143,22 @@ type orch struct {
 	// initialized from the loaded seeds so a partial capture sweep never wipes
 	// another pane's seed from disk. saveArmed/histArmed debounce the writes.
 	// histLines bounds each capture (0 = whole buffer). All loop-goroutine only.
-	sessionPath  string
-	historyPath  string
-	seeds        map[uint32]string
-	restoredCwds map[uint32]string
-	capturedHist map[uint32]string
-	histLines    uint32
-	saveArmed    bool
-	histArmed    bool
+	// restoredAgents and resumePlans carry the persisted agent-session refs
+	// across a restart (resume.go): restoredAgents holds each pane's loaded
+	// ref until the pane goes live (adopted by reconcile or re-spawned by
+	// createPane) and is merged under live refs at save time; resumePlans is
+	// the argv to exec instead of a shell for a cold-started pane, consumed
+	// exactly once like seeds/restoredCwds.
+	sessionPath    string
+	historyPath    string
+	seeds          map[uint32]string
+	restoredCwds   map[uint32]string
+	restoredAgents map[uint32]persist.AgentSession
+	resumePlans    map[uint32][]string
+	capturedHist   map[uint32]string
+	histLines      uint32
+	saveArmed      bool
+	histArmed      bool
 	// finalCap tracks the clean-shutdown capture sweep (nil when not shutting
 	// down): Shutdown captures every live pane's scrollback, bounded by a short
 	// deadline, before firing the stop hook.
@@ -222,23 +231,25 @@ func newOrch(socket, cwd string) (*orch, error) {
 // there is nothing to restore).
 func newOrchWith(socket, cwd string, sess *app.Session) *orch {
 	o := &orch{
-		session:      sess,
-		panes:        make(map[uint32]*paneRuntime),
-		conns:        make(map[*client]struct{}),
-		area:         defaultArea,
-		cellW:        8,
-		cellH:        16,
-		cwd:          cwd,
-		visible:      make(map[uint32]bool),
-		pendingReqs:  make(map[reqKey][]*pending),
-		waiters:      make(map[uint32][]*waiter),
-		waiterCheck:  make(map[uint32]bool),
-		outAccum:     make(map[uint32]*outputScanner),
-		subs:         make(map[*ctlSubscriber]struct{}),
-		seeds:        make(map[uint32]string),
-		restoredCwds: make(map[uint32]string),
-		capturedHist: make(map[uint32]string),
-		mailbox:      make(chan func(), 256),
+		session:        sess,
+		panes:          make(map[uint32]*paneRuntime),
+		conns:          make(map[*client]struct{}),
+		area:           defaultArea,
+		cellW:          8,
+		cellH:          16,
+		cwd:            cwd,
+		visible:        make(map[uint32]bool),
+		pendingReqs:    make(map[reqKey][]*pending),
+		waiters:        make(map[uint32][]*waiter),
+		waiterCheck:    make(map[uint32]bool),
+		outAccum:       make(map[uint32]*outputScanner),
+		subs:           make(map[*ctlSubscriber]struct{}),
+		seeds:          make(map[uint32]string),
+		restoredCwds:   make(map[uint32]string),
+		restoredAgents: make(map[uint32]persist.AgentSession),
+		resumePlans:    make(map[uint32][]string),
+		capturedHist:   make(map[uint32]string),
+		mailbox:        make(chan func(), 256),
 	}
 	o.daemon = &daemon{o: o, socket: socket}
 	o.syncDaemon()      // desired sizes; no daemon/conns yet, sends are dropped
@@ -361,9 +372,11 @@ func (o *orch) syncDaemon() {
 
 // createPane spawns a pane's PTY at its desired grid and marks it created. A
 // restored pane the daemon no longer holds (cold start) is re-spawned in its
-// saved cwd with its saved scrollback replayed via initial_history (WS3); both
-// are consumed only on a connected send — a pre-connection create is dropped by
-// daemon.send and retried by reconcile, which must still find them.
+// saved cwd with its saved scrollback replayed via initial_history (WS3) — or,
+// when a resume plan exists (resume.go), with the agent's native resume argv
+// as the pane command instead of a shell. Everything restored is consumed only
+// on a connected send — a pre-connection create is dropped by daemon.send and
+// retried by reconcile, which must still find it.
 func (o *orch) createPane(rt *paneRuntime) {
 	cp := orchestration.NewCreatePane(rt.id, rt.cols, rt.rows)
 	cp.Cwd = o.paneCwd(rt.id)
@@ -377,6 +390,16 @@ func (o *orch) createPane(rt *paneRuntime) {
 		if cwd, ok := o.restoredCwds[rt.id]; ok {
 			cp.Cwd = cwd
 			delete(o.restoredCwds, rt.id)
+		}
+		if argv, ok := o.resumePlans[rt.id]; ok {
+			cp.Command, cp.Args = argv[0], argv[1:]
+			delete(o.resumePlans, rt.id)
+			// The resuming pane keeps its ref live so the next snapshot still
+			// carries it (herdr's set_persisted_agent_session on restore).
+			if s, ok := o.restoredAgents[rt.id]; ok {
+				rt.agentSession = &agentSessionRef{source: s.Source, agent: s.Agent, kind: s.Kind, value: s.Value}
+				delete(o.restoredAgents, rt.id)
+			}
 		}
 		if h, ok := o.seeds[rt.id]; ok {
 			cp.InitialHistory = h

@@ -494,6 +494,19 @@ func (h *Host) createPane(c CreatePane) error {
 	}
 
 	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Cols: c.Cols, Rows: c.Rows})
+	if err != nil && c.Command != "" {
+		// A pane with an explicit command (an agent-session resume) degrades to
+		// the default shell rather than a dead pane — herdr types the resume
+		// command into a shell, so a missing agent binary leaves a usable shell
+		// there; match that outcome.
+		h.emit(NewError(c.PaneID, fmt.Sprintf("command %q: %v — falling back to shell", name, err)))
+		cmd = exec.Command(defaultShell())
+		cmd.Env = buildEnv(c.Env)
+		if c.Cwd != "" {
+			cmd.Dir = c.Cwd
+		}
+		ptmx, err = pty.StartWithSize(cmd, &pty.Winsize{Cols: c.Cols, Rows: c.Rows})
+	}
 	if err != nil {
 		return fmt.Errorf("start pty: %w", err)
 	}
