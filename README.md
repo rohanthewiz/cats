@@ -92,8 +92,8 @@ herdrctl help                           # the full verb list
 ```
 
 `herdrctl integration install claude` installs the herdr hook integration
-into an agent's own config tree (offline — no gateway needed); `wsprobe` is a
-stdlib-only WebSocket probe for exercising the browser protocol headlessly.
+into an agent's own config tree (offline — no gateway needed); `herdrctl probe`
+is a stdlib-only WebSocket probe for exercising the browser protocol headlessly.
 
 ## Layout
 
@@ -101,8 +101,8 @@ stdlib-only WebSocket probe for exercising the browser protocol headlessly.
 cmd/gateway/          herdr server: orchestrator event loop, web UI, WS bridge,
                       control/hook APIs, persistence + restore, auth/TLS
 cmd/termhost/         terminal-backend daemon (orchestration Host over a socket)
-cmd/herdrctl/         control-API CLI + agent-integration installers (untagged)
-cmd/wsprobe/          stdlib-only WebSocket probe for the browser protocol
+cmd/herdrctl/         control-API CLI, agent-integration installers, and the
+                      browser-protocol WebSocket probe verb (untagged)
 internal/app/         session model + §7 command table (the Dispatcher seam)
 internal/browserproto/  browser WebSocket protocol (spec: ai_docs/phase-c-ws9-protocol.md)
 internal/orchestration/ gateway↔termhost seam (protocol + terminal-backend Host)

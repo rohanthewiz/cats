@@ -1,7 +1,11 @@
-// Command wsprobe is a stdlib-only WebSocket client for the WS9 browser
-// protocol (internal/browserproto), used to verify cmd/gateway end-to-end
-// without a browser. It connects, sends init, folds pane_frame/pane_diff
-// into per-pane grids, and runs a small op script against the live session.
+// This file is herdrctl's `probe` verb (formerly the standalone cmd/wsprobe):
+// a stdlib-only WebSocket client for the WS9 browser protocol
+// (internal/browserproto), used to verify cmd/gateway end-to-end without a
+// browser. Unlike every other verb it dials the gateway's /ws endpoint — the
+// browser transport — not the control socket, so it proves the full
+// browser-facing path (upgrade, auth, init, frames, commands) headlessly.
+// It connects, sends init, folds pane_frame/pane_diff into per-pane grids,
+// and runs a small op script against the live session.
 //
 // Ops (semicolon-separated, via --script):
 //
@@ -46,7 +50,7 @@
 //
 // Example:
 //
-//	wsprobe --url ws://localhost:8421/ws --script 'wait:800; type:echo hi\n; expect:1:hi; dump:1'
+//	herdrctl probe --url ws://localhost:8421/ws --script 'wait:800; type:echo hi\n; expect:1:hi; dump:1'
 package main
 
 import (
@@ -69,21 +73,30 @@ import (
 	"github.com/rohanthewiz/herdr-web/internal/browserproto"
 )
 
-func main() {
-	rawURL := flag.String("url", "ws://localhost:8421/ws", "gateway WebSocket URL")
-	cols := flag.Int("cols", 120, "grid columns")
-	rows := flag.Int("rows", 32, "grid rows")
-	script := flag.String("script", "wait:1000; dump:0", "op script (see doc comment)")
-	timeout := flag.Duration("timeout", 8*time.Second, "expect/modes poll timeout")
-	life := flag.Duration("life", 120*time.Second, "connection lifetime limit")
-	token := flag.String("token", "", "shared access token sent as Authorization: Bearer (WS10 auth)")
-	flag.Parse()
-
-	if err := run(*rawURL, *cols, *rows, *script, *timeout, *life, *token); err != nil {
-		fmt.Fprintf(os.Stderr, "wsprobe: FAIL: %v\n", err)
-		os.Exit(1)
+// runProbe is the `probe` verb's entry point. It owns a dedicated FlagSet
+// (parsed from the args after the verb) because its flags are WebSocket-side
+// and disjoint from the control-socket global flags in main.go — the same
+// early-dispatch pattern the integration verb uses. Exit status mirrors the
+// CLI convention: 0 = script passed, 1 = a probe op failed, 2 = bad flags.
+func runProbe(args []string) int {
+	fs := flag.NewFlagSet("herdrctl probe", flag.ContinueOnError)
+	rawURL := fs.String("url", "ws://localhost:8421/ws", "gateway WebSocket URL")
+	cols := fs.Int("cols", 120, "grid columns")
+	rows := fs.Int("rows", 32, "grid rows")
+	script := fs.String("script", "wait:1000; dump:0", "op script (see cmd/herdrctl/probe.go doc comment)")
+	timeout := fs.Duration("timeout", 8*time.Second, "expect/modes poll timeout")
+	life := fs.Duration("life", 120*time.Second, "connection lifetime limit")
+	token := fs.String("token", "", "shared access token sent as Authorization: Bearer (WS10 auth)")
+	if err := fs.Parse(args); err != nil {
+		return 2 // flag already reported the problem (and prints defaults on -h)
 	}
-	fmt.Println("wsprobe: PASS")
+
+	if err := probeRun(*rawURL, *cols, *rows, *script, *timeout, *life, *token); err != nil {
+		fmt.Fprintf(os.Stderr, "herdrctl probe: FAIL: %v\n", err)
+		return 1
+	}
+	fmt.Println("herdrctl probe: PASS")
+	return 0
 }
 
 // paneGrid is the probe's fold of one pane's frame stream.
@@ -125,7 +138,9 @@ type probe struct {
 	seq         int
 }
 
-func run(rawURL string, cols, rows int, script string, timeout, life time.Duration, token string) error {
+// probeRun dials the gateway, performs the WS upgrade + init handshake, starts
+// the frame-folding reader, then executes the op script sequentially.
+func probeRun(rawURL string, cols, rows int, script string, timeout, life time.Duration, token string) error {
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		return err
@@ -1348,7 +1363,7 @@ func keyNameFor(code string, mods uint8) string {
 	return code
 }
 
-// --- Wire helpers (RFC6455 client frames, mirrors cmd/wsprobe) -------------------
+// --- Wire helpers (RFC6455 client frames, stdlib-only) ---------------------------
 
 func (p *probe) send(m any) error {
 	b, err := browserproto.Marshal(m)

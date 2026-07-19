@@ -11,11 +11,17 @@
 //	herdrctl help                               list the ergonomic verbs
 //	herdrctl commands                           list the raw §7 method names
 //	herdrctl integration <install|uninstall|status|help> ...  agent hook installers
+//	herdrctl probe [--url ...] [--script ...]   browser-protocol WebSocket probe
 //
 // The integration family is the one offline verb: it installs/removes the
 // herdr shell-hook integrations for coding agents (claude, codex, kimi, ...)
 // by editing their config trees directly, and never dials the control socket
 // (internal/integration does the work).
+//
+// The probe verb is the other transport exception: it speaks the WS9 browser
+// WebSocket protocol to a gateway's /ws endpoint — not the control socket —
+// to verify the browser-facing path headlessly (see probe.go for its op
+// script language).
 //
 // Ergonomic verbs build the params for you from positional args (`herdrctl help`
 // lists them). Examples:
@@ -85,6 +91,13 @@ func run() int {
 	// like --outdated-only — so it must dispatch before the flag re-parse below.
 	if method == "integration" {
 		return runIntegration(rest[1:])
+	}
+
+	// The probe verb dials the gateway's /ws endpoint (the browser WebSocket
+	// transport, not the control socket) and owns a disjoint flag set (--url,
+	// --script, ...), so like integration it dispatches before the re-parse.
+	if method == "probe" {
+		return runProbe(rest[1:])
 	}
 
 	_ = flag.CommandLine.Parse(rest[1:])
@@ -227,6 +240,8 @@ Usage:
   herdrctl commands                            list the raw §7 method names
   herdrctl integration install|uninstall <target>   install/remove agent hooks (offline)
   herdrctl integration status [--outdated-only]     integration install states (offline)
+  herdrctl probe [--url ws://...] [--script '...']  browser-protocol WebSocket probe
+                                               (op reference: cmd/herdrctl/probe.go)
 
 Verbs:
 `)
