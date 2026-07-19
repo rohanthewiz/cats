@@ -201,4 +201,31 @@ func TestParsePersistence(t *testing.T) {
 	if _, err := parse([]byte("persistence:\n  history_lines: -1\n")); err == nil {
 		t.Fatal("negative history_lines should be rejected")
 	}
+
+	got, err = parse([]byte("persistence:\n  resume_agents: false\n"))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if got.Persistence.ResumeAgents || !got.Persistence.Enabled {
+		t.Fatalf("got %+v", got.Persistence)
+	}
+}
+
+// The shipped example config must always parse against the current schema and
+// keep the defaults it documents.
+func TestExampleConfigParses(t *testing.T) {
+	data, err := os.ReadFile("../../config.example.yaml")
+	if err != nil {
+		t.Fatalf("read example config: %v", err)
+	}
+	got, err := parse(data)
+	if err != nil {
+		t.Fatalf("example config does not parse: %v", err)
+	}
+	want := Default()
+	if got.Server != want.Server || got.Persistence != want.Persistence ||
+		got.Worktrees != want.Worktrees {
+		t.Fatalf("example config drifted from defaults:\n got %+v\nwant %+v",
+			got, want)
+	}
 }

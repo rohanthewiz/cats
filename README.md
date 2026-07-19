@@ -35,6 +35,22 @@ matches. Proto 14 inserted `ServerMessage::WindowTitle` at index 7, shifting `Mo
 to 9 — handled in `internal/wire`. The server renders per-client at each client's requested
 size, so attaching a web client does not resize other clients' views.
 
+## Build & packaging
+
+The VT engine (libghostty-vt, Zig) is vendored in `third_party/libghostty-vt`
+— the repo is self-contained; no Rust checkout is needed.
+
+```bash
+make vt             # one-time: build the vendored libghostty-vt (downloads pinned Zig 0.15.2)
+make binaries       # gateway2 + termhost + herdrctl into bin/ (-tags ghostty)
+make check          # everything CI runs: fmt, vet, untagged tests, tagged race tests
+make dist           # release tarball for this host's OS/arch into dist/
+```
+
+CI (`.github/workflows/ci.yml`) runs the untagged quick checks plus the
+ghostty-tagged race tests on Linux and macOS. A `v*` tag triggers
+`release.yml`, which attaches per-platform tarballs to the GitHub release.
+
 ## Run
 
 ```bash
@@ -107,8 +123,8 @@ real shell PTY, pump it through the emulator, dump the grid). Both work on Apple
 Silicon / macOS 26.5. To build:
 
 ```bash
-./scripts/build-libghostty-vt.sh          # builds libghostty-vt, prints PKG_CONFIG_PATH
-export PKG_CONFIG_PATH=~/projs/rust/herdr/vendor/libghostty-vt/zig-out/share/pkgconfig
+./scripts/build-libghostty-vt.sh          # builds the vendored libghostty-vt, prints PKG_CONFIG_PATH
+export PKG_CONFIG_PATH=$PWD/third_party/libghostty-vt/zig-out/share/pkgconfig
 go test -tags ghostty ./internal/terminal/   # Emulator round-trip tests
 go run  -tags ghostty ./cmd/vtspike
 go run  -tags ghostty ./cmd/ptyspike
