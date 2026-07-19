@@ -143,7 +143,8 @@ func TestHostReportsAgent(t *testing.T) {
 	c := startTestHost(t)
 
 	cp := NewCreatePane(4, 40, 5)
-	cp.Command = "/bin/sh"
+	// bash, not /bin/sh: `exec -a` is a bashism, and /bin/sh is dash on Linux.
+	cp.Command = "/bin/bash"
 	// Advertise argv[0]="codex" over a real binary so process-based detection
 	// identifies the agent without needing one installed.
 	cp.Args = []string{"-c", "exec -a codex sleep 3"}
@@ -177,7 +178,8 @@ func TestHostReportsAgentWorkingState(t *testing.T) {
 	c := startTestHost(t)
 
 	cp := NewCreatePane(5, 40, 5)
-	cp.Command = "/bin/sh"
+	// bash, not /bin/sh: `exec -a` is a bashism, and /bin/sh is dash on Linux.
+	cp.Command = "/bin/bash"
 	// A foreground process named "pi" (agent) that prints the pi manifest's
 	// working marker — exercises identity + manifest state classification. It must
 	// outlive the Stage C startup grace window (3s), during which the screen is not
