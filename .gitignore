@@ -25,3 +25,8 @@ __pycache__/
 
 # local toolchain (zig 0.15.2 for libghostty-vt build)
 .tools/
+
+# vendored libghostty-vt build outputs (rebuilt per checkout — the pkgconfig
+# file bakes an absolute prefix at build time)
+/third_party/libghostty-vt/zig-out/
+/third_party/libghostty-vt/.zig-cache/
