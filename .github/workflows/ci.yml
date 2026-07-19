@@ -1,0 +1,64 @@
+# CI: untagged quick checks, then the real (ghostty-tagged, CGO) build+tests
+# on Linux and macOS against the vendored libghostty-vt (third_party/),
+# compiled by scripts/build-libghostty-vt.sh with pinned Zig 0.15.2.
+name: ci
+
+on:
+  push:
+    branches: ["**"]
+    tags-ignore: ["v*"] # tag builds are release.yml's job
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Format, vet, build, and test the untagged tree (no CGO — the pure-Go
+  # domain packages and stubs). Fast first signal.
+  quick:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: make fmt-check
+      - run: make vet
+      - run: make build
+      - run: make test
+
+  # The real terminal path: build the vendored VT engine, then vet + race-test
+  # everything with -tags ghostty.
+  ghostty:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      # The pinned Zig toolchain download and the Zig package cache (the few
+      # lazy deps fetched from deps.files.ghostty.org on a cold build).
+      - uses: actions/cache@v4
+        with:
+          path: |
+            .tools
+            ~/.cache/zig
+          key: zig-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/build-libghostty-vt.sh', 'third_party/libghostty-vt/build.zig.zon') }}
+      # The built VT lib + Zig incremental cache, keyed on the vendored source.
+      # zig-out bakes the checkout's absolute path into its pkgconfig, which is
+      # stable for a given runner/repo, so caching it across runs is safe.
+      - uses: actions/cache@v4
+        with:
+          path: |
+            third_party/libghostty-vt/zig-out
+            third_party/libghostty-vt/.zig-cache
+          key: vt-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('third_party/libghostty-vt/**', '!third_party/libghostty-vt/zig-out/**', '!third_party/libghostty-vt/.zig-cache/**', 'scripts/build-libghostty-vt.sh') }}
+      - run: make vt
+      - run: make vet-ghostty
+      - run: make race-ghostty

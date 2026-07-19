@@ -4,6 +4,14 @@
 *.test
 *.out
 
+# Built command binaries (produced by `go build` in cmd/*)
+/gateway2
+/herdrctl
+/termhost
+/cmd/gateway2/gateway2
+/cmd/herdrctl/herdrctl
+/cmd/termhost/termhost
+
 # Editor / OS
 .DS_Store
 .idea/
@@ -14,3 +22,11 @@
 
 # Python
 __pycache__/
+
+# local toolchain (zig 0.15.2 for libghostty-vt build)
+.tools/
+
+# vendored libghostty-vt build outputs (rebuilt per checkout — the pkgconfig
+# file bakes an absolute prefix at build time)
+/third_party/libghostty-vt/zig-out/
+/third_party/libghostty-vt/.zig-cache/

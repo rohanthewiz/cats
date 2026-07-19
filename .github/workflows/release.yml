@@ -1,0 +1,39 @@
+# Release: on a v* tag, build the shipped binaries (gateway, termhost,
+# herdrctl — ghostty-tagged, static libghostty-vt linked in) per platform and
+# attach the tarballs to the GitHub release. CGO rules out cross-compiling
+# from one runner, so each platform builds its own.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  dist:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # git describe needs tags
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/cache@v4
+        with:
+          path: |
+            .tools
+            ~/.cache/zig
+          key: zig-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/build-libghostty-vt.sh', 'third_party/libghostty-vt/build.zig.zon') }}
+      - run: make vt
+      - run: make test-ghostty
+      - run: make dist
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.tar.gz
