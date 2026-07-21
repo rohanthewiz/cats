@@ -135,6 +135,22 @@
   #ctxmenu .item.danger:hover { background:var(--err); }
   #ctxmenu .sep { height:1px; background:var(--line); margin:4px 6px; }
 
+  /* ---- Pane-list hover tooltip ----
+     The sidebar pane rows truncate title/agent to fit their narrow column, so
+     the full details are only reachable on hover. This styled popup mirrors the
+     ctxmenu look (panel2 surface, drop shadow) but lays its fields out as a
+     two-column label/value grid for scannability. It is a single reused element
+     (see #panetip in JS), positioned fixed and clamped into the viewport. */
+  #panetip { position:fixed; z-index:11; background:var(--panel2); border:1px solid var(--line);
+    border-radius:6px; padding:8px 10px; box-shadow:0 6px 24px rgba(0,0,0,.5); font-size:12px;
+    max-width:340px; pointer-events:none; display:none; }
+  #panetip.show { display:grid; grid-template-columns:auto 1fr; gap:3px 10px; align-items:baseline; }
+  #panetip .k { color:var(--muted); font-size:10px; text-transform:uppercase; letter-spacing:.5px; white-space:nowrap; }
+  #panetip .v { color:var(--fg); word-break:break-word; }
+  #panetip .v.pub { color:var(--accent); }
+  #panetip .v.mono { font-family:inherit; }
+  #panetip .v.exited { color:var(--err); }
+
   /* ---- Palette / navigator (WS8) ---- */
   .modal.pal { width:520px; margin-top:9vh; }
   .pal .query { padding:10px 12px; border-bottom:1px solid var(--line); }
@@ -543,9 +559,53 @@
         li.appendChild(a);
       }
       li.addEventListener("click", () => { if (!pr.focused) sendCmd("pane.focus", { pane: pr.pane }); });
+      // Reveal the untruncated pane details on hover. mousemove keeps the popup
+      // riding just right of the pointer; mouseleave tears it down. We pass the
+      // live pane object by id (not the closure's `p`) so a re-render between
+      // enter and move still shows current title/agent/state.
+      li.addEventListener("mouseenter", (e) => showPaneTip(e, pr));
+      li.addEventListener("mousemove", (e) => showPaneTip(e, pr));
+      li.addEventListener("mouseleave", hidePaneTip);
       paneListEl.appendChild(li);
     }
   }
+
+  // ---- Pane-list hover tooltip ----
+  // A single reused element (cheaper than per-row popups, and only ever one is
+  // visible). Rebuilt on each show since the underlying pane state is live.
+  const paneTipEl = document.createElement("div");
+  paneTipEl.id = "panetip";
+  document.body.appendChild(paneTipEl);
+
+  function showPaneTip(e, pr) {
+    const p = panes.get(pr.pane);
+    paneTipEl.innerHTML = "";
+    const row = (k, v, vcls) => {
+      if (v === undefined || v === null || v === "") return;
+      const kk = document.createElement("span"); kk.className = "k"; kk.textContent = k;
+      const vv = document.createElement("span"); vv.className = "v" + (vcls ? " " + vcls : ""); vv.textContent = v;
+      paneTipEl.appendChild(kk); paneTipEl.appendChild(vv);
+    };
+    row("Pane", pr.pub || ("#" + pr.pane), "pub");
+    if (p) {
+      row("Title", p.title);
+      row("Dir", p.cwd, "mono");
+      if (p.agent) row("Agent", p.agent + " · " + (p.agentState || "unknown"));
+      if (p.exited !== null && p.exited !== undefined) row("Exited", "code " + p.exited, "exited");
+    }
+    row("Focus", pr.focused ? "focused" : "");
+    // Position the popup to the right of the cursor, clamped into the viewport
+    // (measured after making it visible so its size is known).
+    paneTipEl.classList.add("show");
+    const r = paneTipEl.getBoundingClientRect();
+    let x = e.clientX + 14, y = e.clientY + 8;
+    if (x + r.width > window.innerWidth - 4) x = e.clientX - r.width - 8;
+    if (y + r.height > window.innerHeight - 4) y = window.innerHeight - r.height - 4;
+    paneTipEl.style.left = Math.max(4, x) + "px";
+    paneTipEl.style.top = Math.max(4, y) + "px";
+  }
+
+  function hidePaneTip() { paneTipEl.classList.remove("show"); }
 
   function renderTabbar(msg) {
     tabbarEl.innerHTML = "";
