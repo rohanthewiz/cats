@@ -17,7 +17,7 @@ GOARCH   := $(shell go env GOARCH)
 DIST     := dist/herdr-web_$(VERSION)_$(GOOS)_$(GOARCH)
 
 .PHONY: all vt build test build-ghostty test-ghostty race-ghostty binaries \
-        local dist fmt-check vet vet-ghostty check clean
+        local dist macapp macapp-client fmt-check vet vet-ghostty check clean
 
 all: binaries
 
@@ -72,6 +72,25 @@ dist: binaries
 	cp config.example.yaml README.md $(DIST)/
 	tar -czf $(DIST).tar.gz -C dist $(notdir $(DIST))
 	@echo "==> $(DIST).tar.gz"
+
+# --- macOS app bundles --------------------------------------------------------
+# Both variants are built from the one cmd/herdrapp launcher; the variant chooses
+# what gets bundled and the baked-in default mode. Unsigned/personal: another Mac
+# needs a one-time right-click -> Open. scripts/build-macapp.sh does the assembly.
+
+APP_ID        := dev.herdr.app
+APP_CLIENT_ID := dev.herdr.client
+
+# macapp (Variant 1, self-contained): launcher + the three static ghostty daemons
+# → dist/Herdr.app. Runs fully local. Depends on `binaries` for the daemons; the
+# vendored VT engine must be built first (`make vt`).
+macapp: binaries
+	scripts/build-macapp.sh self "Herdr" $(APP_ID) $(VERSION)
+
+# macapp-client (Variant 2, thin): launcher only, baked to remote mode →
+# dist/Herdr Client.app. No backend binaries, so no ghostty/Zig toolchain needed.
+macapp-client:
+	scripts/build-macapp.sh client "Herdr Client" $(APP_CLIENT_ID) $(VERSION)
 
 # --- hygiene ------------------------------------------------------------------
 

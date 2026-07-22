@@ -125,12 +125,21 @@ func GenerateSecret() (string, error) {
 	return base64.RawURLEncoding.EncodeToString(b), nil
 }
 
-// OriginOK reports whether a WebSocket upgrade's Origin header is same-origin
-// with the request Host. A browser always sends Origin on a cross-document WS
-// handshake, so a mismatch is a cross-site attempt and is rejected. A
-// non-browser client sends no Origin and is allowed here — the same-origin
-// policy does not apply to it, and it must still pass the secret/cookie check.
-func OriginOK(origin, host string) bool {
+// OriginOK reports whether a WebSocket upgrade's Origin header is acceptable:
+// same-origin with the request Host, or a match against the operator's explicit
+// allow-list. A browser always sends Origin on a cross-document WS handshake, so
+// a mismatch is a cross-site attempt and is rejected. A non-browser client sends
+// no Origin and is allowed here — the same-origin policy does not apply to it,
+// and it must still pass the secret/cookie check.
+//
+// allowed carries operator-configured extra origins (server.allowed_origins /
+// --allowed-origins). Each entry may be a full origin ("https://app.example.com")
+// or a bare authority ("app.example.com" / "app.example.com:8421"); only the
+// host[:port] authority is compared. This is the escape hatch for a reverse
+// proxy or relay whose public Host differs from the gateway's own — with
+// subdomain relay routing Origin.Host already equals Host, so it is mostly a
+// safety valve, but it closes the "no allow-list" gap for other deployments.
+func OriginOK(origin, host string, allowed []string) bool {
 	if origin == "" {
 		return true // non-browser client (e.g. herdrctl probe); auth is still enforced
 	}
@@ -138,5 +147,31 @@ func OriginOK(origin, host string) bool {
 	if err != nil || u.Host == "" {
 		return false
 	}
-	return u.Host == host
+	if u.Host == host {
+		return true
+	}
+	for _, a := range allowed {
+		if originAuthority(a) == u.Host {
+			return true
+		}
+	}
+	return false
+}
+
+// originAuthority extracts the host[:port] authority from an allow-list entry
+// that may be a full origin URL or a bare authority. A bare authority (no
+// "scheme://") is returned trimmed as-is; a malformed URL yields "" so it can
+// never accidentally match.
+func originAuthority(entry string) string {
+	entry = strings.TrimSpace(entry)
+	if entry == "" {
+		return ""
+	}
+	if strings.Contains(entry, "://") {
+		if u, err := url.Parse(entry); err == nil {
+			return u.Host
+		}
+		return ""
+	}
+	return entry
 }

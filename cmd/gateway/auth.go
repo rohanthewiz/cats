@@ -35,8 +35,9 @@ func resolveSecret(flagVal string) (secret string, generated bool, err error) {
 // request. A nil *authGuard means auth is disabled (--auth none) and no
 // middleware is installed.
 type authGuard struct {
-	a      *gwauth.Authenticator
-	secure bool // set the session cookie Secure (server is serving TLS)
+	a              *gwauth.Authenticator
+	secure         bool     // set the session cookie Secure (server is serving TLS)
+	allowedOrigins []string // extra WS Origins accepted beyond same-origin (gwauth.OriginOK)
 }
 
 // middleware gates every request. Public paths (/login, /favicon.ico) pass
@@ -50,7 +51,7 @@ func (g *authGuard) middleware(ctx rweb.Context) error {
 	}
 	if path == "/ws" {
 		origin := ctx.Request().Header("Origin")
-		if !gwauth.OriginOK(origin, ctx.Request().Host()) {
+		if !gwauth.OriginOK(origin, ctx.Request().Host(), g.allowedOrigins) {
 			return ctx.Status(http.StatusForbidden).WriteText("forbidden: cross-origin websocket")
 		}
 	}

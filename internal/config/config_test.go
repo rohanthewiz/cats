@@ -223,8 +223,11 @@ func TestExampleConfigParses(t *testing.T) {
 		t.Fatalf("example config does not parse: %v", err)
 	}
 	want := Default()
-	if got.Server != want.Server || got.Persistence != want.Persistence ||
-		got.Worktrees != want.Worktrees {
+	// Server holds a slice (AllowedOrigins) now, so it is not != comparable;
+	// DeepEqual covers all three sub-structs uniformly.
+	if !reflect.DeepEqual(got.Server, want.Server) ||
+		!reflect.DeepEqual(got.Persistence, want.Persistence) ||
+		!reflect.DeepEqual(got.Worktrees, want.Worktrees) {
 		t.Fatalf("example config drifted from defaults:\n got %+v\nwant %+v",
 			got, want)
 	}

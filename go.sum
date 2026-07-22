@@ -12,5 +12,7 @@ github.com/rohanthewiz/rweb v0.1.26 h1:LLOrv+eaZXFAnGAPu4entbYt/ekRhwIetLmtzRYpB
 github.com/rohanthewiz/rweb v0.1.26/go.mod h1:NyLiaSzl2IiRuwRC9ciHrIE/VsXQ1Nx+F2LEL0iewqA=
 github.com/rohanthewiz/serr v1.3.0 h1:gCKIHw0XFOmPifLq0oocx5RDi6iT7AxzVGT+9z3liO4=
 github.com/rohanthewiz/serr v1.3.0/go.mod h1:l01AbjXw1zP0kxe5tX5s/sADHiBbl0Rwfo/igde4b88=
+github.com/webview/webview_go v0.0.0-20240831120633-6173450d4dd6 h1:VQpB2SpK88C6B5lPHTuSZKb2Qee1QWwiFlC5CKY4AW0=
+github.com/webview/webview_go v0.0.0-20240831120633-6173450d4dd6/go.mod h1:yE65LFCeWf4kyWD5re+h4XNvOHJEXOCOuJZ4v8l5sgk=
 go.mitchellh.com/libghostty v0.0.0-20260528200934-790a3ff6e9f6 h1:LT4Uj+66TADciHrl4qqc8U2rFcNZ6rqzvN0ZaBRsWoo=
 go.mitchellh.com/libghostty v0.0.0-20260528200934-790a3ff6e9f6/go.mod h1:sx8yDvnDrQC/PzsrFfYx7ROmH8my91nz7lOxQb6sbo0=

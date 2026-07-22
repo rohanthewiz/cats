@@ -143,19 +143,26 @@ func TestGenerateSecretUnique(t *testing.T) {
 func TestOriginOK(t *testing.T) {
 	cases := []struct {
 		origin, host string
+		allowed      []string
 		want         bool
 	}{
-		{"", "example.com:8421", true},                          // non-browser: no Origin
-		{"https://example.com:8421", "example.com:8421", true},  // same origin (https)
-		{"http://example.com:8421", "example.com:8421", true},   // same authority, http
-		{"https://evil.com", "example.com:8421", false},         // cross-site
-		{"https://example.com:9999", "example.com:8421", false}, // port mismatch
-		{"null", "example.com:8421", false},                     // opaque/file origin
-		{"not a url ::::", "example.com:8421", false},           // unparseable
+		{"", "example.com:8421", nil, true},                          // non-browser: no Origin
+		{"https://example.com:8421", "example.com:8421", nil, true},  // same origin (https)
+		{"http://example.com:8421", "example.com:8421", nil, true},   // same authority, http
+		{"https://evil.com", "example.com:8421", nil, false},         // cross-site
+		{"https://example.com:9999", "example.com:8421", nil, false}, // port mismatch
+		{"null", "example.com:8421", nil, false},                     // opaque/file origin
+		{"not a url ::::", "example.com:8421", nil, false},           // unparseable
+		// allow-list: a proxy/relay host that differs from the request Host.
+		{"https://app.relay.dev", "example.com:8421", []string{"https://app.relay.dev"}, true}, // full-origin entry
+		{"https://app.relay.dev", "example.com:8421", []string{"app.relay.dev"}, true},         // bare-authority entry
+		{"https://app.relay.dev:8443", "example.com:8421", []string{"app.relay.dev:8443"}, true},
+		{"https://other.relay.dev", "example.com:8421", []string{"app.relay.dev"}, false}, // not on the list
+		{"https://app.relay.dev", "example.com:8421", []string{""}, false},                // empty entry never matches
 	}
 	for _, c := range cases {
-		if got := OriginOK(c.origin, c.host); got != c.want {
-			t.Errorf("OriginOK(%q, %q) = %v, want %v", c.origin, c.host, got, c.want)
+		if got := OriginOK(c.origin, c.host, c.allowed); got != c.want {
+			t.Errorf("OriginOK(%q, %q, %v) = %v, want %v", c.origin, c.host, c.allowed, got, c.want)
 		}
 	}
 }

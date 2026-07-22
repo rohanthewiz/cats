@@ -19,6 +19,10 @@ server:
   hook_socket: "/tmp/herdr-hooks.sock" # agent hook-report API ("none" disables)
   auth: "password"                     # "password" (login + cookie) or "none"
   session_ttl: "24h"                   # login cookie lifetime (Go duration)
+  # Extra WebSocket Origins accepted beyond same-origin — needed when a reverse
+  # proxy or relay serves the UI under a different host. Full origins or bare
+  # host[:port] authorities. Empty ⇒ strict same-origin only.
+  # allowed_origins: ["https://home.relay.herdr.dev"]
   # The shared secret is NOT read from this file — set HERDR_PASSWORD or pass
   # --password so it never lands in a committed config.
   tls:

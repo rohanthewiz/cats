@@ -52,6 +52,13 @@ type Server struct {
 	Auth           string `yaml:"auth"`           // "password" | "none"
 	SessionTTL     string `yaml:"session_ttl"`    // a Go duration string, e.g. "24h"
 	TLS            TLS    `yaml:"tls"`
+	// AllowedOrigins are extra WebSocket Origins accepted beyond same-origin
+	// (see gwauth.OriginOK): full origins or bare host[:port] authorities. Needed
+	// when a reverse proxy or relay serves the UI under a host that differs from
+	// the gateway's own Host header. Empty ⇒ strict same-origin only. omitempty
+	// keeps an unset list out of a saved file, so it round-trips as nil (not [])
+	// and stays equal to the default.
+	AllowedOrigins []string `yaml:"allowed_origins,omitempty"`
 }
 
 // Persistence is session persistence & restore (WS3): the model snapshot that

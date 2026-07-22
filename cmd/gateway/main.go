@@ -55,6 +55,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -82,6 +83,8 @@ func main() {
 	hookSocket := flag.String("hook-socket", "",
 		"agent hook-report API socket path (default "+defaultHookSocket+`; "none" disables)`)
 	authMode := flag.String("auth", "password", `auth mode: "password" (login + session cookie) or "none"`)
+	allowedOrigins := flag.String("allowed-origins", "",
+		"comma-separated extra WebSocket origins to accept beyond same-origin (host[:port] or full origin)")
 	password := flag.String("password", "", "shared access password/token (env HERDR_PASSWORD; generated if unset)")
 	sessionTTL := flag.Duration("session-ttl", 24*time.Hour, "session cookie lifetime")
 	useTLS := flag.Bool("tls", false, "serve HTTPS (auto self-signed cert unless --tls-cert/--tls-key given)")
@@ -123,6 +126,9 @@ func main() {
 	}
 	if set["auth"] {
 		eff.Auth = *authMode
+	}
+	if set["allowed-origins"] {
+		eff.AllowedOrigins = splitCSV(*allowedOrigins)
 	}
 	if set["session-ttl"] {
 		effTTL = *sessionTTL
@@ -229,7 +235,7 @@ func main() {
 	}
 
 	// Auth: build the guard unless explicitly disabled.
-	guard, err := buildGuard(eff.Auth, *password, effTTL, tlsOn)
+	guard, err := buildGuard(eff.Auth, *password, effTTL, tlsOn, eff.AllowedOrigins)
 	if err != nil {
 		log.Fatalf("gateway: auth: %v", err)
 	}
@@ -340,7 +346,8 @@ func buildOrch(socket, cwd string, pc config.Persistence) (*orch, error) {
 // buildGuard constructs the auth guard for the chosen mode. "none" returns a
 // nil guard (no middleware). "password" resolves the shared secret (flag → env
 // → generated) and logs a generated one so the operator can find it.
-func buildGuard(mode, password string, ttl time.Duration, tlsOn bool) (*authGuard, error) {
+// allowedOrigins is the extra WebSocket Origin allow-list (see gwauth.OriginOK).
+func buildGuard(mode, password string, ttl time.Duration, tlsOn bool, allowedOrigins []string) (*authGuard, error) {
 	switch mode {
 	case "none":
 		log.Printf("gateway: WARNING auth disabled (--auth none) — anyone who can reach the listen address can drive your terminals")
@@ -357,10 +364,22 @@ func buildGuard(mode, password string, ttl time.Duration, tlsOn bool) (*authGuar
 		if generated {
 			log.Printf("gateway: no --password/HERDR_PASSWORD set; generated access password: %s", secret)
 		}
-		return &authGuard{a: a, secure: tlsOn}, nil
+		return &authGuard{a: a, secure: tlsOn, allowedOrigins: allowedOrigins}, nil
 	default:
 		return nil, fmt.Errorf("unknown --auth %q (want password|none)", mode)
 	}
+}
+
+// splitCSV parses a comma-separated flag value into a trimmed, non-empty slice.
+// Returns nil for an empty/whitespace-only value so it matches an unset config.
+func splitCSV(s string) []string {
+	var out []string
+	for _, part := range strings.Split(s, ",") {
+		if p := strings.TrimSpace(part); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // resolveTLS returns the cert/key PEM paths to serve: the operator's files if
