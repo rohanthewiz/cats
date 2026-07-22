@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/rohanthewiz/herdr-web/internal/layout"
+	"github.com/rohanthewiz/cats/internal/layout"
 )
 
 // errScroll stands in for a backend ScrollPane failure (e.g. unknown pane).
@@ -114,7 +114,7 @@ func (r *fakeResponder) Fail(msg string) {
 	r.errMsg = msg
 }
 
-// jsonDec mirrors gateway's browser param decoder: empty ⇒ ErrNoParams.
+// jsonDec mirrors catway's browser param decoder: empty ⇒ ErrNoParams.
 type jsonDec struct{ raw []byte }
 
 func (d jsonDec) Decode(v any) error {
@@ -300,7 +300,7 @@ func TestDispatchReadDaemonDown(t *testing.T) {
 
 	h.d.Dispatch(CmdRead, params(t, ReadParams{Pane: 1}), r)
 
-	if !r.failCall || r.errMsg != "termhost daemon not connected" {
+	if !r.failCall || r.errMsg != "cathost daemon not connected" {
 		t.Fatalf("daemon-down read: fail=%v msg=%q", r.failCall, r.errMsg)
 	}
 }

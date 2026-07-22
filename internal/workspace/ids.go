@@ -1,4 +1,4 @@
-// Package workspace ports herdr's workspace/tab bookkeeping (src/workspace.rs)
+// Package workspace ports cats's workspace/tab bookkeeping (src/workspace.rs)
 // — pane identity, tabs, and stable public numbering — with no terminal-backend
 // coupling (pane creation goes through a spawner seam).
 //
@@ -13,7 +13,7 @@ import (
 	"sync/atomic"
 )
 
-// publicIDAlphabet is herdr's 32-character handle alphabet
+// publicIDAlphabet is cats's 32-character handle alphabet
 // (cf. PUBLIC_ID_ALPHABET, workspace.rs:73). Digit values 1..32 in order.
 const publicIDAlphabet = "123456789ABCDEFGHJKMNPQRSTVWXYZ0"
 

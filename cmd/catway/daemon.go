@@ -1,0 +1,337 @@
+//go:build ghostty
+
+package main
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"log"
+	"net"
+	"sync"
+	"time"
+
+	"github.com/rohanthewiz/cats/internal/app"
+	"github.com/rohanthewiz/cats/internal/browserproto"
+	"github.com/rohanthewiz/cats/internal/orchestration"
+	"github.com/rohanthewiz/cats/internal/terminal"
+)
+
+// daemon manages the orchestrator's single connection to the cathost daemon:
+// dial + hello/welcome, reconciling the daemon's surviving panes against the
+// model, then pumping events until the connection drops — and redialing. All
+// state that the pump touches beyond the raw socket lives in orch and is
+// reached by posting closures onto the orchestrator loop (never a lock).
+type daemon struct {
+	o      *orch
+	socket string
+
+	mu   sync.Mutex // serializes writes; guards conn
+	conn net.Conn
+}
+
+func (d *daemon) connected() bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.conn != nil
+}
+
+// send writes one command to the daemon. Disconnected sends are dropped —
+// reconcile replays the model when the connection comes back. Called from the
+// orchestrator loop (which owns the decision to send).
+func (d *daemon) send(m any) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.conn == nil {
+		return
+	}
+	if err := orchestration.WriteMessage(d.conn, m); err != nil {
+		log.Printf("catway: daemon write: %v", err)
+		_ = d.conn.Close() // the pump's read fails and triggers redial
+	}
+}
+
+func (d *daemon) setConn(c net.Conn) {
+	d.mu.Lock()
+	d.conn = c
+	d.mu.Unlock()
+}
+
+// run dials the daemon forever, with backoff.
+func (d *daemon) run() {
+	backoff := time.Second
+	for {
+		conn, err := net.DialTimeout("unix", d.socket, 3*time.Second)
+		if err != nil {
+			log.Printf("catway: cathost dial: %v (retrying in %s)", err, backoff)
+			time.Sleep(backoff)
+			backoff = min(backoff*2, 5*time.Second)
+			continue
+		}
+		backoff = time.Second
+		if err := d.session(conn); err != nil {
+			log.Printf("catway: cathost session: %v", err)
+		}
+		_ = conn.Close()
+		d.setConn(nil)
+		d.o.post(func() {
+			d.o.flushPending("cathost connection lost")
+			d.o.flushWaiters("cathost connection lost")
+			d.o.broadcast(browserproto.NewError(0, "cathost connection lost — reconnecting"))
+		})
+	}
+}
+
+// session runs one daemon connection: handshake, reconcile, event pump.
+func (d *daemon) session(conn net.Conn) error {
+	if err := orchestration.WriteMessage(conn, orchestration.NewHello()); err != nil {
+		return err
+	}
+	mt, payload, err := orchestration.ReadMessage(conn)
+	if err != nil {
+		return err
+	}
+	if mt != orchestration.MsgWelcome {
+		return fmt.Errorf("expected welcome, got %q", mt)
+	}
+	var w orchestration.Welcome
+	if err := json.Unmarshal(payload, &w); err != nil {
+		return err
+	}
+	if w.Error != "" {
+		return errors.New("daemon rejected hello: " + w.Error)
+	}
+	if w.ProtocolVersion != orchestration.ProtocolVersion {
+		return fmt.Errorf("daemon speaks protocol %d, want %d", w.ProtocolVersion, orchestration.ProtocolVersion)
+	}
+
+	d.setConn(conn)
+	d.reconcile(w.Panes)
+
+	for {
+		mt, payload, err := orchestration.ReadMessage(conn)
+		if err != nil {
+			return err
+		}
+		d.dispatch(mt, payload)
+	}
+}
+
+// reconcile syncs the daemon's surviving pane set to the model: mark survivors
+// created, drop the created flag on the rest so syncDaemon respawns them, close
+// daemon panes outside the model, then re-apply the model and resync the
+// visible panes for any attached browser. Runs on the orchestrator loop.
+func (d *daemon) reconcile(alivePanes []uint32) {
+	d.o.post(func() {
+		o := d.o
+		alive := make(map[uint32]bool, len(alivePanes))
+		for _, id := range alivePanes {
+			alive[id] = true
+		}
+		model := make(map[uint32]bool)
+		for _, id := range o.session.AllPaneIDs() {
+			pid := uint32(id)
+			model[pid] = true
+			rt := o.panes[pid]
+			if rt == nil {
+				continue // syncDaemon (in applyModel) creates missing runtimes
+			}
+			rt.created = alive[pid]
+			if alive[pid] {
+				// An adopted survivor keeps its live PTY, real scrollback, and
+				// real cwd — the restored seeds would be stale duplicates, and
+				// resuming would double-launch an agent that never died. Its
+				// saved session ref goes live on the runtime instead: the agent
+				// is (presumably) still running that conversation, and the
+				// normal lifecycle rules (detection conflict, release, exit)
+				// now own clearing it.
+				delete(o.seeds, pid)
+				delete(o.restoredCwds, pid)
+				delete(o.resumePlans, pid)
+				if s, ok := o.restoredAgents[pid]; ok && rt.agentSession == nil {
+					rt.agentSession = &agentSessionRef{source: s.Source, agent: s.Agent, kind: s.Kind, value: s.Value}
+					delete(o.restoredAgents, pid)
+				}
+			}
+		}
+		for _, id := range alivePanes {
+			if !model[id] {
+				d.send(orchestration.NewClosePane(id))
+			}
+		}
+		o.applyModel()
+		for _, id := range o.session.VisiblePaneIDs() {
+			o.resyncPane(uint32(id))
+		}
+	})
+}
+
+// dispatch translates one daemon β event into browser messages and model
+// updates, posted onto the orchestrator loop. Chrome is cached on the pane
+// runtime regardless of visibility (§8), but only forwarded to browsers when
+// the pane is in the current viewport; the agents rollup is always global.
+func (d *daemon) dispatch(mt orchestration.MessageType, payload []byte) {
+	o := d.o
+	switch mt {
+	case orchestration.MsgPaneFrame:
+		var ev orchestration.PaneFrame
+		if err := json.Unmarshal(payload, &ev); err != nil || ev.Frame == nil {
+			return
+		}
+		o.post(func() {
+			rt := o.panes[ev.PaneID]
+			if rt == nil {
+				return
+			}
+			rt.histDirty = true // output since the last history capture (WS3)
+			if !o.visible[ev.PaneID] {
+				return
+			}
+			for c := range o.conns {
+				msg := c.translator(ev.PaneID).Translate(ev.Frame)
+				if b, err := browserproto.Marshal(msg); err == nil {
+					o.enqueue(c, b)
+				}
+			}
+		})
+
+	case orchestration.MsgPaneOutput:
+		var ev orchestration.PaneOutput
+		if err := json.Unmarshal(payload, &ev); err != nil {
+			return
+		}
+		// Raw output stream for pane.wait_for_output: matched against the pane's
+		// waiters (loop goroutine). Only streamed while a waiter is active.
+		o.post(func() { o.onPaneOutput(ev.PaneID, ev.Data) })
+
+	case orchestration.MsgPaneModes:
+		var ev orchestration.PaneModes
+		if err := json.Unmarshal(payload, &ev); err != nil {
+			return
+		}
+		o.post(func() {
+			rt := o.panes[ev.PaneID]
+			if rt == nil {
+				return
+			}
+			rt.modes = inputModesFrom(ev)
+			rt.enc.SetModes(rt.modes)
+			if o.visible[ev.PaneID] {
+				o.broadcast(browserproto.ModesFrom(ev))
+			}
+		})
+
+	case orchestration.MsgPaneTitle:
+		var ev orchestration.PaneTitle
+		if err := json.Unmarshal(payload, &ev); err != nil {
+			return
+		}
+		o.post(func() {
+			rt := o.panes[ev.PaneID]
+			if rt == nil {
+				return
+			}
+			rt.title = ev.Title
+			if o.visible[ev.PaneID] {
+				o.broadcast(browserproto.NewPaneTitle(ev.PaneID, o.effectiveTitle(ev.PaneID)))
+			}
+			o.broadcastTitle()
+			o.emitEvent(app.EventPaneTitle, ev.PaneID, app.PaneTitleEvent{Pane: ev.PaneID, Title: ev.Title})
+		})
+
+	case orchestration.MsgPaneCwd:
+		var ev orchestration.PaneCwd
+		if err := json.Unmarshal(payload, &ev); err != nil {
+			return
+		}
+		o.post(func() {
+			rt := o.panes[ev.PaneID]
+			if rt == nil {
+				return
+			}
+			rt.cwd = ev.Cwd
+			if o.visible[ev.PaneID] {
+				o.broadcast(browserproto.NewPaneCwd(ev.PaneID, ev.Cwd))
+			}
+			o.emitEvent(app.EventPaneCwd, ev.PaneID, app.PaneCwdEvent{Pane: ev.PaneID, Cwd: ev.Cwd})
+			o.saveSoon() // pane cwds ride the session file (restore re-spawns there)
+		})
+
+	case orchestration.MsgPaneAgent:
+		var ev orchestration.PaneAgent
+		if err := json.Unmarshal(payload, &ev); err != nil {
+			return
+		}
+		o.post(func() { o.onPaneAgent(ev) })
+
+	case orchestration.MsgPaneClipboard:
+		var ev orchestration.PaneClipboard
+		if err := json.Unmarshal(payload, &ev); err != nil {
+			return
+		}
+		o.post(func() { o.broadcast(browserproto.NewClipboard(ev.Data)) })
+
+	case orchestration.MsgPaneExited:
+		var ev orchestration.PaneExited
+		if err := json.Unmarshal(payload, &ev); err != nil {
+			return
+		}
+		o.post(func() {
+			rt := o.panes[ev.PaneID]
+			if rt == nil {
+				return
+			}
+			code := ev.ExitCode
+			rt.exited = &code
+			if o.visible[ev.PaneID] {
+				o.broadcast(browserproto.NewPaneExited(ev.PaneID, ev.ExitCode))
+			}
+			o.emitEvent(app.EventPaneExited, ev.PaneID, app.PaneExitedEvent{Pane: ev.PaneID, ExitCode: ev.ExitCode})
+			o.resolveWaitersOnExit(ev.PaneID) // no more output will come
+			o.clearHookOnExit(rt)             // a late hook packet must not resurrect a dead agent
+		})
+
+	case orchestration.MsgPaneSelection:
+		var ev orchestration.PaneSelection
+		if err := json.Unmarshal(payload, &ev); err != nil {
+			return
+		}
+		o.post(func() {
+			o.resolvePending(reqKey{ev.PaneID, reqSelection}, browserproto.ReadResult{Text: ev.Text})
+		})
+
+	case orchestration.MsgPaneText:
+		var ev orchestration.PaneText
+		if err := json.Unmarshal(payload, &ev); err != nil {
+			return
+		}
+		o.post(func() {
+			o.resolvePending(reqKey{ev.PaneID, reqText}, browserproto.CaptureResult{Text: ev.Text})
+		})
+
+	case orchestration.MsgError:
+		var ev orchestration.Error
+		if err := json.Unmarshal(payload, &ev); err != nil {
+			return
+		}
+		log.Printf("catway: daemon error (pane %d): %s", ev.PaneID, ev.Message)
+		o.post(func() { o.broadcast(browserproto.NewError(ev.PaneID, ev.Message)) })
+	}
+}
+
+// inputModesFrom rehydrates the β pane_modes mirror into the emulator-side
+// struct the input encoder consumes.
+func inputModesFrom(m orchestration.PaneModes) terminal.InputModes {
+	return terminal.InputModes{
+		AlternateScreen:      m.AlternateScreen,
+		ApplicationCursor:    m.ApplicationCursor,
+		BracketedPaste:       m.BracketedPaste,
+		FocusReporting:       m.FocusReporting,
+		MouseMode:            terminal.MouseMode(m.MouseMode),
+		MouseEncoding:        terminal.MouseEncoding(m.MouseEncoding),
+		MouseAlternateScroll: m.MouseAlternateScroll,
+		SynchronizedOutput:   m.SynchronizedOutput,
+		KittyKeyboardFlags:   m.KittyKeyboardFlags,
+		ModifyOtherKeys:      m.ModifyOtherKeys,
+	}
+}

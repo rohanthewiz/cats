@@ -1,10 +1,10 @@
-// Package integration ports herdr's Rust integration module: shell-hook and
+// Package integration ports cats's Rust integration module: shell-hook and
 // plugin installers that wire coding agents (claude, codex, kimi, ...) to a
-// running herdr server. Each install drops an embedded asset into the agent's
+// running cats server. Each install drops an embedded asset into the agent's
 // config tree and registers it in the agent's own settings format — JSON
 // rewritten order-preservingly, TOML and YAML edited line-wise — so unrelated
 // user configuration survives byte-for-byte. Status detection reads the
-// HERDR_INTEGRATION_VERSION marker stamped in every asset.
+// CATS_INTEGRATION_VERSION marker stamped in every asset.
 //
 // The port is unix-only: on Windows every target reports not-supported (the
 // Rust .ps1 assets are not embedded).
@@ -19,17 +19,17 @@ import (
 	"strings"
 )
 
-// HerdrPaneIDEnvVar names the env var carrying the public pane id into spawned
+// CatsPaneIDEnvVar names the env var carrying the public pane id into spawned
 // pane processes; the hook scripts echo it back to the server.
-const HerdrPaneIDEnvVar = "HERDR_PANE_ID"
+const CatsPaneIDEnvVar = "CATS_PANE_ID"
 
 // InstallWarningPrefix marks message lines that are warnings rather than
 // results; UIs filter on it.
 const InstallWarningPrefix = "warning:"
 
 const (
-	herdrSocketPathEnvVar = "HERDR_SOCKET_PATH"
-	herdrEnvEnvVar        = "HERDR_ENV"
+	catsSocketPathEnvVar = "CATS_SOCKET_PATH"
+	catsEnvEnvVar        = "CATS_ENV"
 )
 
 // Target is one supported coding-agent integration.
@@ -102,59 +102,59 @@ func ParseTarget(name string) (Target, bool) {
 }
 
 // Install names, embedded-asset versions and per-target env overrides. The
-// versions must equal the HERDR_INTEGRATION_VERSION marker inside the matching
+// versions must equal the CATS_INTEGRATION_VERSION marker inside the matching
 // embedded asset (asserted by tests); bump both together.
 const (
-	piExtensionInstallName = "herdr-agent-state.ts"
+	piExtensionInstallName = "cats-agent-state.ts"
 	piIntegrationVersion   = 2
 
-	ompExtensionInstallName = "herdr-omp-agent-state.ts"
+	ompExtensionInstallName = "cats-omp-agent-state.ts"
 	ompIntegrationVersion   = 2
 
 	piCodingAgentDirEnvVar = "PI_CODING_AGENT_DIR"
 
-	claudeHookInstallName    = "herdr-agent-state.sh"
+	claudeHookInstallName    = "cats-agent-state.sh"
 	claudeIntegrationVersion = 5
 	claudeConfigDirEnvVar    = "CLAUDE_CONFIG_DIR"
 
-	codexHookInstallName    = "herdr-agent-state.sh"
+	codexHookInstallName    = "cats-agent-state.sh"
 	codexIntegrationVersion = 5
 	codexHomeEnvVar         = "CODEX_HOME"
 
-	kimiHookInstallName    = "herdr-agent-state.sh"
+	kimiHookInstallName    = "cats-agent-state.sh"
 	kimiIntegrationVersion = 3
 	kimiCodeHomeEnvVar     = "KIMI_CODE_HOME"
-	kimiConfigBlockBegin   = "# >>> herdr kimi integration"
-	kimiConfigBlockEnd     = "# <<< herdr kimi integration"
+	kimiConfigBlockBegin   = "# >>> cats kimi integration"
+	kimiConfigBlockEnd     = "# <<< cats kimi integration"
 	kimiMinVersion         = "0.14.0"
 
-	copilotHookInstallName    = "herdr-agent-state.sh"
+	copilotHookInstallName    = "cats-agent-state.sh"
 	copilotIntegrationVersion = 2
 	copilotHomeEnvVar         = "COPILOT_HOME"
 
-	droidHookInstallName    = "herdr-agent-state.sh"
+	droidHookInstallName    = "cats-agent-state.sh"
 	droidIntegrationVersion = 2
 
-	opencodePluginInstallName  = "herdr-agent-state.js"
+	opencodePluginInstallName  = "cats-agent-state.js"
 	opencodeIntegrationVersion = 5
 
-	kiloPluginInstallName  = "herdr-agent-state.js"
+	kiloPluginInstallName  = "cats-agent-state.js"
 	kiloIntegrationVersion = 1
 
-	hermesPluginInstallName         = "herdr-agent-state"
+	hermesPluginInstallName         = "cats-agent-state"
 	hermesPluginManifestInstallName = "plugin.yaml"
 	hermesPluginInitInstallName     = "__init__.py"
 	hermesIntegrationVersion        = 2
 
-	qodercliHookInstallName    = "herdr-agent-state.sh"
+	qodercliHookInstallName    = "cats-agent-state.sh"
 	qodercliIntegrationVersion = 2
 	qodercliConfigDirEnvVar    = "QODER_CONFIG_DIR"
 
-	cursorHookInstallName    = "herdr-agent-state.sh"
+	cursorHookInstallName    = "cats-agent-state.sh"
 	cursorIntegrationVersion = 1
 	cursorConfigDirEnvVar    = "CURSOR_CONFIG_DIR"
 
-	integrationVersionMarker = "HERDR_INTEGRATION_VERSION="
+	integrationVersionMarker = "CATS_INTEGRATION_VERSION="
 )
 
 type hookEvent struct {
@@ -224,7 +224,7 @@ var qodercliRemovedLifecycleHookEvents = []hookEvent{
 
 // PaneEnv builds the env entries ("KEY=VALUE") a spawned pane process needs so
 // the installed hooks can reach the server: socket path, pane id (the public
-// id, or "p_<raw>" when none is assigned yet), and the HERDR_ENV=1 guard the
+// id, or "p_<raw>" when none is assigned yet), and the CATS_ENV=1 guard the
 // hook scripts check before doing anything.
 func PaneEnv(socketPath string, paneID uint64, publicPaneID string) []string {
 	id := publicPaneID
@@ -232,9 +232,9 @@ func PaneEnv(socketPath string, paneID uint64, publicPaneID string) []string {
 		id = fmt.Sprintf("p_%d", paneID)
 	}
 	return []string{
-		herdrSocketPathEnvVar + "=" + socketPath,
-		HerdrPaneIDEnvVar + "=" + id,
-		herdrEnvEnvVar + "=1",
+		catsSocketPathEnvVar + "=" + socketPath,
+		CatsPaneIDEnvVar + "=" + id,
+		catsEnvEnvVar + "=1",
 	}
 }
 
@@ -253,7 +253,7 @@ type Status struct {
 	Target Target
 	Path   string
 	State  StatusKind
-	// InstalledVersion is the parsed HERDR_INTEGRATION_VERSION, or -1 when
+	// InstalledVersion is the parsed CATS_INTEGRATION_VERSION, or -1 when
 	// the file exists without a readable marker (a legacy install).
 	InstalledVersion int
 	ExpectedVersion  int
@@ -387,7 +387,7 @@ func installTargetMessages(target Target) ([]string, error) {
 		}
 		if installed.UpdatedLegacyHooks {
 			messages = append(messages, fmt.Sprintf(
-				"removed legacy herdr droid hook entries from %s", installed.HooksPath))
+				"removed legacy cats droid hook entries from %s", installed.HooksPath))
 		}
 		return messages, nil
 	case TargetOpencode:
@@ -470,9 +470,9 @@ func UninstallTarget(target Target) ([]string, error) {
 			messages = append(messages, fmt.Sprintf("no claude hook found at %s", result.HookPath))
 		}
 		if result.UpdatedSettings {
-			messages = append(messages, fmt.Sprintf("removed herdr claude hook entries from %s", result.SettingsPath))
+			messages = append(messages, fmt.Sprintf("removed cats claude hook entries from %s", result.SettingsPath))
 		} else {
-			messages = append(messages, fmt.Sprintf("no herdr claude hook entries found in %s", result.SettingsPath))
+			messages = append(messages, fmt.Sprintf("no cats claude hook entries found in %s", result.SettingsPath))
 		}
 		return messages, nil
 	case TargetCodex:
@@ -487,9 +487,9 @@ func UninstallTarget(target Target) ([]string, error) {
 			messages = append(messages, fmt.Sprintf("no codex hook found at %s", result.HookPath))
 		}
 		if result.UpdatedHooks {
-			messages = append(messages, fmt.Sprintf("removed herdr codex hook entries from %s", result.HooksPath))
+			messages = append(messages, fmt.Sprintf("removed cats codex hook entries from %s", result.HooksPath))
 		} else {
-			messages = append(messages, fmt.Sprintf("no herdr codex hook entries found in %s", result.HooksPath))
+			messages = append(messages, fmt.Sprintf("no cats codex hook entries found in %s", result.HooksPath))
 		}
 		messages = append(messages, fmt.Sprintf("left codex config unchanged at %s", result.ConfigPath))
 		return messages, nil
@@ -505,9 +505,9 @@ func UninstallTarget(target Target) ([]string, error) {
 			messages = append(messages, fmt.Sprintf("no copilot hook found at %s", result.HookPath))
 		}
 		if result.UpdatedSettings {
-			messages = append(messages, fmt.Sprintf("removed herdr copilot hook entries from %s", result.SettingsPath))
+			messages = append(messages, fmt.Sprintf("removed cats copilot hook entries from %s", result.SettingsPath))
 		} else {
-			messages = append(messages, fmt.Sprintf("no herdr copilot hook entries found in %s", result.SettingsPath))
+			messages = append(messages, fmt.Sprintf("no cats copilot hook entries found in %s", result.SettingsPath))
 		}
 		return messages, nil
 	case TargetKimi:
@@ -522,9 +522,9 @@ func UninstallTarget(target Target) ([]string, error) {
 			messages = append(messages, fmt.Sprintf("no kimi hook found at %s", result.HookPath))
 		}
 		if result.UpdatedConfig {
-			messages = append(messages, fmt.Sprintf("removed herdr kimi hook entries from %s", result.ConfigPath))
+			messages = append(messages, fmt.Sprintf("removed cats kimi hook entries from %s", result.ConfigPath))
 		} else {
-			messages = append(messages, fmt.Sprintf("no herdr kimi hook entries found in %s", result.ConfigPath))
+			messages = append(messages, fmt.Sprintf("no cats kimi hook entries found in %s", result.ConfigPath))
 		}
 		return messages, nil
 	case TargetDroid:
@@ -539,14 +539,14 @@ func UninstallTarget(target Target) ([]string, error) {
 			messages = append(messages, fmt.Sprintf("no droid hook found at %s", result.HookPath))
 		}
 		if result.UpdatedHooks {
-			messages = append(messages, fmt.Sprintf("removed legacy herdr droid hook entries from %s", result.HooksPath))
+			messages = append(messages, fmt.Sprintf("removed legacy cats droid hook entries from %s", result.HooksPath))
 		} else {
-			messages = append(messages, fmt.Sprintf("no legacy herdr droid hook entries found in %s", result.HooksPath))
+			messages = append(messages, fmt.Sprintf("no legacy cats droid hook entries found in %s", result.HooksPath))
 		}
 		if result.UpdatedSettings {
-			messages = append(messages, fmt.Sprintf("removed herdr droid hook entries from %s", result.SettingsPath))
+			messages = append(messages, fmt.Sprintf("removed cats droid hook entries from %s", result.SettingsPath))
 		} else {
-			messages = append(messages, fmt.Sprintf("no herdr droid hook entries found in %s", result.SettingsPath))
+			messages = append(messages, fmt.Sprintf("no cats droid hook entries found in %s", result.SettingsPath))
 		}
 		return messages, nil
 	case TargetOpencode:
@@ -596,9 +596,9 @@ func UninstallTarget(target Target) ([]string, error) {
 			messages = append(messages, fmt.Sprintf("no qodercli hook found at %s", result.HookPath))
 		}
 		if result.UpdatedSettings {
-			messages = append(messages, fmt.Sprintf("removed herdr qodercli hook entries from %s", result.SettingsPath))
+			messages = append(messages, fmt.Sprintf("removed cats qodercli hook entries from %s", result.SettingsPath))
 		} else {
-			messages = append(messages, fmt.Sprintf("no herdr qodercli hook entries found in %s", result.SettingsPath))
+			messages = append(messages, fmt.Sprintf("no cats qodercli hook entries found in %s", result.SettingsPath))
 		}
 		return messages, nil
 	case TargetCursor:
@@ -613,9 +613,9 @@ func UninstallTarget(target Target) ([]string, error) {
 			messages = append(messages, fmt.Sprintf("no cursor hook found at %s", result.HookPath))
 		}
 		if result.UpdatedHooks {
-			messages = append(messages, fmt.Sprintf("removed herdr cursor hook entries from %s", result.HooksPath))
+			messages = append(messages, fmt.Sprintf("removed cats cursor hook entries from %s", result.HooksPath))
 		} else {
-			messages = append(messages, fmt.Sprintf("no herdr cursor hook entries found in %s", result.HooksPath))
+			messages = append(messages, fmt.Sprintf("no cats cursor hook entries found in %s", result.HooksPath))
 		}
 		return messages, nil
 	}
@@ -801,12 +801,12 @@ func outdatedInstalledIntegrations() []Status {
 	return outdated
 }
 
-// UpdateInstructions builds the "run `herdrctl integration install X`, ... and
+// UpdateInstructions builds the "run `catctl integration install X`, ... and
 // `...`" phrase for a set of targets.
 func UpdateInstructions(targets []Target) string {
 	commands := make([]string, 0, len(targets))
 	for _, target := range targets {
-		commands = append(commands, fmt.Sprintf("`herdrctl integration install %s`", target.Label()))
+		commands = append(commands, fmt.Sprintf("`catctl integration install %s`", target.Label()))
 	}
 	switch len(commands) {
 	case 0:
@@ -830,7 +830,7 @@ func OutdatedUpdateNotice() (notice string, ok bool) {
 	for _, status := range outdated {
 		targets = append(targets, status.Target)
 	}
-	return fmt.Sprintf("installed herdr integrations need updating; %s.",
+	return fmt.Sprintf("installed cats integrations need updating; %s.",
 		strings.ReplaceAll(UpdateInstructions(targets), "`", "")), true
 }
 
@@ -859,7 +859,7 @@ func integrationStatusAt(target Target, path string, expectedVersion int) Status
 	}
 }
 
-// parseIntegrationVersion scans for the HERDR_INTEGRATION_VERSION marker,
+// parseIntegrationVersion scans for the CATS_INTEGRATION_VERSION marker,
 // tolerating `//` and `#` comment prefixes; a file without a parseable marker
 // is a legacy install.
 func parseIntegrationVersion(content string) (int, bool) {

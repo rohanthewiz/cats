@@ -3,7 +3,7 @@ package orchestration
 // Stage C — process-probe throttle. The detection loop must know which agent owns
 // a pane's foreground, but enumerating the foreground process group (per-pid comm,
 // exec path, and argv via sysctl) is far more expensive than the 300ms loop cadence
-// warrants for an idle pane. This file ports herdr's throttle (Rust:
+// warrants for an idle pane. This file ports cats's throttle (Rust:
 // src/pane.rs — should_probe_foreground_job + AgentDetectionPresence) so the Go
 // backend only runs that enumeration when it can pay off:
 //
@@ -19,7 +19,7 @@ package orchestration
 //     misses (AGENT_MISS_CONFIRMATION_ATTEMPTS) to clear, so a transient probe
 //     hiccup doesn't flap identity.
 //
-// Scope note: herdr's throttle also threads suppressed-agent (remote release),
+// Scope note: cats's throttle also threads suppressed-agent (remote release),
 // pending foreground-shell-exit, and full-lifecycle-authority inputs. Those
 // subsystems don't exist on the Go backend yet, so this port covers the
 // no-suppression / no-lifecycle-authority subset and omits those branches.
@@ -29,7 +29,7 @@ package orchestration
 
 import "time"
 
-// Throttle tuning, matched to herdr's src/pane.rs constants.
+// Throttle tuning, matched to cats's src/pane.rs constants.
 const (
 	agentMissConfirmationAttempts        = 6
 	processRecheckIdentified             = 5 * time.Second
@@ -45,7 +45,7 @@ const (
 const noPGID = -1
 
 // agentPresence debounces process-based identity: an identified agent survives a
-// few empty probes before it's cleared. Ports herdr's AgentDetectionPresence.
+// few empty probes before it's cleared. Ports cats's AgentDetectionPresence.
 type agentPresence struct {
 	current string
 	misses  int
@@ -91,7 +91,7 @@ func (a *agentPresence) observeProcessProbe(identified string) bool {
 // foregroundGroupChanged reports whether the foreground process group id differs
 // from the last observed one, treating noPGID as a real "absent" value (so an
 // appearing or vanishing group counts as a change, but absent→absent does not).
-// Ports herdr's foreground_group_changed.
+// Ports cats's foreground_group_changed.
 func foregroundGroupChanged(pgid, last int) bool {
 	return pgid != last && (pgid > 0 || last > 0)
 }
@@ -108,7 +108,7 @@ type processProbeInput struct {
 }
 
 // shouldProbeForegroundJob decides whether this tick should run the expensive
-// foreground enumeration. Ports the no-suppression subset of herdr's
+// foreground enumeration. Ports the no-suppression subset of cats's
 // should_probe_foreground_job.
 func shouldProbeForegroundJob(in processProbeInput) bool {
 	changed := foregroundGroupChanged(in.foregroundPgid, in.lastForegroundPgid)

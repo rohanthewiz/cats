@@ -1,6 +1,6 @@
-// Package persist is gateway's on-disk session state (WS3): the model
-// snapshot that survives a gateway restart (session.json) and the captured
-// scrollback seeds that survive a termhost daemon loss (history.json). Two
+// Package persist is catway's on-disk session state (WS3): the model
+// snapshot that survives a catway restart (session.json) and the captured
+// scrollback seeds that survive a cathost daemon loss (history.json). Two
 // files because they have different rhythms — the model is small and written
 // on every mutation (debounced); history is large and written occasionally
 // (periodic capture + clean shutdown).
@@ -16,7 +16,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/rohanthewiz/herdr-web/internal/app"
+	"github.com/rohanthewiz/cats/internal/app"
 )
 
 // Version is the state-file schema version. A mismatch refuses the file (the
@@ -27,7 +27,7 @@ const Version = 1
 // snapshot: each pane's last daemon-reported working directory (OSC 7), so a
 // cold restore re-spawns shells where they were — runtime chrome the domain
 // model deliberately doesn't own. PaneAgents is the same idea for resumable
-// agent sessions (herdr's PaneAgentSessionSnapshot): the hook-reported session
+// agent sessions (cats's PaneAgentSessionSnapshot): the hook-reported session
 // identity per pane, so a cold restore can relaunch the agent's native
 // conversation (`claude --resume <id>`). Additive fields — a version bump is
 // not needed, an old file simply has neither map.
@@ -39,10 +39,10 @@ type sessionFile struct {
 }
 
 // AgentSession is one pane's persisted resumable agent-session identity
-// (herdr's PaneAgentSessionSnapshot): the reporting source ("herdr:claude"),
+// (cats's PaneAgentSessionSnapshot): the reporting source ("cats:claude"),
 // the agent label it must match, and the session ref — Kind "id" for every
 // agent except pi, which may use an absolute "path". No timestamps, no TTL:
-// staleness is the agent's own problem at resume time, exactly as in herdr.
+// staleness is the agent's own problem at resume time, exactly as in cats.
 type AgentSession struct {
 	Source string `json:"source"`
 	Agent  string `json:"agent"`
@@ -59,7 +59,7 @@ type historyFile struct {
 }
 
 // DefaultDir is the state directory when the config names none:
-// $XDG_STATE_HOME/herdr, falling back to ~/.local/state/herdr (state, not
+// $XDG_STATE_HOME/cats, falling back to ~/.local/state/cats (state, not
 // config — this is machine-local runtime data, following the same XDG-with-
 // fallback convention as the config file). "" if no home dir is resolvable.
 func DefaultDir() string {
@@ -71,7 +71,7 @@ func DefaultDir() string {
 		}
 		dir = filepath.Join(home, ".local", "state")
 	}
-	return filepath.Join(dir, "herdr")
+	return filepath.Join(dir, "cats")
 }
 
 // SessionPath / HistoryPath are the file locations within a state dir.

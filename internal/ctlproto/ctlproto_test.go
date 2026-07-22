@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rohanthewiz/herdr-web/internal/app"
+	"github.com/rohanthewiz/cats/internal/app"
 )
 
 // syncDispatch resolves the responder inline, echoing method+params — the common
@@ -132,7 +132,7 @@ func TestServeAndCallOverSocket(t *testing.T) {
 		t.Fatalf("listen: %v", err)
 	}
 	defer l.Close()
-	s := NewServer(syncDispatch(false), time.Second, "gateway")
+	s := NewServer(syncDispatch(false), time.Second, "catway")
 	go s.Serve(l)
 
 	// ping over the wire

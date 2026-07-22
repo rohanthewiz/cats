@@ -123,7 +123,7 @@ func enforceAgentVersion(requirement *agentVersionRequirement) (string, error) {
 
 	if found.less(required) {
 		return "", fmt.Errorf(
-			"%s %d.%d.%d is too old: herdr hooks require %s %s or newer. upgrade %s, then re-run install",
+			"%s %d.%d.%d is too old: cats hooks require %s %s or newer. upgrade %s, then re-run install",
 			requirement.label, found.major, found.minor, found.patch,
 			requirement.label, requirement.minVersion, requirement.label)
 	}

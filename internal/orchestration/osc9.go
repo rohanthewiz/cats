@@ -8,7 +8,7 @@ import (
 
 // osc9MaxLen caps a single buffered OSC 9 body. Progress payloads are tiny
 // (`4;3;`); the cap only bounds garbage. oscProgressMaxChars further caps the
-// retained string, mirroring herdr's AGENT_OSC_MAX_CHARS.
+// retained string, mirroring cats's AGENT_OSC_MAX_CHARS.
 const (
 	osc9MaxLen          = 4096
 	oscProgressMaxChars = 256
@@ -21,7 +21,7 @@ const (
 // (OSC 52). The detector feeds the retained progress into detect.Input.OscProgress
 // so manifest `osc_progress` rules (e.g. Claude's `^4;0` idle) can match.
 //
-// Mirrors the OSC 9 half of herdr's AgentOscStateTracker. Not safe for concurrent
+// Mirrors the OSC 9 half of cats's AgentOscStateTracker. Not safe for concurrent
 // use: a pane drives one scanner from its readPump goroutine.
 type osc9Scanner struct {
 	state oscState
@@ -88,7 +88,7 @@ func (s *osc9Scanner) reset() {
 
 // parseOSC9Progress extracts the progress payload from an OSC 9 body — everything
 // after the `9;` command, sanitized. Returns ok=false for other OSC commands.
-// Mirrors how herdr's AgentOscStateTracker stores OSC 9 payloads verbatim (after
+// Mirrors how cats's AgentOscStateTracker stores OSC 9 payloads verbatim (after
 // the command) as latest_progress.
 func parseOSC9Progress(body []byte) (string, bool) {
 	rest, ok := bytes.CutPrefix(body, []byte("9;"))
@@ -99,7 +99,7 @@ func parseOSC9Progress(body []byte) (string, bool) {
 }
 
 // sanitizeOSCString drops control characters and caps the result at maxChars
-// runes — untrusted child output bounded for safety. Mirrors herdr's
+// runes — untrusted child output bounded for safety. Mirrors cats's
 // sanitize_agent_osc_string.
 func sanitizeOSCString(payload []byte, maxChars int) string {
 	var b strings.Builder

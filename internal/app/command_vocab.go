@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rohanthewiz/herdr-web/internal/layout"
+	"github.com/rohanthewiz/cats/internal/layout"
 )
 
 // This file is the protocol-neutral §7 command vocabulary: the command names,
@@ -514,13 +514,13 @@ type ConfigTheme struct {
 // ConfigServerInfo is the read-only server section of config.get: informational
 // only (these settings are flag/config driven and need a restart).
 type ConfigServerInfo struct {
-	Addr           string `json:"addr"`
-	Auth           string `json:"auth"`
-	TLS            bool   `json:"tls"`
-	TermhostSocket string `json:"termhost_socket"`
-	ControlSocket  string `json:"control_socket,omitempty"`
-	HookSocket     string `json:"hook_socket,omitempty"`
-	SessionTTL     string `json:"session_ttl"`
+	Addr          string `json:"addr"`
+	Auth          string `json:"auth"`
+	TLS           bool   `json:"tls"`
+	CathostSocket string `json:"cathost_socket"`
+	ControlSocket string `json:"control_socket,omitempty"`
+	HookSocket    string `json:"hook_socket,omitempty"`
+	SessionTTL    string `json:"session_ttl"`
 }
 
 // ConfigGetResult is CmdResult.Data for config.get (and config.set, which

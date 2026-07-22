@@ -146,7 +146,7 @@ func TestInstallTargetKimiVersionGate(t *testing.T) {
 
 	fakeBinary(t, "kimi", "#!/bin/sh\necho 'kimi-code 0.13.9'\n")
 	_, err := InstallTarget(TargetKimi)
-	want := "kimi code 0.13.9 is too old: herdr hooks require kimi code 0.14.0 or newer. upgrade kimi code, then re-run install"
+	want := "kimi code 0.13.9 is too old: cats hooks require kimi code 0.14.0 or newer. upgrade kimi code, then re-run install"
 	if err == nil || err.Error() != want {
 		t.Fatalf("err = %v, want %q", err, want)
 	}

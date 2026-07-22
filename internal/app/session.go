@@ -6,7 +6,7 @@
 // no daemon, no I/O, no goroutines, so it unit-tests like the layout/workspace
 // models it composes (the Rust src/app actions are the spec).
 //
-// The orchestrator runtime (the event-loop actor in cmd/gateway) owns exactly
+// The orchestrator runtime (the event-loop actor in cmd/catway) owns exactly
 // one Session and is its only caller, so Session needs no synchronization.
 package app
 
@@ -17,8 +17,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/rohanthewiz/herdr-web/internal/layout"
-	"github.com/rohanthewiz/herdr-web/internal/workspace"
+	"github.com/rohanthewiz/cats/internal/layout"
+	"github.com/rohanthewiz/cats/internal/workspace"
 )
 
 // Session is the multi-workspace session state. active indexes the workspace
@@ -99,8 +99,8 @@ func (s *Session) PublicPaneID(id layout.PaneID) (string, bool) {
 
 // PaneByPublicID is the reverse of PublicPaneID: it resolves a public handle
 // back to the internal pane id. It accepts the two handle forms panes are given
-// in their environment (HERDR_PANE_ID): the public "w1:p3" form, and the
-// "p_<raw>" fallback that embeds the internal id directly (herdr's
+// in their environment (CATS_PANE_ID): the public "w1:p3" form, and the
+// "p_<raw>" fallback that embeds the internal id directly (cats's
 // apply_pane_env emits it when no public id is known). Reports false for a
 // handle that resolves to no live pane.
 func (s *Session) PaneByPublicID(handle string) (layout.PaneID, bool) {

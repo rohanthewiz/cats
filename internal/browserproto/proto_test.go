@@ -62,10 +62,10 @@ func TestRoundTrip(t *testing.T) {
 			Cells: []DiffCell{{I: 3, Cell: Cell{S: "x", B: 0x02112233}}}}, DecodeDown},
 		{"clipboard", NewClipboard([]byte("copied")), DecodeDown},
 		{"notify", NewNotify("agent", "claude is blocked", "w1:p3"), DecodeDown},
-		{"title", NewTitle("herdr — proj"), DecodeDown},
+		{"title", NewTitle("cats — proj"), DecodeDown},
 		{"error", NewError(pane, "pane gone"), DecodeDown},
 		{"shutdown", NewShutdown(), DecodeDown},
-		{"update_ready", NewUpdateReady("1.2.3", "brew upgrade herdr"), DecodeDown},
+		{"update_ready", NewUpdateReady("1.2.3", "brew upgrade cats"), DecodeDown},
 		{"cmd_result", mustCmdResult(t, "42", true, "", ReadResult{Text: "hello\n"}), DecodeDown},
 
 		// Up.

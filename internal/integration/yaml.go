@@ -4,7 +4,7 @@ package integration
 // the Rust source (no YAML library — the user's file layout, comments and
 // quoting must survive edits byte-for-byte where nothing changed).
 //
-// It manages the `herdr-agent-state` entry across every plugins layout hermes
+// It manages the `cats-agent-state` entry across every plugins layout hermes
 // accepts:
 //
 //	plugins:                       plugins:            plugins: [a, b]
@@ -36,7 +36,7 @@ func updateHermesEnabledPlugin(content string, enabled bool) string {
 		if result != "" {
 			result += "\n"
 		}
-		result += "plugins:\n  enabled:\n    - herdr-agent-state\n"
+		result += "plugins:\n  enabled:\n    - cats-agent-state\n"
 		return result
 	}
 
@@ -66,10 +66,10 @@ func updateHermesEnabledPlugin(content string, enabled bool) string {
 
 	if enabledIndex >= 0 {
 		line := strings.TrimSpace(lines[enabledIndex])
-		if line == "enabled: []" || line == "enabled: [] # herdr" {
+		if line == "enabled: []" || line == "enabled: [] # cats" {
 			if enabled {
 				lines[enabledIndex] = "  enabled:"
-				lines = insertLine(lines, enabledIndex+1, "    - herdr-agent-state")
+				lines = insertLine(lines, enabledIndex+1, "    - cats-agent-state")
 			}
 			return joinYamlLines(lines, trailingNewline)
 		}
@@ -98,7 +98,7 @@ func updateHermesEnabledPlugin(content string, enabled bool) string {
 		case (enabled && existingItemIndex >= 0) || (!enabled && existingItemIndex < 0):
 			return content
 		case enabled:
-			lines = insertLine(lines, listStart, "    - herdr-agent-state")
+			lines = insertLine(lines, listStart, "    - cats-agent-state")
 		default:
 			lines = append(lines[:existingItemIndex], lines[existingItemIndex+1:]...)
 		}
@@ -142,7 +142,7 @@ func updateHermesEnabledPlugin(content string, enabled bool) string {
 		case (enabled && existingItemIndex >= 0) || (!enabled && existingItemIndex < 0):
 			return content
 		case enabled:
-			lines = insertLine(lines, flatListStart, "  - herdr-agent-state")
+			lines = insertLine(lines, flatListStart, "  - cats-agent-state")
 		default:
 			lines = append(lines[:existingItemIndex], lines[existingItemIndex+1:]...)
 		}
@@ -151,7 +151,7 @@ func updateHermesEnabledPlugin(content string, enabled bool) string {
 
 	if enabled {
 		lines = insertLine(lines, pluginsIndex+1, "  enabled:")
-		lines = insertLine(lines, pluginsIndex+2, "    - herdr-agent-state")
+		lines = insertLine(lines, pluginsIndex+2, "    - cats-agent-state")
 		return joinYamlLines(lines, trailingNewline)
 	}
 

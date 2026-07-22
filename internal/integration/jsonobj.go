@@ -2,7 +2,7 @@ package integration
 
 // Order-preserving JSON. Settings files (claude/copilot/droid/qodercli
 // settings.json, codex/cursor hooks.json) belong to the user: install must
-// mutate only the herdr hook entries and rewrite everything else — unrelated
+// mutate only the cats hook entries and rewrite everything else — unrelated
 // keys, and their original order — untouched. encoding/json's map[string]any
 // loses order, so JSON documents are decoded off the token stream into a small
 // tree whose objects remember insertion order.

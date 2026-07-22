@@ -9,15 +9,15 @@ import (
 )
 
 // DefaultSocket is the control socket path used when neither a flag nor the
-// HERDR_CONTROL_SOCKET env var overrides it. It mirrors the termhost socket
-// convention (/tmp/herdr-*.sock) so server and client agree by default.
-const DefaultSocket = "/tmp/herdr-control.sock"
+// CATS_CONTROL_SOCKET env var overrides it. It mirrors the cathost socket
+// convention (/tmp/cats-*.sock) so server and client agree by default.
+const DefaultSocket = "/tmp/cats-control.sock"
 
 // SocketEnvVar overrides the control socket path for both server and client.
-const SocketEnvVar = "HERDR_CONTROL_SOCKET"
+const SocketEnvVar = "CATS_CONTROL_SOCKET"
 
 // ResolveSocket picks the control socket path with the standard precedence: an
-// explicit non-empty override (a CLI flag) wins; else HERDR_CONTROL_SOCKET; else
+// explicit non-empty override (a CLI flag) wins; else CATS_CONTROL_SOCKET; else
 // DefaultSocket. Server and client both call it so they agree by default.
 func ResolveSocket(override string) string {
 	if override != "" {

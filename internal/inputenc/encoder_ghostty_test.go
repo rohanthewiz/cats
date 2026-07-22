@@ -1,11 +1,11 @@
 //go:build ghostty
 
 // Golden byte tests for the ghostty-backed encoders, keyed to the same
-// dimensions as herdr's WS0-B2 differential matrix (mouse mode × mouse
+// dimensions as cats's WS0-B2 differential matrix (mouse mode × mouse
 // encoding × kitty flags) — now including kitty bits 2/8, which the Rust pure
 // encoders deliberately degraded (the divergence WS9 retires). Run with:
 //
-//	PKG_CONFIG_PATH=<herdr>/vendor/libghostty-vt/zig-out/share/pkgconfig \
+//	PKG_CONFIG_PATH=<cats>/vendor/libghostty-vt/zig-out/share/pkgconfig \
 //	  go test -tags ghostty ./internal/inputenc/
 
 package inputenc
@@ -13,8 +13,8 @@ package inputenc
 import (
 	"testing"
 
-	"github.com/rohanthewiz/herdr-web/internal/browserproto"
-	"github.com/rohanthewiz/herdr-web/internal/terminal"
+	"github.com/rohanthewiz/cats/internal/browserproto"
+	"github.com/rohanthewiz/cats/internal/terminal"
 )
 
 func newEnc(t *testing.T, m terminal.InputModes) *Encoder {

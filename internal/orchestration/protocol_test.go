@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/rohanthewiz/herdr-web/internal/terminal"
+	"github.com/rohanthewiz/cats/internal/terminal"
 )
 
 func TestColorPacking(t *testing.T) {

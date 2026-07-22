@@ -3,7 +3,7 @@ package orchestration
 // Stage C — driver parity. The per-pane detection loop (detectPump in host.go)
 // classifies an agent's state on a timer. A naive "emit on every change" loop
 // flickers: agents repaint spinners, transient blank frames read as idle, and
-// startup splash screens look like work. This file ports herdr's flicker-smoothing
+// startup splash screens look like work. This file ports cats's flicker-smoothing
 // state machine (Rust: src/pane/agent_detection.rs) so the Go backend publishes the
 // same debounced signal:
 //
@@ -23,10 +23,10 @@ package orchestration
 import (
 	"time"
 
-	"github.com/rohanthewiz/herdr-web/internal/detect"
+	"github.com/rohanthewiz/cats/internal/detect"
 )
 
-// Tuning, matched to herdr's pane/agent_detection.rs constants.
+// Tuning, matched to cats's pane/agent_detection.rs constants.
 const (
 	// detectInterval is the base cadence for probing a pane's foreground agent
 	// and (when due) scanning its screen.
@@ -62,7 +62,7 @@ type publishState struct {
 // pendingIdle debounces the Working→plain-Idle transition (the one prone to
 // flicker between spinner frames). A "plain" idle is Idle with no visible-idle
 // marker on screen — i.e. inferred absence of work, not a positive idle signal.
-// Ports herdr's PendingIdleConfirmation.
+// Ports cats's PendingIdleConfirmation.
 type pendingIdle struct {
 	started       bool
 	startedAt     time.Time
@@ -113,7 +113,7 @@ func (p *pendingIdle) shouldHoldWorkingToIdle(prev, next publishState, agentChan
 // shouldSkipIdleScreenScan reports whether the (relatively expensive) screen
 // snapshot+scan can be skipped this tick: only when we're sitting in Idle with an
 // agent present, no transition in flight, and the PTY content sequence is
-// unchanged since the last scan. Ports herdr's should_skip_idle_screen_scan.
+// unchanged since the last scan. Ports cats's should_skip_idle_screen_scan.
 func shouldSkipIdleScreenScan(state detect.State, agentPresent, pendingActive, agentChanged, processExited bool, currentSeq, lastSeq uint64, hasLastSeq bool) bool {
 	if state != detect.StateIdle || !agentPresent || pendingActive || agentChanged || processExited {
 		return false
@@ -123,7 +123,7 @@ func shouldSkipIdleScreenScan(state detect.State, agentPresent, pendingActive, a
 
 // stableVisibleSignalRefreshDue reports whether a steady visible blocker (present
 // both before and after this tick) is due for a refresh re-emit.
-// Ports herdr's stable_visible_signal_refresh_due.
+// Ports cats's stable_visible_signal_refresh_due.
 func stableVisibleSignalRefreshDue(prev, next publishState, lastRefresh time.Time, hasRefresh bool, now time.Time) bool {
 	stable := next.visibleBlocker && prev.visibleBlocker
 	if !stable {
@@ -133,7 +133,7 @@ func stableVisibleSignalRefreshDue(prev, next publishState, lastRefresh time.Tim
 }
 
 // shouldPublishDetectionUpdate reports whether next differs from prev in any way
-// worth emitting. Ports herdr's should_publish_detection_update.
+// worth emitting. Ports cats's should_publish_detection_update.
 func shouldPublishDetectionUpdate(prev, next publishState, agentChanged, processExited, stableRefreshDue bool) bool {
 	return next.state != prev.state ||
 		next.visibleIdle != prev.visibleIdle ||
@@ -146,7 +146,7 @@ func shouldPublishDetectionUpdate(prev, next publishState, agentChanged, process
 
 // decideDetectionTransition combines the pending-idle hold with the publish test:
 // it returns true when next should be published now. It mutates pending as a side
-// effect (advancing or clearing the confirmation count). Ports herdr's
+// effect (advancing or clearing the confirmation count). Ports cats's
 // decide_detection_transition.
 func decideDetectionTransition(prev, next publishState, agentChanged, processExited, stableRefreshDue bool, now time.Time, pending *pendingIdle) bool {
 	if pending.shouldHoldWorkingToIdle(prev, next, agentChanged, processExited, now) {

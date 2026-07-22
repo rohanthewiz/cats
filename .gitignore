@@ -5,12 +5,12 @@
 *.out
 
 # Built command binaries (produced by `go build` in cmd/*)
-/gateway2
-/herdrctl
-/termhost
-/cmd/gateway2/gateway2
-/cmd/herdrctl/herdrctl
-/cmd/termhost/termhost
+/catway2
+/catctl
+/cathost
+/cmd/catway2/catway2
+/cmd/catctl/catctl
+/cmd/cathost/cathost
 
 # Editor / OS
 .DS_Store

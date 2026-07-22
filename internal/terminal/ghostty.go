@@ -21,7 +21,7 @@ const (
 	defaultCellWidthPx  = 8
 	defaultCellHeightPx = 16
 
-	// defaultMaxScrollback is the history depth (lines) kept per termhost pane.
+	// defaultMaxScrollback is the history depth (lines) kept per cathost pane.
 	// libghostty defaults to 0 (no scrollback), so the Host must opt in for the
 	// orchestrator's scrollback to work.
 	defaultMaxScrollback = 10000
@@ -108,7 +108,7 @@ func (e *ghosttyEmulator) Scroll(delta int) error {
 }
 
 // ScrollMetrics reports the current scrollback position from libghostty's live
-// scrollbar (no self-tracking), mirroring herdr's Rust scroll_metrics. The
+// scrollbar (no self-tracking), mirroring cats's Rust scroll_metrics. The
 // scrollbar gives Total rows, the viewport Offset into them, and the visible Len;
 // offset-from-bottom is the rows below the viewport, max is the whole history.
 func (e *ghosttyEmulator) ScrollMetrics() (ScrollMetrics, error) {
@@ -124,7 +124,7 @@ func (e *ghosttyEmulator) ScrollMetrics() (ScrollMetrics, error) {
 }
 
 // FormatSelection resolves the two screen-buffer endpoints to grid references and
-// formats the bounded selection as plain text. It mirrors herdr's Rust extraction
+// formats the bounded selection as plain text. It mirrors cats's Rust extraction
 // (read_text_screen): order endpoints top-left → bottom-right, resolve each via
 // PointTagScreen, then format with unwrap+trim. The grid references are borrowed
 // views of terminal internals, so they are built and consumed back-to-back with no
@@ -182,7 +182,7 @@ func (e *ghosttyEmulator) screenRangeRefs(startRow, endRow uint32, cols uint16) 
 	return *startRef, *endRef, nil
 }
 
-// ExtractText formats buffer text for the given scope, mirroring herdr's
+// ExtractText formats buffer text for the given scope, mirroring cats's
 // recent_*/visible_* extraction (read_text_screen / read_ansi_screen): a
 // full-width screen-coordinate range formatted plain or VT, optionally unwrapped,
 // trailing-trimmed.

@@ -1,6 +1,6 @@
-# herdr-web
+# cats
 
-[herdr](https://herdr.dev) in Go, presented through the browser: a terminal
+[cats](https://herdr.dev) in Go, presented through the browser: a terminal
 workspace manager for herding AI coding agents. This repo is the complete
 application — the Rust implementation is retired, and no Rust checkout is
 needed to build or run anything here.
@@ -9,9 +9,9 @@ Three binaries make up the app:
 
 | Binary | Role |
 |--------|------|
-| `gateway` | The herdr-web server: workspace/tab/pane orchestrator, web UI over WebSocket, control + hook APIs, session persistence |
-| `termhost` | Terminal backend daemon: owns PTYs + VT emulation (libghostty-vt) per pane; run `-persistent` so shells survive gateway restarts |
-| `herdrctl` | CLI client for the control API — the same command table the browser uses — plus offline agent-integration installers |
+| `catway` | The cats server: workspace/tab/pane orchestrator, web UI over WebSocket, control + hook APIs, session persistence |
+| `cathost` | Terminal backend daemon: owns PTYs + VT emulation (libghostty-vt) per pane; run `-persistent` so shells survive catway restarts |
+| `catctl` | CLI client for the control API — the same command table the browser uses — plus offline agent-integration installers |
 
 ## Features
 
@@ -22,8 +22,8 @@ Three binaries make up the app:
   from herdr.dev; agent hook reports (permission prompts, task completion)
   arrive on a local hook socket and surface as badges/toasts.
 - **Session persistence & restore**: the model is saved to
-  `~/.local/state/herdr` on every mutation. A gateway restart re-adopts live
-  PTYs from the persistent termhost; a cold start re-spawns panes with captured
+  `~/.local/state/cats` on every mutation. A catway restart re-adopts live
+  PTYs from the persistent cathost; a cold start re-spawns panes with captured
   scrollback replayed, and `resume_agents` relaunches supported agents into
   their native conversation sessions.
 - **Git worktrees**: create a worktree checkout per agent/task from the UI.
@@ -32,10 +32,10 @@ Three binaries make up the app:
 - **Remote access**: shared-password login with HMAC-signed session cookies
   (headless clients use a Bearer token) and optional TLS (self-signed
   auto-generated, or bring your own cert).
-- **Configuration** in YAML (`~/.config/herdr/config.yaml`): server settings,
+- **Configuration** in YAML (`~/.config/cats/config.yaml`): server settings,
   theme colors/font, and keybindings — see
   [`config.example.yaml`](config.example.yaml). Theme/keybinding edits apply
-  with `herdrctl reload`, no restart.
+  with `catctl reload`, no restart.
 
 ## Build & packaging
 
@@ -44,7 +44,7 @@ The VT engine (libghostty-vt, Zig) is vendored in `third_party/libghostty-vt`
 
 ```bash
 make vt             # one-time: build the vendored libghostty-vt (downloads pinned Zig 0.15.2)
-make binaries       # gateway + termhost + herdrctl into bin/ (-tags ghostty)
+make binaries       # catway + cathost + catctl into bin/ (-tags ghostty)
 make check          # everything CI runs: fmt, vet, untagged tests, tagged race tests
 make dist           # release tarball for this host's OS/arch into dist/
 ```
@@ -53,59 +53,59 @@ CI (`.github/workflows/ci.yml`) runs the untagged quick checks plus the
 ghostty-tagged race tests on Linux and macOS. A `v*` tag triggers
 `release.yml`, which attaches per-platform tarballs to the GitHub release.
 
-The CGO terminal path is behind the `ghostty` build tag: `gateway` and
-`termhost` need `-tags ghostty` + `PKG_CONFIG_PATH` (the Makefile wires this),
-while `herdrctl` and most `internal/` packages build and test with a plain
+The CGO terminal path is behind the `ghostty` build tag: `catway` and
+`cathost` need `-tags ghostty` + `PKG_CONFIG_PATH` (the Makefile wires this),
+while `catctl` and most `internal/` packages build and test with a plain
 `go build ./...` — no Zig toolchain required.
 
 ## Run
 
 ```bash
-# 1. Terminal backend (persistent: panes survive gateway restarts/upgrades)
-bin/termhost -socket /tmp/herdr-termhost.sock -persistent &
+# 1. Terminal backend (persistent: panes survive catway restarts/upgrades)
+bin/cathost -socket /tmp/cats-cathost.sock -persistent &
 
-# 2. The herdr server
-HERDR_PASSWORD=changeme bin/gateway --addr :8421
+# 2. The cats server
+CATS_PASSWORD=changeme bin/catway --addr :8421
 
 # 3. Open http://localhost:8421 and sign in
 ```
 
-`gateway --auth none` skips the login for trusted localhost use; `--tls`
+`catway --auth none` skips the login for trusted localhost use; `--tls`
 serves HTTPS. Flags beat the config file, which beats built-in defaults
-(`flag > config > default`); run `gateway -h` for the full set.
+(`flag > config > default`); run `catway -h` for the full set.
 
-> **Note:** the web UI (`cmd/gateway/web/index.html`) is embedded into the
-> gateway binary at compile time (`//go:embed`) — after editing it, rebuild
-> and restart the gateway; a browser reload alone keeps serving the old page.
+> **Note:** the web UI (`cmd/catway/web/index.html`) is embedded into the
+> catway binary at compile time (`//go:embed`) — after editing it, rebuild
+> and restart the catway; a browser reload alone keeps serving the old page.
 
 ### CLI control & automation
 
-`herdrctl` drives a running gateway over the owner-only control socket:
+`catctl` drives a running catway over the owner-only control socket:
 
 ```bash
-herdrctl split h 2                      # split pane 2 horizontally
-herdrctl panes                          # list panes
-herdrctl wait 1 "BUILD SUCCESSFUL" 120  # block until pane 1 prints the pattern
-herdrctl events 1                       # stream pane events until Ctrl-C
-herdrctl reload                         # re-render page after config edits
-herdrctl help                           # the full verb list
+catctl split h 2                      # split pane 2 horizontally
+catctl panes                          # list panes
+catctl wait 1 "BUILD SUCCESSFUL" 120  # block until pane 1 prints the pattern
+catctl events 1                       # stream pane events until Ctrl-C
+catctl reload                         # re-render page after config edits
+catctl help                           # the full verb list
 ```
 
-`herdrctl integration install claude` installs the herdr hook integration
-into an agent's own config tree (offline — no gateway needed); `herdrctl probe`
+`catctl integration install claude` installs the cats hook integration
+into an agent's own config tree (offline — no catway needed); `catctl probe`
 is a stdlib-only WebSocket probe for exercising the browser protocol headlessly.
 
 ## Layout
 
 ```
-cmd/gateway/          herdr server: orchestrator event loop, web UI, WS bridge,
+cmd/catway/          cats server: orchestrator event loop, web UI, WS bridge,
                       control/hook APIs, persistence + restore, auth/TLS
-cmd/termhost/         terminal-backend daemon (orchestration Host over a socket)
-cmd/herdrctl/         control-API CLI, agent-integration installers, and the
+cmd/cathost/         terminal-backend daemon (orchestration Host over a socket)
+cmd/catctl/         control-API CLI, agent-integration installers, and the
                       browser-protocol WebSocket probe verb (untagged)
 internal/app/         session model + §7 command table (the Dispatcher seam)
 internal/browserproto/  browser WebSocket protocol (spec: ai_docs/phase-c-ws9-protocol.md)
-internal/orchestration/ gateway↔termhost seam (protocol + terminal-backend Host)
+internal/orchestration/ catway↔cathost seam (protocol + terminal-backend Host)
 internal/terminal/    VT emulator (Emulator iface + go-libghostty)
 internal/layout/      BSP pane layout
 internal/detect/      agent detection (process inspection + manifest catalog)
@@ -128,7 +128,7 @@ changes are made.
 
 ## History
 
-This codebase replaced the Rust/ratatui herdr through a phased migration:
+This codebase replaced the Rust/ratatui cats through a phased migration:
 Phase A (a thin web client attached to the Rust server), Phase B (Go-owned
 PTY + VT emulation behind an orchestration seam), and Phase C (the
 orchestrator, layout, detection, persistence, and web chrome in Go). The

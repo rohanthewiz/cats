@@ -11,7 +11,7 @@ import (
 	"fmt"
 	"maps"
 
-	"github.com/rohanthewiz/herdr-web/internal/layout"
+	"github.com/rohanthewiz/cats/internal/layout"
 )
 
 // PaneSnapshot is a pane's durable viewport state (PaneState minus the

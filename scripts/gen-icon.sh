@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Regenerate scripts/AppIcon.icns from scripts/icon/herdr-icon.svg. The bundler
+# Regenerate scripts/AppIcon.icns from scripts/icon/cats-icon.svg. The bundler
 # (build-macapp.sh) copies AppIcon.icns into the .app if present, so this is a
 # one-time (or on-design-change) step, not part of every build.
 #
@@ -8,9 +8,9 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SVG="$ROOT/scripts/icon/herdr-icon.svg"
+SVG="$ROOT/scripts/icon/cats-icon.svg"
 OUT="$ROOT/scripts/AppIcon.icns"
-SET="$(mktemp -d)/Herdr.iconset"
+SET="$(mktemp -d)/Cats.iconset"
 mkdir -p "$SET"
 
 [ -f "$SVG" ] || { echo "gen-icon: missing $SVG" >&2; exit 1; }

@@ -7,9 +7,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/rohanthewiz/herdr-web/internal/app"
-	"github.com/rohanthewiz/herdr-web/internal/layout"
-	"github.com/rohanthewiz/herdr-web/internal/workspace"
+	"github.com/rohanthewiz/cats/internal/app"
+	"github.com/rohanthewiz/cats/internal/layout"
+	"github.com/rohanthewiz/cats/internal/workspace"
 )
 
 type nopSpawner struct{}
@@ -35,7 +35,7 @@ func TestSessionSaveLoad(t *testing.T) {
 	snap := sampleSnapshot(t)
 
 	agents := map[uint32]AgentSession{
-		2: {Source: "herdr:claude", Agent: "claude", Kind: "id", Value: "sess-abc123"},
+		2: {Source: "cats:claude", Agent: "claude", Kind: "id", Value: "sess-abc123"},
 	}
 	if err := SaveSession(path, snap, map[uint32]string{2: "/tmp/deep"}, agents); err != nil {
 		t.Fatalf("SaveSession: %v", err)

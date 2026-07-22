@@ -1,4 +1,4 @@
-// Package config is gateway's optional YAML configuration file. It is a second
+// Package config is catway's optional YAML configuration file. It is a second
 // source of settings alongside the command-line flags: for the server settings
 // the precedence is flag > config > built-in default (main.go applies the flag
 // layer via flag.Visit); the front-end settings (theme colours and copy-mode
@@ -6,7 +6,7 @@
 // served page.
 //
 // A missing file is not an error — every field has a default (Default), so an
-// empty or absent config yields the same behaviour gateway had before configs
+// empty or absent config yields the same behaviour catway had before configs
 // existed. Absent scalar keys keep their defaults; the theme and keybinding maps
 // merge key-wise, so a config that sets one colour or rebinds one action keeps
 // the defaults for everything it does not mention.
@@ -30,9 +30,9 @@ import (
 
 // EnvVar overrides the config file path (after an explicit --config flag, before
 // the default location).
-const EnvVar = "HERDR_CONFIG"
+const EnvVar = "CATS_CONFIG"
 
-// Config is the whole gateway configuration file.
+// Config is the whole catway configuration file.
 type Config struct {
 	Server      Server      `yaml:"server"`
 	Persistence Persistence `yaml:"persistence"`
@@ -42,40 +42,40 @@ type Config struct {
 }
 
 // Server mirrors the network/auth flags. Password is deliberately absent — a
-// shared secret belongs in the environment (HERDR_PASSWORD) or a flag, never a
+// shared secret belongs in the environment (CATS_PASSWORD) or a flag, never a
 // config file that is easy to commit by accident.
 type Server struct {
-	Addr           string `yaml:"addr"`
-	TermhostSocket string `yaml:"termhost_socket"`
-	ControlSocket  string `yaml:"control_socket"` // "" ⇒ ctlproto resolves env/default
-	HookSocket     string `yaml:"hook_socket"`    // agent hook-report API socket
-	Auth           string `yaml:"auth"`           // "password" | "none"
-	SessionTTL     string `yaml:"session_ttl"`    // a Go duration string, e.g. "24h"
-	TLS            TLS    `yaml:"tls"`
+	Addr          string `yaml:"addr"`
+	CathostSocket string `yaml:"cathost_socket"`
+	ControlSocket string `yaml:"control_socket"` // "" ⇒ ctlproto resolves env/default
+	HookSocket    string `yaml:"hook_socket"`    // agent hook-report API socket
+	Auth          string `yaml:"auth"`           // "password" | "none"
+	SessionTTL    string `yaml:"session_ttl"`    // a Go duration string, e.g. "24h"
+	TLS           TLS    `yaml:"tls"`
 	// AllowedOrigins are extra WebSocket Origins accepted beyond same-origin
 	// (see gwauth.OriginOK): full origins or bare host[:port] authorities. Needed
 	// when a reverse proxy or relay serves the UI under a host that differs from
-	// the gateway's own Host header. Empty ⇒ strict same-origin only. omitempty
+	// the catway's own Host header. Empty ⇒ strict same-origin only. omitempty
 	// keeps an unset list out of a saved file, so it round-trips as nil (not [])
 	// and stays equal to the default.
 	AllowedOrigins []string `yaml:"allowed_origins,omitempty"`
 }
 
 // Persistence is session persistence & restore (WS3): the model snapshot that
-// survives a gateway restart and the scrollback seeds that survive a termhost
+// survives a catway restart and the scrollback seeds that survive a cathost
 // daemon loss.
 type Persistence struct {
 	// Enabled turns persistence on (the default): the session model is saved on
 	// every mutation and restored at startup.
 	Enabled bool `yaml:"enabled"`
 	// StateDir overrides where session.json/history.json live ("" ⇒
-	// $XDG_STATE_HOME/herdr, falling back to ~/.local/state/herdr).
+	// $XDG_STATE_HOME/cats, falling back to ~/.local/state/cats).
 	StateDir string `yaml:"state_dir"`
 	// HistoryLines bounds the scrollback captured per pane for cold-restore
 	// seeds (0 = the whole buffer).
 	HistoryLines int `yaml:"history_lines"`
 	// ResumeAgents relaunches supported AI-agent panes into their native
-	// conversation sessions on a cold restore (herdr's
+	// conversation sessions on a cold restore (cats's
 	// session.resume_agents_on_restore, default true). Requires official
 	// integrations that report session refs over the hook API.
 	ResumeAgents bool `yaml:"resume_agents"`
@@ -149,29 +149,29 @@ var defaultCopyMode = map[string][]string{
 	"exit":       {"Escape", "q"},
 }
 
-// Default is the configuration gateway uses with no config file. Every call
+// Default is the configuration catway uses with no config file. Every call
 // returns fresh maps so callers can mutate the result without affecting the
 // package globals or each other.
 func Default() Config {
 	return Config{
 		Server: Server{
-			Addr:           ":8421",
-			TermhostSocket: "/tmp/herdr-termhost.sock",
-			ControlSocket:  "",
-			HookSocket:     "/tmp/herdr-hooks.sock",
-			Auth:           "password",
-			SessionTTL:     "24h",
+			Addr:          ":8421",
+			CathostSocket: "/tmp/cats-cathost.sock",
+			ControlSocket: "",
+			HookSocket:    "/tmp/cats-hooks.sock",
+			Auth:          "password",
+			SessionTTL:    "24h",
 		},
 		Persistence: Persistence{Enabled: true, HistoryLines: 2000, ResumeAgents: true},
 		Theme:       Theme{Colors: cloneStrMap(defaultColors), Font: defaultFont},
 		Keybindings: Keybindings{CopyMode: cloneKeyMap(defaultCopyMode)},
-		Worktrees:   Worktrees{Directory: "~/.herdr/worktrees"},
+		Worktrees:   Worktrees{Directory: "~/.cats/worktrees"},
 	}
 }
 
 // --- loading -----------------------------------------------------------------
 
-// Load resolves the config path (override flag > HERDR_CONFIG > default location)
+// Load resolves the config path (override flag > CATS_CONFIG > default location)
 // and returns the merged, validated configuration plus the path consulted. A
 // missing file at the default location yields Default with no error; a missing
 // file at an explicitly requested path (flag or env) is an error, since the user
@@ -271,7 +271,7 @@ func (c Config) Validate() error {
 }
 
 // resolvePath picks the config path: an explicit override (flag) wins, then
-// HERDR_CONFIG, then the default location. explicit reports whether the path came
+// CATS_CONFIG, then the default location. explicit reports whether the path came
 // from the flag or env (so a missing file there is an error, not silent
 // defaults).
 func resolvePath(override string) (path string, explicit bool) {
@@ -284,8 +284,8 @@ func resolvePath(override string) (path string, explicit bool) {
 	return DefaultPath(), false
 }
 
-// DefaultPath is $XDG_CONFIG_HOME/herdr/config.yaml, falling back to
-// ~/.config/herdr/config.yaml (the conventional location for a dev CLI tool, on
+// DefaultPath is $XDG_CONFIG_HOME/cats/config.yaml, falling back to
+// ~/.config/cats/config.yaml (the conventional location for a dev CLI tool, on
 // macOS too). Returns "" if neither the env var nor a home dir is available.
 // Exported so config.set can create the file when no config was in use yet.
 func DefaultPath() string {
@@ -297,7 +297,7 @@ func DefaultPath() string {
 		}
 		dir = filepath.Join(home, ".config")
 	}
-	return filepath.Join(dir, "herdr", "config.yaml")
+	return filepath.Join(dir, "cats", "config.yaml")
 }
 
 // --- map helpers -------------------------------------------------------------

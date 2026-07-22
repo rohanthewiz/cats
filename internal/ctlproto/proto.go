@@ -1,5 +1,5 @@
 // Package ctlproto is the local control-API wire protocol for driving a running
-// herdr server from a CLI or automation client. It is the second front-end onto
+// cats server from a CLI or automation client. It is the second front-end onto
 // the protocol-neutral §7 command table in internal/app — the browser (WS9,
 // internal/browserproto) is the first. A client sends a newline-framed JSON
 // Request naming an app command; the server dispatches it through app.Dispatcher

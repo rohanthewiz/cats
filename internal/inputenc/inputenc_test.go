@@ -3,7 +3,7 @@ package inputenc
 import (
 	"testing"
 
-	"github.com/rohanthewiz/herdr-web/internal/terminal"
+	"github.com/rohanthewiz/cats/internal/terminal"
 )
 
 func TestW3CKeyName(t *testing.T) {

@@ -85,7 +85,7 @@ func TestInstallClaudeRemovesDeprecatedHooksAndPreservesUserHooks(t *testing.T) 
 	home := testHome(t)
 	claudeDir := filepath.Join(home, ".claude")
 	hookPath := filepath.Join(claudeDir, "hooks", claudeHookInstallName)
-	herdr := func(action string) string {
+	cats := func(action string) string {
 		return fmt.Sprintf(`{"type":"command","command":"bash '%s' %s","timeout":10}`, hookPath, action)
 	}
 	settings := fmt.Sprintf(`{"hooks":{
@@ -93,7 +93,7 @@ func TestInstallClaudeRemovesDeprecatedHooksAndPreservesUserHooks(t *testing.T) 
 		"PostToolUseFailure":[{"matcher":"*","hooks":[%s,{"type":"command","command":"echo keep-failure","timeout":10}]}],
 		"SubagentStop":[{"matcher":"*","hooks":[%s,{"type":"command","command":"echo keep-subagent","timeout":10}]}],
 		"SessionEnd":[{"matcher":"*","hooks":[%s,{"type":"command","command":"echo keep-session-end","timeout":10}]}]
-	}}`, herdr("working"), herdr("working"), herdr("working"), herdr("release"))
+	}}`, cats("working"), cats("working"), cats("working"), cats("release"))
 	mustWriteFile(t, filepath.Join(claudeDir, "settings.json"), settings)
 
 	if _, err := InstallClaude(); err != nil {
@@ -119,7 +119,7 @@ func TestInstallClaudeRemovesDeprecatedHooksAndPreservesUserHooks(t *testing.T) 
 	}
 }
 
-func TestUninstallClaudeRemovesHerdrHooksAndPreservesOthers(t *testing.T) {
+func TestUninstallClaudeRemovesCatsHooksAndPreservesOthers(t *testing.T) {
 	home := testHome(t)
 	claudeDir := filepath.Join(home, ".claude")
 	mustMkdirAll(t, claudeDir)
@@ -128,7 +128,7 @@ func TestUninstallClaudeRemovesHerdrHooksAndPreservesOthers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// A user hook alongside the herdr entry must survive uninstall.
+	// A user hook alongside the cats entry must survive uninstall.
 	settings := fmt.Sprintf(`{"hooks":{
 		"SessionStart":[{"matcher":"*","hooks":[{"type":"command","command":"bash '%s' session","timeout":10}]}],
 		"UserPromptSubmit":[{"hooks":[{"type":"command","command":"echo keep","timeout":10}]}]
@@ -147,7 +147,7 @@ func TestUninstallClaudeRemovesHerdrHooksAndPreservesOthers(t *testing.T) {
 	}
 	got := readJSONFile(t, installed.SettingsPath)
 	if jsonAt(got, "hooks", "SessionStart") != nil {
-		t.Fatal("herdr SessionStart entry still present")
+		t.Fatal("cats SessionStart entry still present")
 	}
 	if cmd := jsonStringAt(t, got, "hooks", "UserPromptSubmit", 0, "hooks", 0, "command"); cmd != "echo keep" {
 		t.Fatalf("user hook lost: %q", cmd)

@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
-"""Claude Code hook: advertise the running session's friendly name to herdr-web.
+"""Claude Code hook: advertise the running session's friendly name to cats.
 
 Wire this to the SessionStart and Stop hooks. On each call it reads the hook
 payload on stdin, finds the session's latest auto-generated title (the
-`ai-title` line in the transcript), and POSTs it to the herdr-web gateway, which
+`ai-title` line in the transcript), and POSTs it to the cats catway, which
 broadcasts it to connected browsers as the tab title (document.title).
 
-herdr forwards no usable window title to the gateway, so this push is the only
+cats forwards no usable window title to the catway, so this push is the only
 way the browser tab can reflect "what's running" instead of the static pane name.
 
 The ai-title is generated a turn or two into a session, so at SessionStart it is
 usually absent; we fall back to "Claude Code · <cwd basename>" until it exists.
 
-Gateway URL defaults to http://localhost:8420 (override with HERDR_GATEWAY_URL).
-All failures are swallowed: a missing gateway must never disrupt the session.
+Catway URL defaults to http://localhost:8420 (override with CATS_CATWAY_URL).
+All failures are swallowed: a missing catway must never disrupt the session.
 """
 
 import json
@@ -51,7 +51,7 @@ def main() -> int:
         base = os.path.basename(cwd) or "session"
         title = f"Claude Code · {base}"
 
-    url = os.environ.get("HERDR_GATEWAY_URL", "http://localhost:8420").rstrip("/")
+    url = os.environ.get("CATS_CATWAY_URL", "http://localhost:8420").rstrip("/")
     body = json.dumps({"title": title}).encode("utf-8")
     req = urllib.request.Request(
         url + "/title", data=body, headers={"Content-Type": "application/json"}
@@ -59,7 +59,7 @@ def main() -> int:
     try:
         urllib.request.urlopen(req, timeout=1).read()
     except Exception:
-        pass  # gateway not running / unreachable — ignore
+        pass  # catway not running / unreachable — ignore
 
     return 0
 

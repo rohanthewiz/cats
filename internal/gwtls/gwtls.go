@@ -1,4 +1,4 @@
-// Package gwtls provides the gateway's TLS certificate for WS10: it reuses a
+// Package gwtls provides the catway's TLS certificate for WS10: it reuses a
 // cached self-signed certificate or mints a fresh one on demand. It exists
 // because rweb loads certificates from files (tls.LoadX509KeyPair), so an
 // auto-generated cert must be written to disk before the server can use it.
@@ -25,8 +25,8 @@ import (
 )
 
 const (
-	certFile = "gateway-cert.pem"
-	keyFile  = "gateway-key.pem"
+	certFile = "catway-cert.pem"
+	keyFile  = "catway-key.pem"
 
 	// validity is the lifetime of a freshly minted certificate.
 	validity = 825 * 24 * time.Hour
@@ -96,7 +96,7 @@ func generate(certPath, keyPath string) error {
 	now := time.Now()
 	tmpl := &x509.Certificate{
 		SerialNumber:          serial,
-		Subject:               pkix.Name{CommonName: "herdr gateway (self-signed)"},
+		Subject:               pkix.Name{CommonName: "cats catway (self-signed)"},
 		NotBefore:             now.Add(-time.Hour), // tolerate small clock skew
 		NotAfter:              now.Add(validity),
 		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
@@ -127,7 +127,7 @@ func generate(certPath, keyPath string) error {
 
 // hostSANs collects the DNS names and IPs the cert should cover: always
 // localhost + the loopback addresses, plus this host's name and its
-// non-loopback interface addresses so LAN access to the gateway validates.
+// non-loopback interface addresses so LAN access to the catway validates.
 func hostSANs() (dns []string, ips []net.IP) {
 	dns = []string{"localhost"}
 	ips = []net.IP{net.IPv4(127, 0, 0, 1), net.IPv6loopback}

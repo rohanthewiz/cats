@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/rohanthewiz/herdr-web/internal/layout"
+	"github.com/rohanthewiz/cats/internal/layout"
 )
 
 // fakeSpawner is the test double for the PaneSpawner seam (mirrors Rust's
@@ -28,7 +28,7 @@ func (f *fakeSpawner) Despawn(id TerminalID) {
 // testWorkspace mirrors Workspace::test_new: one tab, one root pane, custom name.
 func testWorkspace(t *testing.T, name string) *Workspace {
 	t.Helper()
-	ws, err := New(&fakeSpawner{}, "/herdr-test/ws", SpawnSpec{Rows: 24, Cols: 80})
+	ws, err := New(&fakeSpawner{}, "/cats-test/ws", SpawnSpec{Rows: 24, Cols: 80})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -49,7 +49,7 @@ func mustSplitFocused(t *testing.T, ws *Workspace, direction layout.Direction) l
 // mustAddTab mirrors Workspace::test_add_tab.
 func mustAddTab(t *testing.T, ws *Workspace, name string) int {
 	t.Helper()
-	idx, err := ws.CreateTab("/herdr-test/ws", SpawnSpec{Rows: 24, Cols: 80})
+	idx, err := ws.CreateTab("/cats-test/ws", SpawnSpec{Rows: 24, Cols: 80})
 	if err != nil {
 		t.Fatalf("CreateTab: %v", err)
 	}
@@ -140,7 +140,7 @@ func TestWorkspaceIdentityFollowsFirstTabRootPaneCwd(t *testing.T) {
 	}
 	lookup := func(id TerminalID) (string, bool) {
 		if id == terminalID {
-			return "/herdr-test/pion", true
+			return "/cats-test/pion", true
 		}
 		return "", false
 	}
@@ -148,8 +148,8 @@ func TestWorkspaceIdentityFollowsFirstTabRootPaneCwd(t *testing.T) {
 	if got := ws.DisplayNameFrom(lookup); got != "pion" {
 		t.Fatalf("DisplayNameFrom = %q, want %q", got, "pion")
 	}
-	if got := ws.ResolvedIdentityCwdFrom(lookup); got != "/herdr-test/pion" {
-		t.Fatalf("ResolvedIdentityCwdFrom = %q, want %q", got, "/herdr-test/pion")
+	if got := ws.ResolvedIdentityCwdFrom(lookup); got != "/cats-test/pion" {
+		t.Fatalf("ResolvedIdentityCwdFrom = %q, want %q", got, "/cats-test/pion")
 	}
 }
 

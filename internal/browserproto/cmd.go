@@ -1,6 +1,6 @@
 package browserproto
 
-import "github.com/rohanthewiz/herdr-web/internal/app"
+import "github.com/rohanthewiz/cats/internal/app"
 
 // The §7 command vocabulary (names, param/result structs, direction mappings)
 // now lives in internal/app so one command table can serve both this browser

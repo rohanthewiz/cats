@@ -7,7 +7,7 @@ import (
 
 // osc52MaxPayload caps a single buffered OSC 52 body. 256 KiB of base64 is
 // ~192 KiB of text — enough for real source-file copies while still bounding
-// memory against stream garbage. Mirrors herdr's OSC52_MAX_PAYLOAD_BYTES.
+// memory against stream garbage. Mirrors cats's OSC52_MAX_PAYLOAD_BYTES.
 const osc52MaxPayload = 256 * 1024
 
 // osc52Scanner reconstructs OSC 52 clipboard-write sequences from a raw terminal
@@ -15,7 +15,7 @@ const osc52MaxPayload = 256 * 1024
 // clipboard contents, so child clipboard writes never reach the host unless the
 // Host forwards them itself (the same reason oscScanner exists for OSC 7). It is
 // a distinct scanner from oscScanner because OSC 52 payloads are far larger than
-// the 4 KiB OSC 7 cap, mirroring herdr's separate Osc52Forwarder / CwdOscTracker.
+// the 4 KiB OSC 7 cap, mirroring cats's separate Osc52Forwarder / CwdOscTracker.
 // Not safe for concurrent use: a pane drives one scanner from its readPump.
 type osc52Scanner struct {
 	state oscState
@@ -63,13 +63,13 @@ func (s *osc52Scanner) scan(b []byte) [][]byte {
 				s.reset()
 			} else {
 				// ESC followed by a non-terminator: a literal ESC in the payload.
-				// Push it back (as herdr's forwarder does) and keep collecting; the
+				// Push it back (as cats's forwarder does) and keep collecting; the
 				// body will simply fail to base64-decode if it was truly garbage.
 				s.buf = append(s.buf, 0x1b, c)
 				s.state = oscCollect
 			}
 		}
-		// Bound the buffer every byte (matches herdr): an overlong/unterminated
+		// Bound the buffer every byte (matches cats): an overlong/unterminated
 		// body is abandoned and the scanner recovers at the next ESC.
 		if len(s.buf) > osc52MaxPayload {
 			s.buf = s.buf[:0]
@@ -88,7 +88,7 @@ func (s *osc52Scanner) reset() {
 // Accepts `52;c;<base64>` and `52;;<base64>` (the default selection); rejects
 // other selections (p/q/s/0-7), queries (`?`, which have no reply path here),
 // and payloads that are not valid standard base64. An empty payload (`52;c;`)
-// decodes to an empty slice — a clipboard-clear. Mirrors herdr's
+// decodes to an empty slice — a clipboard-clear. Mirrors cats's
 // parse_osc52_clipboard_write.
 func parseOSC52Clipboard(body []byte) ([]byte, bool) {
 	rest, ok := bytes.CutPrefix(body, []byte("52;"))

@@ -3,7 +3,7 @@
 // Rust server's src/pty + src/ghostty + src/terminal for a pane.
 //
 // The Emulator interface and the Snapshot/Cell value types in this file are
-// pure Go and always compile, so the rest of herdr-web (the Phase A gateway)
+// pure Go and always compile, so the rest of cats (the Phase A catway)
 // builds without the CGO terminal backend. The concrete implementation lives in
 // ghostty.go behind the `ghostty` build tag and is selected with:
 //
@@ -73,7 +73,7 @@ type Snapshot struct {
 	Scroll ScrollMetrics
 }
 
-// ScrollMetrics describes a pane's scrollback position, mirroring herdr's
+// ScrollMetrics describes a pane's scrollback position, mirroring cats's
 // ScrollMetrics so the orchestrator can drive its scrollbar/indicator.
 type ScrollMetrics struct {
 	// OffsetFromBottom is how many lines the viewport is scrolled up from the

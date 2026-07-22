@@ -275,7 +275,7 @@ func InstallOmp() (OmpInstallPaths, error) {
 }
 
 // removeLegacyPiExtensionFromOmpDir removes an old pi extension only when its
-// HERDR_INTEGRATION_ID marker proves it is ours — a user file that happens to
+// CATS_INTEGRATION_ID marker proves it is ours — a user file that happens to
 // share the name survives.
 func removeLegacyPiExtensionFromOmpDir(dir string) (bool, error) {
 	legacyPath := legacyPiExtensionPath(dir)
@@ -286,7 +286,7 @@ func removeLegacyPiExtensionFromOmpDir(dir string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	if !bytes.Contains(content, []byte("HERDR_INTEGRATION_ID=pi")) {
+	if !bytes.Contains(content, []byte("CATS_INTEGRATION_ID=pi")) {
 		return false, nil
 	}
 	if err := os.Remove(legacyPath); err != nil {
@@ -530,7 +530,7 @@ func InstallCopilot() (CopilotInstallPaths, error) {
 	return CopilotInstallPaths{HookPath: hookPath, SettingsPath: settingsPath}, nil
 }
 
-// InstallDroid registers the hook in settings.json and cleans herdr entries
+// InstallDroid registers the hook in settings.json and cleans cats entries
 // out of the legacy hooks.json (which is never written to otherwise).
 func InstallDroid() (DroidInstallPaths, error) {
 	dir, err := droidDir()

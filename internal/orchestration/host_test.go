@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rohanthewiz/herdr-web/internal/terminal"
+	"github.com/rohanthewiz/cats/internal/terminal"
 )
 
 // startTestHost spins up a Host serving one end of an in-memory pipe and returns
@@ -886,7 +886,7 @@ func TestHostShutdownCommand(t *testing.T) {
 }
 
 // TestHostIdleTimeoutExits verifies a persistent daemon with no client attached
-// exits after the idle timeout (a crashed herdr that never reconnects).
+// exits after the idle timeout (a crashed cats that never reconnects).
 func TestHostIdleTimeoutExits(t *testing.T) {
 	h := NewHost()
 	h.FlushInterval = 5 * time.Millisecond

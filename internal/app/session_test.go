@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/rohanthewiz/herdr-web/internal/layout"
-	"github.com/rohanthewiz/herdr-web/internal/workspace"
+	"github.com/rohanthewiz/cats/internal/layout"
+	"github.com/rohanthewiz/cats/internal/workspace"
 )
 
 // fakeSpawner satisfies workspace.PaneSpawner with monotonic terminal ids; the

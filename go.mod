@@ -1,4 +1,4 @@
-module github.com/rohanthewiz/herdr-web
+module github.com/rohanthewiz/cats
 
 go 1.26.0
 

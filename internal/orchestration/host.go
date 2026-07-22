@@ -16,8 +16,8 @@ import (
 	"time"
 
 	"github.com/creack/pty"
-	"github.com/rohanthewiz/herdr-web/internal/detect"
-	"github.com/rohanthewiz/herdr-web/internal/terminal"
+	"github.com/rohanthewiz/cats/internal/detect"
+	"github.com/rohanthewiz/cats/internal/terminal"
 )
 
 // DefaultFlushInterval coalesces dirty panes into frames at ~60 Hz, mirroring
@@ -135,7 +135,7 @@ func (p *pane) setAgentMeta(agent, state string, visBlocker, visWorking bool) {
 // protocol. In managed mode (Serve) panes are torn down when the single
 // connection ends. In persistent mode the panes — PTYs, emulators, detection —
 // outlive any one connection: a client can Attach, drop, and a later client can
-// reconnect and resync, so live shells survive a herdr restart or binary handoff.
+// reconnect and resync, so live shells survive a cats restart or binary handoff.
 // One client attaches at a time (single-writer); Attach is called serially.
 type Host struct {
 	FlushInterval time.Duration
@@ -144,7 +144,7 @@ type Host struct {
 	// timeout. Managed mode (Serve) leaves it false.
 	Persistent bool
 	// IdleTimeout exits a persistent daemon if no client is attached for this long
-	// (a crashed herdr that never reconnects). Zero disables it. Only consulted in
+	// (a crashed cats that never reconnects). Zero disables it. Only consulted in
 	// persistent mode.
 	IdleTimeout time.Duration
 
@@ -496,7 +496,7 @@ func (h *Host) createPane(c CreatePane) error {
 	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Cols: c.Cols, Rows: c.Rows})
 	if err != nil && c.Command != "" {
 		// A pane with an explicit command (an agent-session resume) degrades to
-		// the default shell rather than a dead pane — herdr types the resume
+		// the default shell rather than a dead pane — cats types the resume
 		// command into a shell, so a missing agent binary leaves a usable shell
 		// there; match that outcome.
 		h.emit(NewError(c.PaneID, fmt.Sprintf("command %q: %v — falling back to shell", name, err)))
@@ -594,7 +594,7 @@ func (h *Host) readPump(p *pane) {
 // screen + OSC title.
 //
 // Stage C — driver parity: the raw per-tick classification is smoothed through the
-// detectstate.go state machine (ported from herdr) so transient flicker doesn't
+// detectstate.go state machine (ported from cats) so transient flicker doesn't
 // reach the wire. Concretely: a newly-acquired agent is pinned to Idle for a
 // startup grace window; Working→plain-Idle drops are debounced over several fast
 // rechecks; an idle agent with no new output skips the screen scan entirely; and a

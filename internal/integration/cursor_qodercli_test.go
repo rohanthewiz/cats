@@ -41,7 +41,7 @@ func TestInstallCursorWritesHookAndUpdatesHooksJSON(t *testing.T) {
 	}
 	wantCommand := "bash " + shellSingleQuote(installed.HookPath) + " session"
 	if cmd := jsonStringAt(t, hooks, "hooks", "sessionStart", 1, "command"); cmd != wantCommand {
-		t.Fatalf("herdr command = %q, want %q", cmd, wantCommand)
+		t.Fatalf("cats command = %q, want %q", cmd, wantCommand)
 	}
 	// Simple shape: no type/timeout fields.
 	entry := entries[1].(map[string]any)
@@ -96,7 +96,7 @@ func TestInstallCursorUsesCursorConfigDirEnv(t *testing.T) {
 	}
 }
 
-func TestUninstallCursorRemovesHerdrHooksAndPreservesOthers(t *testing.T) {
+func TestUninstallCursorRemovesCatsHooksAndPreservesOthers(t *testing.T) {
 	home := testHome(t)
 	mustMkdirAll(t, filepath.Join(home, ".cursor"))
 
@@ -121,7 +121,7 @@ func TestUninstallCursorRemovesHerdrHooksAndPreservesOthers(t *testing.T) {
 	}
 	hooks := readJSONFile(t, installed.HooksPath)
 	if jsonAt(hooks, "hooks", "stop") != nil {
-		t.Fatal("herdr stop entry still present")
+		t.Fatal("cats stop entry still present")
 	}
 	entries, ok := jsonAt(hooks, "hooks", "sessionStart").([]any)
 	if !ok || len(entries) != 1 {
@@ -211,7 +211,7 @@ func TestInstallQodercliIsIdempotentForHookEntries(t *testing.T) {
 	}
 }
 
-func TestUninstallQodercliRemovesHerdrHooksAndPreservesOthers(t *testing.T) {
+func TestUninstallQodercliRemovesCatsHooksAndPreservesOthers(t *testing.T) {
 	home := testHome(t)
 	mustMkdirAll(t, filepath.Join(home, ".qoder"))
 
@@ -232,7 +232,7 @@ func TestUninstallQodercliRemovesHerdrHooksAndPreservesOthers(t *testing.T) {
 	}
 	settings := readJSONFile(t, installed.SettingsPath)
 	if jsonAt(settings, "hooks", "SessionStart") != nil {
-		t.Fatal("herdr entry still present")
+		t.Fatal("cats entry still present")
 	}
 	if cmd := jsonStringAt(t, settings, "hooks", "Stop", 0, "hooks", 0, "command"); cmd != "echo keep" {
 		t.Fatalf("user hook lost: %q", cmd)

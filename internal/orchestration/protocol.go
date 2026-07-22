@@ -16,7 +16,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/rohanthewiz/herdr-web/internal/terminal"
+	"github.com/rohanthewiz/cats/internal/terminal"
 )
 
 // ProtocolVersion is bumped on any breaking change to the message shapes. v2
@@ -85,7 +85,7 @@ type CreatePane struct {
 	Env          map[string]string `json:"env,omitempty"`
 	// InitialHistory is VT-encoded scrollback to seed the emulator with before the
 	// child's first output, so a restored session shows its prior history above the
-	// freshly spawned shell (the analogue of herdr's seed_history_ansi).
+	// freshly spawned shell (the analogue of cats's seed_history_ansi).
 	InitialHistory string `json:"initial_history,omitempty"`
 }
 
@@ -140,7 +140,7 @@ func NewScrollViewport(id uint32, delta int32) ScrollViewport {
 
 // SelectionPoint is one endpoint of a selection in screen-buffer (absolute)
 // coordinates: Row counts from the top of the scrollback buffer (so it is stable
-// while the pane scrolls), Col is the 0-based column. This mirrors herdr's
+// while the pane scrolls), Col is the 0-based column. This mirrors cats's
 // Selection endpoints (row, col), which it tracks in screen-buffer space.
 type SelectionPoint struct {
 	Row uint32 `json:"row"`
@@ -167,7 +167,7 @@ func NewRequestSelection(id uint32, anchor, cursor SelectionPoint, rectangle boo
 }
 
 // RequestText asks the Go side to extract buffer text from a pane (the orchestrator
-// holds an unfed local emulator for termhost panes, so it can't read text itself).
+// holds an unfed local emulator for cathost panes, so it can't read text itself).
 // The Host replies with a pane_text event. Scope is terminal.TextScope (0 visible,
 // 1 recent); Lines bounds the recent scope (0 = whole buffer); Ansi selects VT vs
 // plain; Unwrap rejoins soft-wrapped lines.
@@ -219,7 +219,7 @@ func NewSetOutputStream(id uint32, enabled bool) SetOutputStream {
 // Shutdown asks a persistent daemon to exit and tear down all panes. The
 // orchestrator sends this on a *clean* quit so the daemon doesn't linger; a
 // crash or binary handoff instead just drops the connection (the daemon keeps
-// its panes alive for the next herdr to reconnect and resync).
+// its panes alive for the next cats to reconnect and resync).
 type Shutdown struct {
 	Type MessageType `json:"type"`
 }
@@ -233,7 +233,7 @@ type Welcome struct {
 	ProtocolVersion int         `json:"protocol_version"`
 	Error           string      `json:"error,omitempty"`
 	// Panes lists the pane IDs the daemon already has live when a client connects.
-	// Empty on a fresh daemon; populated when a restarted/handed-off herdr reconnects
+	// Empty on a fresh daemon; populated when a restarted/handed-off cats reconnects
 	// to a persistent daemon, so it can reconcile its restored session against the
 	// surviving panes (adopt the matches, expect a resync for each) instead of
 	// re-creating them. The daemon replays each pane's current state (full frame +
@@ -326,7 +326,7 @@ func NewPaneClipboard(id uint32, data []byte) PaneClipboard {
 
 // PaneTitle reports a pane's window title (OSC 0/2) when it changes. libghostty
 // surfaces the title to the emulator, but the seam otherwise carries none, so the
-// orchestrator can show the running program's title on a termhost pane's border the
+// orchestrator can show the running program's title on a cathost pane's border the
 // way it does for in-process panes. An empty Title is a title-clear.
 type PaneTitle struct {
 	Type   MessageType `json:"type"`
@@ -340,7 +340,7 @@ func NewPaneTitle(id uint32, title string) PaneTitle {
 
 // PaneSelection is the reply to a RequestSelection: the plain text of the
 // requested range, with soft-wrapped lines unwrapped and trailing whitespace
-// trimmed (matching herdr's own selection extraction). Text is "" when the range
+// trimmed (matching cats's own selection extraction). Text is "" when the range
 // has no selectable content. The orchestrator hands this to its clipboard writer
 // (AppEvent::ClipboardWrite). One pane_selection is emitted per request.
 type PaneSelection struct {
@@ -460,7 +460,7 @@ type Frame struct {
 	Scroll *ScrollInfo `json:"scroll,omitempty"`
 }
 
-// ScrollInfo mirrors terminal.ScrollMetrics on the wire (and herdr's ScrollMetrics).
+// ScrollInfo mirrors terminal.ScrollMetrics on the wire (and cats's ScrollMetrics).
 type ScrollInfo struct {
 	OffsetFromBottom    int `json:"offset_from_bottom"`
 	MaxOffsetFromBottom int `json:"max_offset_from_bottom"`

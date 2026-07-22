@@ -5,12 +5,12 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/rohanthewiz/herdr-web/internal/layout"
+	"github.com/rohanthewiz/cats/internal/layout"
 )
 
 // This file is the protocol-neutral §7 command dispatcher. It mutates the
 // app.Session domain model and drives runtime effects through the Backend seam,
-// replying to the caller through a Responder. gateway's orch implements Backend
+// replying to the caller through a Responder. catway's orch implements Backend
 // (browser WebSocket effects) and a Responder over one connection; a future
 // CLI/control-API implements the same two interfaces differently. The dispatcher
 // itself is libghostty-free and unit-testable with fakes.
@@ -326,7 +326,7 @@ func (d *Dispatcher) Dispatch(name string, dec ParamDecoder, r Responder) {
 			return
 		}
 		if !d.backend.DaemonConnected() {
-			r.Fail("termhost daemon not connected")
+			r.Fail("cathost daemon not connected")
 			return
 		}
 		d.backend.StartRead(r, p) // async: the daemon reply resolves r later
@@ -345,7 +345,7 @@ func (d *Dispatcher) Dispatch(name string, dec ParamDecoder, r Responder) {
 			return
 		}
 		if !d.backend.DaemonConnected() {
-			r.Fail("termhost daemon not connected")
+			r.Fail("cathost daemon not connected")
 			return
 		}
 		d.backend.StartCapture(r, p) // async: the daemon reply resolves r later
@@ -368,7 +368,7 @@ func (d *Dispatcher) Dispatch(name string, dec ParamDecoder, r Responder) {
 			return
 		}
 		if !d.backend.DaemonConnected() {
-			r.Fail("termhost daemon not connected")
+			r.Fail("cathost daemon not connected")
 			return
 		}
 		d.backend.StartWaitForOutput(r, p) // async: a match / timeout / exit resolves r later

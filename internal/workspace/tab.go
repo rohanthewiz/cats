@@ -4,7 +4,7 @@ import (
 	"os"
 	"strconv"
 
-	"github.com/rohanthewiz/herdr-web/internal/layout"
+	"github.com/rohanthewiz/cats/internal/layout"
 )
 
 // PaneState is the viewport state for a pane (cf. pane/state.rs). Terminal

@@ -3,7 +3,7 @@
 // This file wraps go-libghostty's key/mouse/paste encoders. It only builds
 // with `-tags ghostty` and requires libghostty-vt on PKG_CONFIG_PATH (the
 // same prerequisite as internal/terminal's emulator; no Zig toolchain — the
-// prebuilt static lib from herdr's vendor tree suffices).
+// prebuilt static lib from cats's vendor tree suffices).
 //
 // go-libghostty is pinned in go.mod and makes no API-stability promise yet,
 // so all of its surface is confined to this file behind Encoder.
@@ -15,8 +15,8 @@ import (
 
 	libghostty "go.mitchellh.com/libghostty"
 
-	"github.com/rohanthewiz/herdr-web/internal/browserproto"
-	"github.com/rohanthewiz/herdr-web/internal/terminal"
+	"github.com/rohanthewiz/cats/internal/browserproto"
+	"github.com/rohanthewiz/cats/internal/terminal"
 )
 
 // Encoder turns one pane's structured input events into the exact bytes its
@@ -53,11 +53,11 @@ func New() (*Encoder, error) {
 	}
 	// Terminal users expect the option/alt key to send ESC-prefixed input,
 	// not composed characters (macOS). Becomes a config knob when WS2 ports
-	// herdr's macos-option-as-alt setting.
+	// cats's macos-option-as-alt setting.
 	e.key.SetOptOptionAsAlt(libghostty.OptionAsAltTrue)
 	// DEC mode 1036 (altSendsEscape) defaults ON in the terminal
 	// (modes.zig:289) but OFF in the standalone encoder. β doesn't mirror
-	// 1036 changes — matching herdr's Rust encoder, which always prefixed —
+	// 1036 changes — matching cats's Rust encoder, which always prefixed —
 	// so pin the terminal default here.
 	e.key.SetOptBool(libghostty.KeyEncoderOptAltEscPrefix, true)
 	// Cell coordinates go straight through: 1px cells make surface-space

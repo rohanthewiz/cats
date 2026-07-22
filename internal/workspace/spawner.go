@@ -1,6 +1,6 @@
 package workspace
 
-import "github.com/rohanthewiz/herdr-web/internal/layout"
+import "github.com/rohanthewiz/cats/internal/layout"
 
 // TerminalID identifies a terminal (PTY + VT state) owned by the spawner,
 // e.g. "term_18f3a2c41" (cf. terminal/id.rs). Workspace/Tab only carry it;

@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/rohanthewiz/herdr-web/internal/layout"
+	"github.com/rohanthewiz/cats/internal/layout"
 )
 
 // buildWorkspace makes a workspace with two tabs — tab 1 split twice with a
@@ -33,7 +33,7 @@ func buildWorkspace(t *testing.T) *Workspace {
 	return ws
 }
 
-// recordingSpawner mirrors gateway's modelSpawner: pure, deterministic ids.
+// recordingSpawner mirrors catway's modelSpawner: pure, deterministic ids.
 func recordingSpawner() PaneSpawner { return modelStubSpawner{} }
 
 type modelStubSpawner struct{}

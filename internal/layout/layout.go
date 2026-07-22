@@ -1,4 +1,4 @@
-// Package layout is a port of herdr's BSP pane-tiling tree (src/layout.rs).
+// Package layout is a port of cats's BSP pane-tiling tree (src/layout.rs).
 // It tracks pane *identity* only — never content — and computes pane rects on
 // demand from a caller-supplied screen Rect.
 //

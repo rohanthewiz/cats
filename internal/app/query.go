@@ -1,8 +1,8 @@
 package app
 
 import (
-	"github.com/rohanthewiz/herdr-web/internal/layout"
-	"github.com/rohanthewiz/herdr-web/internal/workspace"
+	"github.com/rohanthewiz/cats/internal/layout"
+	"github.com/rohanthewiz/cats/internal/workspace"
 )
 
 // This file assembles the read-only query results (the §7 *.list / *.get

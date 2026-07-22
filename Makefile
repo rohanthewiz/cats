@@ -1,4 +1,4 @@
-# herdr-web build entry points. The ghostty-tagged targets need the vendored
+# cats build entry points. The ghostty-tagged targets need the vendored
 # libghostty-vt built first (`make vt`, or scripts/build-libghostty-vt.sh) —
 # the CGO seam behind internal/terminal only compiles with -tags ghostty and
 # PKG_CONFIG_PATH pointing at the built pkgconfig.
@@ -10,11 +10,11 @@ GHOSTTY  := PKG_CONFIG_PATH=$(PC_DIR)
 TAGS     := -tags ghostty
 
 # The shipped binaries. The other cmd/ entries are development spikes.
-BINS     := gateway termhost herdrctl
+BINS     := catway cathost catctl
 VERSION  := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 GOOS     := $(shell go env GOOS)
 GOARCH   := $(shell go env GOARCH)
-DIST     := dist/herdr-web_$(VERSION)_$(GOOS)_$(GOARCH)
+DIST     := dist/cats_$(VERSION)_$(GOOS)_$(GOARCH)
 
 .PHONY: all vt build test build-ghostty test-ghostty race-ghostty binaries \
         local dist macapp macapp-client fmt-check vet vet-ghostty check clean
@@ -56,7 +56,7 @@ binaries:
 # The map is "cmd:alias" pairs — edit here to rename or add targets. Splitting
 # on ':' keeps the source dir (./cmd/$(cmd)) decoupled from the installed name.
 LOCAL_BIN := $(HOME)/bin
-LOCAL_MAP := gateway:hway termhost:thost herdrctl:hctl
+LOCAL_MAP := catway:hway cathost:thost catctl:hctl
 
 local:
 	@mkdir -p $(LOCAL_BIN)
@@ -68,29 +68,29 @@ local:
 
 dist: binaries
 	@mkdir -p $(DIST)
-	cp bin/gateway bin/termhost bin/herdrctl $(DIST)/
+	cp bin/catway bin/cathost bin/catctl $(DIST)/
 	cp config.example.yaml README.md $(DIST)/
 	tar -czf $(DIST).tar.gz -C dist $(notdir $(DIST))
 	@echo "==> $(DIST).tar.gz"
 
 # --- macOS app bundles --------------------------------------------------------
-# Both variants are built from the one cmd/herdrapp launcher; the variant chooses
+# Both variants are built from the one cmd/catapp launcher; the variant chooses
 # what gets bundled and the baked-in default mode. Unsigned/personal: another Mac
 # needs a one-time right-click -> Open. scripts/build-macapp.sh does the assembly.
 
-APP_ID        := dev.herdr.app
-APP_CLIENT_ID := dev.herdr.client
+APP_ID        := dev.cats.app
+APP_CLIENT_ID := dev.cats.client
 
 # macapp (Variant 1, self-contained): launcher + the three static ghostty daemons
-# → dist/Herdr.app. Runs fully local. Depends on `binaries` for the daemons; the
+# → dist/Cats.app. Runs fully local. Depends on `binaries` for the daemons; the
 # vendored VT engine must be built first (`make vt`).
 macapp: binaries
-	scripts/build-macapp.sh self "Herdr" $(APP_ID) $(VERSION)
+	scripts/build-macapp.sh self "Cats" $(APP_ID) $(VERSION)
 
 # macapp-client (Variant 2, thin): launcher only, baked to remote mode →
-# dist/Herdr Client.app. No backend binaries, so no ghostty/Zig toolchain needed.
+# dist/Cats Client.app. No backend binaries, so no ghostty/Zig toolchain needed.
 macapp-client:
-	scripts/build-macapp.sh client "Herdr Client" $(APP_CLIENT_ID) $(VERSION)
+	scripts/build-macapp.sh client "Cats Client" $(APP_CLIENT_ID) $(VERSION)
 
 # --- hygiene ------------------------------------------------------------------
 

@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
-# Assemble a macOS .app bundle for herdr. The bundle is unsigned (personal use);
+# Assemble a macOS .app bundle for cats. The bundle is unsigned (personal use);
 # on another Mac it needs a one-time right-click -> Open to clear Gatekeeper.
 #
 # Two variants, selected by the first argument:
-#   self   — self-contained: herdrapp + gateway + termhost + herdrctl. Runs fully
+#   self   — self-contained: catapp + catway + cathost + catctl. Runs fully
 #            local (make macapp). Requires the ghostty binaries in bin/ (make
 #            binaries), which this script does NOT build — it copies them.
-#   client — thin client: herdrapp only, baked to remote mode (make macapp-client).
+#   client — thin client: catapp only, baked to remote mode (make macapp-client).
 #            No backend binaries, so no ghostty/Zig toolchain needed to produce it.
 #
 # Usage: build-macapp.sh <self|client> <AppName> <bundle-id> <version>
 #
 # Design notes:
-#   - herdrapp is built here (plain `go build`, cgo on for webview, no -tags
+#   - catapp is built here (plain `go build`, cgo on for webview, no -tags
 #     ghostty). The three ghostty daemons are static (otool -L shows only system
 #     frameworks), so there are no dylibs to copy and no @rpath fixups.
 #   - The launcher finds its sibling daemons via os.Executable() -> same dir, so
@@ -44,16 +44,16 @@ mkdir -p "$MACOS" "$RES"
 
 # The launcher. cgo is required (WebKit); do not pass -tags ghostty. The baked
 # defaultMode decides local-vs-remote on first run (before any app.json exists).
-echo "  building herdrapp (mode=$MODE)"
+echo "  building catapp (mode=$MODE)"
 ( cd "$ROOT" && go build -trimpath \
     -ldflags "-X main.defaultMode=${MODE}" \
-    -o "$MACOS/herdrapp" ./cmd/herdrapp )
+    -o "$MACOS/catapp" ./cmd/catapp )
 
 # Self-contained variant also carries the three static daemons. They must already
 # be built (make binaries -> bin/); we only copy so this script needs no ghostty
 # toolchain of its own.
 if [ "$VARIANT" = "self" ]; then
-  for bin in gateway termhost herdrctl; do
+  for bin in catway cathost catctl; do
     if [ ! -x "$ROOT/bin/$bin" ]; then
       echo "build-macapp: bin/$bin missing — run 'make binaries' first" >&2
       exit 1
@@ -82,7 +82,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleIdentifier</key><string>${BUNDLE_ID}</string>
   <key>CFBundleVersion</key><string>${VERSION}</string>
   <key>CFBundleShortVersionString</key><string>${VERSION}</string>
-  <key>CFBundleExecutable</key><string>herdrapp</string>
+  <key>CFBundleExecutable</key><string>catapp</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>LSMinimumSystemVersion</key><string>10.15</string>

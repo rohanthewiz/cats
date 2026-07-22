@@ -109,12 +109,12 @@ func TestInstallCodexOnlyMigratesTopLevelFeatureFlags(t *testing.T) {
 	}
 }
 
-func TestUninstallCodexRemovesHerdrHooksAndLeavesConfigAlone(t *testing.T) {
+func TestUninstallCodexRemovesCatsHooksAndLeavesConfigAlone(t *testing.T) {
 	home := testHome(t)
 	codexDir := filepath.Join(home, ".codex")
 	hookPath := filepath.Join(codexDir, codexHookInstallName)
 	mustWriteFile(t, hookPath, codexHookAsset)
-	herdr := func(action string) string {
+	cats := func(action string) string {
 		return fmt.Sprintf(`{"type":"command","command":"bash '%s' %s","timeout":10}`, hookPath, action)
 	}
 	mustWriteFile(t, filepath.Join(codexDir, "hooks.json"), fmt.Sprintf(`{"hooks":{
@@ -123,7 +123,7 @@ func TestUninstallCodexRemovesHerdrHooksAndLeavesConfigAlone(t *testing.T) {
 		"PreToolUse":[{"hooks":[%s]}],
 		"PermissionRequest":[{"hooks":[%s]}],
 		"Stop":[{"hooks":[%s]}]
-	}}`, herdr("idle"), herdr("working"), herdr("working"), herdr("blocked"), herdr("idle")))
+	}}`, cats("idle"), cats("working"), cats("working"), cats("blocked"), cats("idle")))
 	mustWriteFile(t, filepath.Join(codexDir, "config.toml"), "[features]\nhooks = true\nother = true\n")
 
 	result, err := UninstallCodex()

@@ -1,7 +1,7 @@
 // Session persistence support (WS3): the whole-session snapshot and its
 // restore constructor. Snapshot/RestoreSession are pure model conversions —
 // where the file lives, when it is written, and how PTYs are re-adopted or
-// re-seeded is the orchestrator runtime's business (cmd/gateway), not the
+// re-seeded is the orchestrator runtime's business (cmd/catway), not the
 // domain layer's.
 package app
 
@@ -9,11 +9,11 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/rohanthewiz/herdr-web/internal/layout"
-	"github.com/rohanthewiz/herdr-web/internal/workspace"
+	"github.com/rohanthewiz/cats/internal/layout"
+	"github.com/rohanthewiz/cats/internal/workspace"
 )
 
-// Snapshot is the session's durable state: everything a gateway restart needs
+// Snapshot is the session's durable state: everything a catway restart needs
 // to rebuild the workspace/tab/pane tree exactly — split ratios, focus, zoom,
 // custom names, public numbering — plus the active-workspace viewport.
 type Snapshot struct {

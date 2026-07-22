@@ -4,16 +4,16 @@ import "bytes"
 
 // oscTitleMaxLen caps a single buffered OSC 0/2 body. Titles are short; the cap
 // only bounds garbage. oscProgressMaxChars (defined in osc9.go) further caps the
-// retained string, mirroring herdr's AGENT_OSC_MAX_CHARS.
+// retained string, mirroring cats's AGENT_OSC_MAX_CHARS.
 const oscTitleMaxLen = 4096
 
 // oscTitleScanner extracts OSC 0/2 window-title reports from a raw terminal output
 // stream, tolerating sequences split across reads. libghostty-vt *does* surface the
-// title to the emulator (Emulator.Title, used by the detector), but the termhost
-// seam carries no title to the orchestrator, so a termhost pane's border can't show
+// title to the emulator (Emulator.Title, used by the detector), but the cathost
+// seam carries no title to the orchestrator, so a cathost pane's border can't show
 // the program's title the way an in-process pane's can. This scanner reconstructs
 // the title from the raw bytes — the same approach as oscScanner (OSC 7) /
-// osc52Scanner (OSC 52) / osc9Scanner (OSC 9), and the same raw-scan herdr's
+// osc52Scanner (OSC 52) / osc9Scanner (OSC 9), and the same raw-scan cats's
 // AgentOscStateTracker uses for OSC 0/2. Not safe for concurrent use: a pane drives
 // one scanner from its readPump goroutine.
 type oscTitleScanner struct {

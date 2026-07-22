@@ -35,14 +35,14 @@ func TestBundledAssetsReportSessionRefs(t *testing.T) {
 		{
 			name:    "codex",
 			asset:   codexHookAsset,
-			want:    []string{"HERDR_HOOK_INPUT_FILE", "agent_session_id", "pane.report_agent_session"},
+			want:    []string{"CATS_HOOK_INPUT_FILE", "agent_session_id", "pane.report_agent_session"},
 			wantNot: []string{`"state": action`, "pane.release_agent"},
 		},
 		{
 			name:  "kimi",
 			asset: kimiHookAsset,
 			want: []string{
-				`source = "herdr:kimi"`, "agent_session_id",
+				`source = "cats:kimi"`, "agent_session_id",
 				"pane.report_agent_session", `"state": action`, "pane.release_agent",
 			},
 		},
@@ -70,7 +70,7 @@ func TestBundledAssetsReportSessionRefs(t *testing.T) {
 			name:  "kilo",
 			asset: kiloPluginAsset,
 			want: []string{
-				`SOURCE = "herdr:kilo"`, `AGENT = "kilo"`,
+				`SOURCE = "cats:kilo"`, `AGENT = "kilo"`,
 				"pane.report_agent_session", "reportState", "pane.release_agent",
 			},
 		},
@@ -85,14 +85,14 @@ func TestBundledAssetsReportSessionRefs(t *testing.T) {
 		{
 			name:    "qodercli",
 			asset:   qodercliHookAsset,
-			want:    []string{"HERDR_HOOK_INPUT_FILE", "agent_session_id", "pane.report_agent_session"},
+			want:    []string{"CATS_HOOK_INPUT_FILE", "agent_session_id", "pane.report_agent_session"},
 			wantNot: []string{`"state": action`, "pane.release_agent", "QODER_HOOK_EVENT"},
 		},
 		{
 			name:  "cursor",
 			asset: cursorHookAsset,
 			want: []string{
-				"HERDR_INTEGRATION_ID=cursor", "conversation_id", "conversationId",
+				"CATS_INTEGRATION_ID=cursor", "conversation_id", "conversationId",
 				"sessionId", "agent_session_id", "pane.report_agent_session",
 				"hook_event_name", "sessionStart",
 			},
@@ -115,7 +115,7 @@ func TestBundledAssetsReportSessionRefs(t *testing.T) {
 }
 
 // TestAssetMarkersMatchExpectedVersions pins each embedded asset's
-// HERDR_INTEGRATION_VERSION marker to the package's expected-version
+// CATS_INTEGRATION_VERSION marker to the package's expected-version
 // constant: bumping one without the other would break status detection.
 func TestAssetMarkersMatchExpectedVersions(t *testing.T) {
 	cases := []struct {
@@ -139,7 +139,7 @@ func TestAssetMarkersMatchExpectedVersions(t *testing.T) {
 	for _, tc := range cases {
 		version, ok := parseIntegrationVersion(tc.asset)
 		if !ok {
-			t.Errorf("%s asset has no parseable HERDR_INTEGRATION_VERSION marker", tc.name)
+			t.Errorf("%s asset has no parseable CATS_INTEGRATION_VERSION marker", tc.name)
 			continue
 		}
 		if version != tc.expected {

@@ -124,7 +124,7 @@ func TestInstallOmpRemovesLegacyPiIntegration(t *testing.T) {
 	home := testHome(t)
 	extensionsDir := filepath.Join(home, ".omp", "agent", "extensions")
 	legacyPath := filepath.Join(extensionsDir, piExtensionInstallName)
-	mustWriteFile(t, legacyPath, "// HERDR_INTEGRATION_ID=pi\n// HERDR_INTEGRATION_VERSION=1\n")
+	mustWriteFile(t, legacyPath, "// CATS_INTEGRATION_ID=pi\n// CATS_INTEGRATION_VERSION=1\n")
 
 	installed, err := InstallOmp()
 	if err != nil {
@@ -138,11 +138,11 @@ func TestInstallOmpRemovesLegacyPiIntegration(t *testing.T) {
 	}
 }
 
-func TestInstallOmpPreservesNonHerdrFileWithPiInstallName(t *testing.T) {
+func TestInstallOmpPreservesNonCatsFileWithPiInstallName(t *testing.T) {
 	home := testHome(t)
 	extensionsDir := filepath.Join(home, ".omp", "agent", "extensions")
 	userPath := filepath.Join(extensionsDir, piExtensionInstallName)
-	userContent := "// my own extension, not herdr's\nexport {}\n"
+	userContent := "// my own extension, not cats's\nexport {}\n"
 	mustWriteFile(t, userPath, userContent)
 
 	installed, err := InstallOmp()
@@ -150,7 +150,7 @@ func TestInstallOmpPreservesNonHerdrFileWithPiInstallName(t *testing.T) {
 		t.Fatal(err)
 	}
 	if installed.RemovedLegacyPiExtension {
-		t.Fatal("user file misidentified as herdr's")
+		t.Fatal("user file misidentified as cats's")
 	}
 	if mustReadFile(t, userPath) != userContent {
 		t.Fatal("user file modified")

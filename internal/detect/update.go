@@ -1,4 +1,4 @@
-// Remote manifest updates (WS5) — the port of herdr's manifest_update.rs.
+// Remote manifest updates (WS5) — the port of cats's manifest_update.rs.
 //
 // A TOML catalog hosted at herdr.dev lists per-agent manifest files; the
 // updater fetches it, applies each agent's manifest that is strictly newer than
@@ -29,7 +29,7 @@ import (
 	"github.com/pelletier/go-toml/v2"
 )
 
-// EngineVersion is the rules-engine version this package implements (herdr's
+// EngineVersion is the rules-engine version this package implements (cats's
 // MANIFEST_ENGINE_VERSION). A remote manifest whose min_engine_version exceeds
 // it is refused — it may use constructs this engine cannot evaluate.
 const EngineVersion = 2
@@ -37,7 +37,7 @@ const EngineVersion = 2
 const (
 	defaultCatalogURL = "https://herdr.dev/agent-detection/index.toml"
 	// CatalogURLEnv overrides the catalog location (mirrors the Rust env var).
-	CatalogURLEnv = "HERDR_AGENT_DETECTION_MANIFEST_CATALOG_URL"
+	CatalogURLEnv = "CATS_AGENT_DETECTION_MANIFEST_CATALOG_URL"
 	maxFetchBytes = 256 << 10
 )
 
@@ -390,7 +390,7 @@ type rawCatalogAgent struct {
 // parseCatalog strictly decodes the catalog TOML and validates it: schema
 // version 1, safe relative paths, no duplicates. Agents this build doesn't know
 // (no embedded manifest) are skipped with a log — a newer catalog may list
-// agents a newer herdr detects.
+// agents a newer cats detects.
 func parseCatalog(content string) ([]catalogEntry, error) {
 	var cat rawCatalog
 	dec := toml.NewDecoder(strings.NewReader(content))

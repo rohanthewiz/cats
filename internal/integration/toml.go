@@ -7,7 +7,7 @@ package integration
 //   - codex config.toml: force `hooks = true` under the TOP-LEVEL [features]
 //     table only (never [profiles.*.features]), removing deprecated
 //     `codex_hooks` keys there, appending a fresh [features] table if absent.
-//   - kimi config.toml: replace the sentinel-delimited herdr block with a
+//   - kimi config.toml: replace the sentinel-delimited cats block with a
 //     freshly generated set of [[hooks]] tables, leaving user hooks alone.
 
 import (
@@ -130,7 +130,7 @@ func buildCodexConfigWithHooks(content string) string {
 	return joinTomlLines(lines, trailingNewline)
 }
 
-// buildKimiConfigWithHooks strips any existing herdr block and appends a
+// buildKimiConfigWithHooks strips any existing cats block and appends a
 // fresh one holding all lifecycle [[hooks]] tables between the sentinels.
 func buildKimiConfigWithHooks(content, hookPath string) string {
 	result := strings.TrimRight(removeKimiConfigBlock(content), "\n")

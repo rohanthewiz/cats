@@ -6,7 +6,7 @@
 //
 // The heavy lifting is ghostty's own key/mouse/paste encoders via
 // go-libghostty (encoder.go, `-tags ghostty` + libghostty-vt on
-// PKG_CONFIG_PATH) — the same library the termhost daemon embeds for VT
+// PKG_CONFIG_PATH) — the same library the cathost daemon embeds for VT
 // emulation, so the encoder and the emulator interpreting its bytes can never
 // drift apart. Wrapping it (WS9 task 3.1's spike outcome) supersedes the Rust
 // InputMirror's pure encoders and retires their known kitty bits-2/8
@@ -24,7 +24,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/rohanthewiz/herdr-web/internal/terminal"
+	"github.com/rohanthewiz/cats/internal/terminal"
 )
 
 // w3cKeyName converts a W3C KeyboardEvent.code ("KeyA", "Digit0", "ArrowLeft",

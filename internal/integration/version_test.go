@@ -85,7 +85,7 @@ func TestEnforceAgentVersionRejectsOldVersion(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for old version")
 	}
-	want := "kimi code 0.12.1 is too old: herdr hooks require kimi code 0.14.0 or newer. upgrade kimi code, then re-run install"
+	want := "kimi code 0.12.1 is too old: cats hooks require kimi code 0.14.0 or newer. upgrade kimi code, then re-run install"
 	if err.Error() != want {
 		t.Fatalf("error = %q, want %q", err.Error(), want)
 	}
@@ -109,13 +109,13 @@ func TestParseIntegrationVersionMarkerForms(t *testing.T) {
 		want    int
 		found   bool
 	}{
-		{"slash comment", "// managed by herdr\n// HERDR_INTEGRATION_VERSION=2\n", 2, true},
-		{"hash comment", "#!/bin/sh\n# HERDR_INTEGRATION_VERSION=3\n", 3, true},
-		{"hash no space", "#HERDR_INTEGRATION_VERSION=4\n", 4, true},
-		{"bare marker", "HERDR_INTEGRATION_VERSION=5\n", 5, true},
-		{"padded value", "# HERDR_INTEGRATION_VERSION= 7 \n", 7, true},
+		{"slash comment", "// managed by cats\n// CATS_INTEGRATION_VERSION=2\n", 2, true},
+		{"hash comment", "#!/bin/sh\n# CATS_INTEGRATION_VERSION=3\n", 3, true},
+		{"hash no space", "#CATS_INTEGRATION_VERSION=4\n", 4, true},
+		{"bare marker", "CATS_INTEGRATION_VERSION=5\n", 5, true},
+		{"padded value", "# CATS_INTEGRATION_VERSION= 7 \n", 7, true},
 		{"missing marker", "#!/bin/sh\necho hi\n", 0, false},
-		{"garbage value", "# HERDR_INTEGRATION_VERSION=abc\n", 0, false},
+		{"garbage value", "# CATS_INTEGRATION_VERSION=abc\n", 0, false},
 		{"empty", "", 0, false},
 	}
 	for _, tc := range cases {
@@ -130,11 +130,11 @@ func TestUpdateInstructions(t *testing.T) {
 	if got := UpdateInstructions(nil); got != "" {
 		t.Errorf("empty: %q", got)
 	}
-	if got := UpdateInstructions([]Target{TargetPi}); got != "run `herdrctl integration install pi`" {
+	if got := UpdateInstructions([]Target{TargetPi}); got != "run `catctl integration install pi`" {
 		t.Errorf("one: %q", got)
 	}
 	got := UpdateInstructions([]Target{TargetPi, TargetOmp, TargetClaude})
-	want := "run `herdrctl integration install pi`, `herdrctl integration install omp` and `herdrctl integration install claude`"
+	want := "run `catctl integration install pi`, `catctl integration install omp` and `catctl integration install claude`"
 	if got != want {
 		t.Errorf("many: %q, want %q", got, want)
 	}
@@ -145,7 +145,7 @@ func TestOutdatedUpdateNoticeAndLegacyMarker(t *testing.T) {
 
 	// A pi extension without a version marker is a legacy install: Outdated.
 	piPath := home + "/.pi/agent/extensions/" + piExtensionInstallName
-	mustWriteFile(t, piPath, "// managed by herdr\nexport {}\n")
+	mustWriteFile(t, piPath, "// managed by cats\nexport {}\n")
 
 	var pi *Status
 	for _, status := range InstalledIntegrationStatuses() {
@@ -168,12 +168,12 @@ func TestOutdatedUpdateNoticeAndLegacyMarker(t *testing.T) {
 	if !ok {
 		t.Fatal("expected outdated notice")
 	}
-	if !strings.Contains(notice, "installed herdr integrations need updating; run herdrctl integration install pi.") {
+	if !strings.Contains(notice, "installed cats integrations need updating; run catctl integration install pi.") {
 		t.Fatalf("notice = %q", notice)
 	}
 
 	// A current marker flips the state and silences the notice.
-	mustWriteFile(t, piPath, "// HERDR_INTEGRATION_VERSION=2\nexport {}\n")
+	mustWriteFile(t, piPath, "// CATS_INTEGRATION_VERSION=2\nexport {}\n")
 	for _, status := range InstalledIntegrationStatuses() {
 		if status.Target == TargetPi && status.State != StatusCurrent {
 			t.Fatalf("current pi status = %+v", status)
@@ -211,14 +211,14 @@ func TestRecommendationLabelsAndNeedsInstall(t *testing.T) {
 
 func TestPaneEnv(t *testing.T) {
 	got := PaneEnv("/tmp/h.sock", 7, "")
-	want := []string{"HERDR_SOCKET_PATH=/tmp/h.sock", "HERDR_PANE_ID=p_7", "HERDR_ENV=1"}
+	want := []string{"CATS_SOCKET_PATH=/tmp/h.sock", "CATS_PANE_ID=p_7", "CATS_ENV=1"}
 	for i := range want {
 		if got[i] != want[i] {
 			t.Fatalf("PaneEnv = %v, want %v", got, want)
 		}
 	}
 	got = PaneEnv("/tmp/h.sock", 7, "p_pub")
-	if got[1] != "HERDR_PANE_ID=p_pub" {
+	if got[1] != "CATS_PANE_ID=p_pub" {
 		t.Fatalf("public id not honored: %v", got)
 	}
 }

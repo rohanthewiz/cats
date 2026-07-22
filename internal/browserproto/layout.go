@@ -1,9 +1,9 @@
 package browserproto
 
 import (
-	"github.com/rohanthewiz/herdr-web/internal/app"
-	"github.com/rohanthewiz/herdr-web/internal/layout"
-	"github.com/rohanthewiz/herdr-web/internal/workspace"
+	"github.com/rohanthewiz/cats/internal/app"
+	"github.com/rohanthewiz/cats/internal/layout"
+	"github.com/rohanthewiz/cats/internal/workspace"
 )
 
 // BorderID encodes a split node's tree path as the opaque handle carried in

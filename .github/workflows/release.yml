@@ -1,5 +1,5 @@
-# Release: on a v* tag, build the shipped binaries (gateway, termhost,
-# herdrctl — ghostty-tagged, static libghostty-vt linked in) per platform and
+# Release: on a v* tag, build the shipped binaries (catway, cathost,
+# catctl — ghostty-tagged, static libghostty-vt linked in) per platform and
 # attach the tarballs to the GitHub release. CGO rules out cross-compiling
 # from one runner, so each platform builds its own.
 name: release

@@ -4,8 +4,8 @@ import (
 	"math/rand"
 	"testing"
 
-	"github.com/rohanthewiz/herdr-web/internal/orchestration"
-	"github.com/rohanthewiz/herdr-web/internal/terminal"
+	"github.com/rohanthewiz/cats/internal/orchestration"
+	"github.com/rohanthewiz/cats/internal/terminal"
 )
 
 // pack mirrors β's packRGB (0x02_RR_GG_BB) for expectations.

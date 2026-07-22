@@ -1,4 +1,4 @@
-// Package worktree is the pure logic behind gateway's git-worktree feature
+// Package worktree is the pure logic behind catway's git-worktree feature
 // (port of the Rust src/worktree.rs): branch/path slug derivation, the
 // `git worktree` command builders, the `worktree list --porcelain` parser, and
 // the dirty-remove error detection the two-step force confirmation keys on.
@@ -69,7 +69,7 @@ func DefaultCheckoutPath(root, repoName, branch string) string {
 }
 
 // ExpandTilde resolves a leading "~" or "~/" against the user's home directory
-// (the worktrees.directory default is "~/.herdr/worktrees"). A path with no
+// (the worktrees.directory default is "~/.cats/worktrees"). A path with no
 // tilde, or no resolvable home, is returned unchanged.
 func ExpandTilde(path string) string {
 	if path != "~" && !strings.HasPrefix(path, "~/") {

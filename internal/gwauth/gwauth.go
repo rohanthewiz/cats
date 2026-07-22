@@ -1,13 +1,13 @@
-// Package gwauth implements the gateway's browser authentication (WS10): a
+// Package gwauth implements the catway's browser authentication (WS10): a
 // single shared secret (the login password / bearer token), stateless
 // HMAC-signed session cookies, and a same-origin check for the WebSocket
 // upgrade.
 //
-// The model is deliberately minimal because herdr is single-user: there is one
+// The model is deliberately minimal because cats is single-user: there is one
 // secret, no user table. A browser exchanges the secret once at /login for a
-// session cookie; a headless client (herdrctl probe, scripts) presents the secret
+// session cookie; a headless client (catctl probe, scripts) presents the secret
 // directly as an Authorization: Bearer token. Session cookies are signed with a
-// per-process random key, so restarting the gateway invalidates outstanding
+// per-process random key, so restarting the catway invalidates outstanding
 // sessions (re-login required) and no secret is ever written to disk.
 package gwauth
 
@@ -26,7 +26,7 @@ import (
 	"time"
 )
 
-// CookieName is the session cookie the gateway sets after a successful login.
+// CookieName is the session cookie the catway sets after a successful login.
 const CookieName = "hsess"
 
 // bearerPrefix is the scheme in an Authorization header value.
@@ -136,12 +136,12 @@ func GenerateSecret() (string, error) {
 // --allowed-origins). Each entry may be a full origin ("https://app.example.com")
 // or a bare authority ("app.example.com" / "app.example.com:8421"); only the
 // host[:port] authority is compared. This is the escape hatch for a reverse
-// proxy or relay whose public Host differs from the gateway's own — with
+// proxy or relay whose public Host differs from the catway's own — with
 // subdomain relay routing Origin.Host already equals Host, so it is mostly a
 // safety valve, but it closes the "no allow-list" gap for other deployments.
 func OriginOK(origin, host string, allowed []string) bool {
 	if origin == "" {
-		return true // non-browser client (e.g. herdrctl probe); auth is still enforced
+		return true // non-browser client (e.g. catctl probe); auth is still enforced
 	}
 	u, err := url.Parse(origin)
 	if err != nil || u.Host == "" {

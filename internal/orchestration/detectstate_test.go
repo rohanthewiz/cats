@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rohanthewiz/herdr-web/internal/detect"
+	"github.com/rohanthewiz/cats/internal/detect"
 )
 
 func ps(state detect.State) publishState { return publishState{state: state} }

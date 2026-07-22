@@ -31,25 +31,25 @@ func TestInstallCopilotWritesHookAndUpdatesSettings(t *testing.T) {
 	if !ok || len(entries) != 2 {
 		t.Fatalf("SessionStart entries = %v", entries)
 	}
-	// User entry preserved, herdr entry appended in the flat/direct shape.
+	// User entry preserved, cats entry appended in the flat/direct shape.
 	if cmd := jsonStringAt(t, settings, "hooks", "SessionStart", 0, "bash"); cmd != "echo keep" {
 		t.Fatalf("user entry = %q", cmd)
 	}
-	herdrEntry := entries[1].(map[string]any)
-	if herdrEntry["type"] != "command" {
-		t.Fatalf("herdr entry = %v", herdrEntry)
+	catsEntry := entries[1].(map[string]any)
+	if catsEntry["type"] != "command" {
+		t.Fatalf("cats entry = %v", catsEntry)
 	}
-	command := herdrEntry["bash"].(string)
+	command := catsEntry["bash"].(string)
 	if command != hookCommand(installed.HookPath, "", false) {
-		t.Fatalf("herdr command = %q", command)
+		t.Fatalf("cats command = %q", command)
 	}
-	if timeout, _ := herdrEntry["timeoutSec"].(float64); timeout != 10 {
-		t.Fatalf("timeoutSec = %v", herdrEntry["timeoutSec"])
+	if timeout, _ := catsEntry["timeoutSec"].(float64); timeout != 10 {
+		t.Fatalf("timeoutSec = %v", catsEntry["timeoutSec"])
 	}
-	if _, has := herdrEntry["matcher"]; has {
+	if _, has := catsEntry["matcher"]; has {
 		t.Fatal("copilot entry must not carry a matcher")
 	}
-	if _, has := herdrEntry["command"]; has {
+	if _, has := catsEntry["command"]; has {
 		t.Fatal("copilot entry must use bash, not command")
 	}
 }
@@ -101,7 +101,7 @@ func TestInstallCopilotRemovesLegacyLifecycleEvents(t *testing.T) {
 	}
 }
 
-func TestUninstallCopilotRemovesHerdrHooksAndPreservesOthers(t *testing.T) {
+func TestUninstallCopilotRemovesCatsHooksAndPreservesOthers(t *testing.T) {
 	home := testHome(t)
 	copilotDir := filepath.Join(home, ".copilot")
 	mustMkdirAll(t, copilotDir)
@@ -110,7 +110,7 @@ func TestUninstallCopilotRemovesHerdrHooksAndPreservesOthers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Add a user hook next to the herdr one.
+	// Add a user hook next to the cats one.
 	raw := fmt.Sprintf(`{"hooks":{"SessionStart":[{"type":"command","bash":%q,"timeoutSec":10},{"type":"command","bash":"echo keep","timeoutSec":5}]}}`,
 		hookCommand(installed.HookPath, "", false))
 	mustWriteFile(t, installed.SettingsPath, raw)
@@ -186,7 +186,7 @@ func TestInstallDroidWritesHookToSettingsAndCleansLegacyHooksJSON(t *testing.T) 
 		t.Fatal("user legacy hook lost")
 	}
 	if jsonAt(legacyHooks, "hooks", "SessionStart") != nil {
-		t.Fatal("herdr legacy entry still present")
+		t.Fatal("cats legacy entry still present")
 	}
 }
 
@@ -210,7 +210,7 @@ func TestInstallDroidIsIdempotentForHookEntries(t *testing.T) {
 	}
 }
 
-func TestUninstallDroidRemovesHerdrHooksAndPreservesOthers(t *testing.T) {
+func TestUninstallDroidRemovesCatsHooksAndPreservesOthers(t *testing.T) {
 	home := testHome(t)
 	droidDir := filepath.Join(home, ".factory")
 	mustMkdirAll(t, droidDir)
@@ -219,10 +219,10 @@ func TestUninstallDroidRemovesHerdrHooksAndPreservesOthers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	herdrCommand := hookCommand(installed.HookPath, "session", true)
+	catsCommand := hookCommand(installed.HookPath, "session", true)
 	mustWriteFile(t, installed.SettingsPath, fmt.Sprintf(
 		`{"theme":"factory-dark","hooks":{"SessionStart":[{"hooks":[{"type":"command","command":%q,"timeout":10}]}],"Stop":[{"hooks":[{"type":"command","command":"echo keep","timeout":10}]}]}}`,
-		herdrCommand))
+		catsCommand))
 
 	result, err := UninstallDroid()
 	if err != nil {
@@ -233,7 +233,7 @@ func TestUninstallDroidRemovesHerdrHooksAndPreservesOthers(t *testing.T) {
 	}
 	settings := readJSONFile(t, installed.SettingsPath)
 	if jsonAt(settings, "hooks", "SessionStart") != nil {
-		t.Fatal("herdr entry still present")
+		t.Fatal("cats entry still present")
 	}
 	if cmd := jsonStringAt(t, settings, "hooks", "Stop", 0, "hooks", 0, "command"); cmd != "echo keep" {
 		t.Fatalf("user hook lost: %q", cmd)

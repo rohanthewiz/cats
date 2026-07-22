@@ -1,6 +1,6 @@
 package browserproto
 
-import "github.com/rohanthewiz/herdr-web/internal/orchestration"
+import "github.com/rohanthewiz/cats/internal/orchestration"
 
 // A β diff touching more than 3/5 (~60%) of cells is sent as a full frame —
 // cheaper than the per-cell index overhead, and free to decide since β diffs

@@ -42,7 +42,7 @@ type Detection struct {
 	SkipStateUpdate bool
 }
 
-// --- raw manifest types, mirroring herdr's TOML schema ---
+// --- raw manifest types, mirroring cats's TOML schema ---
 //
 // The same structs decode both the embedded JSON manifests and the remote TOML
 // manifests fetched from the herdr.dev catalog (WS5) — the schemas are 1:1 (the
@@ -202,7 +202,7 @@ func compileManifest(rm *rawManifest) (*compiledManifest, error) {
 		}
 		region := strings.TrimSpace(r.Region)
 		if region == "" {
-			region = "whole_recent" // matches herdr's default_region
+			region = "whole_recent" // matches cats's default_region
 		}
 		cm.rules = append(cm.rules, compiledRule{
 			gate:            gate,
@@ -304,7 +304,7 @@ func Detect(label string, in Input) Detection {
 		if !gateMatches(&r.gate, text, strings.ToLower(text)) {
 			continue
 		}
-		// Higher priority wins; first-seen wins on ties (mirrors herdr).
+		// Higher priority wins; first-seen wins on ties (mirrors cats).
 		if matched == nil || r.priority > matched.priority {
 			matched = r
 		}
@@ -372,7 +372,7 @@ func anyLineMatches(re *regexp.Regexp, text string) bool {
 	return false
 }
 
-// --- region extraction (ports the subset of herdr regions the manifests use) ---
+// --- region extraction (ports the subset of cats regions the manifests use) ---
 
 func region(in Input, spec string) string {
 	switch spec {

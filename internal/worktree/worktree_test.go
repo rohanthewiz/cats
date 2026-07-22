@@ -37,8 +37,8 @@ func TestBranchToPathSlug(t *testing.T) {
 }
 
 func TestDefaultCheckoutPath(t *testing.T) {
-	got := DefaultCheckoutPath("/home/me/.herdr/worktrees", "herdr", "worktree/brave-river")
-	if want := "/home/me/.herdr/worktrees/herdr/worktree-brave-river"; got != want {
+	got := DefaultCheckoutPath("/home/me/.cats/worktrees", "cats", "worktree/brave-river")
+	if want := "/home/me/.cats/worktrees/cats/worktree-brave-river"; got != want {
 		t.Fatalf("DefaultCheckoutPath = %q, want %q", got, want)
 	}
 }
@@ -74,9 +74,9 @@ func TestIsDirtyRemoveError(t *testing.T) {
 		msg  string
 		want bool
 	}{
-		{"fatal: '/w/herdr' contains modified or untracked files, use --force to delete it", true},
-		{"fatal: '/w/herdr' is a missing but already registered worktree", false},
-		{"fatal: '/w/herdr' contains a locked worktree, use --force only if you know why", false},
+		{"fatal: '/w/cats' contains modified or untracked files, use --force to delete it", true},
+		{"fatal: '/w/cats' is a missing but already registered worktree", false},
+		{"fatal: '/w/cats' contains a locked worktree, use --force only if you know why", false},
 	} {
 		if got := IsDirtyRemoveError(tc.msg); got != tc.want {
 			t.Errorf("IsDirtyRemoveError(%q) = %v, want %v", tc.msg, got, tc.want)
@@ -87,25 +87,25 @@ func TestIsDirtyRemoveError(t *testing.T) {
 // The command builders emit the exact git invocations; remove never names the
 // branch (the checkout goes, the branch stays).
 func TestCommandBuilders(t *testing.T) {
-	add := AddCommand("/repo/herdr", "/w/herdr/worktree-brave-river", "worktree/brave-river", "HEAD")
+	add := AddCommand("/repo/cats", "/w/cats/worktree-brave-river", "worktree/brave-river", "HEAD")
 	if add.Program != "git" || !reflect.DeepEqual(add.Args, []string{
-		"-C", "/repo/herdr", "worktree", "add", "-b", "worktree/brave-river",
-		"/w/herdr/worktree-brave-river", "HEAD",
+		"-C", "/repo/cats", "worktree", "add", "-b", "worktree/brave-river",
+		"/w/cats/worktree-brave-river", "HEAD",
 	}) {
 		t.Fatalf("AddCommand = %+v", add)
 	}
 
-	rm := RemoveCommand("/repo/herdr", "/w/herdr/issue-137", false)
-	if !reflect.DeepEqual(rm.Args, []string{"-C", "/repo/herdr", "worktree", "remove", "/w/herdr/issue-137"}) {
+	rm := RemoveCommand("/repo/cats", "/w/cats/issue-137", false)
+	if !reflect.DeepEqual(rm.Args, []string{"-C", "/repo/cats", "worktree", "remove", "/w/cats/issue-137"}) {
 		t.Fatalf("RemoveCommand = %+v", rm)
 	}
-	rmf := RemoveCommand("/repo/herdr", "/w/herdr/issue-137", true)
-	if !reflect.DeepEqual(rmf.Args, []string{"-C", "/repo/herdr", "worktree", "remove", "--force", "/w/herdr/issue-137"}) {
+	rmf := RemoveCommand("/repo/cats", "/w/cats/issue-137", true)
+	if !reflect.DeepEqual(rmf.Args, []string{"-C", "/repo/cats", "worktree", "remove", "--force", "/w/cats/issue-137"}) {
 		t.Fatalf("forced RemoveCommand = %+v", rmf)
 	}
 
-	ls := ListCommand("/repo/herdr")
-	if !reflect.DeepEqual(ls.Args, []string{"-C", "/repo/herdr", "worktree", "list", "--porcelain"}) {
+	ls := ListCommand("/repo/cats")
+	if !reflect.DeepEqual(ls.Args, []string{"-C", "/repo/cats", "worktree", "list", "--porcelain"}) {
 		t.Fatalf("ListCommand = %+v", ls)
 	}
 }
@@ -113,7 +113,7 @@ func TestCommandBuilders(t *testing.T) {
 func TestExpandTilde(t *testing.T) {
 	t.Setenv("HOME", "/home/me")
 	for _, tc := range []struct{ in, want string }{
-		{"~/.herdr/worktrees", "/home/me/.herdr/worktrees"},
+		{"~/.cats/worktrees", "/home/me/.cats/worktrees"},
 		{"~", "/home/me"},
 		{"/tmp/worktrees", "/tmp/worktrees"},
 		{"~backup", "~backup"}, // not a home reference

@@ -67,8 +67,8 @@ keybindings:
 		t.Fatalf("server overrides not applied: %+v", got.Server)
 	}
 	// Untouched scalars keep defaults.
-	if got.Server.TermhostSocket != Default().Server.TermhostSocket {
-		t.Fatalf("termhost socket should keep default, got %q", got.Server.TermhostSocket)
+	if got.Server.CathostSocket != Default().Server.CathostSocket {
+		t.Fatalf("cathost socket should keep default, got %q", got.Server.CathostSocket)
 	}
 	// Overridden color wins; sibling colors keep defaults.
 	if got.Theme.Colors["bg"] != "#000000" {
@@ -128,7 +128,7 @@ func TestLoad(t *testing.T) {
 		t.Fatal("Load of a missing explicit path should error")
 	}
 
-	// HERDR_CONFIG env resolves the path when no override is given.
+	// CATS_CONFIG env resolves the path when no override is given.
 	t.Setenv(EnvVar, path)
 	got, _, err = Load("")
 	if err != nil || got.Server.Addr != ":7000" {
@@ -165,9 +165,9 @@ func TestSaveRoundtrip(t *testing.T) {
 	}
 }
 
-// The worktrees block defaults to ~/.herdr/worktrees and overrides cleanly.
+// The worktrees block defaults to ~/.cats/worktrees and overrides cleanly.
 func TestParseWorktrees(t *testing.T) {
-	if got := Default().Worktrees.Directory; got != "~/.herdr/worktrees" {
+	if got := Default().Worktrees.Directory; got != "~/.cats/worktrees" {
 		t.Fatalf("default worktrees.directory = %q", got)
 	}
 	got, err := parse([]byte("worktrees:\n  directory: /tmp/checkouts\n"))
