@@ -20,7 +20,7 @@ the net-new work is a launcher/bundler and a relay.
 
 | Question | Choice |
 |---|---|
-| Remote topology | **A — remote front-end, home backend.** `gateway`+`termhost` both run on the home mini-PC; the browser/Mac app at work connects over HTTPS/WSS with the existing password + TLS. The gateway↔termhost seam stays a local Unix socket. |
+| Remote topology | **A — remote front-end, home backend.** `gateway`+`termhost` both run on the home mini-PC; the browser/Mac app at work connects over HTTPS/WSS with the existing password + TLS. The gateway↔termhost seam stays a local Unix socket. **The home mini-PC runs Linux (32 GB RAM); the Mac `.app` is front-end only.** |
 | Mac app shell | **Minimal Go webview** (`github.com/webview/webview_go`) + a small Go supervisor. `.app` bundle hand-assembled by a Makefile target. |
 | Reaching home over NAT | **Build a relay/rendezvous.** The home gateway dials out to a public relay; the front-end connects to the relay, which brokers the two. |
 | Packaging polish | **Personal / unsigned.** A `make` target that produces a runnable `Herdr.app`; no Apple Developer signing/notarization (Gatekeeper right-click→Open on other Macs). |
@@ -51,6 +51,17 @@ the net-new work is a launcher/bundler and a relay.
 
 ---
 
+## Build targets & platforms (confirmed: Linux backend)
+
+The two requests build for **different platforms** — keep them separate.
+
+- **Backend (home mini-PC): `linux/amd64`** (confirmed x86-64). `gateway` + `termhost` + `herdrctl` + the tunnel client build for `GOOS=linux GOARCH=amd64`.
+  - `make vt` on Linux is a **native Zig build** — the macOS SDK `.tbd` slice patch in `scripts/build-libghostty-vt.sh` is macOS-only and is skipped, so the Linux path is simpler. CI already exercises the ghostty-tagged race tests on Linux, and `release.yml` attaches a per-platform Linux tarball.
+  - **CGO cross-compile from macOS → Linux is painful** (needs a Linux cross-toolchain + libghostty built for the Linux target). Prefer **building on the mini-PC itself** (`make vt && make binaries`) or pulling the Linux tarball from a `v*` release. On Linux, CGO links glibc dynamically — fine when built on the same distro family it runs on.
+  - Home service = **systemd** unit (not launchd): `termhost -persistent` + `gateway --tls --relay … --relay-token …`.
+- **Front-end (work Mac): macOS.** `cmd/herdrapp` + `make macapp` → `Herdr.app`. The Mac never runs the backend, so it needs no ghostty/Zig toolchain for the app shell (the launcher is plain Go + webview). In pure remote mode the `.app` ships **only** `herdrapp` — no gateway/termhost binaries required in the bundle. (Local-mode bundling from Request 1 still needs the macOS-built backends.)
+- **Relay: Linux VPS.** `cmd/relay` is pure Go — trivial `GOOS=linux` build.
+
 ## Shared groundwork (do first)
 
 - **Per-user, private socket paths.** The default `/tmp/herdr-*.sock` is world-visible and collides between users. In the launcher, point both daemons at `$TMPDIR` (on macOS `$TMPDIR` is a per-user, 0700 dir under `/var/folders/…`), e.g. `--socket $TMPDIR/herdr-termhost.sock`. Solves privacy + uniqueness with no code change (flags already exist: gateway `--socket`, termhost `-socket`).
@@ -58,7 +69,28 @@ the net-new work is a launcher/bundler and a relay.
 
 ---
 
-## Request 1 — Herdr.app (local, all-in-one)
+## The two Mac-app build variants
+
+Both ship as `.app` bundles built from **one `cmd/herdrapp` codebase**; the Makefile
+target chooses what gets bundled and the baked-in default mode
+(`-ldflags "-X main.defaultMode=local|remote"`). The launcher decides local-vs-remote
+at runtime by that default (overridable in `app.json`), and only supervises daemons
+when they are actually present in the bundle.
+
+| | **Variant 1 — Self-contained** | **Variant 2 — Thin client** |
+|---|---|---|
+| Target | `make macapp` → `Herdr.app` | `make macapp-client` → `Herdr Client.app` |
+| Bundles | `herdrapp` + `gateway` + `termhost` + `herdrctl` (macOS-built, static) | `herdrapp` **only** |
+| Runs | fully local & offline (supervises its own daemons) | pure front-end; loads a **remote gateway URL** |
+| Backend | in-bundle, on the Mac | on the **x86-64 Linux mini-PC** |
+| Connectivity | none needed | relay (NAT) **or** direct LAN/VPN/Tailscale — the client only needs a reachable URL |
+| Default mode | `local` | `remote` |
+
+Variant 1 is a superset (it *can* also point at a remote URL), but keeping the thin
+client as its own tiny target means the common "frontend at work" build carries no
+backend binaries and needs no ghostty/Zig toolchain to produce.
+
+## Request 1 — Variant 1: self-contained Herdr.app (local, all-in-one)
 
 ### 1a. New supervisor + webview launcher — `cmd/herdrapp/`
 A small Go binary (built **without** `-tags ghostty`; it only supervises and shows a window). New dep: `github.com/webview/webview_go`.
@@ -73,16 +105,15 @@ Responsibilities:
 
 Reuse: the readiness-dial/backoff idiom from `daemon.go`; no changes to gateway/termhost themselves for local mode.
 
-### 1b. Bundler — `make macapp`
-New Makefile target (extends the existing `binaries`/`dist` section, `Makefile:48-74`):
-- Build `gateway`, `termhost`, `herdrctl` (`-tags ghostty`, static — unchanged) **and** `herdrapp` (plain).
-- Assemble `dist/Herdr.app/Contents/`:
-  - `MacOS/herdrapp` (the `CFBundleExecutable`), `MacOS/{gateway,termhost,herdrctl}`.
-  - `Resources/AppIcon.icns` + `Resources/` for any extras.
-  - `Info.plist` — bundle id (`dev.herdr.app`), name, version from `git describe` (already computed as `VERSION`, `Makefile:15`), `NSHighResolutionCapable`, minimum-system.
+### 1b. Bundlers — `make macapp` and `make macapp-client`
+Two Makefile targets (extend the existing `binaries`/`dist` section, `Makefile:48-74`) sharing a helper that assembles a `.app` skeleton:
+- **`make macapp` (Variant 1, self-contained):** build `gateway`, `termhost`, `herdrctl` (`-tags ghostty`, static — unchanged) **and** `herdrapp` (plain, `-X main.defaultMode=local`). Assemble `dist/Herdr.app/Contents/`:
+  - `MacOS/herdrapp` (`CFBundleExecutable`), `MacOS/{gateway,termhost,herdrctl}`.
+  - `Resources/AppIcon.icns`; `Info.plist` — bundle id (`dev.herdr.app`), name, version from `git describe` (already `VERSION`, `Makefile:15`), `NSHighResolutionCapable`, min-system.
+- **`make macapp-client` (Variant 2, thin):** build **only** `herdrapp` (plain, `-X main.defaultMode=remote`) → `dist/Herdr Client.app` with just `MacOS/herdrapp` + `Info.plist` (bundle id `dev.herdr.client`). No backend binaries, no ghostty/Zig toolchain needed to produce it.
 - No dylibs to copy, no rpath fixups (static link). Unsigned: document the right-click→Open Gatekeeper step for other Macs.
 
-**Deliverable:** double-click `Herdr.app` → herdr opens in a native window, fully local.
+**Deliverables:** double-click `Herdr.app` → herdr opens in a native window, fully local; double-click `Herdr Client.app` → connect prompt → remote session.
 
 ---
 
@@ -111,11 +142,12 @@ Three parts: (2a) minimal gateway hardening, (2b) a tunnel client at home, (2c) 
 
 **Trust model (call out explicitly):** the relay terminates the browser's TLS, so it can see plaintext (the ngrok model) — including the password on login. This is acceptable for a **self-hosted** relay (you control it). Document it. Future hardening: an app-layer E2E key negotiated at pairing so even the relay can't read Mac-app traffic (browsers can't easily do custom E2E). Not in v1.
 
-### 2d. Mac app remote mode — extend `cmd/herdrapp/`
-- Add a mode to `app.json`: `Local` (start daemons, as Request 1) or `Remote{url,label}`.
+### 2d. Variant 2 remote path — same `cmd/herdrapp/`, thin build
+This is the `make macapp-client` variant (`defaultMode=remote`) — the same launcher, no bundled backends.
+- `app.json` holds `Remote{url,label}` (or `Local` for Variant 1); the baked `defaultMode` is the fallback on first run.
 - First run or a "Connect…" menu item shows a tiny chooser (a small built-in HTML form served on loopback, or a `webview` bind/eval prompt) that writes `app.json`.
-- **Remote:** skip the daemons entirely; `w.Navigate(remoteURL)`. The gateway's own login page collects the password; the webview persists the `hsess` cookie across launches (WKWebView data store), so re-launch is one click.
-- **Home mini-PC** (the server side) runs the plain binaries as a service, not the app: `termhost -persistent` + `gateway --tls --password … --relay wss://relay.herdr.dev --relay-token …`, wired as a `launchd` (macOS) or `systemd` (if the mini-PC is Linux) unit. The `make dist` tarball already ships these binaries; only the relay flags are new.
+- **Remote:** start no daemons; `w.Navigate(remoteURL)`. The remote gateway's own login page collects the password; the webview persists the `hsess` cookie across launches (WKWebView data store), so re-launch is one click. The URL is either a relay host (`https://<home-id>.relay.herdr.dev`) or a direct LAN/VPN address — the client is agnostic.
+- **Home mini-PC (Linux)** runs the plain binaries as a **systemd** service, not the app: `termhost -persistent` + `gateway --tls --password … --relay wss://relay.herdr.dev --relay-token …`. The Linux `make dist` tarball already ships these binaries; only the relay flags are new. Ship a `herdr.service` (or a `termhost.service` + `gateway.service` pair with `After=`/`Requires=`) unit template under `scripts/` so the mini-PC install is `systemctl enable --now`.
 
 ---
 
