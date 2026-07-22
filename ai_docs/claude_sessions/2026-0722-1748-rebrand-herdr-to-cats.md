@@ -96,7 +96,24 @@ still use the **pre-rebrand** names — translate old→new when acting on them.
 
 - **TODO:** stand up a `cats.dev` equivalent of the agent-detection manifest
   catalog, then flip `defaultCatalogURL` + `relay.herdr.dev` over.
-- Local checkout dir is still `~/projs/go/herdr-web` (unchanged; only the remote
-  + module moved). Rebuild on the Linux mini-PC after `git pull`.
+- Local checkout dir was `~/projs/go/herdr-web` at the time this was written —
+  ~~unchanged~~ **superseded, see Correction below.** Rebuild on the Linux
+  mini-PC after `git pull`.
 - Optional: `internal/gwauth`/`gwtls` → `cwauth`/`cwtls` if full consistency
   wanted.
+
+## Correction (2026-07-22, appended)
+
+The "checkout dir still `~/projs/go/herdr-web`" open item above is **out of
+date.** Later the same session the local checkout was renamed to match the repo:
+
+- `~/projs/go/herdr-web` → **`~/projs/go/cats`** (our checkout — start future
+  Claude Code sessions from here).
+- Name collision handled first: `~/projs/go/cats` already held an unrelated,
+  non-git "cat shop" Go project, so it was moved aside to
+  **`~/projs/go/catshop`** (intact; still not under git — its only safety net).
+- Verified from the new path: `origin` = `github.com/rohanthewiz/cats.git`,
+  module `github.com/rohanthewiz/cats`, working tree clean, `go build ./...` OK.
+- Claude Code keys memory by directory path, so the project memory was copied to
+  the new key `~/.claude/projects/-Users-ro-projs-go-cats/memory/`.
+- This was a local filesystem rename only — not tracked by git, nothing to push.
