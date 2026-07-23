@@ -86,6 +86,8 @@ serves HTTPS. Flags beat the config file, which beats built-in defaults
 catctl split h 2                      # split pane 2 horizontally
 catctl panes                          # list panes
 catctl wait 1 "BUILD SUCCESSFUL" 120  # block until pane 1 prints the pattern
+catctl send 1 vim notes.md            # type into pane 1 (staged; nothing runs)
+catctl run 1 make test                # type and submit with Enter
 catctl events 1                       # stream pane events until Ctrl-C
 catctl reload                         # re-render page after config edits
 catctl help                           # the full verb list

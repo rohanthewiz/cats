@@ -200,6 +200,11 @@ Not commands (browser-local): sidebar toggle, help/menus/pickers, copy-mode moti
 under the same envelope): worktree ops, `agent.send`/`pane.send_text` (API-only), custom
 command keybinds, detach (meaningless in-browser; the tab just closes).
 
+Since added under the same envelope: worktree ops (`worktree.*`), and the text-injection
+command — `pane.send_input` `{pane, text?, submit?}` — text paste-encoded against the
+pane's live modes plus an optional real Enter (`submit`), the API half that lets an
+automation client (`catctl send`) drive a pane it isn't rendering.
+
 ## 8. Visibility & frame streaming policy
 
 The server streams `pane_frame`/`pane_diff` **only for panes in the connection's active

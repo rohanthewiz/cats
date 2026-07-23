@@ -24,6 +24,7 @@ const (
 	CmdRead               = app.CmdRead
 	CmdCapture            = app.CmdCapture
 	CmdWaitForOutput      = app.CmdWaitForOutput
+	CmdPaneSendInput      = app.CmdPaneSendInput
 	CmdTabCreate          = app.CmdTabCreate
 	CmdTabClose           = app.CmdTabClose
 	CmdTabFocus           = app.CmdTabFocus
@@ -83,6 +84,7 @@ type (
 	CaptureParams         = app.CaptureParams
 	CaptureResult         = app.CaptureResult
 	WaitForOutputParams   = app.WaitForOutputParams
+	SendInputParams       = app.SendInputParams
 	WaitForOutputResult   = app.WaitForOutputResult
 	TabParams             = app.TabParams
 	OptTabParams          = app.OptTabParams

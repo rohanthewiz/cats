@@ -35,6 +35,7 @@ const (
 	CmdRead               = "read"
 	CmdCapture            = "capture"
 	CmdWaitForOutput      = "pane.wait_for_output"
+	CmdPaneSendInput      = "pane.send_input"
 	CmdTabCreate          = "tab.create"
 	CmdTabClose           = "tab.close"
 	CmdTabFocus           = "tab.focus"
@@ -80,6 +81,7 @@ func CommandNames() []string {
 		CmdPaneSplit, CmdPaneClose, CmdPaneFocus, CmdPaneFocusDirection,
 		CmdPaneCycle, CmdPaneLast, CmdPaneSwap, CmdPaneSwapWith, CmdPaneZoom, CmdPaneRename,
 		CmdPaneResizeBorder, CmdScroll, CmdRead, CmdCapture, CmdWaitForOutput,
+		CmdPaneSendInput,
 		CmdTabCreate, CmdTabClose, CmdTabFocus, CmdTabRename, CmdTabMove,
 		CmdWorkspaceCreate, CmdWorkspaceClose, CmdWorkspaceFocus, CmdWorkspaceRename,
 		CmdWorkspaceMove,
@@ -326,6 +328,31 @@ func WaitTimeout(ms uint32) time.Duration {
 		return d
 	}
 	return MaxWaitTimeout
+}
+
+// SendInputParams: pane.send_input — inject text into a pane's PTY as though
+// typed locally, the outbound half of the automation API (capture/wait are the
+// inbound half; together a client can drive an interactive program end-to-end).
+// Text is paste-encoded against the pane's live mode state, so when the
+// foreground app has bracketed paste on (readline, most TUIs) a multi-line
+// prompt lands in its input intact instead of executing line-by-line. Submit
+// follows the text with a real Enter keypress — separate from Text so a caller
+// can stage input for the user to review (Submit false) or fire it (true), and
+// an empty-Text Submit sends just the Enter. Encoding stays server-side, same
+// as browser input: clients never pre-encode VT bytes.
+type SendInputParams struct {
+	Pane   uint32 `json:"pane"`
+	Text   string `json:"text,omitempty"`
+	Submit bool   `json:"submit,omitempty"`
+}
+
+// Validate rejects a send with nothing to deliver — no text and no Enter — so
+// the dispatcher reports a bad call instead of silently acking a no-op.
+func (p SendInputParams) Validate() error {
+	if p.Text == "" && !p.Submit {
+		return errors.New("send_input: empty text and no submit — nothing to send")
+	}
+	return nil
 }
 
 // TabParams: tab.focus.

@@ -143,6 +143,21 @@ func TestBuildWait(t *testing.T) {
 	buildErr(t, "wait", []string{"1", "x", "2", "3"})
 }
 
+// send/run: words join with spaces; send stages (text required), run submits
+// with Enter (a bare `run <pane>` is just the Enter, firing staged input).
+func TestBuildSendRun(t *testing.T) {
+	buildOK(t, "send", []string{"1", "ls", "-la"}, app.SendInputParams{Pane: 1, Text: "ls -la"})
+	buildErr(t, "send", nil)
+	buildErr(t, "send", []string{"1"})         // text required: staging nothing is a no-op
+	buildErr(t, "send", []string{"x", "text"}) // bad pane id
+
+	buildOK(t, "run", []string{"2", "make", "test"},
+		app.SendInputParams{Pane: 2, Text: "make test", Submit: true})
+	buildOK(t, "run", []string{"3"}, app.SendInputParams{Pane: 3, Submit: true})
+	buildErr(t, "run", nil)
+	buildErr(t, "run", []string{"x"})
+}
+
 // events: optional pane filter.
 func TestBuildEvents(t *testing.T) {
 	buildOK(t, "events", nil, app.EventsSubscribeParams{})

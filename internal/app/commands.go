@@ -36,6 +36,12 @@ type Backend interface {
 	// ScrollPane passes a scrollback delta straight to the pane's PTY; it errors
 	// if the pane is unknown.
 	ScrollPane(pane uint32, delta int) error
+	// SendInput injects text (and, with submit, an Enter keypress) into a pane's
+	// PTY, encoded against the pane's live mode state — the pane.send_input
+	// command. Synchronous like ScrollPane: the daemon write is fire-and-forget,
+	// so success means "encoded and sent", not "the app consumed it"; it errors
+	// if the pane is unknown/exited or the encode fails.
+	SendInput(pane uint32, text string, submit bool) error
 
 	// PaneExists / DaemonConnected gate the async round-trip commands.
 	PaneExists(pane uint32) bool
@@ -372,6 +378,32 @@ func (d *Dispatcher) Dispatch(name string, dec ParamDecoder, r Responder) {
 			return
 		}
 		d.backend.StartWaitForOutput(r, p) // async: a match / timeout / exit resolves r later
+
+	case CmdPaneSendInput:
+		var p SendInputParams
+		if err := dec.Decode(&p); err != nil {
+			bad(err)
+			return
+		}
+		if err := p.Validate(); err != nil {
+			bad(err)
+			return
+		}
+		if !d.backend.PaneExists(p.Pane) {
+			r.Fail(fmt.Sprintf("unknown pane %d", p.Pane))
+			return
+		}
+		// Gate on the daemon like read/capture: the backend's write path drops
+		// silently when disconnected, and a vanished prompt is worse than an error.
+		if !d.backend.DaemonConnected() {
+			r.Fail("cathost daemon not connected")
+			return
+		}
+		if err := d.backend.SendInput(p.Pane, p.Text, p.Submit); err != nil {
+			r.Fail(err.Error())
+			return
+		}
+		r.OK(nil)
 
 	case CmdTabCreate:
 		if _, err := d.session.CreateTab(); err != nil {

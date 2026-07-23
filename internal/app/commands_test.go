@@ -33,6 +33,8 @@ type fakeBackend struct {
 	lastWait     Responder
 	lastWaitP    WaitForOutputParams
 	lastScroll   [2]int
+	sendErr      error
+	lastSend     SendInputParams
 	lastTitle    uint32
 	lastWtList   Responder
 	lastWtCreate Responder
@@ -58,6 +60,11 @@ func (b *fakeBackend) ScrollPane(pane uint32, delta int) error {
 	b.rec("scroll")
 	b.lastScroll = [2]int{int(pane), delta}
 	return b.scrollErr
+}
+func (b *fakeBackend) SendInput(pane uint32, text string, submit bool) error {
+	b.rec("sendInput")
+	b.lastSend = SendInputParams{Pane: pane, Text: text, Submit: submit}
+	return b.sendErr
 }
 func (b *fakeBackend) StartRead(r Responder, _ ReadParams) { b.rec("startRead"); b.lastRead = r }
 func (b *fakeBackend) StartCapture(r Responder, _ CaptureParams) {
@@ -503,6 +510,74 @@ func TestDispatchWaitStarts(t *testing.T) {
 	}
 	if h.b.lastWait != r || h.b.lastWaitP != p {
 		t.Fatalf("wait not forwarded: resp=%v params=%+v", h.b.lastWait == r, h.b.lastWaitP)
+	}
+}
+
+// send_input forwards pane/text/submit to the backend and acks synchronously.
+func TestDispatchSendInput(t *testing.T) {
+	h := newCmdHarness(t)
+	r := h.resp()
+	p := SendInputParams{Pane: 3, Text: "make test", Submit: true}
+
+	h.d.Dispatch(CmdPaneSendInput, params(t, p), r)
+
+	if !r.okCall {
+		t.Fatalf("send_input should ack: fail=%v msg=%q", r.failCall, r.errMsg)
+	}
+	if got := *h.log; len(got) != 2 || got[0] != "sendInput" || got[1] != "ok" {
+		t.Fatalf("send_input effects = %v, want [sendInput ok]", got)
+	}
+	if h.b.lastSend != p {
+		t.Fatalf("send_input params = %+v, want %+v", h.b.lastSend, p)
+	}
+}
+
+// A submit-only send (bare Enter) is valid; an empty send (no text, no submit)
+// is rejected as bad params before reaching the backend.
+func TestDispatchSendInputEmpty(t *testing.T) {
+	h := newCmdHarness(t)
+	r := h.resp()
+	h.d.Dispatch(CmdPaneSendInput, params(t, SendInputParams{Pane: 1, Submit: true}), r)
+	if !r.okCall || h.b.lastSend != (SendInputParams{Pane: 1, Submit: true}) {
+		t.Fatalf("submit-only send should reach the backend: ok=%v last=%+v", r.okCall, h.b.lastSend)
+	}
+
+	h = newCmdHarness(t)
+	r = h.resp()
+	h.d.Dispatch(CmdPaneSendInput, params(t, SendInputParams{Pane: 1}), r)
+	if !r.failCall || !strings.Contains(r.errMsg, "bad params") {
+		t.Fatalf("empty send: fail=%v msg=%q", r.failCall, r.errMsg)
+	}
+	if len(*h.log) != 1 { // just the fail — no backend effect
+		t.Fatalf("empty send must not reach the backend, log=%v", *h.log)
+	}
+}
+
+// send_input shares read/capture's gates (unknown pane, daemon down) and
+// surfaces a backend send error as a failure.
+func TestDispatchSendInputGated(t *testing.T) {
+	unknown := newCmdHarness(t)
+	unknown.b.paneExists = false
+	r := unknown.resp()
+	unknown.d.Dispatch(CmdPaneSendInput, params(t, SendInputParams{Pane: 9, Text: "x"}), r)
+	if !r.failCall || !strings.Contains(r.errMsg, "unknown pane") {
+		t.Fatalf("unknown pane: fail=%v msg=%q", r.failCall, r.errMsg)
+	}
+
+	down := newCmdHarness(t)
+	down.b.daemonUp = false
+	r = down.resp()
+	down.d.Dispatch(CmdPaneSendInput, params(t, SendInputParams{Pane: 1, Text: "x"}), r)
+	if !r.failCall || !strings.Contains(r.errMsg, "not connected") {
+		t.Fatalf("daemon down: fail=%v msg=%q", r.failCall, r.errMsg)
+	}
+
+	failing := newCmdHarness(t)
+	failing.b.sendErr = errors.New("pane 1 has exited")
+	r = failing.resp()
+	failing.d.Dispatch(CmdPaneSendInput, params(t, SendInputParams{Pane: 1, Text: "x"}), r)
+	if !r.failCall || r.errMsg != "pane 1 has exited" {
+		t.Fatalf("backend error: fail=%v msg=%q", r.failCall, r.errMsg)
 	}
 }
 

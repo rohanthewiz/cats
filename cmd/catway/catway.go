@@ -917,6 +917,46 @@ func (o *orch) ScrollPane(pane uint32, delta int) error {
 	return nil
 }
 
+// SendInput injects text into a pane's PTY (pane.send_input), addressed by pane
+// id rather than riding focus like the browser Key/Paste path — an automation
+// client targets panes the user isn't looking at. Text goes through the pane's
+// own paste encoder, so bracketed-paste wrapping (and ghostty's control-byte
+// sanitizing) tracks the foreground app's live modes; submit then synthesizes a
+// real Enter press+release through the key encoder, which adapts to kitty/
+// modifyOtherKeys/DECCKM state the same way a browser keystroke would. The
+// release usually encodes to nothing and is skipped — it exists for apps that
+// asked for release events (kitty report-event-types).
+func (o *orch) SendInput(pane uint32, text string, submit bool) error {
+	rt := o.panes[pane]
+	if rt == nil {
+		return fmt.Errorf("unknown pane %d", pane)
+	}
+	if rt.exited != nil {
+		return fmt.Errorf("pane %d has exited", pane)
+	}
+	if text != "" {
+		b, err := rt.enc.Paste(text)
+		if err != nil {
+			return fmt.Errorf("send_input: paste encode: %w", err)
+		}
+		if len(b) > 0 {
+			o.daemon.send(orchestration.NewInput(rt.id, b))
+		}
+	}
+	if submit {
+		for _, kind := range []string{browserproto.KeyDown, browserproto.KeyUp} {
+			b, err := rt.enc.Key(browserproto.Key{Code: "Enter", Key: "Enter", Kind: kind})
+			if err != nil {
+				return fmt.Errorf("send_input: enter encode: %w", err)
+			}
+			if len(b) > 0 {
+				o.daemon.send(orchestration.NewInput(rt.id, b))
+			}
+		}
+	}
+	return nil
+}
+
 // PaneExists / DaemonConnected gate the async round-trip commands.
 func (o *orch) PaneExists(pane uint32) bool { return o.panes[pane] != nil }
 func (o *orch) DaemonConnected() bool       { return o.daemon.connected() }

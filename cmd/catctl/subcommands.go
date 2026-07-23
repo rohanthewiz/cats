@@ -65,6 +65,8 @@ var subcommands = []subcommand{
 	{"capture", app.CmdCapture, "capture <pane> [lines]", "capture a pane's text (whole buffer, or last N lines)", buildCapture},
 	{"read", app.CmdRead, "read <pane> <r0> <c0> <r1> <c1>", "read the text between two [row,col] points", buildRead},
 	{"wait", app.CmdWaitForOutput, "wait <pane> <pattern> [timeout_secs]", "wait until a pane's output contains a pattern", buildWait},
+	{"send", app.CmdPaneSendInput, "send <pane> <text...>", "type text into a pane without submitting it", buildSend},
+	{"run", app.CmdPaneSendInput, "run <pane> [text...]", "type text into a pane and submit it with Enter", buildRun},
 
 	// Tab commands.
 	{"tab", app.CmdTabFocus, "tab <num>", "focus a tab", buildTabFocus},
@@ -279,6 +281,37 @@ func buildWait(args []string) (json.RawMessage, error) {
 		p.TimeoutMs = uint32(secs * 1000)
 	}
 	return marshal(p)
+}
+
+// buildSend / buildRun: the two faces of pane.send_input. Both join their text
+// words with single spaces (shell-friendly; quote the text to keep exact
+// whitespace as one arg). `send` only types the text — tmux-send-keys-style
+// staging, so the user can review before running — while `run` follows it with
+// a real Enter. They are separate verbs (not one verb with a flag) because
+// main.go re-parses post-verb args through the global FlagSet, so a leading
+// dash operand like -r would be eaten as an unknown flag.
+func buildSend(args []string) (json.RawMessage, error) {
+	if len(args) < 2 {
+		return nil, usageErr{"send <pane> <text...>"}
+	}
+	pane, err := parsePane(args[0])
+	if err != nil {
+		return nil, err
+	}
+	return marshal(app.SendInputParams{Pane: pane, Text: strings.Join(args[1:], " ")})
+}
+
+// buildRun: run <pane> [text...]. Text is optional — a bare `run <pane>` sends
+// just the Enter, submitting input already staged by an earlier `send`.
+func buildRun(args []string) (json.RawMessage, error) {
+	if len(args) == 0 {
+		return nil, usageErr{"run <pane> [text...]"}
+	}
+	pane, err := parsePane(args[0])
+	if err != nil {
+		return nil, err
+	}
+	return marshal(app.SendInputParams{Pane: pane, Text: strings.Join(args[1:], " "), Submit: true})
 }
 
 // buildEvents: events [pane] — an optional pane filter for the event stream. The
