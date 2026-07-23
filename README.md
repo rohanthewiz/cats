@@ -97,6 +97,25 @@ catctl help                           # the full verb list
 into an agent's own config tree (offline — no catway needed); `catctl probe`
 is a stdlib-only WebSocket probe for exercising the browser protocol headlessly.
 
+### cats-todo — prompt backlog
+
+`cats-todo` (ported from [herdr-todo](https://github.com/rohanthewiz/herdr-todo))
+is a TUI prompt-backlog manager built on the same control socket: save prompts
+of future work per-project (`.cats-todo/todos.json`, committed with the repo)
+or globally (`~/.config/cats-todo/`), then *drop* one into a Claude Code
+session — an existing agent pane (the picker lists every detected agent pane
+with its state and location) or a fresh tab that launches the agent first.
+
+```bash
+cats-todo                              # open the manager in the current pane
+cats-todo add fix the flaky reconnect  # quick-capture to the project backlog
+git log -p | cats-todo add -g -t huh   # capture piped stdin to the global backlog
+```
+
+In the manager: `enter` opens the target picker, then `enter` pastes the
+prompt staged for review while `ctrl+r` submits it to run (and marks the todo
+done). Outside cats it still manages backlogs; only drops need the socket.
+
 ## Layout
 
 ```

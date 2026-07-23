@@ -1,0 +1,276 @@
+// fuzzylist.go — a reusable fuzzy-filtered, keyboard-navigable list with a query
+// box, used by both the todo list and the drop-target picker.
+//
+// Adapted from herdr-plus (https://github.com/cloudmanic/herdr-plus),
+// Copyright (c) 2026 Cloudmanic Labs, LLC, MIT License. See NOTICE.
+
+package main
+
+import (
+	"fmt"
+	"strings"
+
+	"github.com/charmbracelet/bubbles/textinput"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/sahilm/fuzzy"
+)
+
+// listItem is one row in a fuzzyList. A selectable row shows a name (matched and
+// highlighted) plus an optional dimmer description, and carries ref — the
+// caller's identifier for the row. A row with selectable=false is a
+// non-selectable separator: with a name it renders as a dim group heading,
+// without one as a blank spacer. badge, when set, renders dim before the name
+// (used to mark done todos). strike renders the name struck-through (done).
+type listItem struct {
+	name       string
+	desc       string
+	search     string // when set, replaces desc in the fuzzy-match haystack
+	badge      string
+	strike     bool
+	selectable bool
+	ref        int
+}
+
+// scoredItem is a listItem that survived the current query filter, carrying the
+// name-character positions that matched, for highlighting.
+type scoredItem struct {
+	item    listItem
+	matched []int
+}
+
+// fuzzyList is a reusable fuzzy-filtered, keyboard-navigable list with a query box.
+type fuzzyList struct {
+	input    textinput.Model
+	items    []listItem
+	filtered []scoredItem
+	cursor   int
+}
+
+// newFuzzyList builds a list over items with a focused, empty query box.
+func newFuzzyList(placeholder string, items []listItem) fuzzyList {
+	ti := textinput.New()
+	ti.Placeholder = placeholder
+	ti.Prompt = ""
+	ti.Focus()
+
+	l := fuzzyList{input: ti, items: items}
+	l.filter()
+	return l
+}
+
+// setItems replaces the list's rows (e.g. after an add/edit/delete) and keeps
+// the query, re-filtering and clamping the cursor.
+func (l *fuzzyList) setItems(items []listItem) {
+	l.items = items
+	l.filter()
+}
+
+// filter recomputes the visible rows from the current query. An empty query
+// shows every item — separators included — in its natural order. A non-empty
+// query fuzzy-matches only the selectable items against the name plus the
+// item's search text (its rendered description when no search text is set), so
+// a query can hit text that isn't on screen — like the deep lines of a
+// multi-line prompt. Only matches inside the name are highlighted.
+func (l *fuzzyList) filter() {
+	q := strings.TrimSpace(l.input.Value())
+	l.filtered = l.filtered[:0]
+
+	if q == "" {
+		for _, it := range l.items {
+			l.filtered = append(l.filtered, scoredItem{item: it})
+		}
+		l.clampCursor()
+		return
+	}
+
+	var sel []listItem
+	for _, it := range l.items {
+		if it.selectable {
+			sel = append(sel, it)
+		}
+	}
+	haystacks := make([]string, len(sel))
+	nameLens := make([]int, len(sel))
+	for i, it := range sel {
+		haystacks[i] = it.name + "  " + firstNonEmpty(it.search, it.desc)
+		nameLens[i] = len(it.name)
+	}
+	for _, mt := range fuzzy.Find(q, haystacks) {
+		var inName []int
+		for _, idx := range mt.MatchedIndexes {
+			if idx < nameLens[mt.Index] {
+				inName = append(inName, idx)
+			}
+		}
+		l.filtered = append(l.filtered, scoredItem{item: sel[mt.Index], matched: inName})
+	}
+
+	l.clampCursor()
+}
+
+// clampCursor keeps the cursor in range and parked on a selectable row.
+func (l *fuzzyList) clampCursor() {
+	if len(l.filtered) == 0 {
+		l.cursor = 0
+		return
+	}
+	if l.cursor >= len(l.filtered) {
+		l.cursor = len(l.filtered) - 1
+	}
+	if l.cursor < 0 {
+		l.cursor = 0
+	}
+	if l.filtered[l.cursor].item.selectable {
+		return
+	}
+	for i := l.cursor; i < len(l.filtered); i++ {
+		if l.filtered[i].item.selectable {
+			l.cursor = i
+			return
+		}
+	}
+	for i := l.cursor; i >= 0; i-- {
+		if l.filtered[i].item.selectable {
+			l.cursor = i
+			return
+		}
+	}
+}
+
+// moveUp and moveDown move the highlight to the previous/next selectable row.
+func (l *fuzzyList) moveUp() {
+	for i := l.cursor - 1; i >= 0; i-- {
+		if l.filtered[i].item.selectable {
+			l.cursor = i
+			return
+		}
+	}
+}
+
+func (l *fuzzyList) moveDown() {
+	for i := l.cursor + 1; i < len(l.filtered); i++ {
+		if l.filtered[i].item.selectable {
+			l.cursor = i
+			return
+		}
+	}
+}
+
+// selectRef parks the cursor on the visible selectable row carrying ref, so a
+// caller can keep the highlight on an item across a rebuild (e.g. after
+// reordering). A ref that isn't visible leaves the cursor where it was.
+func (l *fuzzyList) selectRef(ref int) {
+	for i, s := range l.filtered {
+		if s.item.selectable && s.item.ref == ref {
+			l.cursor = i
+			return
+		}
+	}
+}
+
+// selectedIndex returns the ref of the highlighted selectable row, or -1 when
+// nothing is selectable (empty list, or all matches filtered away).
+func (l *fuzzyList) selectedIndex() int {
+	if len(l.filtered) == 0 {
+		return -1
+	}
+	it := l.filtered[l.cursor].item
+	if !it.selectable {
+		return -1
+	}
+	return it.ref
+}
+
+// editQuery feeds a message to the query box and re-filters.
+func (l *fuzzyList) editQuery(msg tea.Msg) tea.Cmd {
+	var cmd tea.Cmd
+	l.input, cmd = l.input.Update(msg)
+	l.filter()
+	return cmd
+}
+
+// view renders the query line, the match count, and the result rows.
+func (l fuzzyList) view(emptyMsg string) string {
+	var b strings.Builder
+
+	matched, total := 0, 0
+	for _, it := range l.items {
+		if it.selectable {
+			total++
+		}
+	}
+	for _, s := range l.filtered {
+		if s.item.selectable {
+			matched++
+		}
+	}
+
+	b.WriteString(promptStyle.Render("❯ "))
+	b.WriteString(l.input.View())
+	b.WriteString("   ")
+	b.WriteString(countStyle.Render(fmt.Sprintf("%d/%d", matched, total)))
+	b.WriteString("\n\n")
+
+	if matched == 0 {
+		b.WriteString(descStyle.Render("  " + emptyMsg))
+		b.WriteString("\n")
+	}
+	for i, s := range l.filtered {
+		it := s.item
+		if !it.selectable {
+			b.WriteString("\n")
+			if it.name != "" {
+				b.WriteString(headingStyle.Render(it.name))
+				b.WriteString("\n")
+			}
+			continue
+		}
+		selected := i == l.cursor
+		if selected {
+			b.WriteString(barStyle.Render("▌ "))
+		} else {
+			b.WriteString("  ")
+		}
+		if it.badge != "" {
+			b.WriteString(descStyle.Render(it.badge + " "))
+		}
+		b.WriteString(highlightName(it.name, s.matched, selected, it.strike))
+		if it.desc != "" {
+			b.WriteString("  ")
+			b.WriteString(descStyle.Render(it.desc))
+		}
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
+// highlightName renders a row's name with the fuzzy-matched characters
+// emphasized. When strike is set (a done todo) the base text is dimmed and
+// struck through.
+func highlightName(name string, matched []int, selected, strike bool) string {
+	base := nameStyle
+	if selected {
+		base = nameSelStyle
+	}
+	if strike {
+		base = doneStyle
+	}
+	if len(matched) == 0 {
+		return base.Render(name)
+	}
+
+	set := make(map[int]bool, len(matched))
+	for _, idx := range matched {
+		set[idx] = true
+	}
+
+	var b strings.Builder
+	for i, r := range name {
+		if set[i] {
+			b.WriteString(matchStyle.Render(string(r)))
+		} else {
+			b.WriteString(base.Render(string(r)))
+		}
+	}
+	return b.String()
+}

@@ -87,6 +87,8 @@ type (
 	SendInputParams       = app.SendInputParams
 	WaitForOutputResult   = app.WaitForOutputResult
 	TabParams             = app.TabParams
+	TabCreateResult       = app.TabCreateResult
+	PaneMeta              = app.PaneMeta
 	OptTabParams          = app.OptTabParams
 	RenameTabParams       = app.RenameTabParams
 	MoveTabParams         = app.MoveTabParams

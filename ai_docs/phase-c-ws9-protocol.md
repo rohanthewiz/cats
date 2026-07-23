@@ -205,6 +205,15 @@ command — `pane.send_input` `{pane, text?, submit?}` — text paste-encoded ag
 pane's live modes plus an optional real Enter (`submit`), the API half that lets an
 automation client (`catctl send`) drive a pane it isn't rendering.
 
+Also since added, for automation clients (`cats-todo`'s drop-target picker was the
+driver): `tab.create` now returns `cmd_result.data` `{num, pane}` — the new tab's public
+number and its focused root pane id, so a client can chain straight into
+`pane.send_input`/`pane.wait_for_output` without diffing `pane.list`; and
+`pane.list`/`pane.get` `PaneInfo` carries a runtime-metadata block (`agent`,
+`agent_state`, `title`, `cwd`, all omit-empty) merged in by the dispatcher from the new
+`Backend.PaneMeta` seam — the same hook-vs-detection agent arbitration the sidebar
+shows, now queryable over the control socket.
+
 ## 8. Visibility & frame streaming policy
 
 The server streams `pane_frame`/`pane_diff` **only for panes in the connection's active

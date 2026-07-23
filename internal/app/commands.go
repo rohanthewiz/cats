@@ -46,6 +46,11 @@ type Backend interface {
 	// PaneExists / DaemonConnected gate the async round-trip commands.
 	PaneExists(pane uint32) bool
 	DaemonConnected() bool
+	// PaneMeta reports the runtime-side metadata for a pane — detected agent,
+	// live title, cwd — which the session's domain model cannot know. The
+	// dispatcher merges it into pane.list / pane.get results; an unknown pane
+	// yields the zero value (all-empty is a valid answer, so no ok flag).
+	PaneMeta(pane uint32) PaneMeta
 	// StartRead / StartCapture begin a daemon round-trip and resolve r when the
 	// reply (or a timeout / disconnect) arrives — the dispatch returns first.
 	StartRead(r Responder, p ReadParams)
@@ -406,12 +411,20 @@ func (d *Dispatcher) Dispatch(name string, dec ParamDecoder, r Responder) {
 		r.OK(nil)
 
 	case CmdTabCreate:
-		if _, err := d.session.CreateTab(); err != nil {
+		num, err := d.session.CreateTab()
+		if err != nil {
 			r.Fail(err.Error())
 			return
 		}
 		d.backend.ApplyModel()
-		r.OK(nil)
+		// CreateTab switches to the new tab, so the globally focused pane is its
+		// root pane — returned so an automation client can drive the fresh pane
+		// (send_input / wait_for_output) without diffing pane.list.
+		res := TabCreateResult{Num: num}
+		if id, ok := d.session.FocusedPane(); ok {
+			res.Pane = uint32(id)
+		}
+		r.OK(res)
 
 	case CmdTabClose:
 		var p OptTabParams
@@ -638,7 +651,14 @@ func (d *Dispatcher) Dispatch(name string, dec ParamDecoder, r Responder) {
 		r.OK(TabListResult{Workspace: resolved, Tabs: tabs})
 
 	case CmdPaneList:
-		r.OK(PaneListResult{Panes: d.session.ListPanes()})
+		panes := d.session.ListPanes()
+		// Merge in the runtime-side metadata (agent/title/cwd) the session can't
+		// know; the backend answers from its per-pane runtime cache, so this is
+		// loop-local and cheap even for many panes.
+		for i := range panes {
+			panes[i].PaneMeta = d.backend.PaneMeta(panes[i].Pane)
+		}
+		r.OK(PaneListResult{Panes: panes})
 
 	case CmdPaneGet:
 		var p OptPaneParams
@@ -651,6 +671,7 @@ func (d *Dispatcher) Dispatch(name string, dec ParamDecoder, r Responder) {
 			r.Fail("no such pane")
 			return
 		}
+		info.PaneMeta = d.backend.PaneMeta(info.Pane)
 		r.OK(info)
 
 	default:

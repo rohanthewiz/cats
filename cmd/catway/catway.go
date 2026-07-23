@@ -961,6 +961,24 @@ func (o *orch) SendInput(pane uint32, text string, submit bool) error {
 func (o *orch) PaneExists(pane uint32) bool { return o.panes[pane] != nil }
 func (o *orch) DaemonConnected() bool       { return o.daemon.connected() }
 
+// PaneMeta answers pane.list/pane.get's runtime-metadata merge from the pane's
+// cached runtime state — no daemon round trip. The agent pair comes from
+// effectiveAgent (the same hook-vs-detection arbitration the sidebar shows), so
+// a control-API client sees exactly what the browser chrome does. An unknown
+// pane returns the zero value; the dispatcher treats all-empty as a valid
+// answer.
+func (o *orch) PaneMeta(pane uint32) app.PaneMeta {
+	rt := o.panes[pane]
+	if rt == nil {
+		return app.PaneMeta{}
+	}
+	meta := app.PaneMeta{Title: rt.title, Cwd: rt.cwd}
+	if agent, state := rt.effectiveAgent(); agent != "" {
+		meta.Agent, meta.AgentState = agent, state
+	}
+	return meta
+}
+
 // ReloadConfig re-reads the config file and re-renders the served page so its
 // theme and copy-mode keybindings take effect on the next page load / browser
 // connection. Server settings (addr, sockets, auth, tls) are fixed for the

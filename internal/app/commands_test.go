@@ -44,6 +44,9 @@ type fakeBackend struct {
 	lastWtRemove Responder
 	lastWtRemP   WorktreeRemoveParams
 	lastCfgSetP  ConfigSetParams
+	// paneMeta is the canned per-pane metadata PaneMeta answers with (nil ⇒ all
+	// zero values), letting pane.list/pane.get tests assert the merge.
+	paneMeta map[uint32]PaneMeta
 }
 
 func (b *fakeBackend) rec(s string)                { *b.log = append(*b.log, s) }
@@ -53,6 +56,7 @@ func (b *fakeBackend) BroadcastLayout()            { b.rec("broadcastLayout") }
 func (b *fakeBackend) BroadcastPaneTitle(p uint32) { b.rec("title"); b.lastTitle = p }
 func (b *fakeBackend) PaneExists(uint32) bool      { return b.paneExists }
 func (b *fakeBackend) DaemonConnected() bool       { return b.daemonUp }
+func (b *fakeBackend) PaneMeta(p uint32) PaneMeta  { return b.paneMeta[p] }
 func (b *fakeBackend) ReloadConfig() error         { b.rec("reload"); return b.reloadErr }
 func (b *fakeBackend) Shutdown()                   { b.rec("shutdown") }
 
@@ -729,5 +733,55 @@ func TestDispatchUnknownCommand(t *testing.T) {
 
 	if !r.failCall || r.errMsg != `command "pane.teleport" not supported yet (WS2 in progress)` {
 		t.Fatalf("unknown command: fail=%v msg=%q", r.failCall, r.errMsg)
+	}
+}
+
+// tab.create returns the new tab's public number and its root pane id (the
+// globally focused pane after the switch), so an automation client can drive
+// the fresh pane without diffing pane.list.
+func TestDispatchTabCreateResult(t *testing.T) {
+	h := newCmdHarness(t)
+	r := h.resp()
+
+	h.d.Dispatch(CmdTabCreate, noParams(), r)
+
+	got := okData[TabCreateResult](t, r)
+	if lg := *h.log; len(lg) != 2 || lg[0] != "applyModel" || lg[1] != "ok" {
+		t.Fatalf("tab.create effects = %v, want [applyModel ok]", lg)
+	}
+	if got.Num != 2 {
+		t.Fatalf("new tab num = %d, want 2", got.Num)
+	}
+	focused, ok := h.s.FocusedPane()
+	if !ok || got.Pane != uint32(focused) {
+		t.Fatalf("root pane = %d, want the focused pane %d", got.Pane, focused)
+	}
+	// The focused pane must be the newly created one, not the original root —
+	// the whole point of returning it.
+	if len(h.s.AllPaneIDs()) != 2 {
+		t.Fatalf("pane count = %d, want 2", len(h.s.AllPaneIDs()))
+	}
+}
+
+// pane.list and pane.get merge the backend's runtime metadata (agent/title/cwd)
+// into each PaneInfo; panes the backend knows nothing about stay zero-valued.
+func TestDispatchPaneMetaMerge(t *testing.T) {
+	h := newCmdHarness(t)
+	focused, _ := h.s.FocusedPane()
+	meta := PaneMeta{Agent: "claude", AgentState: "working", Title: "vim", Cwd: "/tmp/x"}
+	h.b.paneMeta = map[uint32]PaneMeta{uint32(focused): meta}
+
+	r := h.resp()
+	h.d.Dispatch(CmdPaneList, noParams(), r)
+	list := okData[PaneListResult](t, r)
+	if len(list.Panes) != 1 || list.Panes[0].PaneMeta != meta {
+		t.Fatalf("pane.list meta = %+v, want %+v", list.Panes, meta)
+	}
+
+	r = h.resp()
+	h.d.Dispatch(CmdPaneGet, noParams(), r)
+	info := okData[PaneInfo](t, r)
+	if info.PaneMeta != meta {
+		t.Fatalf("pane.get meta = %+v, want %+v", info.PaneMeta, meta)
 	}
 }

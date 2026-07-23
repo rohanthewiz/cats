@@ -448,12 +448,41 @@ type TabListResult struct {
 // used to address the pane in every other command; Handle is its human public
 // label ("w1:p3"). Focused marks the pane focused within its own tab (each tab
 // has one); Visible marks the panes in the current viewport.
+//
+// The session knows only the first five fields; the trailing PaneMeta block is
+// runtime-side state (detected agent, live title/cwd) filled in by the
+// dispatcher from Backend.PaneMeta, so automation clients (e.g. cats-todo's
+// drop-target picker) can find agent panes and show where they live without a
+// second protocol.
 type PaneInfo struct {
 	Pane    uint32 `json:"pane"`
 	Handle  string `json:"handle,omitempty"`
 	Name    string `json:"name,omitempty"` // custom name; empty if auto-named
 	Focused bool   `json:"focused"`
 	Visible bool   `json:"visible"`
+	PaneMeta
+}
+
+// PaneMeta is the runtime-side metadata for one pane, supplied by the Backend
+// (the session cannot know it): the arbitrated agent identity the sidebar shows
+// (hook authority first, daemon detection second), the pane's live title, and
+// its current working directory. All fields may be empty — an unknown pane, no
+// agent detected, or a title/cwd not yet reported.
+type PaneMeta struct {
+	Agent      string `json:"agent,omitempty"`       // detected agent label ("claude", "codex", …)
+	AgentState string `json:"agent_state,omitempty"` // agent activity state ("working", "idle", …); only when Agent is set
+	Title      string `json:"title,omitempty"`       // live terminal title
+	Cwd        string `json:"cwd,omitempty"`         // live working directory
+}
+
+// TabCreateResult is CmdResult.Data for tab.create: the new tab's public number
+// and its root pane's id. CreateTab focuses the new tab (and its sole pane), so
+// an automation client can chain straight into pane.send_input / wait_for_output
+// on Pane without a follow-up query — the reason this command returns data at
+// all (the browser UI ignores it).
+type TabCreateResult struct {
+	Num  int    `json:"num"`
+	Pane uint32 `json:"pane"`
 }
 
 // PaneListResult is CmdResult.Data for pane.list.

@@ -10,7 +10,9 @@ GHOSTTY  := PKG_CONFIG_PATH=$(PC_DIR)
 TAGS     := -tags ghostty
 
 # The shipped binaries. The other cmd/ entries are development spikes.
-BINS     := catway cathost catctl
+# cats-todo is untagged (a pure control-socket client) but rides the same
+# ghostty-tagged build line harmlessly — no CGO package is in its import graph.
+BINS     := catway cathost catctl cats-todo
 VERSION  := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 GOOS     := $(shell go env GOOS)
 GOARCH   := $(shell go env GOARCH)
@@ -56,7 +58,7 @@ binaries:
 # The map is "cmd:alias" pairs — edit here to rename or add targets. Splitting
 # on ':' keeps the source dir (./cmd/$(cmd)) decoupled from the installed name.
 LOCAL_BIN := $(HOME)/bin
-LOCAL_MAP := catway:hway cathost:thost catctl:hctl
+LOCAL_MAP := catway:hway cathost:thost catctl:hctl cats-todo:cats-todo
 
 local:
 	@mkdir -p $(LOCAL_BIN)
@@ -68,7 +70,7 @@ local:
 
 dist: binaries
 	@mkdir -p $(DIST)
-	cp bin/catway bin/cathost bin/catctl $(DIST)/
+	cp bin/catway bin/cathost bin/catctl bin/cats-todo $(DIST)/
 	cp config.example.yaml README.md $(DIST)/
 	tar -czf $(DIST).tar.gz -C dist $(notdir $(DIST))
 	@echo "==> $(DIST).tar.gz"

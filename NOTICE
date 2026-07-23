@@ -1,0 +1,10 @@
+cats
+Copyright (c) 2026 Rohan Allison
+
+The cmd/cats-todo tool is ported from herdr-todo
+(https://github.com/rohanthewiz/herdr-todo), Copyright (c) 2026 Rohan
+Allison, MIT License, which itself includes code adapted from herdr-plus
+(https://github.com/cloudmanic/herdr-plus), Copyright (c) 2026 Cloudmanic
+Labs, LLC, used under the MIT License. Specifically, the host socket client,
+the run-context plumbing, and the fuzzy-list TUI component derive from
+herdr-plus.
