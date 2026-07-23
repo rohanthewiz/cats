@@ -7,7 +7,10 @@
 <style>
   :root {
     --bg:#181818; --fg:#d4d4d4; --accent:#5b9dff; --panel:#141414; --panel2:#1d1d1d;
-    --line:#2a2a2a; --muted:#8a8a8a; --chrome:#202430; --chrome-focus:#26314a;
+    /* --muted carries every secondary label (sidebar headings, status bar,
+       hints). It was #8a8a8a, which sits under 5:1 on the panel surface and
+       read as noise at 10–12px; this is the same hue, lifted to ~7:1. */
+    --line:#2a2a2a; --muted:#9aa4b2; --chrome:#202430; --chrome-focus:#26314a;
     --ok:#6ac47a; --warn:#e2b64e; --err:#ff6b6b; --done:#4fd1c5;
   }
   html,body { margin:0; height:100%; background:var(--bg); color:var(--fg);
@@ -69,27 +72,36 @@
   .pane { position:absolute; box-sizing:border-box; }
   .pane.dragging { opacity:.5; }
   .pane.droptarget { outline:2px solid var(--accent); outline-offset:-2px; }
+  /* Pane chrome = the per-pane toolbar. It is exactly one terminal row tall
+     (the server reserves chromeRows in each pane's inner rect), so the icon
+     buttons buy glyph size by giving up vertical padding: 17px symbols with
+     line-height 1 and no top/bottom padding stay clear of the strip's
+     overflow:hidden clip at a ~19px row, while synthetic bold thickens the
+     hairline box-drawing symbols (⊟ ⊞ ⤢ ⬚ ⧉) that were the hardest to read. */
   .pane .chrome { position:absolute; left:0; top:0; right:0; overflow:hidden; display:flex;
-    align-items:center; gap:0; font-size:11px; color:#9a9a9a; background:var(--chrome);
-    padding:0 4px 0 8px; box-sizing:border-box; }
-  .pane.focused .chrome { color:#e8e8e8; background:var(--chrome-focus); }
+    align-items:center; gap:0; font-size:12px; color:#b4bac6; background:var(--chrome);
+    padding:0 5px 0 9px; box-sizing:border-box; }
+  .pane.focused .chrome { color:#f0f2f7; background:var(--chrome-focus); }
   .pane .chrome .info { flex:1; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
   .pane .chrome .info .pub { color:var(--accent); }
   .pane .chrome .info .agent { color:var(--warn); }
   .pane .chrome .info .exited { color:var(--err); }
-  .pane .chrome .ctl { display:flex; gap:2px; flex:none; }
-  .pane .chrome .ctl button { background:none; border:none; color:#9a9a9a; cursor:pointer;
-    font-size:16px; line-height:1; padding:3px 5px; border-radius:3px; font-family:inherit; }
-  .pane .chrome .ctl button:hover { background:rgba(255,255,255,.12); color:#fff; }
+  .pane .chrome .ctl { display:flex; gap:1px; flex:none; }
+  .pane .chrome .ctl button { background:none; border:none; color:#c2c9d8; cursor:pointer;
+    font-size:17px; font-weight:600; line-height:1; padding:0 6px; border-radius:3px;
+    font-family:inherit; }
+  .pane .chrome .ctl button:hover { background:rgba(255,255,255,.2); color:#fff; }
+  .pane.focused .chrome .ctl button { color:#dfe5f0; }
   .pane .chrome .ctl button.close:hover { background:var(--err); color:#fff; }
   .pane canvas { position:absolute; display:block; }
   .pane.focused canvas { outline:1px solid var(--accent); outline-offset:-1px; }
 
-  /* ---- Status bar ---- */
-  #statusbar { display:flex; align-items:center; gap:14px; padding:0 12px; font-size:11px;
+  /* ---- Status bar ----
+     Connection state and the window grid size used to live here; they moved
+     into the pane hover card (see #panetip) and, for failures, the banner —
+     the bar is now only modes and affordances, at readable contrast. */
+  #statusbar { display:flex; align-items:center; gap:14px; padding:0 12px; font-size:12px;
     color:var(--muted); background:var(--panel); border-top:1px solid var(--line); }
-  #statusbar .err { color:var(--err); }
-  #statusbar #conn.ok { color:var(--ok); }
 
   /* ---- Toasts ---- */
   #toasts { position:fixed; right:10px; top:38px; display:flex; flex-direction:column; gap:6px; z-index:6; }
@@ -150,6 +162,8 @@
   #panetip .v.pub { color:var(--accent); }
   #panetip .v.mono { font-family:inherit; }
   #panetip .v.exited { color:var(--err); }
+  #panetip .v.ok { color:var(--ok); }
+  #panetip .v.err { color:var(--err); }
 
   /* ---- Palette / navigator (WS8) ---- */
   .modal.pal { width:520px; margin-top:9vh; }
@@ -180,6 +194,9 @@
   #banner.show { display:flex; }
   #banner .x { margin-left:auto; cursor:pointer; color:var(--muted); }
   #banner .x:hover { color:var(--err); }
+  /* Link failures took over the banner when the status bar's conn label went
+     away — red border/text so a dropped socket still announces itself. */
+  #banner.linkerr { background:#2a1c1c; border-bottom-color:var(--err); color:#ffd7d7; }
 
   /* ---- Status bar extras (WS8) ---- */
   #mode { color:var(--warn); font-weight:600; }
@@ -187,7 +204,7 @@
   #zoomind { color:var(--accent); cursor:pointer; display:none; }
   #palhint { margin-left:auto; color:var(--muted); cursor:pointer; }
   #palhint:hover { color:var(--accent); }
-  #gear { cursor:pointer; font-size:13px; position:relative; }
+  #gear { cursor:pointer; font-size:16px; position:relative; }
   #gear:hover { color:var(--accent); }
   #gear.badge::after { content:""; position:absolute; top:-1px; right:-4px; width:6px; height:6px;
     border-radius:50%; background:var(--accent); }
@@ -225,8 +242,6 @@
     <div id="tabbar"></div>
     <div id="panes"></div>
     <div id="statusbar">
-      <span id="conn">connecting…</span>
-      <span id="grid"></span>
       <span id="mode"></span>
       <span id="modehint"></span>
       <span id="zoomind" title="zoomed — click to unzoom">ZOOM ⤢</span>
@@ -245,8 +260,6 @@
   const paneListEl = document.getElementById("pane-list");
   const agentListEl = document.getElementById("agent-list");
   const tabbarEl = document.getElementById("tabbar");
-  const connEl = document.getElementById("conn");
-  const gridEl = document.getElementById("grid");
   const toastsEl = document.getElementById("toasts");
   const modeEl = document.getElementById("mode");
   const modeHintEl = document.getElementById("modehint");
@@ -319,6 +332,7 @@
     panesEl.appendChild(el);
     const p = { id, el, chrome, chromeInfo: info, canvas, ctx: canvas.getContext("2d", { alpha: false }),
       pub: "", info: null, W: 0, H: 0, cells: [], links: [], cur: null,
+      gs: 1, ox: 0, oy: 0,   // grid inset: scale + centring offsets (setInset)
       defFg: THEME_FG, defBg: THEME_BG, modes: { mouse: false, alt: false },
       title: "", cwd: "", agent: "", agentState: "", exited: null,
       pressed: -1, lastCell: "", dirty: false, scroll: null, sel: null, cm: null };
@@ -367,7 +381,9 @@
       p.canvas.style.height = (ih * cellH) + "px";
       p.canvas.width = Math.floor(iw * cellW * dpr);
       p.canvas.height = Math.floor(ih * cellH * dpr);
-      p.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      // Sizing the canvas resets its context (transform included), so the
+      // padded transform is (re)installed per frame in draw() — see setInset.
+      setInset(p, iw * cellW, ih * cellH);
       renderChrome(p);
       scheduleDraw(p);
     }
@@ -383,6 +399,44 @@
     renderBorders(msg);
     renderStatusExtras(msg);
   }
+
+  // ---- Pane text inset ------------------------------------------------------
+  //
+  // Panes tile the cell grid exactly (the server's rects leave no gutter), so a
+  // pane's canvas is precisely inner-cols × inner-rows of glyph boxes and text
+  // lands flush against the pane edge. Rather than shrink the canvas — which
+  // would clip the last column/row — the canvas keeps the full inner rect and
+  // the *grid inside it* is drawn a hair smaller and centred, turning the
+  // leftover pixels into a margin on all four sides:
+  //
+  //   ┌─ canvas = iw*cellW × ih*cellH ─────────┐
+  //   │  ox                                    │   ox = boxW*(1-s)/2 ≥ PAD_X
+  //   │ ┌─ grid, uniformly scaled by s ──────┐ │   oy = boxH*(1-s)/2 ≥ PAD_Y
+  //   │ │ $ text no longer touches the edge  │ │
+  //   │ └────────────────────────────────────┘ │
+  //   └────────────────────────────────────────┘
+  //
+  // The scale is uniform so glyph aspect ratio — and, critically, the way
+  // box-drawing characters butt against their neighbours — is preserved; cells
+  // stay contiguous because every coordinate scales together. s lands near 0.98
+  // for ordinary panes (a sub-pixel type-size change) and is floored so a very
+  // small pane loses padding rather than legibility. Drawing happens at full
+  // device resolution, so nothing is resampled: only the glyph em size changes.
+  const PAD_X = 6, PAD_Y = 4; // px of breathing room per side, best effort
+  const MIN_INSET_SCALE = 0.92;
+  function setInset(p, boxW, boxH) {
+    const s = Math.max(MIN_INSET_SCALE,
+      Math.min(1, boxW > 0 ? 1 - (2 * PAD_X) / boxW : 1, boxH > 0 ? 1 - (2 * PAD_Y) / boxH : 1));
+    p.gs = s;
+    p.ox = (boxW * (1 - s)) / 2;
+    p.oy = (boxH * (1 - s)) / 2;
+  }
+
+  // Canvas CSS px → grid user-space px (the coordinate system draw() renders
+  // in). Every hit test goes through these so the inset stays invisible to the
+  // rest of the code.
+  function userX(p, clientX) { return (clientX - p.canvas.getBoundingClientRect().left - (p.ox || 0)) / (p.gs || 1); }
+  function userY(p, clientY) { return (clientY - p.canvas.getBoundingClientRect().top - (p.oy || 0)) / (p.gs || 1); }
 
   // ---- Split resize handles (WS8): draggable borders → pane.resize_border ----
   // Each border div covers a thin halo around the split line; dragging maps the
@@ -594,6 +648,13 @@
       if (p.exited !== null && p.exited !== undefined) row("Exited", "code " + p.exited, "exited");
     }
     row("Focus", pr.focused ? "focused" : "");
+    // Geometry + link state, relocated here from the status bar: the pane's own
+    // terminal grid (from its last frame, falling back to the layout's inner
+    // rect before the first frame lands) and then the window grid it sits in.
+    const gw = (p && p.W) || pr.inner[2], gh = (p && p.H) || pr.inner[3];
+    if (gw && gh) row("Size", gw + "×" + gh + " cells");
+    if (cols && rows) row("Window", cols + "×" + rows + " cells");
+    row("Link", connState.text, connState.err ? "err" : "ok");
     // Position the popup to the right of the cursor, clamped into the viewport
     // (measured after making it visible so its size is known).
     paneTipEl.classList.add("show");
@@ -791,8 +852,15 @@
   function draw(p) {
     const ctx = p.ctx;
     const defFg = p.defFg || THEME_FG, defBg = p.defBg || THEME_BG;
+    // Two passes over the transform: paint the whole canvas (padding included)
+    // in the terminal's own background so the inset reads as terminal margin
+    // rather than a hole, then switch to the inset grid space everything else
+    // draws in. Re-installed every frame because a canvas resize clears it.
+    const s = p.gs || 1;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.fillStyle = css(defBg);
-    ctx.fillRect(0, 0, p.W * cellW + cellW, p.H * cellH + cellH);
+    ctx.fillRect(0, 0, p.canvas.width / dpr, p.canvas.height / dpr);
+    ctx.setTransform(dpr * s, 0, 0, dpr * s, (p.ox || 0) * dpr, (p.oy || 0) * dpr);
     ctx.textBaseline = "top";
     for (let y = 0; y < p.H; y++) {
       for (let x = 0; x < p.W; x++) {
@@ -999,9 +1067,10 @@
 
   // ---- Mouse (structured cell coords; server applies the pane's encoding) ----
   function cellOf(p, ev) {
-    const r = p.canvas.getBoundingClientRect();
-    const x = Math.min(Math.max(0, Math.floor((ev.clientX - r.left) / cellW)), Math.max(0, p.W - 1));
-    const y = Math.min(Math.max(0, Math.floor((ev.clientY - r.top) / cellH)), Math.max(0, p.H - 1));
+    // userX/userY undo the pane's text inset first, so a click in the margin
+    // clamps to the nearest edge cell (what the user visually intends).
+    const x = Math.min(Math.max(0, Math.floor(userX(p, ev.clientX) / cellW)), Math.max(0, p.W - 1));
+    const y = Math.min(Math.max(0, Math.floor(userY(p, ev.clientY) / cellH)), Math.max(0, p.H - 1));
     return [x, y];
   }
 
@@ -1183,13 +1252,12 @@
       requestAnimationFrame(() => {
         queued = false;
         if (!hasScrollbar(p)) return;
-        const r = p.canvas.getBoundingClientRect();
         const vh = p.H * cellH;
         const total = p.scroll.max + p.scroll.rows;
         const h = Math.max(20, vh * p.scroll.rows / total);
         const span = vh - h;
         if (span <= 0) return;
-        const frac = Math.min(1, Math.max(0, (ev.clientY - r.top - h / 2) / span));
+        const frac = Math.min(1, Math.max(0, (userY(p, ev.clientY) - h / 2) / span));
         const target = Math.round(p.scroll.max * (1 - frac));
         const delta = p.scroll.off - target; // positive = toward the live bottom
         if (delta) sendCmd("scroll", { pane: p.id, delta });
@@ -1210,8 +1278,8 @@
       if (p.info && !p.info.focused) sendCmd("pane.focus", { pane: p.id });
       // The scrollbar strip owns left-drags whenever it is drawn.
       if (ev.button === 0 && hasScrollbar(p)) {
-        const r = p.canvas.getBoundingClientRect();
-        if (ev.clientX - r.left >= p.W * cellW - SB_W - 2) {
+        // The strip is drawn in grid space (drawScrollbar), so compare there.
+        if (userX(p, ev.clientX) >= p.W * cellW - SB_W - 2) {
           ev.preventDefault();
           beginScrollDrag(p, ev);
           return;
@@ -1269,7 +1337,7 @@
     p.canvas.addEventListener("wheel", (ev) => {
       ev.preventDefault();
       const lines = ev.deltaMode === 1 ? Math.round(ev.deltaY)
-        : Math.sign(ev.deltaY) * Math.max(1, Math.round(Math.abs(ev.deltaY) / cellH));
+        : Math.sign(ev.deltaY) * Math.max(1, Math.round(Math.abs(ev.deltaY) / (cellH * (p.gs || 1))));
       if (!lines) return;
       if (p.modes.mouse || p.modes.alt) sendMouse(p, "w", 3, ev, 0, lines);
       else {
@@ -2077,20 +2145,32 @@
     showBanner("cats update ready" + (updateInfo.version ? " — " + updateInfo.version : "") +
       (updateInfo.command ? " · run: " + updateInfo.command : ""));
   }
-  function showBanner(text) {
+  // showBanner(text, kind): kind is an optional extra class ("linkerr") that
+  // recolors the strip; dismissing always clears both so the next banner starts
+  // from the default look.
+  function showBanner(text, kind) {
     bannerEl.innerHTML = "";
     const t = document.createElement("span"); t.textContent = text;
     const x = document.createElement("span"); x.className = "x"; x.textContent = "✕"; x.title = "dismiss";
-    x.addEventListener("click", () => bannerEl.classList.remove("show"));
+    x.addEventListener("click", () => bannerEl.classList.remove("show", "linkerr"));
     bannerEl.appendChild(t); bannerEl.appendChild(x);
+    bannerEl.classList.toggle("linkerr", kind === "linkerr");
     bannerEl.classList.add("show");
   }
 
   // ---- Status & toasts ----
+  // The status bar no longer carries a connection label: link state is a field
+  // on the pane hover card (showPaneTip) — read only when you go looking — and
+  // failures escalate to the banner, which is unmissable. connState is the
+  // single source both read, so a hover card opened mid-outage is accurate.
+  let connState = { text: "connecting…", err: false };
   function setStatus(t, err) {
-    connEl.textContent = t;
-    connEl.className = err ? "err" : (t.startsWith("connected") ? "ok" : "");
-    gridEl.textContent = cols && rows ? `${cols}×${rows}` : "";
+    connState = { text: t, err: !!err };
+    if (err) {
+      showBanner(t, "linkerr");
+    } else if (bannerEl.classList.contains("linkerr")) {
+      bannerEl.classList.remove("show", "linkerr"); // link recovered → drop the alarm
+    }
   }
   function toast(text) {
     const el = document.createElement("div");
@@ -2158,7 +2238,8 @@
     resizeTimer = setTimeout(() => {
       gridSize();
       sendMsg({ t: "resize", cols, rows });
-      setStatus("connected");
+      // (No status refresh here any more — the window grid size is reported by
+      // the pane hover card, which reads cols/rows live when it opens.)
     }, 120);
   });
 
