@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 )
@@ -16,8 +15,9 @@ import (
 // addFromCLI implements `cats-todo add [-g] [-t title] [prompt...]`. The prompt
 // is the remaining arguments joined by spaces; with none it is read from a piped
 // stdin. The default target is the project backlog rooted at the nearest
-// .cats-todo (or .git) directory above the current directory; -g targets the
-// global backlog instead.
+// .cats-todo (or .git) directory above the current directory — the same root the
+// manager TUI resolves, so both entry points reach one backlog per project; -g
+// targets the global backlog instead.
 func addFromCLI(args []string) {
 	fs := flag.NewFlagSet("cats-todo add", flag.ExitOnError)
 	global := fs.Bool("g", false, "add to the global backlog instead of the project's")
@@ -77,32 +77,4 @@ func readPipedStdin() string {
 		return ""
 	}
 	return string(data)
-}
-
-// findProjectRoot walks up from dir to the project root for a CLI add: the
-// nearest directory with an existing .cats-todo backlog wins, then the nearest
-// with a .git directory (the repo root). With neither, dir itself is the root —
-// matching how the manager scopes todos to the directory it launched from.
-func findProjectRoot(dir string) string {
-	for d := dir; ; {
-		if fi, err := os.Stat(filepath.Join(d, projectConfigDirName)); err == nil && fi.IsDir() {
-			return d
-		}
-		parent := filepath.Dir(d)
-		if parent == d {
-			break
-		}
-		d = parent
-	}
-	for d := dir; ; {
-		if _, err := os.Stat(filepath.Join(d, ".git")); err == nil {
-			return d
-		}
-		parent := filepath.Dir(d)
-		if parent == d {
-			break
-		}
-		d = parent
-	}
-	return dir
 }

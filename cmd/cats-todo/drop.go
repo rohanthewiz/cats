@@ -30,7 +30,9 @@ func performDrop(client *catsClient, act pendingAction) error {
 }
 
 // dropIntoNewSession opens a fresh tab (in the active workspace — the one the
-// manager pane lives in), launches the target's agent (claude by default),
+// manager pane lives in, rooted at the manager's own working directory so the
+// agent sees the same project the todo was scoped to), launches the target's
+// agent (claude by default),
 // waits for its input UI, and delivers the prompt as typed input. Run mode adds
 // a real Enter so the agent starts working; paste mode stops short so the user
 // can review and edit. One delivery path for both modes — and for any agent —
@@ -47,7 +49,7 @@ func dropIntoNewSession(client *catsClient, act pendingAction, prompt string) er
 		label = command + ": " + truncate(t, 18)
 	}
 
-	num, pane, err := client.tabCreate()
+	num, pane, err := client.tabCreate(act.cwd)
 	if err != nil {
 		return err
 	}

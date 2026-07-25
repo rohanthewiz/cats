@@ -139,9 +139,19 @@ func (c *catsClient) waitForOutput(pane uint32, pattern string, regex bool, time
 // tabCreate opens a new tab in the active workspace, returning the new tab's
 // public number and its root pane's id. The server focuses the new tab, so the
 // returned pane is immediately drivable.
-func (c *catsClient) tabCreate() (num int, pane uint32, err error) {
+//
+// cwd roots the new tab's shell. Passing it matters because the workspace's
+// identity cwd — what tab.create defaults to — is not necessarily the project
+// the dropped todo belongs to; an agent launched in the wrong directory reads
+// the wrong repo. An empty cwd sends no params at all, preserving the historical
+// wire shape (and the server's default) for callers with no directory to pin.
+func (c *catsClient) tabCreate(cwd string) (num int, pane uint32, err error) {
+	var params any // nil, not an empty struct: keeps the no-params request shape
+	if cwd != "" {
+		params = app.TabCreateParams{Cwd: cwd}
+	}
 	var out app.TabCreateResult
-	if err = c.call(app.CmdTabCreate, nil, &out, callTimeout); err != nil {
+	if err = c.call(app.CmdTabCreate, params, &out, callTimeout); err != nil {
 		return 0, 0, err
 	}
 	return out.Num, out.Pane, nil

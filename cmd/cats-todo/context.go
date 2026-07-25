@@ -12,6 +12,7 @@ package main
 
 import (
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -20,26 +21,78 @@ import (
 )
 
 // RunContext describes where cats-todo is running: the pane's working directory
-// (which scopes project todos and roots any new session's tab), the pane's own
-// handle (so the drop-target picker can exclude the manager's pane), and the
-// workspace it lives in (so the picker can mark same-project sessions).
+// and the project root above it (which scopes project todos and roots any new
+// session's tab), the pane's own handle (so the drop-target picker can exclude
+// the manager's pane), and the workspace it lives in (so the picker can mark
+// same-project sessions).
 type RunContext struct {
-	WorkDir        string
+	WorkDir string
+	// ProjectRoot is the directory that owns the project backlog: WorkDir or an
+	// ancestor of it (see findProjectRoot). Kept separate from WorkDir so the
+	// pane's actual location stays available, and so a context built without a
+	// root — the tests, and any caller that only knows a directory — still
+	// scopes sensibly via projectDir.
+	ProjectRoot    string
 	OwnPane        string // CATS_PANE_ID handle: "w1:p3", or the "p_<id>" fallback
 	WorkspaceID    string // public workspace id ("w1")
 	WorkspaceLabel string
 }
 
+// projectDir is the directory that scopes project todos and roots a new
+// session's tab: the resolved project root, falling back to the raw working
+// directory when no root was resolved. Empty when neither is known — launched
+// somewhere we could not even name, where only the global backlog applies.
+func (c RunContext) projectDir() string {
+	return firstNonEmpty(c.ProjectRoot, c.WorkDir)
+}
+
+// findProjectRoot walks up from dir to the directory that owns the project
+// backlog: the nearest ancestor with an existing .cats-todo backlog wins, then
+// the nearest with a .git directory (the repo root). With neither, dir itself is
+// the root — a directory that is not in a repo and has no backlog yet gets its
+// own on first save.
+//
+// The existing-backlog pass runs to completion before the .git pass so an
+// established backlog always beats a repo root that merely encloses it — a repo
+// with a backlog in a subdirectory keeps using that subdirectory rather than
+// silently starting a second one at the root.
+func findProjectRoot(dir string) string {
+	for d := dir; ; {
+		if fi, err := os.Stat(filepath.Join(d, projectConfigDirName)); err == nil && fi.IsDir() {
+			return d
+		}
+		parent := filepath.Dir(d)
+		if parent == d {
+			break
+		}
+		d = parent
+	}
+	for d := dir; ; {
+		if _, err := os.Stat(filepath.Join(d, ".git")); err == nil {
+			return d
+		}
+		parent := filepath.Dir(d)
+		if parent == d {
+			break
+		}
+		d = parent
+	}
+	return dir
+}
+
 // gatherRunContext builds the launch context. The working directory always
-// resolves (it is this process's cwd); the pane handle comes from the
+// resolves (it is this process's cwd) and the project root is walked up from it,
+// so opening the manager from a subdirectory reaches the same backlog `cats-todo
+// add` writes to from that subdirectory; the pane handle comes from the
 // environment; the workspace resolves via the client — from the pane handle's
 // "w1" prefix when present, else the active workspace — and is left empty when
 // the control socket is unavailable (client nil). A partial context still runs:
-// project todos scope to the cwd regardless.
+// project todos scope to the resolved directory regardless.
 func gatherRunContext(client *catsClient) RunContext {
 	ctx := RunContext{OwnPane: os.Getenv(integration.CatsPaneIDEnvVar)}
 	if wd, err := os.Getwd(); err == nil {
 		ctx.WorkDir = wd
+		ctx.ProjectRoot = findProjectRoot(wd)
 	}
 
 	if ws, _, ok := strings.Cut(ctx.OwnPane, ":"); ok {

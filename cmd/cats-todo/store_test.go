@@ -424,6 +424,19 @@ func TestLoadStores(t *testing.T) {
 		}
 	})
 
+	t.Run("a resolved root outranks the workdir", func(t *testing.T) {
+		// The subdirectory launch: the manager runs in <root>/sub but must load
+		// the backlog at <root>, the same file `cats-todo add` writes there.
+		root := t.TempDir()
+		project, _, err := loadStores(RunContext{WorkDir: filepath.Join(root, "sub"), ProjectRoot: root})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if project.path != projectTodosPath(root) {
+			t.Errorf("project path = %q, want the project root's backlog %q", project.path, projectTodosPath(root))
+		}
+	})
+
 	t.Run("without a workdir is global-only", func(t *testing.T) {
 		project, global, err := loadStores(RunContext{WorkDir: ""})
 		if err != nil {

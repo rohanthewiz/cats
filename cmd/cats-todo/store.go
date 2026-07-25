@@ -305,10 +305,11 @@ func (s *store) find(id string) (Todo, bool) {
 }
 
 // loadStores builds and loads the project and global stores for a launch
-// context. The project store is keyed off ctx.WorkDir; when that is empty (no
-// project) the project store is unavailable and only the global backlog shows.
+// context. The project store is keyed off ctx.projectDir(); when that is empty
+// (no project) the project store is unavailable and only the global backlog
+// shows.
 func loadStores(ctx RunContext) (project *store, global *store, err error) {
-	project = &store{scope: scopeProject, path: projectTodosPath(ctx.WorkDir)}
+	project = &store{scope: scopeProject, path: projectTodosPath(ctx.projectDir())}
 	if err = project.load(); err != nil {
 		return nil, nil, err
 	}

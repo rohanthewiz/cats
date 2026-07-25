@@ -112,6 +112,11 @@ cats-todo add fix the flaky reconnect  # quick-capture to the project backlog
 git log -p | cats-todo add -g -t huh   # capture piped stdin to the global backlog
 ```
 
+Both the manager and `add` scope the project backlog to the same place: the
+nearest ancestor holding a `.cats-todo/` directory, else the repo root, else the
+current directory — so it does not matter which subdirectory of a project you
+launch from. A drop into a fresh tab roots that tab there too.
+
 In the manager: `enter` opens the target picker, then `enter` pastes the
 prompt staged for review while `ctrl+r` submits it to run (and marks the todo
 done). Outside cats it still manages backlogs; only drops need the socket.

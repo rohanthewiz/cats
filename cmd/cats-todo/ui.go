@@ -83,6 +83,13 @@ type pendingAction struct {
 	todo   Todo
 	target dropTarget
 	mode   dropMode
+	// cwd roots a new-session drop's tab: the project directory the todo is
+	// scoped to, so the agent opens on the same tree the prompt was written
+	// about. Captured here at dispatch rather than read inside performDrop so the
+	// drop goroutine needs nothing from the model (which it does not own a
+	// reference to). Only targetNewSession uses it; a drop into an existing pane
+	// inherits that pane's directory.
+	cwd string
 }
 
 // dropResultMsg reports the outcome of an asynchronous drop back to the Update
@@ -696,7 +703,7 @@ func (m model) startDrop(ref todoRef) (tea.Model, tea.Cmd) {
 // pane.list's runtime metadata; the workspace a pane lives in is the "w1"
 // prefix of its handle, labeled via workspace.list.
 func (m model) buildTargets() ([]dropTarget, fuzzyList) {
-	wsLabel := firstNonEmpty(m.ctx.WorkspaceLabel, baseName(m.ctx.WorkDir), "the current workspace")
+	wsLabel := firstNonEmpty(m.ctx.WorkspaceLabel, baseName(m.ctx.projectDir()), "the current workspace")
 	targets := []dropTarget{{
 		kind:    targetNewSession,
 		command: "claude",
@@ -814,7 +821,7 @@ func (m model) chooseTarget(mode dropMode) (tea.Model, tea.Cmd) {
 	m.dropping = true
 	m.stage = stageList
 	m.setStatus("dropping into "+targetDesc(target)+"…", false)
-	return m, m.performDropCmd(m.dropTodo, pendingAction{todo: td, target: target, mode: mode})
+	return m, m.performDropCmd(m.dropTodo, pendingAction{todo: td, target: target, mode: mode, cwd: m.ctx.projectDir()})
 }
 
 // performDropCmd runs the chosen drop in a goroutine (a tea.Cmd) so cats's
@@ -929,7 +936,7 @@ func (m model) viewList() string {
 	b.WriteString(titleStyle.Render("📝 Cats Todo — prompt backlog"))
 	scopeNote := "global only"
 	if m.project.available() {
-		scopeNote = firstNonEmpty(m.ctx.WorkspaceLabel, baseName(m.ctx.WorkDir), "project") + " + global"
+		scopeNote = firstNonEmpty(m.ctx.WorkspaceLabel, baseName(m.ctx.projectDir()), "project") + " + global"
 	}
 	b.WriteString("  ")
 	b.WriteString(descStyle.Render(scopeNote))
