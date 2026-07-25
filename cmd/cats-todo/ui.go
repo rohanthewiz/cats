@@ -96,10 +96,9 @@ type pendingAction struct {
 // loop, so the manager can clear its "dropping…" state and show where the prompt
 // landed (or why it failed) while staying open.
 type dropResultMsg struct {
-	desc     string  // human description of the destination, for the status line
-	ref      todoRef // the dropped todo, so a successful run can auto-mark it done
-	markDone bool    // mark ref done on success (a "run" drop starts the work)
-	err      error
+	desc string  // human description of the destination, for the status line
+	ref  todoRef // the dropped todo, so a successful drop can auto-mark it done
+	err  error
 }
 
 // model is the Bubble Tea state for the whole manager: a small stage machine
@@ -176,15 +175,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		status := "dropped → " + msg.desc
-		// A "run" drop starts the work, so close the todo out automatically. A
-		// "paste" drop leaves it unsubmitted for the user to review, so it stays
-		// open. setDone is idempotent and best effort — a save failure shouldn't
-		// undo a successful drop, so we just skip the "marked done" note.
-		if msg.markDone {
-			if err := m.storeFor(msg.ref.scope).setDone(msg.ref.id, true); err == nil {
-				status += " · marked done"
-				m.rebuildList()
-			}
+		// Handing a prompt to an agent is what "done" means here, so any successful
+		// drop closes the todo out — paste drops included. The prompt now lives in
+		// the agent's input where the user can see it; leaving a duplicate open in
+		// the backlog only invites dropping the same work twice. Reopening is a
+		// single keystroke if the paste gets discarded.
+		//
+		// setDone is idempotent and best effort — a save failure shouldn't undo a
+		// successful drop, so we just skip the "marked done" note.
+		if err := m.storeFor(msg.ref.scope).setDone(msg.ref.id, true); err == nil {
+			status += " · marked done"
+			m.rebuildList()
 		}
 		m.setStatus(status, false)
 		return m, nil
@@ -340,7 +341,10 @@ func (m *model) rebuildList() {
 	add := func(s *store) {
 		appendTodo := func(t Todo) {
 			ref := todoRef{scope: s.scope, id: t.ID}
-			badge := "○"
+			// Both badges arrive at the list pre-styled — the renderer writes them
+			// verbatim — so the open marker has to opt into its own dimming rather
+			// than inheriting it.
+			badge := descStyle.Render("○")
 			if t.Done {
 				badge = checkStyle.Render("✓")
 			}
@@ -833,9 +837,8 @@ func (m model) chooseTarget(mode dropMode) (tea.Model, tea.Cmd) {
 func (m model) performDropCmd(ref todoRef, act pendingAction) tea.Cmd {
 	client := m.client
 	desc := targetDesc(act.target)
-	markDone := act.mode == dropRun
 	return func() tea.Msg {
-		return dropResultMsg{desc: desc, ref: ref, markDone: markDone, err: performDrop(client, act)}
+		return dropResultMsg{desc: desc, ref: ref, err: performDrop(client, act)}
 	}
 }
 

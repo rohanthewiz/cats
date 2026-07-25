@@ -22,9 +22,11 @@ var (
 	footerStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#4B5563"))
 	headingStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#9D7CD8")).Bold(true)
 
-	// Todo-specific accents.
+	// Todo-specific accents. checkStyle is deliberately unbolded: a completed
+	// todo should recede, so the green tick reads as a quiet marker rather than
+	// competing with the open rows above it for attention.
 	doneStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#4B5563")).Strikethrough(true)
-	checkStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#9ECE6A")).Bold(true)
+	checkStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#9ECE6A"))
 	errStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#F7768E"))
 	okStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#9ECE6A"))
 )

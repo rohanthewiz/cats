@@ -466,10 +466,10 @@ func TestChooseTargetStaysOpen(t *testing.T) {
 	}
 }
 
-// TestRunDropMarksTodoDone pins the auto-complete behavior: a successful "run"
-// drop carries markDone, and the dropResultMsg handler closes the todo out and
-// notes it in the status. A "paste" drop leaves the todo open.
-func TestRunDropMarksTodoDone(t *testing.T) {
+// TestDropMarksTodoDone pins the auto-complete behavior: the dropResultMsg
+// handler closes the dropped todo out and notes it in the status, for both drop
+// modes. Only a failed drop leaves the todo open.
+func TestDropMarksTodoDone(t *testing.T) {
 	t.Run("run drop marks done", func(t *testing.T) {
 		m, project, _ := newModelInTemp(t)
 		if err := project.add(Todo{ID: "r", Prompt: "run me"}); err != nil {
@@ -478,7 +478,7 @@ func TestRunDropMarksTodoDone(t *testing.T) {
 		m.rebuildList()
 
 		// A run drop reports success for an existing pane; mark it done.
-		res := dropResultMsg{desc: "claude", ref: todoRef{scope: scopeProject, id: "r"}, markDone: true}
+		res := dropResultMsg{desc: "claude", ref: todoRef{scope: scopeProject, id: "r"}}
 		next, _ := m.Update(res)
 		m = next.(model)
 
@@ -498,22 +498,25 @@ func TestRunDropMarksTodoDone(t *testing.T) {
 		}
 	})
 
-	t.Run("paste drop leaves it open", func(t *testing.T) {
+	// A paste drop delivers the prompt too (just unsubmitted), so it closes the
+	// todo out the same way — the backlog shouldn't hold a duplicate of work that
+	// is already sitting in an agent's input.
+	t.Run("paste drop marks done", func(t *testing.T) {
 		m, project, _ := newModelInTemp(t)
 		if err := project.add(Todo{ID: "p", Prompt: "paste me"}); err != nil {
 			t.Fatal(err)
 		}
 		m.rebuildList()
 
-		res := dropResultMsg{desc: "claude", ref: todoRef{scope: scopeProject, id: "p"}, markDone: false}
+		res := dropResultMsg{desc: "claude", ref: todoRef{scope: scopeProject, id: "p"}}
 		next, _ := m.Update(res)
 		m = next.(model)
 
-		if got, _ := project.find("p"); got.Done {
-			t.Error("a paste drop marked the todo done; it should stay open")
+		if got, _ := project.find("p"); !got.Done {
+			t.Error("a successful paste drop did not mark the todo done")
 		}
-		if strings.Contains(m.status, "marked done") {
-			t.Errorf("status = %q should not claim 'marked done' for a paste drop", m.status)
+		if !strings.Contains(m.status, "marked done") {
+			t.Errorf("status = %q, want it to note 'marked done'", m.status)
 		}
 	})
 
@@ -524,7 +527,7 @@ func TestRunDropMarksTodoDone(t *testing.T) {
 		}
 		m.rebuildList()
 
-		res := dropResultMsg{desc: "claude", ref: todoRef{scope: scopeProject, id: "f"}, markDone: true, err: errTestDrop}
+		res := dropResultMsg{desc: "claude", ref: todoRef{scope: scopeProject, id: "f"}, err: errTestDrop}
 		next, _ := m.Update(res)
 		m = next.(model)
 
@@ -537,16 +540,16 @@ func TestRunDropMarksTodoDone(t *testing.T) {
 	})
 }
 
-// TestChooseTargetRunMarksDone pins that a run drop carries markDone with the
-// dropped todo's ref through to the result, while a paste drop does not.
-func TestChooseTargetRunMarksDone(t *testing.T) {
+// TestChooseTargetCarriesRef pins that both drop modes carry the dropped todo's
+// ref through to the result — the handle the dropResultMsg handler needs to
+// auto-mark it done.
+func TestChooseTargetCarriesRef(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		mode dropMode
-		want bool
 	}{
-		{"run", dropRun, true},
-		{"paste", dropPaste, false},
+		{"run", dropRun},
+		{"paste", dropPaste},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			m, project, _ := newModelInTemp(t)
@@ -566,11 +569,8 @@ func TestChooseTargetRunMarksDone(t *testing.T) {
 			if !ok {
 				t.Fatalf("drop command returned %T, want dropResultMsg", cmd())
 			}
-			if res.markDone != tc.want {
-				t.Errorf("markDone = %v, want %v for a %s drop", res.markDone, tc.want, tc.name)
-			}
 			if res.ref != (todoRef{scope: scopeProject, id: "d"}) {
-				t.Errorf("ref = %+v, want the dropped todo's ref", res.ref)
+				t.Errorf("ref = %+v, want the dropped todo's ref for a %s drop", res.ref, tc.name)
 			}
 		})
 	}

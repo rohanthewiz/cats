@@ -19,8 +19,9 @@ import (
 // highlighted) plus an optional dimmer description, and carries ref — the
 // caller's identifier for the row. A row with selectable=false is a
 // non-selectable separator: with a name it renders as a dim group heading,
-// without one as a blank spacer. badge, when set, renders dim before the name
-// (used to mark done todos). strike renders the name struck-through (done).
+// without one as a blank spacer. badge, when set, is written pre-styled before
+// the name (used to mark done todos). strike renders the name struck-through
+// (done).
 type listItem struct {
 	name       string
 	desc       string
@@ -232,7 +233,11 @@ func (l fuzzyList) view(emptyMsg string) string {
 			b.WriteString("  ")
 		}
 		if it.badge != "" {
-			b.WriteString(descStyle.Render(it.badge + " "))
+			// Written verbatim: the badge is already styled by whoever built the
+			// item. Re-wrapping it here would nest ANSI sequences and let the outer
+			// style's reset clobber the inner one.
+			b.WriteString(it.badge)
+			b.WriteString(" ")
 		}
 		b.WriteString(highlightName(it.name, s.matched, selected, it.strike))
 		if it.desc != "" {
