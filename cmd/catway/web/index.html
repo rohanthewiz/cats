@@ -609,7 +609,7 @@
     }
     const add = document.createElement("li");
     add.className = "add"; add.textContent = "+ workspace"; add.title = "new workspace";
-    add.addEventListener("click", () => sendCmd("workspace.create", {}));
+    add.addEventListener("click", () => newWorkspace());
     wsListEl.appendChild(add);
   }
 
@@ -1480,6 +1480,19 @@
       onSubmit: (name) => sendCmd("tab.rename", { num: t.num, name }),
     });
   }
+  // newWorkspace: name the workspace up front instead of making the user create
+  // it and then rename it. Empty is a first-class answer — the server keeps
+  // auto-naming (the label follows the workspace's cwd) — so the dialog costs one
+  // Enter for anyone who doesn't care.
+  function newWorkspace() {
+    dialogInput({
+      title: "new workspace",
+      value: "",
+      hint: "enter creates · empty keeps auto-naming (the cwd's name) · esc cancels",
+      submitLabel: "create",
+      onSubmit: (name) => sendCmd("workspace.create", { name }),
+    });
+  }
   function renameWorkspace(w) {
     dialogInput({
       title: "rename workspace " + w.id,
@@ -1559,7 +1572,7 @@
   }
   function wsMenuItems(w) {
     return [
-      { label: "new workspace", fn: () => sendCmd("workspace.create", {}) },
+      { label: "new workspace…", fn: newWorkspace },
       { label: "rename workspace…", fn: () => renameWorkspace(w) },
       "-",
       { label: "new worktree…", fn: openNewWorktreeDialog },
@@ -1970,7 +1983,7 @@
     const f = focusedPaneId(), at = activeTab(), aw = activeWorkspace();
     const items = [
       { label: "new tab", fn: () => sendCmd("tab.create", {}) },
-      { label: "new workspace", fn: () => sendCmd("workspace.create", {}) },
+      { label: "new workspace", fn: newWorkspace },
       { label: "split left/right", fn: () => sendCmd("pane.split", { direction: "h" }) },
       { label: "split top/bottom", fn: () => sendCmd("pane.split", { direction: "v" }) },
       { label: "toggle zoom", fn: () => sendCmd("pane.zoom", {}) },

@@ -76,7 +76,7 @@ var subcommands = []subcommand{
 
 	// Workspace commands.
 	{"ws", app.CmdWorkspaceFocus, "ws <id>", "focus a workspace", buildWorkspace},
-	{"new-ws", app.CmdWorkspaceCreate, "new-ws", "create a workspace", noParams},
+	{"new-ws", app.CmdWorkspaceCreate, "new-ws [name...]", "create a workspace (auto-named when no name is given)", buildNewWorkspace},
 	{"close-ws", app.CmdWorkspaceClose, "close-ws [id]", "close a workspace (active by default)", buildOptWorkspace},
 	{"rename-ws", app.CmdWorkspaceRename, "rename-ws <id> <name...>", "rename a workspace (empty name clears)", buildRenameWorkspace},
 
@@ -397,6 +397,16 @@ func buildOptWorkspace(args []string) (json.RawMessage, error) {
 		return nil, nil
 	}
 	return marshal(app.WorkspaceParams{ID: args[0]})
+}
+
+// buildNewWorkspace: new-ws [name...]. The trailing words join into one name, so
+// `catctl new-ws api rewrite` needs no quoting (same convention as rename-ws).
+// No arguments sends no params at all, keeping the historical wire shape.
+func buildNewWorkspace(args []string) (json.RawMessage, error) {
+	if len(args) == 0 {
+		return nil, nil
+	}
+	return marshal(app.WorkspaceCreateParams{Name: strings.Join(args, " ")})
 }
 
 // buildRenameWorkspace: rename-ws <id> <name...>.

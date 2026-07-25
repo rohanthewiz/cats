@@ -111,6 +111,20 @@ func TestBuildRename(t *testing.T) {
 		app.RenameWorkspaceParams{ID: "w1", Name: "front end"})
 }
 
+// new-ws names the workspace when asked and stays a bare no-params command
+// otherwise (the shape a key binding sends).
+func TestBuildNewWorkspace(t *testing.T) {
+	sc, ok := lookupSubcommand("new-ws")
+	if !ok {
+		t.Fatal("no such verb new-ws")
+	}
+	raw, err := sc.build(nil)
+	if err != nil || raw != nil {
+		t.Errorf("new-ws with no args: want (nil, nil), got (%s, %v)", raw, err)
+	}
+	buildOK(t, "new-ws", []string{"api", "rewrite"}, app.WorkspaceCreateParams{Name: "api rewrite"})
+}
+
 // scroll / resize / read parse their numeric operands.
 func TestBuildNumeric(t *testing.T) {
 	buildOK(t, "scroll", []string{"1", "-10"}, app.ScrollParams{Pane: 1, Delta: -10})
@@ -178,7 +192,7 @@ func TestBuildTabs(t *testing.T) {
 
 // No-params verbs emit no params and reject any argument.
 func TestBuildNoParams(t *testing.T) {
-	for _, verb := range []string{"session", "panes", "workspaces", "last", "new-tab", "new-ws", "reload", "stop", "ping"} {
+	for _, verb := range []string{"session", "panes", "workspaces", "last", "new-tab", "reload", "stop", "ping"} {
 		sc, ok := lookupSubcommand(verb)
 		if !ok {
 			t.Fatalf("no such verb %q", verb)

@@ -831,6 +831,65 @@ func TestDispatchTabCreateResult(t *testing.T) {
 	}
 }
 
+// workspace.create names the new workspace when asked, and stays a no-params
+// command otherwise — the shape a key binding and `catctl new-ws` send. Both
+// forms return the new workspace's id.
+func TestDispatchWorkspaceCreate(t *testing.T) {
+	t.Run("named", func(t *testing.T) {
+		h := newCmdHarness(t)
+		r := h.resp()
+
+		h.d.Dispatch(CmdWorkspaceCreate, params(t, WorkspaceCreateParams{Name: "api rewrite"}), r)
+
+		got := okData[WorkspaceCreateResult](t, r)
+		if got.ID == "" {
+			t.Fatal("workspace.create returned no id")
+		}
+		// The rename must land before applyModel, so the workspace never reaches
+		// observers under its auto-name first.
+		if lg := *h.log; len(lg) != 2 || lg[0] != "applyModel" || lg[1] != "ok" {
+			t.Fatalf("workspace.create effects = %v, want [applyModel ok]", lg)
+		}
+		r = h.resp()
+		h.d.Dispatch(CmdWorkspaceList, noParams(), r)
+		for _, ws := range okData[WorkspaceListResult](t, r).Workspaces {
+			if ws.ID == got.ID && ws.Name != "api rewrite" {
+				t.Fatalf("new workspace name = %q, want the requested name", ws.Name)
+			}
+		}
+	})
+
+	t.Run("unnamed keeps auto-naming", func(t *testing.T) {
+		h := newCmdHarness(t)
+		before := okDataFor[WorkspaceListResult](t, h, CmdWorkspaceList)
+		r := h.resp()
+
+		h.d.Dispatch(CmdWorkspaceCreate, noParams(), r)
+
+		got := okData[WorkspaceCreateResult](t, r)
+		after := okDataFor[WorkspaceListResult](t, h, CmdWorkspaceList)
+		if len(after.Workspaces) != len(before.Workspaces)+1 {
+			t.Fatalf("workspace count = %d, want %d", len(after.Workspaces), len(before.Workspaces)+1)
+		}
+		for _, ws := range after.Workspaces {
+			// Auto-naming derives the label from the workspace's cwd; all that
+			// matters here is that the create did not leave it blank.
+			if ws.ID == got.ID && ws.Name == "" {
+				t.Fatal("unnamed workspace has no display name; auto-naming was lost")
+			}
+		}
+	})
+}
+
+// okDataFor dispatches a read-only query on a fresh responder and returns its
+// data — a one-liner for tests that only need a snapshot.
+func okDataFor[T any](t *testing.T, h cmdHarness, method string) T {
+	t.Helper()
+	r := h.resp()
+	h.d.Dispatch(method, noParams(), r)
+	return okData[T](t, r)
+}
+
 // tab.create's optional params pin the tab title and stage a spawn override for
 // the root pane — and the staging must precede applyModel, the call that
 // actually creates the pane's PTY.

@@ -519,12 +519,26 @@ func (d *Dispatcher) Dispatch(name string, dec ParamDecoder, r Responder) {
 		r.OK(nil)
 
 	case CmdWorkspaceCreate:
-		if _, err := d.session.CreateWorkspace(); err != nil {
+		var p WorkspaceCreateParams
+		if err := decodeOptional(dec, &p); err != nil {
+			bad(err)
+			return
+		}
+		id, err := d.session.CreateWorkspace()
+		if err != nil {
 			r.Fail(err.Error())
 			return
 		}
+		if p.Name != "" {
+			// Same session mutation as workspace.rename, applied before
+			// ApplyModel so the workspace reaches every observer already
+			// named — no create-then-rename flicker in the sidebar. The only
+			// way this fails is a vanished workspace, which cannot happen
+			// between these two lines, so the create still succeeds.
+			_ = d.session.RenameWorkspace(id, p.Name)
+		}
 		d.backend.ApplyModel()
-		r.OK(nil)
+		r.OK(WorkspaceCreateResult{ID: id})
 
 	case CmdWorkspaceClose:
 		var p WorkspaceParams

@@ -400,6 +400,24 @@ type WorkspaceParams struct {
 	ID string `json:"id"` // public workspace id, e.g. "w1"
 }
 
+// WorkspaceCreateParams: workspace.create. Every field is optional — the whole
+// params object may be absent, which is what a key binding or `catctl new-ws`
+// sends. Name pins the new workspace's label (what workspace.rename would set);
+// leaving it empty keeps auto-naming, where the label follows the workspace's
+// identity cwd.
+type WorkspaceCreateParams struct {
+	Name string `json:"name,omitempty"`
+}
+
+// WorkspaceCreateResult is CmdResult.Data for workspace.create: the new
+// workspace's public id. Returned for the same reason tab.create returns its
+// tab number — a scripted caller can address the workspace it just made without
+// diffing workspace.list. The browser UI ignores it (the layout broadcast that
+// follows already carries the new workspace).
+type WorkspaceCreateResult struct {
+	ID string `json:"id"`
+}
+
 // RenameWorkspaceParams: workspace.rename ("" reverts to auto-naming).
 type RenameWorkspaceParams struct {
 	ID   string `json:"id"`
