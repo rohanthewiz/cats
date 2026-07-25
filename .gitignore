@@ -27,6 +27,9 @@
 # Claude Code personal settings (shared settings.json is committed)
 .claude/settings.local.json
 
+# Local-only notes / session docs (never committed)
+/ai_docs/local_only/
+
 # Python
 __pycache__/
 
