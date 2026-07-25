@@ -131,10 +131,21 @@ answers with resolved argv).
 
 The web UI has the same surface: gear menu → **plugins** (also in the ⌘K
 palette) lists installed plugins with run / update / uninstall per row and an
-install prompt. Uninstall resolves over the §7 `plugin.list`/`plugin.uninstall`
-commands; install and update spawn `catctl plugin …` in a fresh tab so the
-git + build output streams live in a pane (the server resolves the catctl
+**add…** prompt. Uninstall resolves over the §7 `plugin.list`/`plugin.uninstall`
+commands; install, link and rebuild spawn `catctl plugin …` in a fresh tab so
+the git + build output streams live in a pane (the server resolves the catctl
 path — override with `CATS_CATCTL` if it lives somewhere unusual).
+
+Local checkouts go through the same **add…** prompt: a source shaped like a
+path (`./dir`, `../dir`, `~/dir`, `/dir`) links it in place instead of cloning,
+matching `catctl plugin link`. A relative path resolves against the **focused
+pane's cwd** — so with a pane sitting in the cats repo, `./cmd/cats-todo` links
+the bundled todo plugin, and `../cats/cmd/cats-todo` works from a sibling
+checkout. The leading `./` matters: a bare `cmd/cats-todo` is two segments, the
+`owner/repo` GitHub shorthand. Linked rows show their checkout path, and swap `update`
+(which has no remote to pull from) for **rebuild**, a re-link that re-runs the
+manifest's build steps to pick up local edits; **unlink** removes only the
+link, never the checkout.
 
 ```bash
 catctl plugin install rohanthewiz/some-plugin   # clone from GitHub + build

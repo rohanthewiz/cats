@@ -181,6 +181,10 @@
      affordances are the per-row action buttons (run / update / uninstall) —
      smaller than the footer .btns so a row stays one compact line. */
   .modal.plugins .row { cursor:default; }
+  /* The linked-checkout path. Shrinks before the label does (flex 0 1 auto with
+     min-width:0) so a deep path truncates instead of pushing the buttons off. */
+  .pal .row .sub { color:var(--muted); font-size:11px; flex:0 1 auto; min-width:0;
+    overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
   .pal .row .acts { margin-left:auto; display:flex; gap:4px; flex:none; }
   .pal .row .acts button { background:var(--panel); color:var(--fg); border:1px solid var(--line);
     border-radius:4px; padding:1px 8px; font:inherit; font-size:11px; cursor:pointer; }
@@ -1766,10 +1770,38 @@
   // ---- Plugins dialog ----
   //
   // One list over plugin.list with per-row actions. The instant verbs
-  // (uninstall) resolve over §7 commands; install/update spawn a
+  // (uninstall/unlink) resolve over §7 commands; install/link/rebuild spawn a
   // `catctl plugin …` tab instead — they run git plus a build whose live
   // output the user wants to watch, and cmd_result is one-shot, so a pane is
   // the streaming surface (the server resolves the catctl path for us).
+
+  // pluginSourceIsPath mirrors the host's resolveSourceURL heuristic
+  // (internal/plugin/install.go): a source shaped like a filesystem path is a
+  // local checkout, which means `plugin link` — register it in place, edits
+  // stay live — rather than `plugin install`, which clones into the plugins
+  // root. Keeping the two heuristics identical means what the dialog decides
+  // to do matches what catctl would have done with the same string.
+  //
+  // The leading marker is what makes it a path: "./x", "../x", "~/x", "/x".
+  // A bare "cmd/cats-todo" is deliberately NOT one — two segments is the
+  // "owner/repo" GitHub shorthand, and that ambiguity is why the prefix is
+  // required rather than inferred from whether the directory happens to exist
+  // (which the browser could not check anyway).
+  function pluginSourceIsPath(s) {
+    return /^[.~/]/.test(s);
+  }
+
+  // focusedPaneCwd anchors a *relative* link path. Someone typing
+  // "./cmd/cats-todo" means the directory they are looking at, so the spawned
+  // catctl tab inherits the focused pane's live cwd (tracked from pane_cwd
+  // events) instead of whatever directory the server happened to start in.
+  // Absolute and ~-paths ignore it; "" leaves tab.create's default cwd alone.
+  function focusedPaneCwd() {
+    const id = focusedPaneId();
+    if (id == null) return "";
+    const p = panes.get(id);
+    return (p && p.cwd) || "";
+  }
 
   function pluginStatus(p) {
     if (p.broken) return "broken";
@@ -1789,22 +1821,37 @@
 
   // pluginCatctlTab spawns `catctl plugin <args…>` in a fresh tab. The pane
   // stays on screen after exit (exited chrome), so the git/build output — or
-  // the failure — remains readable until the user closes it.
-  function pluginCatctlTab(catctl, title, args) {
+  // the failure — remains readable until the user closes it. cwd is optional
+  // and only matters for the link path (see focusedPaneCwd).
+  function pluginCatctlTab(catctl, title, args, cwd) {
     closeModal();
-    sendCmdAwait("tab.create", { title, command: [catctl, "plugin"].concat(args) }, (res) => {
+    const params = { title, command: [catctl, "plugin"].concat(args) };
+    if (cwd) params.cwd = cwd;
+    sendCmdAwait("tab.create", params, (res) => {
       if (!res.ok) toast("plugin: " + (res.error || "unknown"));
     });
   }
 
+  // One prompt covers both ways in, dispatching on the shape of the source:
+  // a path links a local checkout, anything else installs from git. Two
+  // buttons would have made the user classify their own input; the host
+  // already draws that line, so the dialog just follows it.
   function pluginInstallDialog(catctl) {
     dialogInput({
-      title: "install plugin",
-      hint: "owner/repo or a git URL · optionally add --ref <branch|tag> · runs in a new tab",
-      submitLabel: "install",
+      title: "add plugin",
+      hint: "owner/repo or git URL to install · --ref <branch|tag> to pin · " +
+        "or a local path (./dir, ../dir, ~/dir, /dir) to link a checkout in place · runs in a new tab",
+      submitLabel: "add",
       onSubmit: (v) => {
         const args = v.trim().split(/\s+/).filter(Boolean);
-        if (!args.length) { toast("plugin install: source is required"); return; }
+        if (!args.length) { toast("plugin: a source is required"); return; }
+        if (pluginSourceIsPath(args[0])) {
+          // --ref has no meaning for a link: there is nothing to check out,
+          // the checkout is whatever the developer has on disk.
+          if (args.length > 1) { toast("plugin link: takes a single directory"); return; }
+          pluginCatctlTab(catctl, "plugin link", ["link", args[0]], focusedPaneCwd());
+          return;
+        }
         pluginCatctlTab(catctl, "plugin install", ["install"].concat(args));
       },
     });
@@ -1841,13 +1888,22 @@
         }
         for (const p of plugins) {
           const row = document.createElement("div"); row.className = "row";
-          row.title = p.broken || p.description || "";
+          row.title = [p.broken || p.description, p.dir].filter(Boolean).join("\n");
           const kind = document.createElement("span"); kind.className = "kind";
           kind.textContent = pluginStatus(p);
           const lbl = document.createElement("span"); lbl.className = "lbl";
           lbl.textContent = p.broken ? p.id : p.id + " v" + (p.version || "?") +
             (p.name && p.name !== p.id ? " — " + p.name : "");
           row.appendChild(kind); row.appendChild(lbl);
+          // A linked row shows its checkout inline: for a local plugin *where*
+          // it lives is the identifying fact (which worktree am I linked to?),
+          // whereas an installed plugin's dir is always the plugins root and
+          // says nothing — that one stays in the tooltip.
+          if (p.linked && p.dir) {
+            const sub = document.createElement("span"); sub.className = "sub";
+            sub.textContent = p.dir;
+            row.appendChild(sub);
+          }
           const acts = document.createElement("div"); acts.className = "acts";
           const actBtn = (label, cls, fn) => {
             const b = document.createElement("button");
@@ -1870,13 +1926,21 @@
           if (!p.broken && !p.linked) {
             actBtn("update", "", () => pluginCatctlTab(info.catctl, "update " + p.id, ["update", p.id]));
           }
+          if (!p.broken && p.linked && p.dir) {
+            // The linked analogue of update. `plugin link` on the same checkout
+            // is idempotent and re-runs the manifest's build steps, which is
+            // exactly how a developer picks up their edits — update refuses on
+            // linked plugins by design, there being no remote to pull from.
+            // p.dir is the resolved symlink target, so no cwd is needed.
+            actBtn("rebuild", "", () => pluginCatctlTab(info.catctl, "rebuild " + p.id, ["link", p.dir]));
+          }
           actBtn(p.linked ? "unlink" : "uninstall", "danger", () => confirmUninstallPlugin(p));
           row.appendChild(acts);
           listEl.appendChild(row);
         }
         const btns = document.createElement("div"); btns.className = "btns";
         btns.appendChild(mkModalBtn("close", "", closeModal));
-        btns.appendChild(mkModalBtn("install…", "primary", () => pluginInstallDialog(info.catctl)));
+        btns.appendChild(mkModalBtn("add…", "primary", () => pluginInstallDialog(info.catctl)));
         m.appendChild(btns);
         m.addEventListener("keydown", (e) => {
           e.stopPropagation();

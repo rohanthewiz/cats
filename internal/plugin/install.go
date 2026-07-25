@@ -87,7 +87,7 @@ func Install(source, ref string, out io.Writer) (Installed, error) {
 // checkout has no ./bin yet, and running it here makes `link` sufficient on
 // its own, matching `herdr plugin link .`.
 func Link(dir string, out io.Writer) (Installed, error) {
-	abs, err := filepath.Abs(dir)
+	abs, err := filepath.Abs(expandTilde(dir))
 	if err != nil {
 		return Installed{}, err
 	}
@@ -142,12 +142,37 @@ func resolveSourceURL(source string) string {
 		return source
 	}
 	if strings.HasPrefix(source, "/") || strings.HasPrefix(source, ".") || strings.HasPrefix(source, "~") {
-		return source
+		return expandTilde(source)
 	}
 	if parts := strings.Split(source, "/"); len(parts) == 2 && parts[0] != "" && parts[1] != "" {
 		return "https://github.com/" + source + ".git"
 	}
 	return source
+}
+
+// expandTilde resolves a leading "~" against the current user's home directory.
+// A shell normally does this before a program ever sees the argument, but a
+// plugin path can arrive as raw argv with no shell in between: the plugins
+// dialog spawns `catctl plugin link <path>` through tab.create, which execs the
+// argv directly. Without this, "~/src/thing" would be read as a literal
+// relative directory named "~" and fail with a confusing not-found.
+//
+// "~user" (another user's home) is deliberately left untouched — resolving it
+// needs the user database, and nothing in the plugin flow asks for it. Likewise
+// an unresolvable home returns the input unchanged so the caller's own
+// not-found error surfaces rather than a substituted path.
+func expandTilde(path string) string {
+	if path != "~" && !strings.HasPrefix(path, "~/") {
+		return path
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return path
+	}
+	if path == "~" {
+		return home
+	}
+	return filepath.Join(home, path[2:])
 }
 
 // runBuild executes the manifest's [[build]] steps in order, in the plugin

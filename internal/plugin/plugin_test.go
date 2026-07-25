@@ -119,6 +119,7 @@ func TestResolveSourceURL(t *testing.T) {
 		"git@github.com:x/y.git":     "git@github.com:x/y.git",
 		"/abs/path/repo":             "/abs/path/repo",
 		"./rel/repo":                 "./rel/repo",
+		"../sibling/repo":            "../sibling/repo",
 		"not-a-shorthand":            "not-a-shorthand",
 		"owner/repo/extra":           "owner/repo/extra", // 3 segments: not the shorthand
 	}
@@ -126,6 +127,67 @@ func TestResolveSourceURL(t *testing.T) {
 		if got := resolveSourceURL(in); got != want {
 			t.Errorf("resolveSourceURL(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+// A "~" path must resolve here, not in a shell: the plugins dialog spawns
+// `catctl plugin link <path>` as raw argv with no shell in between.
+func TestExpandTilde(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	cases := map[string]string{
+		"~":            home,
+		"~/src/thing":  filepath.Join(home, "src/thing"),
+		"~user/thing":  "~user/thing", // another user's home: left alone
+		"/abs/path":    "/abs/path",
+		"./rel":        "./rel",
+		"plain":        "plain",
+		"a/~/embedded": "a/~/embedded", // only a *leading* tilde expands
+	}
+	for in, want := range cases {
+		if got := expandTilde(in); got != want {
+			t.Errorf("expandTilde(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// Link accepts a ~-path end to end (the dialog's local-checkout route).
+func TestLinkTildePath(t *testing.T) {
+	testRoot(t)
+	checkout := writePlugin(t, validManifest)
+	// Present the same checkout as "~/<base>" by pointing HOME at its parent.
+	t.Setenv("HOME", filepath.Dir(checkout))
+
+	inst, err := Link("~/"+filepath.Base(checkout), nil)
+	if err != nil {
+		t.Fatalf("link ~-path: %v", err)
+	}
+	realCheckout, _ := filepath.EvalSymlinks(checkout)
+	if !inst.Linked || inst.Dir != realCheckout {
+		t.Fatalf("linked = %+v, want linked at %s", inst, realCheckout)
+	}
+}
+
+// A relative path — "./dir" or "../dir" — resolves against the process cwd,
+// which for a dialog-spawned link tab is the focused pane's cwd. Running from a
+// sibling directory makes ".." the only way to reach the checkout, so a broken
+// resolution cannot pass by accident.
+func TestLinkRelativeParentPath(t *testing.T) {
+	testRoot(t)
+	checkout := writePlugin(t, validManifest)
+	sibling := filepath.Join(filepath.Dir(checkout), "sibling")
+	if err := os.MkdirAll(sibling, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(sibling)
+
+	inst, err := Link(filepath.Join("..", filepath.Base(checkout)), nil)
+	if err != nil {
+		t.Fatalf("link ../ path: %v", err)
+	}
+	realCheckout, _ := filepath.EvalSymlinks(checkout)
+	if !inst.Linked || inst.Dir != realCheckout {
+		t.Fatalf("linked = %+v, want linked at %s", inst, realCheckout)
 	}
 }
 
