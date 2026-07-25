@@ -132,6 +132,7 @@ never reads a manifest.
 catctl plugin install rohanthewiz/some-plugin   # clone from GitHub + build
 catctl plugin install <git-url> --ref v0.1.0    # pin a branch or tag
 catctl plugin link ./cmd/cats-todo              # dev mode: symlink a checkout
+catctl plugin update rohanthewiz.some-plugin    # fetch recorded source + rebuild
 catctl plugin list                              # ids, versions, actions
 catctl plugin run rohanthewiz.cats-todo         # launch in a new tab
 catctl plugin uninstall rohanthewiz.cats-todo

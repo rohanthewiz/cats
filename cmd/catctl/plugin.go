@@ -1,8 +1,9 @@
 package main
 
 // The `plugin` verb family is the cats plugin host's CLI (internal/plugin).
-// install/link/uninstall/list are fully offline — they manage the plugins
-// directory and never dial the control socket, exactly like `integration`.
+// install/link/update/uninstall/list never dial the control socket — they
+// manage the plugins directory, exactly like `integration` (update does reach
+// the plugin's git remote, but not the cats server).
 // `run` is the one online verb: it resolves an action locally, then launches
 // it in a fresh tab through the §7 tab.create command's spawn params
 // (command/cwd/env) — the server stays plugin-agnostic; the manifest never
@@ -33,6 +34,8 @@ func runPluginCmd(args []string, socket string) int {
 		return pluginInstall(args[1:])
 	case "link":
 		return pluginLink(args[1:])
+	case "update":
+		return pluginUpdate(args[1:])
 	case "uninstall":
 		return pluginUninstall(args[1:])
 	case "list":
@@ -95,6 +98,27 @@ func pluginLink(args []string) int {
 		return 1
 	}
 	fmt.Printf("linked %s v%s → %s\n", inst.ID, inst.Version, inst.Dir)
+	return 0
+}
+
+// pluginUpdate refreshes an installed plugin from its recorded source. Fully
+// offline with respect to the cats server (it never dials the socket), though
+// it does hit the plugin's git remote.
+func pluginUpdate(args []string) int {
+	if len(args) != 1 {
+		fmt.Fprintln(os.Stderr, "usage: catctl plugin update <id>")
+		return 2
+	}
+	inst, updated, err := plugin.Update(args[0], os.Stdout)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	if !updated {
+		fmt.Printf("%s is already up to date (v%s)\n", inst.ID, inst.Version)
+		return 0
+	}
+	fmt.Printf("updated %s to v%s (%s)\n", inst.ID, inst.Version, inst.Dir)
 	return 0
 }
 
@@ -203,6 +227,7 @@ func printPluginHelp() {
 	fmt.Fprint(os.Stderr, `catctl plugin commands:
   catctl plugin install <owner/repo|git-url> [--ref <branch|tag>]
   catctl plugin link <dir>          register a local checkout (dev mode)
+  catctl plugin update <id>         fetch the recorded source and rebuild
   catctl plugin uninstall <id>
   catctl plugin list
   catctl plugin run <id> [action]   launch an action in a new tab (needs a running server)

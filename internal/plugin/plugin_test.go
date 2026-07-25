@@ -192,6 +192,22 @@ func TestLinkLifecycle(t *testing.T) {
 	}
 }
 
+// gitIn returns a runner for git commands in dir. Identity comes in via -c so
+// the tests stay independent of the user's gitconfig.
+func gitIn(t *testing.T, dir string) func(args ...string) {
+	t.Helper()
+	return func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Args = append([]string{"git", "-c", "user.email=t@t", "-c", "user.name=t",
+			"-c", "commit.gpgsign=false"}, args...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+}
+
 // Install exercises the full clone → validate → build → rename path against a
 // local git repo standing in for GitHub.
 func TestInstallFromLocalRepo(t *testing.T) {
@@ -202,17 +218,7 @@ func TestInstallFromLocalRepo(t *testing.T) {
 
 	// A local upstream repo holding the plugin.
 	repo := writePlugin(t, validManifest)
-	git := func(args ...string) {
-		t.Helper()
-		cmd := exec.Command("git", args...)
-		cmd.Dir = repo
-		// Identity via -c keeps the test independent of the user's gitconfig.
-		cmd.Args = append([]string{"git", "-c", "user.email=t@t", "-c", "user.name=t",
-			"-c", "commit.gpgsign=false"}, args...)
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v\n%s", args, err, out)
-		}
-	}
+	git := gitIn(t, repo)
 	git("init", "-q", "-b", "main")
 	git("add", ".")
 	git("commit", "-q", "-m", "plugin")
@@ -250,6 +256,87 @@ func TestInstallFromLocalRepo(t *testing.T) {
 
 	if msg, err := Uninstall("acme.demo"); err != nil || !strings.Contains(msg, "removed") {
 		t.Fatalf("uninstall = %q, %v; want removed", msg, err)
+	}
+}
+
+// Update covers the whole in-place refresh loop against a local upstream:
+// no-op when upstream is unchanged, fetch + rebuild when it moves, and a
+// rollback to the previous version when upstream publishes a manifest whose
+// id no longer matches the install dir.
+func TestUpdate(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	root := testRoot(t)
+
+	repo := writePlugin(t, validManifest)
+	git := gitIn(t, repo)
+	git("init", "-q", "-b", "main")
+	git("add", ".")
+	git("commit", "-q", "-m", "v1")
+
+	if _, err := Install(repo, "", nil); err != nil {
+		t.Fatalf("install: %v", err)
+	}
+	dest := filepath.Join(root, "acme.demo")
+
+	// Upstream unchanged: no rebuild, updated=false.
+	inst, updated, err := Update("acme.demo", nil)
+	if err != nil || updated {
+		t.Fatalf("no-op update = (%+v, %v, %v), want updated=false", inst, updated, err)
+	}
+
+	// Upstream releases 0.2.0 with a new build step; update must land both
+	// the manifest and the artifacts of the re-run build.
+	v2 := strings.Replace(validManifest, `version = "0.1.0"`, `version = "0.2.0"`, 1)
+	v2 = strings.Replace(v2, "echo built > .built", "echo built2 > .built2", 1)
+	if err := os.WriteFile(filepath.Join(repo, ManifestName), []byte(v2), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git("commit", "-aqm", "v2")
+
+	inst, updated, err = Update("acme.demo", nil)
+	if err != nil || !updated || inst.Version != "0.2.0" {
+		t.Fatalf("update = (v%s, %v, %v), want updated v0.2.0", inst.Version, updated, err)
+	}
+	if _, err := os.Stat(filepath.Join(dest, ".built2")); err != nil {
+		t.Fatalf("new build step did not run: %v", err)
+	}
+	// Provenance survives the reset (it is untracked in the clone).
+	if inst.Source != repo {
+		t.Fatalf("source after update = %q, want %q", inst.Source, repo)
+	}
+
+	// Upstream changes the plugin id: the install dir would lie about its
+	// contents, so update refuses and restores the previous version.
+	v3 := strings.Replace(v2, `id = "acme.demo"`, `id = "acme.other"`, 1)
+	if err := os.WriteFile(filepath.Join(repo, ManifestName), []byte(v3), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git("commit", "-aqm", "v3 id change")
+
+	if _, _, err := Update("acme.demo", nil); err == nil || !strings.Contains(err.Error(), "changed the plugin id") {
+		t.Fatalf("id-change update err = %v, want id-change refusal", err)
+	}
+	got, err := Get("acme.demo")
+	if err != nil || got.Version != "0.2.0" {
+		t.Fatalf("after rollback: %+v, %v; want v0.2.0 intact", got, err)
+	}
+}
+
+// Linked plugins are the developer's own checkout — Update must refuse rather
+// than hard-reset their working tree.
+func TestUpdateLinkedRefused(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	testRoot(t)
+	checkout := writePlugin(t, validManifest)
+	if _, err := Link(checkout, nil); err != nil {
+		t.Fatalf("link: %v", err)
+	}
+	if _, _, err := Update("acme.demo", nil); err == nil || !strings.Contains(err.Error(), "linked") {
+		t.Fatalf("update of linked plugin err = %v, want linked refusal", err)
 	}
 }
 
