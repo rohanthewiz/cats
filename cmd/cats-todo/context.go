@@ -46,6 +46,22 @@ func (c RunContext) projectDir() string {
 	return firstNonEmpty(c.ProjectRoot, c.WorkDir)
 }
 
+// paneTitle is the terminal title the manager advertises while it runs, named
+// after the project whose backlog it is showing. Cats scans OSC 0/2 off the PTY
+// into its pane chrome, so this is what labels the pane in the browser — a
+// shell pane otherwise keeps whatever title it last had, which says nothing
+// about the backlog now on screen.
+//
+// The project basename, not the full path: pane chrome already prints the cwd,
+// and a title has to stay short to survive tab-bar truncation. Degrades to the
+// bare app name when no directory resolved (global-only launch).
+func (c RunContext) paneTitle() string {
+	if name := baseName(c.projectDir()); name != "" {
+		return "todo: " + name
+	}
+	return "todo"
+}
+
 // findProjectRoot walks up from dir to the directory that owns the project
 // backlog: the nearest ancestor with an existing .cats-todo backlog wins, then
 // the nearest with a .git directory (the repo root). With neither, dir itself is

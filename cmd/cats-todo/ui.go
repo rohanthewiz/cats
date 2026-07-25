@@ -157,8 +157,13 @@ func newModel(ctx RunContext, project, global *store, client *catsClient) model 
 	return m
 }
 
-// Init starts the cursor blinking.
-func (m model) Init() tea.Cmd { return textinput.Blink }
+// Init starts the cursor blinking and names the pane after the project this
+// backlog belongs to (see RunContext.paneTitle). Setting it here rather than
+// before tea.NewProgram keeps the write inside bubbletea's renderer, so it can
+// never interleave with the frame the program is drawing.
+func (m model) Init() tea.Cmd {
+	return tea.Batch(textinput.Blink, tea.SetWindowTitle(m.ctx.paneTitle()))
+}
 
 // Update routes by stage; non-key messages flow to whatever input is active so
 // cursors keep blinking and text keeps flowing.

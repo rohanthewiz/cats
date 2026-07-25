@@ -124,6 +124,29 @@ func TestRunContextProjectDir(t *testing.T) {
 	}
 }
 
+// TestRunContextPaneTitle pins the terminal title the manager sets: the project
+// basename, tracking projectDir's own fallback order, and the bare app name when
+// no directory resolved.
+func TestRunContextPaneTitle(t *testing.T) {
+	tests := []struct {
+		name string
+		ctx  RunContext
+		want string
+	}{
+		{"names the project root", RunContext{WorkDir: "/repo/sub", ProjectRoot: "/repo"}, "todo: repo"},
+		{"falls back to the workdir", RunContext{WorkDir: "/repo/sub"}, "todo: sub"},
+		{"bare name with no directory", RunContext{}, "todo"},
+		{"bare name at the filesystem root", RunContext{WorkDir: "/"}, "todo"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.ctx.paneTitle(); got != tt.want {
+				t.Errorf("paneTitle() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 // mkdir creates dir and its parents, failing the test if it cannot.
 func mkdir(t *testing.T, dir string) {
 	t.Helper()
