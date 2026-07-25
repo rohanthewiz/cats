@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -54,5 +55,65 @@ func TestWindowSizeMsgNeverPanics(t *testing.T) {
 		m.targets, m.targetList = m.buildTargets()
 		m.stage = stageTarget
 		m.Update(resize)
+	})
+}
+
+// TestScopeNote pins the header's scope line: the project basename must always
+// lead (the workspace label used to replace it, which hid launches that landed
+// in the wrong directory), the workspace label rides along when it adds
+// information, and under width pressure the label — never the project — is
+// what compacts and then disappears.
+func TestScopeNote(t *testing.T) {
+	// Wide enough that the title + note + label all fit uncompacted.
+	const roomy = 120
+
+	build := func(wsLabel string, width int) model {
+		m := newTestModel()
+		m.ctx.WorkspaceLabel = wsLabel
+		m.width = width
+		return m
+	}
+
+	t.Run("project and workspace both shown", func(t *testing.T) {
+		got := build("pers", roomy).scopeNote()
+		if got != "project + global · ws:pers" {
+			t.Fatalf("scopeNote = %q, want project first with ws suffix", got)
+		}
+	})
+
+	t.Run("no workspace label", func(t *testing.T) {
+		if got := build("", roomy).scopeNote(); got != "project + global" {
+			t.Fatalf("scopeNote = %q, want bare project note", got)
+		}
+	})
+
+	t.Run("label matching the project is dropped as redundant", func(t *testing.T) {
+		// newTestModel's WorkDir basename is "project".
+		if got := build("project", roomy).scopeNote(); got != "project + global" {
+			t.Fatalf("scopeNote = %q, want suffix deduped", got)
+		}
+	})
+
+	t.Run("tight width compacts the label, not the project", func(t *testing.T) {
+		got := build("a-rather-long-workspace-name", 60).scopeNote()
+		if !strings.HasPrefix(got, "project + global · ws:") {
+			t.Fatalf("scopeNote = %q, project note must survive compaction intact", got)
+		}
+		if !strings.HasSuffix(got, "…") {
+			t.Fatalf("scopeNote = %q, want a truncated (…) workspace label", got)
+		}
+	})
+
+	t.Run("no room at all drops the label entirely", func(t *testing.T) {
+		if got := build("pers", 40).scopeNote(); got != "project + global" {
+			t.Fatalf("scopeNote = %q, want label dropped, project kept", got)
+		}
+	})
+
+	t.Run("zero width (before the first resize) shows everything", func(t *testing.T) {
+		got := build("a-rather-long-workspace-name", 0).scopeNote()
+		if got != "project + global · ws:a-rather-long-workspace-name" {
+			t.Fatalf("scopeNote = %q, want full label when width is unknown", got)
+		}
 	})
 }

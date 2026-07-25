@@ -939,12 +939,53 @@ func (m model) View() string {
 	}
 }
 
+// listTitle is the fixed heading of the manager's list view. Named so
+// scopeNote can budget the header's remaining width against it — the two share
+// one terminal line.
+const listTitle = "📝 Cats Todo — prompt backlog"
+
+// scopeNote names both scopes in the header: which project backlog is on
+// screen and which workspace the pane lives in — "cats + global · ws:pers".
+// The project basename leads because it is the fact that decides what an edit
+// touches; the workspace label used to stand in for it entirely, which masked
+// launches that had landed in the wrong directory. When the header line would
+// overflow the pane, the workspace label is the part that gives way —
+// truncated to the room left, dropped when even that is too little — never
+// the project name.
+func (m model) scopeNote() string {
+	project := firstNonEmpty(baseName(m.ctx.projectDir()), "project")
+	note := project + " + global"
+	ws := m.ctx.WorkspaceLabel
+	// A workspace named after the project adds nothing over the project name;
+	// skip the suffix rather than print "cats + global · ws:cats".
+	if ws == "" || ws == project {
+		return note
+	}
+	const sep = " · ws:"
+	// m.width is 0 until the first WindowSizeMsg lands; with no width to budget
+	// against, show the full label rather than guess.
+	if m.width > 0 {
+		// Room on the header line after the rendered title (lipgloss.Width so
+		// the style's padding counts), the two-space gap, the note, and the
+		// suffix separator. Rune count stands in for cell width on the
+		// user-authored strings; workspace labels are short and plain enough
+		// that the difference doesn't matter here.
+		room := m.width - lipgloss.Width(titleStyle.Render(listTitle)) - 2 -
+			len([]rune(note)) - len([]rune(sep))
+		if room < 2 {
+			return note // no room for even one rune plus the ellipsis
+		}
+		ws = truncate(ws, room)
+	}
+	return note + sep + ws
+}
+
 func (m model) viewList() string {
 	var b strings.Builder
-	b.WriteString(titleStyle.Render("📝 Cats Todo — prompt backlog"))
+	b.WriteString(titleStyle.Render(listTitle))
 	scopeNote := "global only"
 	if m.project.available() {
-		scopeNote = firstNonEmpty(m.ctx.WorkspaceLabel, baseName(m.ctx.projectDir()), "project") + " + global"
+		scopeNote = m.scopeNote()
 	}
 	b.WriteString("  ")
 	b.WriteString(descStyle.Render(scopeNote))
