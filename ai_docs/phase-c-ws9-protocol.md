@@ -214,6 +214,17 @@ number and its focused root pane id, so a client can chain straight into
 `Backend.PaneMeta` seam — the same hook-vs-detection agent arbitration the sidebar
 shows, now queryable over the control socket.
 
+Also since added (the plugin host's launch path, `catctl plugin run`): `tab.create`
+accepts an optional params block `{title?, cwd?, command?, env?}` — `title` pins the tab
+name (what `tab.rename` would set), `cwd` overrides the root pane's spawn directory,
+`command` is an argv exec'd as the pane's process instead of a shell (the same
+`create_pane.command/args` mechanism agent resume uses, staged via the new
+`Backend.StageSpawn` seam and consumed exactly once by the pane's create), and `env`
+adds environment variables. `cwd`/`env` without `command` still apply to the default
+shell. No params keeps the historical bare-shell behavior. Relatedly, every pane's
+environment now carries `CATS_CONTROL_SOCKET`, so in-pane automation (cats-todo, plugin
+binaries) finds the control socket even on a non-default path.
+
 ## 8. Visibility & frame streaming policy
 
 The server streams `pane_frame`/`pane_diff` **only for panes in the connection's active

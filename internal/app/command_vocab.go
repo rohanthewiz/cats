@@ -475,6 +475,56 @@ type PaneMeta struct {
 	Cwd        string `json:"cwd,omitempty"`         // live working directory
 }
 
+// TabCreateParams is the optional params block for tab.create. The zero value
+// (or no params at all — the historical wire shape) keeps the old behavior: a
+// default-shell tab in the workspace's identity cwd. The optional fields let an
+// automation client (catctl plugin run, scripts) open a fully-formed tab in one
+// round trip instead of tab.create → tab.rename → typing a command into the
+// shell:
+//
+//   - Title pins the tab's display name (what tab.rename would set).
+//   - Cwd overrides the spawn directory for the tab's root pane.
+//   - Command is an argv to exec as the pane's process instead of a shell —
+//     the pane runs the program directly, so its exit closes the pane and no
+//     shell history/prompt noise precedes it (same mechanism as agent resume).
+//   - Env adds environment variables to the spawned process.
+//
+// Cwd/Env without Command still apply to the default shell spawn.
+type TabCreateParams struct {
+	Title   string            `json:"title,omitempty"`
+	Cwd     string            `json:"cwd,omitempty"`
+	Command []string          `json:"command,omitempty"`
+	Env     map[string]string `json:"env,omitempty"`
+}
+
+// Validate rejects a present-but-unusable Command (an empty argv slot cannot be
+// exec'd; an absent Command is the normal shell case and always fine).
+func (p TabCreateParams) Validate() error {
+	if len(p.Command) > 0 && strings.TrimSpace(p.Command[0]) == "" {
+		return errors.New("command[0] must be a program name")
+	}
+	return nil
+}
+
+// SpawnOverride is the runtime-side slice of TabCreateParams: what the Backend
+// must apply when it realizes the new pane's PTY (the dispatcher handles Title
+// itself via the session). Staged per pane before ApplyModel and consumed
+// exactly once by the pane's create.
+type SpawnOverride struct {
+	Cwd     string
+	Command []string
+	Env     map[string]string
+}
+
+// spawnOverride extracts the runtime-relevant fields; the zero flag tells the
+// dispatcher whether staging is needed at all.
+func (p TabCreateParams) spawnOverride() (SpawnOverride, bool) {
+	if p.Cwd == "" && len(p.Command) == 0 && len(p.Env) == 0 {
+		return SpawnOverride{}, false
+	}
+	return SpawnOverride{Cwd: p.Cwd, Command: p.Command, Env: p.Env}, true
+}
+
 // TabCreateResult is CmdResult.Data for tab.create: the new tab's public number
 // and its root pane's id. CreateTab focuses the new tab (and its sole pane), so
 // an automation client can chain straight into pane.send_input / wait_for_output

@@ -1,0 +1,33 @@
+# cats-plugin.toml registers cats-todo with the cats plugin host.
+#
+# cats-todo ships inside the cats repo (make binaries builds it alongside the
+# server), so most users never need this file — it exists so the standard
+# plugin flow works against the flagship plugin, and as the reference manifest
+# for writing new ones:
+#
+#   Local development:  catctl plugin link ./cmd/cats-todo   (from the cats repo)
+#   Launch:             catctl plugin run rohanthewiz.cats-todo
+#
+# The manifest shape mirrors herdr-plugin.toml (which this tool was originally
+# written against), minus herdr's [[panes]] table: a cats action runs its TUI
+# directly in the tab that `plugin run` opens via tab.create's spawn params.
+
+id = "rohanthewiz.cats-todo"
+name = "Cats Todo"
+version = "0.1.0"
+description = "A prompt backlog for cats. Jot down prompts of future work (per-project and global), then fuzzy-pick one and drop it into a Claude Code session — an existing agent pane or a brand-new one — paste-only or run-now."
+platforms = ["linux", "macos"]
+
+# Build the binary at install/link time; the host runs this once in the plugin
+# root. cats-todo lives inside the cats Go module, so a plain `go build .`
+# resolves everything from the repo's go.mod.
+[[build]]
+command = ["sh", "-c", "mkdir -p bin && go build -o bin/cats-todo ."]
+
+# The manager TUI. `catctl plugin run rohanthewiz.cats-todo` opens it in a new
+# tab whose cwd is the directory you invoked from, which is what scopes the
+# per-project backlog (.cats-todo/) correctly.
+[[actions]]
+id = "todo"
+title = "Cats Todo"
+command = ["./bin/cats-todo"]

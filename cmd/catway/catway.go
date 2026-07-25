@@ -14,6 +14,7 @@ import (
 	"github.com/rohanthewiz/cats/internal/app"
 	"github.com/rohanthewiz/cats/internal/browserproto"
 	"github.com/rohanthewiz/cats/internal/config"
+	"github.com/rohanthewiz/cats/internal/ctlproto"
 	"github.com/rohanthewiz/cats/internal/inputenc"
 	"github.com/rohanthewiz/cats/internal/layout"
 	"github.com/rohanthewiz/cats/internal/orchestration"
@@ -126,6 +127,12 @@ type orch struct {
 	// injects it into every pane's environment so installed agent hooks can
 	// dial back. Wired by main before the loop starts; "" disables injection.
 	hookSocket string
+	// controlSocket is where the §7 control API listens (control.go); createPane
+	// exports it to every pane as CATS_CONTROL_SOCKET so in-pane automation
+	// (cats-todo, plugin binaries) finds the socket without relying on the
+	// compiled-in default path. Wired by main before the loop starts; "" skips
+	// the export.
+	controlSocket string
 	// baseHTML is the un-injected served page; cfgPath is the config file to
 	// re-read on server.reload_config; page holds the config-injected page the
 	// HTTP handler serves. The handler (rweb goroutine) and ReloadConfig (loop
@@ -161,10 +168,15 @@ type orch struct {
 	restoredCwds   map[uint32]string
 	restoredAgents map[uint32]persist.AgentSession
 	resumePlans    map[uint32][]string
-	capturedHist   map[uint32]string
-	histLines      uint32
-	saveArmed      bool
-	histArmed      bool
+	// spawnPlans carries tab.create's optional spawn override (argv/cwd/env)
+	// from the dispatcher's StageSpawn to the pane's createPane — the live-
+	// command sibling of resumePlans, consumed exactly once the same way.
+	// Loop-goroutine only.
+	spawnPlans   map[uint32]app.SpawnOverride
+	capturedHist map[uint32]string
+	histLines    uint32
+	saveArmed    bool
+	histArmed    bool
 	// finalCap tracks the clean-shutdown capture sweep (nil when not shutting
 	// down): Shutdown captures every live pane's scrollback, bounded by a short
 	// deadline, before firing the stop hook.
@@ -254,6 +266,7 @@ func newOrchWith(socket, cwd string, sess *app.Session) *orch {
 		restoredCwds:   make(map[uint32]string),
 		restoredAgents: make(map[uint32]persist.AgentSession),
 		resumePlans:    make(map[uint32][]string),
+		spawnPlans:     make(map[uint32]app.SpawnOverride),
 		capturedHist:   make(map[uint32]string),
 		mailbox:        make(chan func(), 256),
 	}
@@ -349,6 +362,10 @@ func (o *orch) syncDaemon() {
 				o.daemon.send(orchestration.NewClosePane(pid))
 			}
 			delete(o.panes, pid)
+			// A never-realized spawn override dies with its pane (a plan is
+			// staged live per tab.create, so unlike the restored-state maps it
+			// can be cleaned eagerly).
+			delete(o.spawnPlans, pid)
 		}
 	}
 	for pid, g := range grids {
@@ -392,6 +409,16 @@ func (o *orch) createPane(rt *paneRuntime) {
 	// exactly these variables).
 	pub, _ := o.session.PublicPaneID(layout.PaneID(rt.id))
 	cp.Env = paneEnvMap(o.hookSocket, rt.id, pub)
+	// Export the control socket alongside the hook env: in-pane automation
+	// (cats-todo, plugin binaries launched via tab.create) resolves the socket
+	// from CATS_CONTROL_SOCKET, which must hold even when catway listens on a
+	// non-default path.
+	if o.controlSocket != "" {
+		if cp.Env == nil {
+			cp.Env = make(map[string]string, 1)
+		}
+		cp.Env[ctlproto.SocketEnvVar] = o.controlSocket
+	}
 	if o.daemon.connected() {
 		if cwd, ok := o.restoredCwds[rt.id]; ok {
 			cp.Cwd = cwd
@@ -406,6 +433,25 @@ func (o *orch) createPane(rt *paneRuntime) {
 				rt.agentSession = &agentSessionRef{source: s.Source, agent: s.Agent, kind: s.Kind, value: s.Value}
 				delete(o.restoredAgents, rt.id)
 			}
+		}
+		// A live spawn override (tab.create's optional command/cwd/env) wins
+		// over the defaults; like the restored state above it is consumed only
+		// on a connected send, so a pre-connection create keeps the plan for
+		// reconcile's retry.
+		if plan, ok := o.spawnPlans[rt.id]; ok {
+			if plan.Cwd != "" {
+				cp.Cwd = plan.Cwd
+			}
+			if len(plan.Command) > 0 {
+				cp.Command, cp.Args = plan.Command[0], plan.Command[1:]
+			}
+			if len(plan.Env) > 0 && cp.Env == nil {
+				cp.Env = make(map[string]string, len(plan.Env))
+			}
+			for k, v := range plan.Env {
+				cp.Env[k] = v
+			}
+			delete(o.spawnPlans, rt.id)
 		}
 		if h, ok := o.seeds[rt.id]; ok {
 			cp.InitialHistory = h
@@ -955,6 +1001,14 @@ func (o *orch) SendInput(pane uint32, text string, submit bool) error {
 		}
 	}
 	return nil
+}
+
+// StageSpawn registers a one-shot spawn override for a pane the next
+// applyModel will create (tab.create's optional command/cwd/env). Loop
+// goroutine, and always dispatched before that applyModel — createPane is the
+// sole consumer, so the plan can never be applied to an already-live pane.
+func (o *orch) StageSpawn(pane uint32, ov app.SpawnOverride) {
+	o.spawnPlans[pane] = ov
 }
 
 // PaneExists / DaemonConnected gate the async round-trip commands.

@@ -47,6 +47,9 @@ type fakeBackend struct {
 	// paneMeta is the canned per-pane metadata PaneMeta answers with (nil ⇒ all
 	// zero values), letting pane.list/pane.get tests assert the merge.
 	paneMeta map[uint32]PaneMeta
+	// staged records StageSpawn calls so tab.create tests can assert the
+	// override reached the backend (and, via the log, before applyModel).
+	staged map[uint32]SpawnOverride
 }
 
 func (b *fakeBackend) rec(s string)                { *b.log = append(*b.log, s) }
@@ -69,6 +72,13 @@ func (b *fakeBackend) SendInput(pane uint32, text string, submit bool) error {
 	b.rec("sendInput")
 	b.lastSend = SendInputParams{Pane: pane, Text: text, Submit: submit}
 	return b.sendErr
+}
+func (b *fakeBackend) StageSpawn(pane uint32, ov SpawnOverride) {
+	b.rec("stageSpawn")
+	if b.staged == nil {
+		b.staged = make(map[uint32]SpawnOverride)
+	}
+	b.staged[pane] = ov
 }
 func (b *fakeBackend) StartRead(r Responder, _ ReadParams) { b.rec("startRead"); b.lastRead = r }
 func (b *fakeBackend) StartCapture(r Responder, _ CaptureParams) {
@@ -760,6 +770,67 @@ func TestDispatchTabCreateResult(t *testing.T) {
 	// the whole point of returning it.
 	if len(h.s.AllPaneIDs()) != 2 {
 		t.Fatalf("pane count = %d, want 2", len(h.s.AllPaneIDs()))
+	}
+}
+
+// tab.create's optional params pin the tab title and stage a spawn override for
+// the root pane — and the staging must precede applyModel, the call that
+// actually creates the pane's PTY.
+func TestDispatchTabCreateSpawn(t *testing.T) {
+	h := newCmdHarness(t)
+	r := h.resp()
+
+	p := TabCreateParams{
+		Title:   "todo",
+		Cwd:     "/tmp/proj",
+		Command: []string{"/opt/plug/bin/tool", "--ui"},
+		Env:     map[string]string{"CATS_PLUGIN_ID": "x.tool"},
+	}
+	h.d.Dispatch(CmdTabCreate, params(t, p), r)
+
+	got := okData[TabCreateResult](t, r)
+	if lg := *h.log; len(lg) != 3 || lg[0] != "stageSpawn" || lg[1] != "applyModel" || lg[2] != "ok" {
+		t.Fatalf("tab.create effects = %v, want [stageSpawn applyModel ok]", lg)
+	}
+	ov, ok := h.b.staged[got.Pane]
+	if !ok {
+		t.Fatalf("no spawn override staged for pane %d", got.Pane)
+	}
+	if ov.Cwd != p.Cwd || len(ov.Command) != 2 || ov.Command[0] != p.Command[0] ||
+		ov.Env["CATS_PLUGIN_ID"] != "x.tool" {
+		t.Fatalf("staged override = %+v, want %+v", ov, p)
+	}
+
+	// The title landed on the new tab (same mutation as tab.rename).
+	r = h.resp()
+	h.d.Dispatch(CmdTabList, noParams(), r)
+	tabs := okData[TabListResult](t, r).Tabs
+	var found bool
+	for _, tb := range tabs {
+		if tb.Num == got.Num {
+			found = true
+			if tb.Name != "todo" {
+				t.Fatalf("new tab name = %q, want %q", tb.Name, "todo")
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("new tab %d missing from tab.list %+v", got.Num, tabs)
+	}
+
+	// A bare tab.create (no params) must not stage anything.
+	r = h.resp()
+	h.d.Dispatch(CmdTabCreate, noParams(), r)
+	got2 := okData[TabCreateResult](t, r)
+	if _, ok := h.b.staged[got2.Pane]; ok {
+		t.Fatalf("bare tab.create staged an override for pane %d", got2.Pane)
+	}
+
+	// An empty command slot is rejected before any session mutation.
+	r = h.resp()
+	h.d.Dispatch(CmdTabCreate, params(t, TabCreateParams{Command: []string{""}}), r)
+	if !r.failCall || !strings.Contains(r.errMsg, "bad params") {
+		t.Fatalf("empty command[0]: fail=%v msg=%q", r.failCall, r.errMsg)
 	}
 }
 

@@ -116,6 +116,27 @@ In the manager: `enter` opens the target picker, then `enter` pastes the
 prompt staged for review while `ctrl+r` submits it to run (and marks the todo
 done). Outside cats it still manages backlogs; only drops need the socket.
 
+### Plugins
+
+The plugin host (`internal/plugin`) manages `~/.config/cats/plugins/`: a
+plugin is a directory with a `cats-plugin.toml` manifest (id, version,
+`[[build]]` steps, `[[actions]]` — the same shape as herdr's manifest; see
+`cmd/cats-todo/cats-plugin.toml` for the reference) plus whatever its build
+produces. Installing and linking are offline; `run` launches an action in a
+fresh tab via `tab.create`'s spawn params, with the invoking directory as the
+pane's cwd and `CATS_PLUGIN_ID`/`CATS_PLUGIN_DIR` (plus every pane's
+`CATS_PANE_ID`/`CATS_CONTROL_SOCKET`) in its environment — the server itself
+never reads a manifest.
+
+```bash
+catctl plugin install rohanthewiz/some-plugin   # clone from GitHub + build
+catctl plugin install <git-url> --ref v0.1.0    # pin a branch or tag
+catctl plugin link ./cmd/cats-todo              # dev mode: symlink a checkout
+catctl plugin list                              # ids, versions, actions
+catctl plugin run rohanthewiz.cats-todo         # launch in a new tab
+catctl plugin uninstall rohanthewiz.cats-todo
+```
+
 ## Layout
 
 ```

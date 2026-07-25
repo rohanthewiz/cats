@@ -11,12 +11,18 @@
 //	catctl help                               list the ergonomic verbs
 //	catctl commands                           list the raw §7 method names
 //	catctl integration <install|uninstall|status|help> ...  agent hook installers
+//	catctl plugin <install|link|uninstall|list|run|help> ...  plugin host
 //	catctl probe [--url ...] [--script ...]   browser-protocol WebSocket probe
 //
-// The integration family is the one offline verb: it installs/removes the
+// The integration family is an offline verb: it installs/removes the
 // cats shell-hook integrations for coding agents (claude, codex, kimi, ...)
 // by editing their config trees directly, and never dials the control socket
 // (internal/integration does the work).
+//
+// The plugin family is the plugin host's CLI (internal/plugin): it manages
+// ~/.config/cats/plugins (install from GitHub / link a local checkout /
+// uninstall / list) offline, while `plugin run` resolves an action's argv
+// locally and launches it in a fresh tab via tab.create's spawn params.
 //
 // The probe verb is the other transport exception: it speaks the WS9 browser
 // WebSocket protocol to a catway's /ws endpoint — not the control socket —
@@ -91,6 +97,15 @@ func run() int {
 	// like --outdated-only — so it must dispatch before the flag re-parse below.
 	if method == "integration" {
 		return runIntegration(rest[1:])
+	}
+
+	// The plugin verb family (internal/plugin) manages the plugins directory —
+	// offline except for `plugin run`, which launches an action via tab.create.
+	// Its subcommands own positional args and flags (--ref), so like
+	// integration it dispatches before the flag re-parse below; the global
+	// --socket (already parsed) is forwarded for `run`.
+	if method == "plugin" {
+		return runPluginCmd(rest[1:], *socket)
 	}
 
 	// The probe verb dials the catway's /ws endpoint (the browser WebSocket
@@ -240,6 +255,8 @@ Usage:
   catctl commands                            list the raw §7 method names
   catctl integration install|uninstall <target>   install/remove agent hooks (offline)
   catctl integration status [--outdated-only]     integration install states (offline)
+  catctl plugin install|link|uninstall|list ...   plugin host (offline; catctl plugin help)
+  catctl plugin run <id> [action]                 launch a plugin action in a new tab
   catctl probe [--url ws://...] [--script '...']  browser-protocol WebSocket probe
                                                (op reference: cmd/catctl/probe.go)
 

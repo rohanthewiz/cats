@@ -43,6 +43,14 @@ type Backend interface {
 	// if the pane is unknown/exited or the encode fails.
 	SendInput(pane uint32, text string, submit bool) error
 
+	// StageSpawn registers a one-shot spawn override for a pane the next
+	// ApplyModel will realize: an argv to exec instead of the default shell, a
+	// cwd override, and/or extra environment (tab.create's optional params).
+	// It must be called before that ApplyModel — the dispatcher knows the new
+	// pane's id from the session before the backend creates its PTY, which is
+	// the only window where the override can influence the spawn.
+	StageSpawn(pane uint32, ov SpawnOverride)
+
 	// PaneExists / DaemonConnected gate the async round-trip commands.
 	PaneExists(pane uint32) bool
 	DaemonConnected() bool
@@ -411,12 +419,20 @@ func (d *Dispatcher) Dispatch(name string, dec ParamDecoder, r Responder) {
 		r.OK(nil)
 
 	case CmdTabCreate:
+		var p TabCreateParams
+		if err := decodeOptional(dec, &p); err != nil {
+			bad(err)
+			return
+		}
+		if err := p.Validate(); err != nil {
+			bad(err)
+			return
+		}
 		num, err := d.session.CreateTab()
 		if err != nil {
 			r.Fail(err.Error())
 			return
 		}
-		d.backend.ApplyModel()
 		// CreateTab switches to the new tab, so the globally focused pane is its
 		// root pane — returned so an automation client can drive the fresh pane
 		// (send_input / wait_for_output) without diffing pane.list.
@@ -424,6 +440,18 @@ func (d *Dispatcher) Dispatch(name string, dec ParamDecoder, r Responder) {
 		if id, ok := d.session.FocusedPane(); ok {
 			res.Pane = uint32(id)
 		}
+		if p.Title != "" {
+			// Same session mutation as tab.rename; the tab was just created, so
+			// the only failure would be a vanished tab — not worth failing the
+			// whole create over.
+			_ = d.session.RenameTab(num, p.Title)
+		}
+		// Stage the spawn override before ApplyModel: that call reconciles the
+		// daemon's PTY set and is what actually creates the pane's process.
+		if ov, ok := p.spawnOverride(); ok {
+			d.backend.StageSpawn(res.Pane, ov)
+		}
+		d.backend.ApplyModel()
 		r.OK(res)
 
 	case CmdTabClose:

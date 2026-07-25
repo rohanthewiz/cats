@@ -176,9 +176,13 @@ func main() {
 	// Local control API (WS4): a CLI/automation client drives the same §7 command
 	// table as the browser over a unix socket. Listen failure is non-fatal — the
 	// browser front-end works without it. cleanup unlinks the socket on stop.
-	controlCleanup, err := serveControl(o, ctlproto.ResolveSocket(eff.ControlSocket))
+	// o.controlSocket must be set before the loop starts — createPane exports
+	// it to every pane as CATS_CONTROL_SOCKET for in-pane automation clients.
+	o.controlSocket = ctlproto.ResolveSocket(eff.ControlSocket)
+	controlCleanup, err := serveControl(o, o.controlSocket)
 	if err != nil {
 		log.Printf("catway: control API disabled: %v", err)
+		o.controlSocket = "" // don't point panes at a socket nobody serves
 		controlCleanup = func() {}
 	}
 
