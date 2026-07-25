@@ -44,6 +44,9 @@ type fakeBackend struct {
 	lastWtRemove Responder
 	lastWtRemP   WorktreeRemoveParams
 	lastCfgSetP  ConfigSetParams
+	lastPlgList  Responder
+	lastPlgUnins Responder
+	lastPlgUninP PluginUninstallParams
 	// paneMeta is the canned per-pane metadata PaneMeta answers with (nil ⇒ all
 	// zero values), letting pane.list/pane.get tests assert the merge.
 	paneMeta map[uint32]PaneMeta
@@ -108,6 +111,15 @@ func (b *fakeBackend) StartWorktreeRemove(r Responder, p WorktreeRemoveParams) {
 	b.rec("wtRemove")
 	b.lastWtRemove = r
 	b.lastWtRemP = p
+}
+func (b *fakeBackend) StartPluginList(r Responder) {
+	b.rec("plgList")
+	b.lastPlgList = r
+}
+func (b *fakeBackend) StartPluginUninstall(r Responder, p PluginUninstallParams) {
+	b.rec("plgUninstall")
+	b.lastPlgUnins = r
+	b.lastPlgUninP = p
 }
 func (b *fakeBackend) ConfigGet(r Responder) { b.rec("cfgGet"); r.OK(ConfigGetResult{Path: "/cfg"}) }
 func (b *fakeBackend) ConfigSet(r Responder, p ConfigSetParams) {
@@ -731,6 +743,52 @@ func TestDispatchConfig(t *testing.T) {
 	h.d.Dispatch(CmdConfigSet, params(t, ConfigSetParams{Theme: &ConfigTheme{Font: "monospace"}}), rr)
 	if !rr.okCall || h.b.lastCfgSetP.Theme == nil || h.b.lastCfgSetP.Theme.Font != "monospace" {
 		t.Fatalf("config.set not forwarded: %+v", h.b.lastCfgSetP)
+	}
+}
+
+// plugin.list is result-only: with no reply channel it short-circuits before
+// scanning the plugins root; with one it forwards the caller's responder and
+// does not resolve synchronously (the backend's disk scan resolves it later).
+func TestDispatchPluginList(t *testing.T) {
+	silent := newCmdHarness(t)
+	r := &fakeResponder{log: silent.log, wants: false}
+	silent.d.Dispatch(CmdPluginList, noParams(), r)
+	if len(*silent.log) != 0 || silent.b.lastPlgList != nil {
+		t.Fatalf("reply-less plugin.list should do nothing, log=%v", *silent.log)
+	}
+
+	h := newCmdHarness(t)
+	rr := h.resp()
+	h.d.Dispatch(CmdPluginList, noParams(), rr)
+	if rr.okCall || rr.failCall {
+		t.Fatalf("plugin.list must not resolve synchronously")
+	}
+	if got := *h.log; len(got) != 1 || got[0] != "plgList" || h.b.lastPlgList != Responder(rr) {
+		t.Fatalf("plugin.list effects = %v", got)
+	}
+}
+
+// plugin.uninstall requires an id (fails before the backend) and otherwise
+// forwards its params, resolving asynchronously.
+func TestDispatchPluginUninstall(t *testing.T) {
+	h := newCmdHarness(t)
+	r := h.resp()
+	h.d.Dispatch(CmdPluginUninstall, params(t, PluginUninstallParams{}), r)
+	if !r.failCall || !strings.Contains(r.errMsg, "id is required") {
+		t.Fatalf("empty id: fail=%v msg=%q", r.failCall, r.errMsg)
+	}
+	if h.b.lastPlgUnins != nil {
+		t.Fatalf("missing id must not reach the backend")
+	}
+
+	h = newCmdHarness(t)
+	r = h.resp()
+	h.d.Dispatch(CmdPluginUninstall, params(t, PluginUninstallParams{ID: "acme.todo"}), r)
+	if r.okCall || r.failCall {
+		t.Fatalf("plugin.uninstall must not resolve synchronously")
+	}
+	if h.b.lastPlgUnins != Responder(r) || h.b.lastPlgUninP.ID != "acme.todo" {
+		t.Fatalf("plugin.uninstall not forwarded: %+v", h.b.lastPlgUninP)
 	}
 }
 

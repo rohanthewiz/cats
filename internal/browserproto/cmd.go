@@ -44,6 +44,8 @@ const (
 	CmdWorktreeRemove     = app.CmdWorktreeRemove
 	CmdConfigGet          = app.CmdConfigGet
 	CmdConfigSet          = app.CmdConfigSet
+	CmdPluginList         = app.CmdPluginList
+	CmdPluginUninstall    = app.CmdPluginUninstall
 	CmdSessionGet         = app.CmdSessionGet
 	CmdWorkspaceList      = app.CmdWorkspaceList
 	CmdTabList            = app.CmdTabList
@@ -108,4 +110,9 @@ type (
 	ConfigServerInfo      = app.ConfigServerInfo
 	ConfigGetResult       = app.ConfigGetResult
 	ConfigSetParams       = app.ConfigSetParams
+	PluginInfo            = app.PluginInfo
+	PluginActionInfo      = app.PluginActionInfo
+	PluginListResult      = app.PluginListResult
+	PluginUninstallParams = app.PluginUninstallParams
+	PluginUninstallResult = app.PluginUninstallResult
 )

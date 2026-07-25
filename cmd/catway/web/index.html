@@ -176,6 +176,17 @@
   .pal .row .meta { margin-left:auto; color:var(--muted); font-size:11px; flex:none; }
   .pal .empty { padding:10px 12px; color:var(--muted); font-style:italic; }
 
+  /* ---- Plugins dialog ----
+     Reuses the palette list chrome, but rows are inert info lines whose
+     affordances are the per-row action buttons (run / update / uninstall) —
+     smaller than the footer .btns so a row stays one compact line. */
+  .modal.plugins .row { cursor:default; }
+  .pal .row .acts { margin-left:auto; display:flex; gap:4px; flex:none; }
+  .pal .row .acts button { background:var(--panel); color:var(--fg); border:1px solid var(--line);
+    border-radius:4px; padding:1px 8px; font:inherit; font-size:11px; cursor:pointer; }
+  .pal .row .acts button:hover { border-color:var(--accent); color:#fff; }
+  .pal .row .acts button.danger:hover { border-color:var(--err); background:var(--err); }
+
   /* ---- Help modal (WS8) ---- */
   .modal.help { max-width:720px; width:680px; }
   .help .body { max-height:60vh; overflow-y:auto; }
@@ -1752,6 +1763,130 @@
     });
   }
 
+  // ---- Plugins dialog ----
+  //
+  // One list over plugin.list with per-row actions. The instant verbs
+  // (uninstall) resolve over §7 commands; install/update spawn a
+  // `catctl plugin …` tab instead — they run git plus a build whose live
+  // output the user wants to watch, and cmd_result is one-shot, so a pane is
+  // the streaming surface (the server resolves the catctl path for us).
+
+  function pluginStatus(p) {
+    if (p.broken) return "broken";
+    if (p.linked) return "linked";
+    return ""; // installed is the default case; an empty kind keeps rows quiet
+  }
+
+  // pluginRunAction launches one manifest action in a fresh tab: resolved argv
+  // and identity env come straight from plugin.list (same shape catctl plugin
+  // run sends).
+  function pluginRunAction(p, a) {
+    closeModal();
+    sendCmdAwait("tab.create", { title: a.title || p.name || p.id, command: a.argv, env: p.env || {} }, (res) => {
+      if (!res.ok) toast("plugin run failed: " + (res.error || "unknown"));
+    });
+  }
+
+  // pluginCatctlTab spawns `catctl plugin <args…>` in a fresh tab. The pane
+  // stays on screen after exit (exited chrome), so the git/build output — or
+  // the failure — remains readable until the user closes it.
+  function pluginCatctlTab(catctl, title, args) {
+    closeModal();
+    sendCmdAwait("tab.create", { title, command: [catctl, "plugin"].concat(args) }, (res) => {
+      if (!res.ok) toast("plugin: " + (res.error || "unknown"));
+    });
+  }
+
+  function pluginInstallDialog(catctl) {
+    dialogInput({
+      title: "install plugin",
+      hint: "owner/repo or a git URL · optionally add --ref <branch|tag> · runs in a new tab",
+      submitLabel: "install",
+      onSubmit: (v) => {
+        const args = v.trim().split(/\s+/).filter(Boolean);
+        if (!args.length) { toast("plugin install: source is required"); return; }
+        pluginCatctlTab(catctl, "plugin install", ["install"].concat(args));
+      },
+    });
+  }
+
+  function confirmUninstallPlugin(p) {
+    dialogConfirm({
+      title: "uninstall plugin",
+      message: p.linked
+        ? "Unlink “" + p.id + "”? Only the link is removed — your checkout at " + p.dir + " is untouched."
+        : "Uninstall “" + p.id + "”? Its directory (" + p.dir + ") is deleted.",
+      confirmLabel: p.linked ? "unlink" : "uninstall", danger: !p.linked,
+      onConfirm: () => sendCmdAwait("plugin.uninstall", { id: p.id }, (res) => {
+        if (!res.ok) { toast("uninstall failed: " + (res.error || "unknown")); return; }
+        toast((res.data && res.data.message) || (p.id + " uninstalled"));
+        openPluginsDialog(); // refresh the list in place
+      }),
+    });
+  }
+
+  function openPluginsDialog() {
+    sendCmdAwait("plugin.list", {}, (res) => {
+      if (!res.ok) { toast("plugins: " + (res.error || "unknown")); return; }
+      const info = res.data || {};
+      const plugins = info.plugins || [];
+      openOverlay((ov) => {
+        const m = document.createElement("div"); m.className = "modal pal plugins";
+        const h = document.createElement("header"); h.textContent = "plugins"; m.appendChild(h);
+        const listEl = document.createElement("div"); listEl.className = "list"; m.appendChild(listEl);
+        if (!plugins.length) {
+          const e = document.createElement("div"); e.className = "empty";
+          e.textContent = "no plugins installed";
+          listEl.appendChild(e);
+        }
+        for (const p of plugins) {
+          const row = document.createElement("div"); row.className = "row";
+          row.title = p.broken || p.description || "";
+          const kind = document.createElement("span"); kind.className = "kind";
+          kind.textContent = pluginStatus(p);
+          const lbl = document.createElement("span"); lbl.className = "lbl";
+          lbl.textContent = p.broken ? p.id : p.id + " v" + (p.version || "?") +
+            (p.name && p.name !== p.id ? " — " + p.name : "");
+          row.appendChild(kind); row.appendChild(lbl);
+          const acts = document.createElement("div"); acts.className = "acts";
+          const actBtn = (label, cls, fn) => {
+            const b = document.createElement("button");
+            b.textContent = label; if (cls) b.className = cls;
+            b.addEventListener("click", fn);
+            acts.appendChild(b);
+          };
+          if (!p.broken && (p.actions || []).length) {
+            actBtn("run", "", (e) => {
+              // One action launches directly (the catctl default); more open a
+              // picker at the button — the ctx menu coexists with the modal.
+              if (p.actions.length === 1) { pluginRunAction(p, p.actions[0]); return; }
+              const r = e.target.getBoundingClientRect();
+              openCtx(r.left, r.bottom + 4, p.actions.map((a) => (
+                { label: a.title || a.id, fn: () => pluginRunAction(p, a) }
+              )));
+              e.stopPropagation();
+            });
+          }
+          if (!p.broken && !p.linked) {
+            actBtn("update", "", () => pluginCatctlTab(info.catctl, "update " + p.id, ["update", p.id]));
+          }
+          actBtn(p.linked ? "unlink" : "uninstall", "danger", () => confirmUninstallPlugin(p));
+          row.appendChild(acts);
+          listEl.appendChild(row);
+        }
+        const btns = document.createElement("div"); btns.className = "btns";
+        btns.appendChild(mkModalBtn("close", "", closeModal));
+        btns.appendChild(mkModalBtn("install…", "primary", () => pluginInstallDialog(info.catctl)));
+        m.appendChild(btns);
+        m.addEventListener("keydown", (e) => {
+          e.stopPropagation();
+          if (e.key === "Escape") { e.preventDefault(); closeModal(); }
+        });
+        ov.appendChild(m);
+      });
+    });
+  }
+
   // ---- Command palette / navigator (WS8) ----
   //
   // One fuzzy list over both surfaces cats splits in two: the Navigator
@@ -1778,6 +1913,7 @@
       { label: "close pane", fn: () => sendCmd("pane.close", {}) },
       { label: "new worktree", fn: openNewWorktreeDialog },
       { label: "open worktree", fn: openWorktreeOpenDialog },
+      { label: "plugins", fn: openPluginsDialog },
       { label: "settings", fn: openSettings },
       { label: "reload config", fn: () => sendCmd("server.reload_config", {}) },
       { label: "keyboard shortcuts", fn: openHelp },
@@ -2245,14 +2381,16 @@
 
   // Status-bar affordances: the zoom chip unzooms, the palette hint opens it,
   // the gear opens the global launcher menu (cats's bottom-corner menu:
-  // settings / keybinds / reload config / update line when one is pending /
-  // stop server standing in for detach — the web has no client to detach).
+  // settings / keybinds / plugins / reload config / update line when one is
+  // pending / stop server standing in for detach — the web has no client to
+  // detach).
   zoomIndEl.addEventListener("click", () => sendCmd("pane.zoom", {}));
   palHintEl.addEventListener("click", () => openPalette());
   gearEl.addEventListener("click", (e) => {
     const items = [
       { label: "settings", fn: openSettings },
       { label: "keybinds", fn: openHelp },
+      { label: "plugins…", fn: openPluginsDialog },
       { label: "reload config", fn: () => sendCmd("server.reload_config", {}) },
     ];
     if (updateInfo) items.push({ label: "update ready" + (updateInfo.version ? " — " + updateInfo.version : ""), fn: showUpdateBanner });

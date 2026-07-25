@@ -62,6 +62,14 @@ const (
 	CmdConfigGet = "config.get"
 	CmdConfigSet = "config.set"
 
+	// Plugin commands (plugins dialog): enumerate and remove installed plugins.
+	// Deliberately only the instant verbs — install/update shell out to git and
+	// a build, whose output a caller wants to *watch*, so the dialog launches
+	// those as `catctl plugin …` in a fresh tab (tab.create spawn params) rather
+	// than hiding minutes of subprocess work behind a single cmd_result.
+	CmdPluginList      = "plugin.list"
+	CmdPluginUninstall = "plugin.uninstall"
+
 	// Read-only query commands (§7): they return a snapshot of session state
 	// and mutate nothing, so the dispatcher answers them straight from the
 	// Session with no Backend effects.
@@ -88,6 +96,7 @@ func CommandNames() []string {
 		CmdAgentFocus, CmdServerReloadConfig, CmdServerStop,
 		CmdWorktreeList, CmdWorktreeCreate, CmdWorktreeOpen, CmdWorktreeRemove,
 		CmdConfigGet, CmdConfigSet,
+		CmdPluginList, CmdPluginUninstall,
 		CmdSessionGet, CmdWorkspaceList, CmdTabList, CmdPaneList, CmdPaneGet,
 	}
 }
@@ -644,6 +653,59 @@ type ConfigGetResult struct {
 type ConfigSetParams struct {
 	Theme    *ConfigTheme        `json:"theme,omitempty"`
 	CopyMode map[string][]string `json:"copy_mode,omitempty"`
+}
+
+// --- Plugin params & results (§7, plugins dialog) ------------------------------
+
+// PluginActionInfo describes one launchable action for plugin.list. Argv is the
+// fully resolved argv (plugin-root-relative "./bin/tool" paths anchored to the
+// install dir server-side), so a front-end can hand it straight to tab.create's
+// Command without knowing the manifest's path conventions.
+type PluginActionInfo struct {
+	ID    string   `json:"id"`
+	Title string   `json:"title,omitempty"`
+	Argv  []string `json:"argv"`
+}
+
+// PluginInfo describes one installed plugin for plugin.list. Broken carries the
+// manifest load/validate error for an entry that exists on disk but cannot run
+// (the manifest fields are then empty apart from ID). Env is the identity
+// environment a launch must carry (CATS_PLUGIN_ID / CATS_PLUGIN_DIR) — included
+// per plugin so the front-end composes tab.create params without hard-coding
+// the env var names.
+type PluginInfo struct {
+	ID          string             `json:"id"`
+	Name        string             `json:"name,omitempty"`
+	Version     string             `json:"version,omitempty"`
+	Description string             `json:"description,omitempty"`
+	Linked      bool               `json:"linked,omitempty"`
+	Dir         string             `json:"dir"`
+	Source      string             `json:"source,omitempty"`
+	Ref         string             `json:"ref,omitempty"`
+	Broken      string             `json:"broken,omitempty"`
+	Actions     []PluginActionInfo `json:"actions,omitempty"`
+	Env         map[string]string  `json:"env,omitempty"`
+}
+
+// PluginListResult is CmdResult.Data for plugin.list. Catctl is the server's
+// best resolution of the catctl binary (PATH first, then a sibling of the
+// server executable) — the dialog spawns `catctl plugin install/update` tabs
+// and the browser has no way to resolve host paths itself.
+type PluginListResult struct {
+	Catctl  string       `json:"catctl"`
+	Plugins []PluginInfo `json:"plugins"`
+}
+
+// PluginUninstallParams: plugin.uninstall — remove an installed plugin's
+// directory (or unlink a linked one; the checkout itself is never touched).
+type PluginUninstallParams struct {
+	ID string `json:"id"`
+}
+
+// PluginUninstallResult is CmdResult.Data for plugin.uninstall: the same
+// human-readable outcome line the CLI prints.
+type PluginUninstallResult struct {
+	Message string `json:"message"`
 }
 
 // optPaneID converts an optional wire pane id into an optional layout.PaneID

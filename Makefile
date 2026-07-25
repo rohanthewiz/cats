@@ -58,7 +58,10 @@ binaries:
 # The map is "cmd:alias" pairs — edit here to rename or add targets. Splitting
 # on ':' keeps the source dir (./cmd/$(cmd)) decoupled from the installed name.
 LOCAL_BIN := $(HOME)/bin
-LOCAL_MAP := catway:hway cathost:thost catctl:hctl cats-todo:cats-todo
+# cats-todo is deliberately absent: it is built by the plugin host instead
+# (`catctl plugin link ./cmd/cats-todo` runs the manifest's build step), so the
+# local install stays limited to the binaries the plugin flow can't provide.
+LOCAL_MAP := catway:catway cathost:cathost catctl:catctl
 
 local:
 	@mkdir -p $(LOCAL_BIN)

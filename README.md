@@ -125,8 +125,16 @@ plugin is a directory with a `cats-plugin.toml` manifest (id, version,
 produces. Installing and linking are offline; `run` launches an action in a
 fresh tab via `tab.create`'s spawn params, with the invoking directory as the
 pane's cwd and `CATS_PLUGIN_ID`/`CATS_PLUGIN_DIR` (plus every pane's
-`CATS_PANE_ID`/`CATS_CONTROL_SOCKET`) in its environment — the server itself
-never reads a manifest.
+`CATS_PANE_ID`/`CATS_CONTROL_SOCKET`) in its environment — the manifest never
+crosses the socket (the server's own `plugin.list` reads it host-side and
+answers with resolved argv).
+
+The web UI has the same surface: gear menu → **plugins** (also in the ⌘K
+palette) lists installed plugins with run / update / uninstall per row and an
+install prompt. Uninstall resolves over the §7 `plugin.list`/`plugin.uninstall`
+commands; install and update spawn `catctl plugin …` in a fresh tab so the
+git + build output streams live in a pane (the server resolves the catctl
+path — override with `CATS_CATCTL` if it lives somewhere unusual).
 
 ```bash
 catctl plugin install rohanthewiz/some-plugin   # clone from GitHub + build

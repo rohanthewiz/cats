@@ -87,6 +87,15 @@ type Backend interface {
 	ConfigGet(r Responder)
 	ConfigSet(r Responder, p ConfigSetParams)
 
+	// StartPluginList / StartPluginUninstall run the plugin-host commands (the
+	// plugins dialog). Both are filesystem work under the plugins root, kept on
+	// the Backend seam (not called into internal/plugin here) for the same
+	// reason as the worktree commands: the disk work runs off the loop
+	// goroutine and r resolves later, and the dispatcher stays free of the
+	// host dependency for fakes.
+	StartPluginList(r Responder)
+	StartPluginUninstall(r Responder, p PluginUninstallParams)
+
 	// ReloadConfig acknowledges a config reload (a no-op today).
 	ReloadConfig() error
 	// Shutdown notifies observers the server is going away and triggers the quit.
@@ -630,6 +639,24 @@ func (d *Dispatcher) Dispatch(name string, dec ParamDecoder, r Responder) {
 			return
 		}
 		d.backend.StartWorktreeRemove(r, p) // async: git remove + workspace close resolve r later
+
+	case CmdPluginList:
+		if !r.WantsReply() {
+			return // list yields only a result; with no reply channel there's nowhere to send it
+		}
+		d.backend.StartPluginList(r) // async: the plugins-root scan resolves r later
+
+	case CmdPluginUninstall:
+		var p PluginUninstallParams
+		if err := dec.Decode(&p); err != nil {
+			bad(err)
+			return
+		}
+		if p.ID == "" {
+			r.Fail("plugin.uninstall: id is required")
+			return
+		}
+		d.backend.StartPluginUninstall(r, p) // async: the directory removal resolves r later
 
 	case CmdConfigGet:
 		if !r.WantsReply() {
