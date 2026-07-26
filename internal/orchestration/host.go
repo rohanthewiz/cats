@@ -512,6 +512,16 @@ func (h *Host) createPane(c CreatePane) error {
 	}
 
 	p := &pane{id: c.PaneID, ptmx: ptmx, cmd: cmd}
+	// Seed the pane's cwd with the directory it spawned in, so consumers (the
+	// browser tooltip, worktree anchoring, session persistence) have a pwd even
+	// when the shell never reports OSC 7. A real OSC 7 later overwrites this via
+	// setCwdMeta's change detection, so shells that do report stay authoritative.
+	spawnDir := c.Cwd
+	if spawnDir == "" {
+		// No explicit dir means the PTY inherited the daemon's process cwd.
+		spawnDir, _ = os.Getwd()
+	}
+	p.lastPwd = spawnDir
 	emu, err := terminal.New(c.Cols, c.Rows, terminal.WithWritePTY(func(d []byte) {
 		_ = p.writePTY(d)
 	}))
@@ -532,6 +542,12 @@ func (h *Host) createPane(c CreatePane) error {
 	h.mu.Lock()
 	h.panes[p.id] = p
 	h.mu.Unlock()
+
+	// Announce the seeded spawn cwd immediately — without this, panes whose
+	// shell never emits OSC 7 would show no directory at all downstream.
+	if spawnDir != "" {
+		h.emit(NewPaneCwd(p.id, spawnDir))
+	}
 
 	go h.readPump(p)
 	go h.detectPump(p)

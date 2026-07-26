@@ -128,10 +128,12 @@ func TestHostReportsPaneCwd(t *testing.T) {
 			if pc.PaneID != 3 {
 				t.Fatalf("pane_cwd for pane %d, want 3", pc.PaneID)
 			}
-			if pc.Cwd != "/tmp" {
-				t.Fatalf("pane_cwd = %q, want /tmp", pc.Cwd)
+			// The first pane_cwd is the spawn-dir seed (the host announces the
+			// directory the PTY started in); keep reading until the OSC 7
+			// report overrides it, proving the shell's own pwd still wins.
+			if pc.Cwd == "/tmp" {
+				return
 			}
-			return
 		case MsgError:
 			t.Fatalf("unexpected error event: %s", string(payload))
 		}
