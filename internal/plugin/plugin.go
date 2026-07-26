@@ -93,12 +93,22 @@ func List() ([]Installed, error) {
 		}
 		inst, err := load(root, name)
 		if err != nil {
-			// A file or broken symlink squatting in the root isn't a plugin;
-			// only report entries that at least look like one (directories).
-			if st, serr2 := os.Stat(filepath.Join(root, name)); serr2 != nil || !st.IsDir() {
+			// Report entries that could plausibly be a plugin: directories (an
+			// install with a bad manifest) and symlinks — including broken ones.
+			// A broken symlink is a dev link whose checkout moved or was
+			// deleted; it still occupies the id (Install's already-installed
+			// check Lstats it), so hiding it here would leave the user with
+			// "already installed" on one side and "no plugins installed" on the
+			// other, and no way to uninstall from the dialog. Lstat (not Stat)
+			// so the judgment is about the entry itself, not its target. Only
+			// plain files squatting in the root are skipped.
+			fi, lerr := os.Lstat(filepath.Join(root, name))
+			if lerr != nil || (fi.Mode()&os.ModeSymlink == 0 && !fi.IsDir()) {
 				continue
 			}
-			inst = Installed{Err: err, Dir: filepath.Join(root, name)}
+			// load's partial result already carries Dir and Linked as far as it
+			// got; keep those and just mark the breakage.
+			inst.Err = err
 			inst.ID = name
 		}
 		out = append(out, inst)

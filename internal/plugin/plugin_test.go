@@ -417,3 +417,59 @@ func TestListBrokenEntry(t *testing.T) {
 		t.Fatalf("list = %+v, want one broken entry", list)
 	}
 }
+
+// A dev link whose checkout was deleted (or moved — e.g. a plugin extracted to
+// its own repo) still occupies its id. It must surface in List as a broken
+// linked entry rather than vanish: hiding it produced the contradiction of
+// Install saying "already installed" while the dialog said "no plugins
+// installed", with nothing to uninstall in between. Install/Link must name the
+// broken link in their refusal, and Uninstall must clear it.
+func TestBrokenDevLink(t *testing.T) {
+	root := testRoot(t)
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// The id the link squats on matches validManifest's, so Install/Link below
+	// collide with it.
+	gone := filepath.Join(t.TempDir(), "moved-away")
+	if err := os.Symlink(gone, filepath.Join(root, "acme.demo")); err != nil {
+		t.Fatal(err)
+	}
+	// A plain file squatter is still skipped — only dirs and symlinks list.
+	if err := os.WriteFile(filepath.Join(root, "stray.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	list, err := List()
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(list) != 1 || list[0].ID != "acme.demo" || list[0].Err == nil || !list[0].Linked {
+		t.Fatalf("list = %+v, want one broken linked entry", list)
+	}
+
+	// Linking a live checkout under the occupied id names the broken link.
+	checkout := writePlugin(t, validManifest)
+	if _, err := Link(checkout, nil); err == nil || !strings.Contains(err.Error(), "broken dev link") {
+		t.Fatalf("link over broken link err = %v, want broken dev link refusal", err)
+	}
+
+	// So does Install (full clone path, against a local upstream).
+	if _, err := exec.LookPath("git"); err == nil {
+		git := gitIn(t, checkout)
+		git("init", "-q", "-b", "main")
+		git("add", ".")
+		git("commit", "-q", "-m", "plugin")
+		if _, err := Install(checkout, "", nil); err == nil || !strings.Contains(err.Error(), "broken dev link") {
+			t.Fatalf("install over broken link err = %v, want broken dev link refusal", err)
+		}
+	}
+
+	// Uninstall clears the squatter; a retry of the link then succeeds.
+	if msg, err := Uninstall("acme.demo"); err != nil || !strings.Contains(msg, "unlinked") {
+		t.Fatalf("uninstall = %q, %v; want unlinked", msg, err)
+	}
+	if _, err := Link(checkout, nil); err != nil {
+		t.Fatalf("link after clearing broken link: %v", err)
+	}
+}

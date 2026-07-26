@@ -64,7 +64,7 @@ func Install(source, ref string, out io.Writer) (Installed, error) {
 	// so the already-installed check necessarily happens here, not up front.
 	dest := filepath.Join(root, m.ID)
 	if _, err := os.Lstat(dest); err == nil {
-		return Installed{}, fmt.Errorf("plugin %q is already installed (uninstall it first)", m.ID)
+		return Installed{}, occupiedErr(dest, m.ID)
 	}
 
 	if err := runBuild(tmp, m.Build, out); err != nil {
@@ -120,7 +120,7 @@ func Link(dir string, out io.Writer) (Installed, error) {
 				return load(root, m.ID)
 			}
 		}
-		return Installed{}, fmt.Errorf("plugin %q is already installed (uninstall it first)", m.ID)
+		return Installed{}, occupiedErr(entry, m.ID)
 	}
 
 	if err := runBuild(abs, m.Build, out); err != nil {
@@ -130,6 +130,23 @@ func Link(dir string, out io.Writer) (Installed, error) {
 		return Installed{}, err
 	}
 	return load(root, m.ID)
+}
+
+// occupiedErr explains why an existing entry blocks Install/Link claiming its
+// id. The interesting case is a symlink whose target is gone — a dev link left
+// behind after its checkout moved or was deleted (e.g. a plugin extracted to
+// its own repo). Plain "already installed" would send the user to `plugin
+// list`, where a working install shows up but a broken link needs the message
+// to say what is actually squatting on the id and how to clear it.
+func occupiedErr(entry, id string) error {
+	if fi, err := os.Lstat(entry); err == nil && fi.Mode()&os.ModeSymlink != 0 {
+		if _, err := os.Stat(entry); err != nil { // Stat follows the link: target missing
+			target, _ := os.Readlink(entry)
+			return fmt.Errorf("plugin %q is blocked by a broken dev link (-> %s); run `catctl plugin uninstall %s` first",
+				id, target, id)
+		}
+	}
+	return fmt.Errorf("plugin %q is already installed (uninstall it first)", id)
 }
 
 // resolveSourceURL turns the CLI's source argument into something git clone
