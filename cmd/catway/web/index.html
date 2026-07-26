@@ -180,7 +180,13 @@
      Reuses the palette list chrome, but rows are inert info lines whose
      affordances are the per-row action buttons (run / update / uninstall) —
      smaller than the footer .btns so a row stays one compact line. */
+  .modal.plugins { width:620px; } /* room for id + version + name before the three buttons */
   .modal.plugins .row { cursor:default; }
+  /* The status tag only renders when there is a status (linked/broken), so it
+     hugs its text instead of reserving the palette's 52px kind slot — which,
+     for the common installed case, was 52px of nothing pushing the label into
+     truncation. */
+  .modal.plugins .row .kind { width:auto; }
   /* The linked-checkout path. Shrinks before the label does (flex 0 1 auto with
      min-width:0) so a deep path truncates instead of pushing the buttons off. */
   .pal .row .sub { color:var(--muted); font-size:11px; flex:0 1 auto; min-width:0;
@@ -1821,7 +1827,7 @@
   function pluginStatus(p) {
     if (p.broken) return "broken";
     if (p.linked) return "linked";
-    return ""; // installed is the default case; an empty kind keeps rows quiet
+    return ""; // installed is the default case; "" renders no status tag at all
   }
 
   // pluginRunAction launches one manifest action in a fresh tab: resolved argv
@@ -1913,12 +1919,20 @@
         for (const p of plugins) {
           const row = document.createElement("div"); row.className = "row";
           row.title = [p.broken || p.description, p.dir].filter(Boolean).join("\n");
-          const kind = document.createElement("span"); kind.className = "kind";
-          kind.textContent = pluginStatus(p);
+          // The status tag exists only when there is a status: the default
+          // installed case appends nothing, so the label starts at the row's
+          // left edge instead of after an empty reserved column (see the
+          // .modal.plugins .kind rule).
+          const status = pluginStatus(p);
+          if (status) {
+            const kind = document.createElement("span"); kind.className = "kind";
+            kind.textContent = status;
+            row.appendChild(kind);
+          }
           const lbl = document.createElement("span"); lbl.className = "lbl";
           lbl.textContent = p.broken ? p.id : p.id + " v" + (p.version || "?") +
             (p.name && p.name !== p.id ? " — " + p.name : "");
-          row.appendChild(kind); row.appendChild(lbl);
+          row.appendChild(lbl);
           // A linked row shows its checkout inline: for a local plugin *where*
           // it lives is the identifying fact (which worktree am I linked to?),
           // whereas an installed plugin's dir is always the plugins root and
