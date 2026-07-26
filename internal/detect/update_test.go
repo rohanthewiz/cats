@@ -195,6 +195,56 @@ func TestCheckAndUpdateEndToEnd(t *testing.T) {
 	}
 }
 
+// A valid remote overlay written in Rust's regex dialect must actually be
+// adopted. This is the hermes case: the manifest fetched fine and cached fine,
+// but its braced \u{fe0e} escapes failed to compile under Go, so every startup
+// logged "ignoring remote manifest" and quietly ran on the stale embedded copy.
+func TestLoadManifestsAdoptsRustUnicodeEscapes(t *testing.T) {
+	dir := t.TempDir()
+	manifest := `id = "codex"
+version = "2099.1.1.1"
+min_engine_version = 1
+
+[[rules]]
+id = "warn"
+state = "blocked"
+priority = 90
+region = "bottom_lines(1)"
+regex = ['^⚠[\u{fe0e}\u{fe0f}]?(?:\s|$)']
+`
+	if err := atomicWriteFile(remoteManifestPath(dir, "codex"), []byte(manifest)); err != nil {
+		t.Fatal(err)
+	}
+	m := loadManifests(dir)
+	if m["codex"] == nil {
+		t.Fatal("remote codex manifest did not load")
+	}
+	// One rule in, one rule out — proof the overlay replaced the bundled
+	// manifest rather than the bundled one surviving as a silent fallback.
+	if got := len(m["codex"].rules); got != 1 {
+		t.Fatalf("overlay not adopted: got %d rules, want the remote manifest's 1", got)
+	}
+}
+
+func TestTranslatePattern(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{`^⚠[\u{fe0e}\u{fe0f}]?`, `^⚠[\x{fe0e}\x{fe0f}]?`}, // Rust braced form
+		{`\u2026`, `\x{2026}`},                             // fixed 4-digit form
+		{`\U0001F600`, `\x{0001F600}`},                     // fixed 8-digit form
+		{`\U{1F600}`, `\x{1F600}`},
+		{`\p{Alphabetic}+`, `\p{L}+`},
+		{`\\u2026`, `\\u2026`},     // escaped backslash, then a literal "u2026"
+		{`\uZZZZ`, `\uZZZZ`},       // malformed payload passes through untouched
+		{`\u{}`, `\u{}`},           // empty braces are not a codepoint
+		{`\d+ \{2\}`, `\d+ \{2\}`}, // ordinary escapes are left alone
+	}
+	for _, c := range cases {
+		if got := translatePattern(c.in); got != c.want {
+			t.Errorf("translatePattern(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
 // A broken remote overlay must fall back to the bundled manifest, not drop the
 // agent.
 func TestLoadManifestsBrokenRemoteFallsBack(t *testing.T) {

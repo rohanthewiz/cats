@@ -274,15 +274,88 @@ func compileGate(g rawGate) (compiledGate, error) {
 	return cg, nil
 }
 
-var reRustUnicodeEscape = regexp.MustCompile(`\\u([0-9A-Fa-f]{4})`)
-
-// translatePattern rewrites the few Rust `regex` constructs the manifests use
-// into Go RE2 equivalents: \uXXXX -> \x{XXXX}, and the binary property
-// \p{Alphabetic} -> \p{L} (Unicode letters). Both engines are otherwise RE2.
+// translatePattern rewrites the Rust `regex` constructs the manifests use into
+// Go RE2 equivalents. The two engines are RE2 at heart, so only a few spellings
+// differ:
+//
+//	\uXXXX  \u{H…}  \UXXXXXXXX  \U{H…}  ->  \x{H…}  (Go's only codepoint escape)
+//	\p{Alphabetic}                      ->  \p{L}   (Go has no binary properties)
+//
+// Missing any of these forms is not cosmetic: compileGate fails, and
+// loadManifests then discards an otherwise-valid cached remote manifest and
+// silently falls back to the older embedded one — which is how the braced
+// \u{fe0e} in the hermes manifest went unused.
+//
+// The scan is escape-aware, walking the pattern instead of doing a blind
+// replace: an escaped backslash is copied as a pair so `\\u{1}` (a literal
+// backslash followed by the letter u) is left alone rather than mistaken for a
+// codepoint escape.
 func translatePattern(p string) string {
-	p = reRustUnicodeEscape.ReplaceAllString(p, `\x{${1}}`)
-	p = strings.ReplaceAll(p, `\p{Alphabetic}`, `\p{L}`)
-	return p
+	var b strings.Builder
+	b.Grow(len(p))
+	for i := 0; i < len(p); {
+		if p[i] != '\\' || i+1 >= len(p) {
+			b.WriteByte(p[i])
+			i++
+			continue
+		}
+		marker := p[i+1]
+		switch marker {
+		case 'u', 'U':
+			hex, width, ok := unicodeEscapeDigits(p[i+2:], marker)
+			if !ok { // not a codepoint escape after all — pass it through
+				b.WriteString(p[i : i+2])
+				i += 2
+				continue
+			}
+			b.WriteString(`\x{`)
+			b.WriteString(hex)
+			b.WriteByte('}')
+			i += 2 + width
+		default:
+			// Consumes `\\` as a unit (so the next byte can't start an escape)
+			// and lets every other escape through untouched.
+			b.WriteString(p[i : i+2])
+			i += 2
+		}
+	}
+	return strings.ReplaceAll(b.String(), `\p{Alphabetic}`, `\p{L}`)
+}
+
+// unicodeEscapeDigits reads the hex payload following a `\u` / `\U` marker:
+// either a braced run ("{fe0f}") or a fixed-width run — 4 digits for \u, 8 for
+// \U, matching Rust's grammar. Returns the digits and the bytes they consumed;
+// ok is false for anything that isn't a well-formed payload, leaving the caller
+// to emit the escape verbatim rather than corrupting it.
+func unicodeEscapeDigits(s string, marker byte) (hex string, width int, ok bool) {
+	if strings.HasPrefix(s, "{") {
+		end := strings.IndexByte(s, '}')
+		if end < 0 || !isHexRun(s[1:end]) {
+			return "", 0, false
+		}
+		return s[1:end], end + 1, true
+	}
+	n := 4
+	if marker == 'U' {
+		n = 8
+	}
+	if len(s) < n || !isHexRun(s[:n]) {
+		return "", 0, false
+	}
+	return s[:n], n, true
+}
+
+func isHexRun(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f' || c >= 'A' && c <= 'F') {
+			return false
+		}
+	}
+	return true
 }
 
 // Detect evaluates the agent's manifest against the input and returns the
