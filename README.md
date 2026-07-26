@@ -99,34 +99,25 @@ is a stdlib-only WebSocket probe for exercising the browser protocol headlessly.
 
 ### cats-todo — prompt backlog
 
-`cats-todo` (ported from [herdr-todo](https://github.com/rohanthewiz/herdr-todo))
-is a TUI prompt-backlog manager built on the same control socket: save prompts
-of future work per-project (`.cats-todo/todos.json`, committed with the repo)
-or globally (`~/.config/cats-todo/`), then *drop* one into a Claude Code
-session — an existing agent pane (the picker lists every detected agent pane
-with its state and location) or a fresh tab that launches the agent first.
+[`cats-todo`](https://github.com/rohanthewiz/cats-todo) (ported from
+[herdr-todo](https://github.com/rohanthewiz/herdr-todo)) is a TUI
+prompt-backlog manager built on the same control socket: save prompts of
+future work per-project or globally, then *drop* one into a Claude Code
+session — an existing agent pane or a fresh tab that launches the agent first.
+It lives in its own repo and installs through the plugin host:
 
 ```bash
-cats-todo                              # open the manager in the current pane
-cats-todo add fix the flaky reconnect  # quick-capture to the project backlog
-git log -p | cats-todo add -g -t huh   # capture piped stdin to the global backlog
+catctl plugin install rohanthewiz/cats-todo
+catctl plugin run rohanthewiz.cats-todo
 ```
-
-Both the manager and `add` scope the project backlog to the same place: the
-nearest ancestor holding a `.cats-todo/` directory, else the repo root, else the
-current directory — so it does not matter which subdirectory of a project you
-launch from. A drop into a fresh tab roots that tab there too.
-
-In the manager: `enter` opens the target picker, then `enter` pastes the
-prompt staged for review while `ctrl+r` submits it to run (and marks the todo
-done). Outside cats it still manages backlogs; only drops need the socket.
 
 ### Plugins
 
 The plugin host (`internal/plugin`) manages `~/.config/cats/plugins/`: a
 plugin is a directory with a `cats-plugin.toml` manifest (id, version,
 `[[build]]` steps, `[[actions]]` — the same shape as herdr's manifest; see
-`cmd/cats-todo/cats-plugin.toml` for the reference) plus whatever its build
+[cats-todo's `cats-plugin.toml`](https://github.com/rohanthewiz/cats-todo/blob/main/cats-plugin.toml)
+for the reference) plus whatever its build
 produces. Installing and linking are offline; `run` launches an action in a
 fresh tab via `tab.create`'s spawn params, with the invoking directory as the
 pane's cwd and `CATS_PLUGIN_ID`/`CATS_PLUGIN_DIR` (plus every pane's
@@ -144,18 +135,19 @@ path — override with `CATS_CATCTL` if it lives somewhere unusual).
 Local checkouts go through the same **add…** prompt: a source shaped like a
 path (`./dir`, `../dir`, `~/dir`, `/dir`) links it in place instead of cloning,
 matching `catctl plugin link`. A relative path resolves against the **focused
-pane's cwd** — so with a pane sitting in the cats repo, `./cmd/cats-todo` links
-the bundled todo plugin, and `../cats/cmd/cats-todo` works from a sibling
-checkout. The leading `./` matters: a bare `cmd/cats-todo` is two segments, the
-`owner/repo` GitHub shorthand. Linked rows show their checkout path, and swap `update`
+pane's cwd** — so with a pane sitting next to a `cats-todo` checkout,
+`./cats-todo` links it in place, and `../cats-todo` works from inside a sibling
+project. The leading `./` matters: only a path-shaped source links in place —
+a bare two-segment `rohanthewiz/cats-todo` is the `owner/repo` GitHub
+shorthand and clones instead. Linked rows show their checkout path, and swap `update`
 (which has no remote to pull from) for **rebuild**, a re-link that re-runs the
 manifest's build steps to pick up local edits; **unlink** removes only the
 link, never the checkout.
 
 ```bash
-catctl plugin install rohanthewiz/some-plugin   # clone from GitHub + build
+catctl plugin install rohanthewiz/cats-todo     # clone from GitHub + build
 catctl plugin install <git-url> --ref v0.1.0    # pin a branch or tag
-catctl plugin link ./cmd/cats-todo              # dev mode: symlink a checkout
+catctl plugin link ./cats-todo                  # dev mode: symlink a checkout
 catctl plugin update rohanthewiz.some-plugin    # fetch recorded source + rebuild
 catctl plugin list                              # ids, versions, actions
 catctl plugin run rohanthewiz.cats-todo         # launch in a new tab

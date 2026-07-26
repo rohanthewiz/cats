@@ -10,9 +10,9 @@ GHOSTTY  := PKG_CONFIG_PATH=$(PC_DIR)
 TAGS     := -tags ghostty
 
 # The shipped binaries. The other cmd/ entries are development spikes.
-# cats-todo is untagged (a pure control-socket client) but rides the same
-# ghostty-tagged build line harmlessly — no CGO package is in its import graph.
-BINS     := catway cathost catctl cats-todo
+# cats-todo lives in its own repo (github.com/rohanthewiz/cats-todo) and is
+# installed through the plugin host, so it is no longer built here.
+BINS     := catway cathost catctl
 VERSION  := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 GOOS     := $(shell go env GOOS)
 GOARCH   := $(shell go env GOARCH)
@@ -58,9 +58,10 @@ binaries:
 # The map is "cmd:alias" pairs — edit here to rename or add targets. Splitting
 # on ':' keeps the source dir (./cmd/$(cmd)) decoupled from the installed name.
 LOCAL_BIN := $(HOME)/bin
-# cats-todo is deliberately absent: it is built by the plugin host instead
-# (`catctl plugin link ./cmd/cats-todo` runs the manifest's build step), so the
-# local install stays limited to the binaries the plugin flow can't provide.
+# cats-todo is deliberately absent: it lives in its own repo and is built by
+# the plugin host (`catctl plugin install rohanthewiz/cats-todo` runs the
+# manifest's build step), so the local install stays limited to the binaries
+# the plugin flow can't provide.
 LOCAL_MAP := catway:catway cathost:cathost catctl:catctl
 
 local:
@@ -73,7 +74,7 @@ local:
 
 dist: binaries
 	@mkdir -p $(DIST)
-	cp bin/catway bin/cathost bin/catctl bin/cats-todo $(DIST)/
+	cp bin/catway bin/cathost bin/catctl $(DIST)/
 	cp config.example.yaml README.md $(DIST)/
 	tar -czf $(DIST).tar.gz -C dist $(notdir $(DIST))
 	@echo "==> $(DIST).tar.gz"
