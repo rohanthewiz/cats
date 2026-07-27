@@ -14,9 +14,10 @@
        hints); kept near 7:1 on the panel surface so 10–12px labels stay legible. */
     --line:#38403a; --muted:#9db0a2; --chrome:#2b322c; --chrome-focus:#3a4a3f;
     --ok:#6ac47a; --warn:#e0b64e; --err:#e57373; --done:#4fd1c5;
-    /* Accent knocked back toward the panel: the focused pane's outline sits
-       right next to terminal text all day, so it marks focus without glowing. */
-    --accent-dim:#346149;
+    /* Accent desaturated most of the way to gray: the focused pane's outline
+       sits right next to terminal text all day, so it reads as a gray-green
+       hairline just above --line rather than a green marker. */
+    --accent-dim:#3d4a43;
   }
   html,body { margin:0; height:100%; background:var(--bg); color:var(--fg);
     font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; overflow:hidden; }
