@@ -20,6 +20,7 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"net/url"
 	"os"
@@ -148,10 +149,30 @@ func runRemote(cfg appConfig) {
 // false: no devtools in the shipped app.
 func newWindow(title string) webview.WebView {
 	w := webview.New(false)
+	uiWindow = w
 	installMenu() // NSApp now exists (created by webview.New); menu before Run()
 	w.SetTitle(title)
 	w.SetSize(windowWidth, windowHeight, webview.HintNone)
 	return w
+}
+
+// uiWindow is the single UI window, kept for the View menu's zoom actions.
+// Menu actions fire only while Run() is blocking, so the reference is valid
+// whenever zoomFont is reached.
+var uiWindow webview.WebView
+
+// zoomFont steps the terminal font size in the page (+1/-1, 0 = reset) by
+// calling the hook the UI exposes for exactly this path — see catappZoom in
+// menu_darwin.go for why the native menu owns ⌘+/⌘-/⌘0. The guard on the JS
+// side keeps this a no-op on pages without the hook (connect form, login).
+func zoomFont(delta int) {
+	w := uiWindow
+	if w == nil {
+		return
+	}
+	w.Dispatch(func() {
+		w.Eval(fmt.Sprintf("window.catsAdjustFont && window.catsAdjustFont(%d)", delta))
+	})
 }
 
 // remoteTitle labels the window with the connected host so a thin client that

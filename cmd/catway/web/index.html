@@ -341,6 +341,11 @@
     toast(`font ${px}px`);
   }
 
+  // Hook for the mac app's View menu. In a WKWebView, Cocoa resolves ⌘+/⌘-/⌘0
+  // as menu key equivalents before the page's keydown handler runs, so the
+  // native menu items call back into Go, which Evals this. delta of 0 resets.
+  window.catsAdjustFont = (delta) => setFontSize(delta ? FONT_PX + delta : FONT_DEFAULT);
+
   // ---- Packed u32 colors (D2): 0x02_RR_GG_BB → CSS ----
   function rgbOf(v) { return [(v >> 16) & 255, (v >> 8) & 255, v & 255]; }
   function css(v) { const [r, g, b] = rgbOf(v); return `rgb(${r},${g},${b})`; }

@@ -24,6 +24,17 @@ func catappCleanup() {
 	runCleanup()
 }
 
+// catappZoom is called from the View menu's zoom actions (menu_darwin.m).
+// delta is +1/-1 to step the terminal font size, 0 to reset it. The menu owns
+// these shortcuts because Cocoa resolves ⌘+/⌘-/⌘0 as key equivalents before
+// the WKWebView's page sees a keydown, so the page's own handler never fires
+// in the app.
+//
+//export catappZoom
+func catappZoom(delta C.int) {
+	zoomFont(int(delta))
+}
+
 // installMenu installs the native menu bar on the shared NSApplication. webview
 // creates a bundled app with no menu of its own, so without this Cmd-Q cannot
 // quit and the standard Cmd-C/V/X/A editing shortcuts — routed in Cocoa through

@@ -19,6 +19,9 @@
 // outlive the menu on its own).
 @interface CatsMenuTarget : NSObject
 - (void)quit:(id)sender;
+- (void)zoomIn:(id)sender;
+- (void)zoomOut:(id)sender;
+- (void)zoomActual:(id)sender;
 @end
 
 @implementation CatsMenuTarget
@@ -26,6 +29,12 @@
     catappCleanup();        // reap daemons (no-op in remote mode; runs once)
     [NSApp terminate:sender]; // safe now — nothing left to orphan
 }
+// Zoom routes through Go (catappZoom → webview Eval → the page's
+// window.catsAdjustFont): WKWebView never sees ⌘+/⌘-/⌘0 as keydowns because
+// Cocoa resolves them as menu key equivalents first.
+- (void)zoomIn:(id)sender     { catappZoom(1); }
+- (void)zoomOut:(id)sender    { catappZoom(-1); }
+- (void)zoomActual:(id)sender { catappZoom(0); }
 @end
 
 static CatsMenuTarget *gMenuTarget = nil;
@@ -90,6 +99,40 @@ void installAppMenu(const char *cAppName) {
         [editMenu addItemWithTitle:@"Select All"
                             action:@selector(selectAll:)
                      keyEquivalent:@"a"];
+
+        // --- View menu --------------------------------------------------------
+        // Font sizing for the terminal. These must be menu items: Cocoa consumes
+        // ⌘+/⌘-/⌘0 as key equivalents before the WKWebView's page ever gets a
+        // keydown, so the in-page shortcut handling cannot work in the app.
+        NSMenuItem *viewItem = [[NSMenuItem alloc] init];
+        [mainMenu addItem:viewItem];
+        NSMenu *viewMenu = [[NSMenu alloc] initWithTitle:@"View"];
+        [viewItem setSubmenu:viewMenu];
+
+        NSMenuItem *zoomIn =
+            [viewMenu addItemWithTitle:@"Bigger Text"
+                                action:@selector(zoomIn:)
+                         keyEquivalent:@"+"];
+        [zoomIn setTarget:gMenuTarget];
+        // Hidden twin so the unshifted ⌘= works too (the visible item's "+"
+        // only matches the shifted key on most layouts).
+        NSMenuItem *zoomInAlt =
+            [viewMenu addItemWithTitle:@"Bigger Text"
+                                action:@selector(zoomIn:)
+                         keyEquivalent:@"="];
+        [zoomInAlt setTarget:gMenuTarget];
+        [zoomInAlt setHidden:YES];
+        [zoomInAlt setAllowsKeyEquivalentWhenHidden:YES];
+        NSMenuItem *zoomOut =
+            [viewMenu addItemWithTitle:@"Smaller Text"
+                                action:@selector(zoomOut:)
+                         keyEquivalent:@"-"];
+        [zoomOut setTarget:gMenuTarget];
+        NSMenuItem *zoomActual =
+            [viewMenu addItemWithTitle:@"Default Text Size"
+                                action:@selector(zoomActual:)
+                         keyEquivalent:@"0"];
+        [zoomActual setTarget:gMenuTarget];
 
         [NSApp setMainMenu:mainMenu];
     }
