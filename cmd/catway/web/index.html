@@ -1060,12 +1060,13 @@
           e.preventDefault(); setFontSize(FONT_DEFAULT); return;
       }
     }
-    // ⌘C falls through to the pane below: apps speaking the kitty keyboard
-    // protocol (editors like rd) receive super+c and copy their own selection
-    // via OSC 52; for legacy panes the server's encoder emits nothing, same
-    // as Ghostty. cats' own copy paths (drag, copy-mode) already copied by
-    // the time ⌘C could be pressed, so nothing here competes with them.
-    if (e.metaKey && !e.ctrlKey && e.code !== "KeyC") return;  // leave other Cmd shortcuts to the browser
+    // ⌘C and ⌘Z/⌘⇧Z fall through to the pane below: apps speaking the kitty
+    // keyboard protocol (editors like rd) receive super+c / super+z and run
+    // their own copy/undo; for legacy panes the server's encoder emits
+    // nothing, same as Ghostty. cats' own copy paths (drag, copy-mode)
+    // already copied by the time ⌘C could be pressed, so nothing here
+    // competes with them.
+    if (e.metaKey && !e.ctrlKey && e.code !== "KeyC" && e.code !== "KeyZ") return;  // leave other Cmd shortcuts to the browser
     if (e.code === "F12") return;         // devtools
     e.preventDefault();
     // Typing to the terminal dismisses a lingering (stale) copy wash.
