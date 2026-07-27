@@ -1,7 +1,8 @@
 cats
 Copyright (c) 2026 Rohan Allison
 
-The cmd/cats-todo tool is ported from herdr-todo
+The cats-todo tool (since moved to its own repository,
+https://github.com/rohanthewiz/cats-todo) is ported from herdr-todo
 (https://github.com/rohanthewiz/herdr-todo), Copyright (c) 2026 Rohan
 Allison, MIT License, which itself includes code adapted from herdr-plus
 (https://github.com/cloudmanic/herdr-plus), Copyright (c) 2026 Cloudmanic

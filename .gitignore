@@ -12,9 +12,6 @@
 /cmd/catctl/catctl
 /cmd/cathost/cathost
 
-# cats-todo's plugin-mode build output (catctl plugin link ./cmd/cats-todo)
-/cmd/cats-todo/bin/
-
 # cats-todo's own backlog for this repo — personal working state that churns on
 # every add/drop, not source. Each checkout keeps its own.
 .cats-todo/todos.json
