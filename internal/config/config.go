@@ -124,9 +124,10 @@ func (s Server) TTL() (time.Duration, error) {
 // defaultColors are the served page's :root CSS custom properties (index.html).
 // Keep in sync with the stylesheet's fallback values.
 var defaultColors = map[string]string{
-	"bg": "#1f2420", "fg": "#d6ddd6", "accent": "#4db380", "panel": "#242a25",
-	"panel2": "#2b322c", "line": "#38403a", "muted": "#9db0a2", "chrome": "#2b322c",
-	"chrome-focus": "#3a4a3f", "ok": "#6ac47a", "warn": "#e0b64e", "err": "#e57373",
+	"bg": "#1f2420", "fg": "#d6ddd6", "accent": "#4db380", "accent-dim": "#3a7557",
+	"panel": "#242a25", "panel2": "#2b322c", "line": "#38403a", "muted": "#9db0a2",
+	"chrome": "#2b322c", "chrome-focus": "#3a4a3f",
+	"ok": "#6ac47a", "warn": "#e0b64e", "err": "#e57373",
 }
 
 const defaultFont = `ui-monospace, "SF Mono", Menlo, Consolas, monospace`

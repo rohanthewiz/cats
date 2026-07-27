@@ -50,6 +50,7 @@ theme:
     bg: "#1f2420"
     fg: "#d6ddd6"
     accent: "#4db380"
+    accent-dim: "#3a7557"  # focused pane outline — accent, knocked back
     panel: "#242a25"
     panel2: "#2b322c"
     line: "#38403a"

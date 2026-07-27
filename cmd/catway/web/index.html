@@ -14,6 +14,9 @@
        hints); kept near 7:1 on the panel surface so 10–12px labels stay legible. */
     --line:#38403a; --muted:#9db0a2; --chrome:#2b322c; --chrome-focus:#3a4a3f;
     --ok:#6ac47a; --warn:#e0b64e; --err:#e57373; --done:#4fd1c5;
+    /* Accent knocked back toward the panel: the focused pane's outline sits
+       right next to terminal text all day, so it marks focus without glowing. */
+    --accent-dim:#3a7557;
   }
   html,body { margin:0; height:100%; background:var(--bg); color:var(--fg);
     font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; overflow:hidden; }
@@ -25,7 +28,10 @@
   #brand { font-size:13px; font-weight:600; letter-spacing:.5px; color:#e8e8e8;
     padding:12px 14px; border-bottom:1px solid var(--line); }
   #brand small { color:var(--muted); font-weight:400; margin-left:6px; }
-  #sidebar section { padding:10px 6px 4px; }
+  #sidebar section { padding:10px 6px 8px; }
+  /* Splitter between Workspaces / Panes / Agents — the headings alone read as
+     one long list once a workspace has more than a couple of panes. */
+  #sidebar section + section { border-top:1px solid var(--line); }
   #sidebar h2 { font-size:10px; text-transform:uppercase; letter-spacing:.8px; color:var(--muted);
     margin:0 0 6px; padding:0 8px; }
   #sidebar ul { list-style:none; margin:0; padding:0; }
@@ -75,7 +81,7 @@
   .pane.dragging { opacity:.5; }
   .pane.droptarget { outline:2px solid var(--accent); outline-offset:-2px; }
   .pane canvas { position:absolute; display:block; }
-  .pane.focused canvas { outline:1px solid var(--accent); outline-offset:-1px; }
+  .pane.focused canvas { outline:1px solid var(--accent-dim); outline-offset:-1px; }
 
   /* ---- Status bar ----
      Connection state and the window grid size used to live here; they moved
@@ -256,7 +262,17 @@
 <div id="toasts"></div>
 <script>
 (() => {
-  const PV = 1, FONT_PX = 15, LINE = 1.25;
+  const PV = 1, LINE = 1.25;
+  // Terminal type size. ⌘+/⌘-/⌘0 rescale it (see setFontSize); it is a per-
+  // browser display preference, so it lives in localStorage rather than in the
+  // session the server persists.
+  const FONT_DEFAULT = 15, FONT_MIN = 9, FONT_MAX = 32, FONT_KEY = "cats.font_px";
+  let FONT_PX = FONT_DEFAULT;
+  try {
+    const stored = parseInt(localStorage.getItem(FONT_KEY), 10);
+    if (stored >= FONT_MIN && stored <= FONT_MAX) FONT_PX = stored;
+  } catch (e) { /* storage disabled (private mode / file://) — keep the default */ }
+
   const panesEl = document.getElementById("panes");
   const wsListEl = document.getElementById("ws-list");
   const paneListEl = document.getElementById("pane-list");
@@ -303,6 +319,25 @@
     const h = panesEl.clientHeight || window.innerHeight;
     cols = Math.max(20, Math.floor(w / cellW));
     rows = Math.max(6, Math.floor(h / cellH));
+  }
+
+  // setFontSize rescales the terminal type. cellW/cellH are read live by both
+  // the layout math and draw(), so re-measuring, re-deriving the grid, and
+  // telling the server the new cols/rows is the whole job: the last layout is
+  // re-applied against the new cell size to keep the frame correct until the
+  // server's relayout lands (a bigger font means fewer cells, so its rects
+  // change too). Cell pixel metrics reported at init aren't resent — β only
+  // consumes them when a pane is created.
+  function setFontSize(px) {
+    px = Math.min(FONT_MAX, Math.max(FONT_MIN, Math.round(px)));
+    if (px === FONT_PX) return;
+    FONT_PX = px;
+    try { localStorage.setItem(FONT_KEY, String(px)); } catch (e) { /* not persisted */ }
+    measure();
+    gridSize();
+    sendMsg({ t: "resize", cols, rows });
+    if (layoutMsg) applyLayout(layoutMsg);
+    toast(`font ${px}px`);
   }
 
   // ---- Packed u32 colors (D2): 0x02_RR_GG_BB → CSS ----
@@ -1006,6 +1041,19 @@
     }
     const isV = e.key === "v" || e.key === "V";
     if (e.type === "keydown" && e.metaKey && !e.ctrlKey && isV) { e.preventDefault(); pasteText(); return; }
+    // ⌘+ / ⌘- / ⌘0 size the terminal type instead of zooming the browser (page
+    // zoom would blur the canvas and leave the grid math on the old cell size).
+    // Matched on e.code so ⌘= and ⌘⇧+ are the same key, numpad included.
+    if (e.type === "keydown" && e.metaKey && !e.ctrlKey) {
+      switch (e.code) {
+        case "Equal": case "NumpadAdd":
+          e.preventDefault(); setFontSize(FONT_PX + 1); return;
+        case "Minus": case "NumpadSubtract":
+          e.preventDefault(); setFontSize(FONT_PX - 1); return;
+        case "Digit0": case "Numpad0":
+          e.preventDefault(); setFontSize(FONT_DEFAULT); return;
+      }
+    }
     if (e.metaKey && !e.ctrlKey) return;  // leave other Cmd shortcuts to the browser
     if (e.code === "F12") return;         // devtools
     e.preventDefault();
@@ -2124,6 +2172,8 @@
       left.appendChild(helpSection("global", [
         ["command palette", ["⌘K", "Ctrl+Alt+K"]],
         ["paste", ["⌘V", "Ctrl+Shift+V*"]],
+        ["bigger / smaller font", ["⌘+", "⌘-"]],
+        ["reset font size", ["⌘0"]],
         ["this help", ["⌘K → keyboard shortcuts"]],
       ]));
       left.appendChild(helpSection("mouse", [
