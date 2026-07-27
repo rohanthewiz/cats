@@ -6,12 +6,14 @@
 <title>cats</title>
 <style>
   :root {
-    --bg:#181818; --fg:#d4d4d4; --accent:#5b9dff; --panel:#141414; --panel2:#1d1d1d;
+    /* GoNotes-style dark green theme: warm gray-green surfaces, green accent.
+       --chrome/--chrome-focus survive the pane header's removal as the
+       hover/selection surfaces (pane list, ctx menu, palette rows). */
+    --bg:#1f2420; --fg:#d6ddd6; --accent:#4db380; --panel:#242a25; --panel2:#2b322c;
     /* --muted carries every secondary label (sidebar headings, status bar,
-       hints). It was #8a8a8a, which sits under 5:1 on the panel surface and
-       read as noise at 10–12px; this is the same hue, lifted to ~7:1. */
-    --line:#2a2a2a; --muted:#9aa4b2; --chrome:#202430; --chrome-focus:#26314a;
-    --ok:#6ac47a; --warn:#e2b64e; --err:#ff6b6b; --done:#4fd1c5;
+       hints); kept near 7:1 on the panel surface so 10–12px labels stay legible. */
+    --line:#38403a; --muted:#9db0a2; --chrome:#2b322c; --chrome-focus:#3a4a3f;
+    --ok:#6ac47a; --warn:#e0b64e; --err:#e57373; --done:#4fd1c5;
   }
   html,body { margin:0; height:100%; background:var(--bg); color:var(--fg);
     font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; overflow:hidden; }
@@ -72,27 +74,6 @@
   .pane { position:absolute; box-sizing:border-box; }
   .pane.dragging { opacity:.5; }
   .pane.droptarget { outline:2px solid var(--accent); outline-offset:-2px; }
-  /* Pane chrome = the per-pane toolbar. It is exactly one terminal row tall
-     (the server reserves chromeRows in each pane's inner rect), so the icon
-     buttons buy glyph size by giving up vertical padding: 17px symbols with
-     line-height 1 and no top/bottom padding stay clear of the strip's
-     overflow:hidden clip at a ~19px row, while synthetic bold thickens the
-     hairline box-drawing symbols (⊟ ⊞ ⤢ ⬚ ⧉) that were the hardest to read. */
-  .pane .chrome { position:absolute; left:0; top:0; right:0; overflow:hidden; display:flex;
-    align-items:center; gap:0; font-size:12px; color:#b4bac6; background:var(--chrome);
-    padding:0 5px 0 9px; box-sizing:border-box; }
-  .pane.focused .chrome { color:#f0f2f7; background:var(--chrome-focus); }
-  .pane .chrome .info { flex:1; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
-  .pane .chrome .info .pub { color:var(--accent); }
-  .pane .chrome .info .agent { color:var(--warn); }
-  .pane .chrome .info .exited { color:var(--err); }
-  .pane .chrome .ctl { display:flex; gap:1px; flex:none; }
-  .pane .chrome .ctl button { background:none; border:none; color:#c2c9d8; cursor:pointer;
-    font-size:17px; font-weight:600; line-height:1; padding:0 6px; border-radius:3px;
-    font-family:inherit; }
-  .pane .chrome .ctl button:hover { background:rgba(255,255,255,.2); color:#fff; }
-  .pane.focused .chrome .ctl button { color:#dfe5f0; }
-  .pane .chrome .ctl button.close:hover { background:var(--err); color:#fff; }
   .pane canvas { position:absolute; display:block; }
   .pane.focused canvas { outline:1px solid var(--accent); outline-offset:-1px; }
 
@@ -105,7 +86,7 @@
 
   /* ---- Toasts ---- */
   #toasts { position:fixed; right:10px; top:38px; display:flex; flex-direction:column; gap:6px; z-index:6; }
-  .toast { background:#2a2a2a; color:#eee; border:1px solid #3a3a3a; border-left:3px solid var(--accent);
+  .toast { background:var(--panel2); color:#eee; border:1px solid var(--line); border-left:3px solid var(--accent);
     padding:6px 10px; border-radius:5px; font-size:12px; max-width:340px; box-shadow:0 2px 8px rgba(0,0,0,.4);
     opacity:0; transform:translateX(8px); transition:opacity .2s, transform .2s; }
   .toast.show { opacity:1; transform:none; }
@@ -135,7 +116,7 @@
   .modal .btns button { background:var(--panel); color:var(--fg); border:1px solid var(--line); border-radius:5px;
     padding:5px 12px; font:inherit; font-size:12px; cursor:pointer; }
   .modal .btns button:hover { border-color:var(--accent); color:#fff; }
-  .modal .btns button.primary { background:var(--accent); border-color:var(--accent); color:#0c1526; font-weight:600; }
+  .modal .btns button.primary { background:var(--accent); border-color:var(--accent); color:#0e1a13; font-weight:600; }
   .modal .btns button.danger { background:var(--err); border-color:var(--err); color:#fff; }
 
   /* ---- Context menu (WS8) ---- */
@@ -292,15 +273,16 @@
   const measureCtx = document.createElement("canvas").getContext("2d");
 
   // Theme defaults used when a packed color is 0 (frame defaults unknown).
-  const THEME_FG = 0xd4d4d4, THEME_BG = 0x181818;
+  // Keep in sync with :root --fg/--bg (and config's defaultColors).
+  const THEME_FG = 0xd6ddd6, THEME_BG = 0x1f2420;
 
   // ratatui Modifier bits (cell.m).
   const M_BOLD = 0x1, M_DIM = 0x2, M_ITALIC = 0x4, M_UNDERLINED = 0x8, M_REVERSED = 0x40, M_HIDDEN = 0x80;
 
   // Translucent wash for a browser-local drag selection (non-mouse panes, §7 read).
-  const SEL_FILL = "rgba(88,148,255,0.32)";
+  const SEL_FILL = "rgba(88,204,140,0.30)";
   // Outline for the keyboard copy-mode cursor (hjkl/arrows), distinct from the wash.
-  const CM_CURSOR = "rgba(120,170,255,0.95)";
+  const CM_CURSOR = "rgba(122,220,170,0.95)";
 
   let ws = null, cellW = 9, cellH = 19, cols = 0, rows = 0;
   let layoutMsg = null;          // last layout message
@@ -334,49 +316,21 @@
   function newPane(id) {
     const el = document.createElement("div");
     el.className = "pane";
-    const chrome = document.createElement("div");
-    chrome.className = "chrome";
-    const info = document.createElement("div");
-    info.className = "info";
-    const ctl = document.createElement("div");
-    ctl.className = "ctl";
-    ctl.appendChild(mkBtn("⊟", "split left/right", "", () => sendCmd("pane.split", { pane: id, direction: "h" })));
-    ctl.appendChild(mkBtn("⊞", "split top/bottom", "", () => sendCmd("pane.split", { pane: id, direction: "v" })));
-    ctl.appendChild(mkBtn("⤢", "toggle zoom", "", () => sendCmd("pane.zoom", { pane: id })));
-    ctl.appendChild(mkBtn("⬚", "copy mode (keyboard select)", "", () => enterCopyMode(id)));
-    ctl.appendChild(mkBtn("⧉", "copy scrollback to clipboard", "", () => copyScrollback(id)));
-    ctl.appendChild(mkBtn("✎", "rename pane", "", () => renamePane(id)));
-    ctl.appendChild(mkBtn("✕", "close pane", "close", () => sendCmd("pane.close", { pane: id })));
-    chrome.appendChild(info); chrome.appendChild(ctl);
     const canvas = document.createElement("canvas");
-    el.appendChild(chrome); el.appendChild(canvas);
+    el.appendChild(canvas);
     panesEl.appendChild(el);
-    const p = { id, el, chrome, chromeInfo: info, canvas, ctx: canvas.getContext("2d", { alpha: false }),
+    const p = { id, el, canvas, ctx: canvas.getContext("2d", { alpha: false }),
       pub: "", info: null, W: 0, H: 0, cells: [], links: [], cur: null,
       gs: 1, ox: 0, oy: 0,   // grid inset: scale + centring offsets (setInset)
       defFg: THEME_FG, defBg: THEME_BG, modes: { mouse: false, alt: false },
       title: "", cwd: "", agent: "", agentState: "", exited: null,
       pressed: -1, lastCell: "", dirty: false, scroll: null, sel: null, cm: null };
-    // Clicking the header (not its buttons) focuses the pane; double-click
-    // renames, right-click opens the pane menu (chrome or canvas); holding
-    // and moving drags the pane onto another to swap slots.
-    chrome.addEventListener("mousedown", (e) => {
-      if (p.info && !p.info.focused) sendCmd("pane.focus", { pane: id });
-      beginPaneSwapDrag(e, id);
-    });
-    chrome.addEventListener("dblclick", () => renamePane(id));
-    chrome.addEventListener("contextmenu", (e) => { e.preventDefault(); openCtx(e.clientX, e.clientY, paneMenuItems(id)); });
+    // No per-pane header: clicking the canvas focuses, right-click opens the
+    // pane menu (attachMouse), and title/agent details live in the sidebar
+    // pane list (with its hover card) — where rename and swap also moved.
     attachMouse(p);
     panes.set(id, p);
     return p;
-  }
-
-  function mkBtn(label, title, cls, fn) {
-    const b = document.createElement("button");
-    b.textContent = label; b.title = title; if (cls) b.className = cls;
-    b.addEventListener("mousedown", (e) => e.stopPropagation());
-    b.addEventListener("click", (e) => { e.stopPropagation(); e.preventDefault(); fn(); });
-    return b;
   }
 
   function pane(id) { return panes.get(id) || newPane(id); }
@@ -395,7 +349,6 @@
       p.el.style.width = (rw * cellW) + "px";
       p.el.style.height = (rh * cellH) + "px";
       p.el.classList.toggle("focused", !!pr.focused);
-      p.chrome.style.height = ((iy - ry) * cellH) + "px";
       p.canvas.style.left = ((ix - rx) * cellW) + "px";
       p.canvas.style.top = ((iy - ry) * cellH) + "px";
       p.canvas.style.width = (iw * cellW) + "px";
@@ -405,7 +358,6 @@
       // Sizing the canvas resets its context (transform included), so the
       // padded transform is (re)installed per frame in draw() — see setInset.
       setInset(p, iw * cellW, ih * cellH);
-      renderChrome(p);
       scheduleDraw(p);
     }
     for (const [id, p] of panes) {
@@ -517,22 +469,6 @@
     zoomIndEl.style.display = zoomed ? "" : "none";
   }
 
-  // ---- Chrome: per-pane header (styled HTML, WS8) ----
-  function renderChrome(p) {
-    p.chromeInfo.innerHTML = "";
-    const add = (cls, text) => {
-      const s = document.createElement("span");
-      if (cls) s.className = cls;
-      s.textContent = text;
-      p.chromeInfo.appendChild(s);
-    };
-    add("pub", p.pub || ("#" + p.id));
-    if (p.title) add("", "  " + p.title);
-    if (p.cwd) add("", "  " + p.cwd);
-    if (p.agent) add("agent", "  " + p.agent + ":" + p.agentState);
-    if (p.exited !== null) add("exited", "  exited (" + p.exited + ")");
-  }
-
   // ---- Sidebar (WS8) ----
   function stClass(state) {
     return state === "working" ? "st-working" : state === "blocked" ? "st-blocked"
@@ -633,7 +569,14 @@
         const a = document.createElement("span"); a.className = "ag " + stClass(p.agentState); a.textContent = p.agent;
         li.appendChild(a);
       }
-      li.addEventListener("click", () => { if (!pr.focused) sendCmd("pane.focus", { pane: pr.pane }); });
+      li.addEventListener("click", () => { if (!dragConsumedClick && !pr.focused) sendCmd("pane.focus", { pane: pr.pane }); });
+      // With the pane header gone, its non-click affordances live here too:
+      // double-click renames, right-click opens the pane menu, and dragging a
+      // row onto a pane on screen swaps the two (beginPaneSwapDrag hit-tests
+      // the live pane rects, so a sidebar origin works the same).
+      li.addEventListener("dblclick", () => renamePane(pr.pane));
+      li.addEventListener("contextmenu", (e) => { e.preventDefault(); openCtx(e.clientX, e.clientY, paneMenuItems(pr.pane)); });
+      li.addEventListener("mousedown", (e) => beginPaneSwapDrag(e, pr.pane));
       // Reveal the untruncated pane details on hover. mousemove keeps the popup
       // riding just right of the pointer; mouseleave tears it down. We pass the
       // live pane object by id (not the closure's `p`) so a re-render between
@@ -791,7 +734,7 @@
     window.addEventListener("mouseup", up);
   }
 
-  // ---- Pane drag-reorder: drag a header onto another pane → pane.swap_with.
+  // ---- Pane drag-reorder: drag a sidebar pane row onto a pane → pane.swap_with.
   // Same shape as beginReorderDrag: mousedown arms a potential drag with a 4px
   // threshold, so a plain press stays a click (focus). While dragging, the
   // pane under the pointer highlights as the drop target; releasing anywhere
@@ -929,7 +872,7 @@
     const top = total > p.scroll.rows ? span * (p.scroll.max - p.scroll.off) / p.scroll.max : 0;
     ctx.fillStyle = "rgba(255,255,255,0.07)";
     ctx.fillRect(vw - SB_W, 0, SB_W, vh);
-    ctx.fillStyle = p.scroll.off ? "rgba(120,170,255,0.6)" : "rgba(255,255,255,0.25)";
+    ctx.fillStyle = p.scroll.off ? "rgba(122,220,170,0.6)" : "rgba(255,255,255,0.25)";
     ctx.fillRect(vw - SB_W, top, SB_W, h);
   }
 
@@ -987,17 +930,17 @@
         p.scroll = msg.scroll || null;
         scheduleDraw(p); break;
       }
-      case "pane_title": { const p = pane(msg.pane); p.title = msg.title; renderChrome(p); refreshPaneList(); break; }
-      case "pane_cwd": { const p = pane(msg.pane); p.cwd = msg.cwd; renderChrome(p); break; }
+      case "pane_title": { const p = pane(msg.pane); p.title = msg.title; refreshPaneList(); break; }
+      case "pane_cwd": { const p = pane(msg.pane); p.cwd = msg.cwd; break; } // hover card reads it live
       case "pane_agent": {
         const p = pane(msg.pane); p.agent = msg.agent; p.agentState = msg.state;
-        renderChrome(p); refreshPaneList(); break;
+        refreshPaneList(); break;
       }
       case "pane_modes": {
         const p = pane(msg.pane); p.modes = { mouse: !!msg.mouse, alt: !!msg.alt_screen };
         break;
       }
-      case "pane_exited": { const p = pane(msg.pane); p.exited = msg.code; renderChrome(p); break; }
+      case "pane_exited": { const p = pane(msg.pane); p.exited = msg.code; refreshPaneList(); break; }
       case "agents": renderAgents(msg.items); break;
       case "clipboard":
         try { navigator.clipboard.writeText(b64decode(msg.data)); } catch (e) {}
@@ -1138,7 +1081,8 @@
   }
 
   // copyScrollback captures the pane's whole buffer (§7 capture, soft-wraps
-  // rejoined) and copies it — the chrome ⧉ button, distinct from a range read.
+  // rejoined) and copies it — the pane menu's "copy scrollback", distinct from
+  // a range read.
   function copyScrollback(id) {
     const p = panes.get(id);
     if (!p) return;
@@ -1556,9 +1500,9 @@
     const items = [];
     if (onCanvas) items.push({ label: "paste", fn: pasteText }, "-");
     items.push(
-      { label: "split left/right ⊟", fn: () => sendCmd("pane.split", { pane: id, direction: "h" }) },
-      { label: "split top/bottom ⊞", fn: () => sendCmd("pane.split", { pane: id, direction: "v" }) },
-      { label: "toggle zoom ⤢", fn: () => sendCmd("pane.zoom", { pane: id }) },
+      { label: "split left/right", fn: () => sendCmd("pane.split", { pane: id, direction: "h" }) },
+      { label: "split top/bottom", fn: () => sendCmd("pane.split", { pane: id, direction: "v" }) },
+      { label: "toggle zoom", fn: () => sendCmd("pane.zoom", { pane: id }) },
       "-",
       { label: "copy mode", fn: () => enterCopyMode(id) },
       { label: "copy scrollback", fn: () => copyScrollback(id) },
@@ -2188,7 +2132,7 @@
         ["rectangular selection", ["Alt+drag"]],
         ["pane / tab / workspace menu", ["right-click"]],
         ["resize splits", ["drag the border"]],
-        ["swap panes", ["drag a pane header onto another pane"]],
+        ["swap panes", ["drag a sidebar pane row onto a pane"]],
         ["reorder tabs / workspaces", ["drag"]],
         ["rename pane / tab / workspace", ["double-click its title"]],
         ["scrollback", ["wheel", "drag the scrollbar"]],
@@ -2208,14 +2152,8 @@
       ];
       const table = (window.__catsKeys && window.__catsKeys.copyMode) || COPY_MODE_DEFAULT;
       const right = document.createElement("div");
-      right.appendChild(helpSection("copy mode (⬚ on a pane header)",
+      right.appendChild(helpSection("copy mode (right-click a pane → copy mode)",
         actions.map(([what, acts]) => [what, acts.flatMap((a) => table[a] || [])])));
-      right.appendChild(helpSection("pane header buttons", [
-        ["split left/right · top/bottom", ["⊟", "⊞"]],
-        ["zoom", ["⤢"]],
-        ["copy mode · copy scrollback", ["⬚", "⧉"]],
-        ["rename · close", ["✎", "✕"]],
-      ]));
       cols.appendChild(right);
 
       body.appendChild(cols);

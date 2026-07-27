@@ -47,18 +47,18 @@ worktrees:
 # (without the leading --); only the ones you list are overridden.
 theme:
   colors:
-    bg: "#181818"
-    fg: "#d4d4d4"
-    accent: "#5b9dff"
-    panel: "#141414"
-    panel2: "#1d1d1d"
-    line: "#2a2a2a"
-    muted: "#8a8a8a"
-    chrome: "#202430"
-    chrome-focus: "#26314a"
+    bg: "#1f2420"
+    fg: "#d6ddd6"
+    accent: "#4db380"
+    panel: "#242a25"
+    panel2: "#2b322c"
+    line: "#38403a"
+    muted: "#9db0a2"
+    chrome: "#2b322c"
+    chrome-focus: "#3a4a3f"
     ok: "#6ac47a"
-    warn: "#e2b64e"
-    err: "#ff6b6b"
+    warn: "#e0b64e"
+    err: "#e57373"
     done: "#4fd1c5"   # unseen agent-completion markers
   font: 'ui-monospace, "SF Mono", Menlo, Consolas, monospace'
 

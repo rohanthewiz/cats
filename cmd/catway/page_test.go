@@ -16,7 +16,7 @@ func TestRenderPageInjects(t *testing.T) {
 
 	for _, want := range []string{
 		`<style id="cats-config-theme">`,
-		`--bg:#181818;`,
+		`--bg:#1f2420;`,
 		`window.__catsKeys=`,
 		`"copyMode"`,
 		"<body>hi</body>", // original body intact

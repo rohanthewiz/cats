@@ -23,9 +23,11 @@ import (
 	"github.com/rohanthewiz/cats/internal/workspace"
 )
 
-// chromeRows is reserved at the top of every pane rect for the HTML chrome
-// strip (title/cwd/agent as data); the pane's grid fills the inner rect.
-const chromeRows = 1
+// chromeRows is reserved at the top of every pane rect for browser-side pane
+// decoration. The per-pane header strip was removed (title/cwd/agent moved to
+// the sidebar pane list and its hover card), so the terminal grid now fills
+// the whole rect.
+const chromeRows = 0
 
 // defaultArea is the layout area assumed until the first browser reports its
 // grid via init/resize.
@@ -292,8 +294,8 @@ func (o *orch) post(fn func()) { o.mailbox <- fn }
 // --- Layout / daemon reconciliation ------------------------------------------
 
 // viewportLayout builds the browser layout message for the current viewport
-// (active workspace's active tab), reserving the chrome strip in each pane's
-// inner rect.
+// (active workspace's active tab), reserving chromeRows (currently none) in
+// each pane's inner rect.
 func (o *orch) viewportLayout() browserproto.Layout {
 	msg := browserproto.BuildLayout(o.session.Workspaces(), o.session.ActiveIndex(), o.area)
 	for i := range msg.Panes {
