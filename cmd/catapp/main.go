@@ -85,6 +85,10 @@ func main() {
 // loopback. The backend is reaped when the window closes (Run returns), on a
 // Cmd-Q, or on a termination signal — all routed through runCleanup.
 func runLocal(_ appConfig) {
+	// Before any child exists: a GUI launch hands us launchd's bare PATH, and
+	// everything downstream (daemons → panes → plugin build steps) inherits it.
+	hydratePATH()
+
 	b, err := startBackend()
 	if err != nil {
 		showError("Could not start cats", err.Error())
