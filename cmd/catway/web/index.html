@@ -983,8 +983,8 @@
       }
       case "pane_exited": { const p = pane(msg.pane); p.exited = msg.code; refreshPaneList(); break; }
       case "agents": renderAgents(msg.items); break;
-      case "clipboard":
-        try { navigator.clipboard.writeText(b64decode(msg.data)); } catch (e) {}
+      case "clipboard": // OSC 52 write from a pane app — no user activation
+        try { clipWrite(b64decode(msg.data)).catch(() => {}); } catch (e) {}
         break;
       case "notify": handleNotify(msg); break;
       case "title": document.title = msg.title ? ("cats · " + msg.title) : "cats"; break;
@@ -1060,7 +1060,12 @@
           e.preventDefault(); setFontSize(FONT_DEFAULT); return;
       }
     }
-    if (e.metaKey && !e.ctrlKey) return;  // leave other Cmd shortcuts to the browser
+    // ⌘C falls through to the pane below: apps speaking the kitty keyboard
+    // protocol (editors like rd) receive super+c and copy their own selection
+    // via OSC 52; for legacy panes the server's encoder emits nothing, same
+    // as Ghostty. cats' own copy paths (drag, copy-mode) already copied by
+    // the time ⌘C could be pressed, so nothing here competes with them.
+    if (e.metaKey && !e.ctrlKey && e.code !== "KeyC") return;  // leave other Cmd shortcuts to the browser
     if (e.code === "F12") return;         // devtools
     e.preventDefault();
     // Typing to the terminal dismisses a lingering (stale) copy wash.
@@ -1071,10 +1076,26 @@
   window.addEventListener("keydown", onKey);
   window.addEventListener("keyup", onKey);
 
+  // ---- Clipboard ----
+  // The mac app binds catsClipWrite/catsClipRead (native pasteboard) into the
+  // page, because WKWebView cripples navigator.clipboard: reads resolve empty
+  // and writes demand a user activation that WebSocket-driven copies (OSC 52
+  // from a pane, §7 read results) never have. Prefer the bridge when present;
+  // browsers keep using navigator.clipboard.
+  function clipWrite(text) {
+    if (window.catsClipWrite) return window.catsClipWrite(text);
+    return navigator.clipboard.writeText(text);
+  }
+  function clipRead() {
+    if (window.catsClipRead) return window.catsClipRead();
+    if (!navigator.clipboard || !navigator.clipboard.readText)
+      return Promise.reject(new Error("clipboard read unavailable"));
+    return navigator.clipboard.readText();
+  }
+
   // ---- Paste ----
   function pasteText() {
-    if (!navigator.clipboard || !navigator.clipboard.readText) { toast("clipboard read unavailable"); return; }
-    navigator.clipboard.readText()
+    clipRead()
       .then((t) => { if (t) sendMsg({ t: "paste", data: t }); else toast("clipboard has no text"); })
       .catch((err) => toast("paste blocked: " + ((err && err.name) || err)));
   }
@@ -1121,7 +1142,7 @@
       if (!res.ok) { toast("read failed: " + (res.error || "unknown")); return; }
       const text = res.data && res.data.text;
       if (!text) { toast("selection is empty"); return; }
-      navigator.clipboard.writeText(text).then(
+      clipWrite(text).then(
         () => toast("copied " + text.length + " char" + (text.length === 1 ? "" : "s")),
         () => toast("clipboard write blocked"));
     });
@@ -1144,7 +1165,7 @@
       if (!res.ok) { toast("capture failed: " + (res.error || "unknown")); return; }
       const text = res.data && res.data.text;
       if (!text) { toast("nothing to copy"); return; }
-      navigator.clipboard.writeText(text).then(
+      clipWrite(text).then(
         () => toast("copied " + text.length + " chars (scrollback)"),
         () => toast("clipboard write blocked"));
     });

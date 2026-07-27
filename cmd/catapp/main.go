@@ -153,6 +153,17 @@ func newWindow(title string) webview.WebView {
 	installMenu() // NSApp now exists (created by webview.New); menu before Run()
 	w.SetTitle(title)
 	w.SetSize(windowWidth, windowHeight, webview.HintNone)
+	// Native clipboard bridge (clipboard.go): injected into every page the
+	// window loads; the catway UI prefers these over navigator.clipboard,
+	// which WKWebView blocks (empty reads, activation-gated writes). The
+	// window only ever loads the configured catway UI, so exposing the
+	// pasteboard to the page does not leak it to arbitrary content.
+	if err := w.Bind("catsClipWrite", clipboardWrite); err != nil {
+		log.Printf("clipboard write bridge unavailable: %v", err)
+	}
+	if err := w.Bind("catsClipRead", clipboardRead); err != nil {
+		log.Printf("clipboard read bridge unavailable: %v", err)
+	}
 	return w
 }
 
