@@ -287,7 +287,7 @@
   // Terminal type size. ⌘+/⌘-/⌘0 rescale it (see setFontSize); it is a per-
   // browser display preference, so it lives in localStorage rather than in the
   // session the server persists.
-  const FONT_DEFAULT = 15, FONT_MIN = 9, FONT_MAX = 32, FONT_KEY = "cats.font_px";
+  const FONT_DEFAULT = 14, FONT_MIN = 9, FONT_MAX = 32, FONT_KEY = "cats.font_px";
   let FONT_PX = FONT_DEFAULT;
   try {
     const stored = parseInt(localStorage.getItem(FONT_KEY), 10);
