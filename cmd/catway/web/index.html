@@ -18,10 +18,13 @@
        sits right next to terminal text all day, so it reads as a gray-green
        hairline just above --line rather than a green marker. */
     --accent-dim:#3d4a43;
+    /* Sidebar column width. Anything else that has to clear the sidebar (the
+       banner) reads it from here so the two can't drift apart. */
+    --sidebar-w:253px;
   }
   html,body { margin:0; height:100%; background:var(--bg); color:var(--fg);
     font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; overflow:hidden; }
-  #app { position:fixed; inset:0; display:grid; grid-template-columns:220px 1fr; }
+  #app { position:fixed; inset:0; display:grid; grid-template-columns:var(--sidebar-w) 1fr; }
 
   /* ---- Sidebar ---- */
   #sidebar { background:var(--panel); border-right:1px solid var(--line);
@@ -204,7 +207,7 @@
     font-size:11px; display:inline-block; margin:1px 2px 1px 0; }
 
   /* ---- Update banner (WS8) ---- */
-  #banner { display:none; position:fixed; top:0; left:220px; right:0; z-index:7; background:var(--chrome-focus);
+  #banner { display:none; position:fixed; top:0; left:var(--sidebar-w); right:0; z-index:7; background:var(--chrome-focus);
     color:#e8e8e8; font-size:12px; padding:6px 12px; align-items:center; gap:10px;
     border-bottom:1px solid var(--accent); }
   #banner.show { display:flex; }
@@ -528,12 +531,9 @@
   function markerState(it) { return it.state === "idle" && !it.seen ? "done" : it.state; }
 
   // paneRef renders a server handle ("w1:p3") for display, swapping the opaque
-  // workspace id for the workspace's name ("cats:p3"). Everywhere a pane
-  // reference has to stand on its own — a tooltip, a dialog title, the agents
-  // rollup and palette, both of which span every workspace — the name is what
-  // the user actually recognizes. The PANES list is the one exception: its
-  // column is narrow and its workspace is the active one, right above it, so
-  // it keeps the compact handle (see renderPaneList).
+  // workspace id for the workspace's name ("cats:p3"). Every pane reference the
+  // user sees goes through here — tooltip, dialog title, agents rollup, palette,
+  // copy-mode bar and the sidebar PANES rows — so one form is worth learning.
   function paneRef(pub, paneID) {
     if (!pub) return "#" + paneID;
     const i = pub.indexOf(":");
@@ -626,10 +626,7 @@
       const li = document.createElement("li");
       li.className = "pn" + (pr.focused ? " focused" : "");
       const dot = document.createElement("span"); dot.className = "dot"; dot.textContent = pr.focused ? "▸" : "";
-      // Raw "w1:p3" handle here, not paneRef's named form: these rows are all
-      // the active workspace's, named directly above, and the column is too
-      // narrow to spend on a repeated name.
-      const pub = document.createElement("span"); pub.className = "pub"; pub.textContent = pr.pub || ("#" + pr.pane);
+      const pub = document.createElement("span"); pub.className = "pub"; pub.textContent = paneRef(pr.pub, pr.pane);
       li.appendChild(dot); li.appendChild(pub);
       if (p && p.title) { const t = document.createElement("span"); t.className = "ttl"; t.textContent = p.title; li.appendChild(t); }
       if (p && p.agent) {
