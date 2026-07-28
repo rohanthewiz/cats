@@ -1411,7 +1411,10 @@
       sendMouse(p, "d", ev.button, ev);
     });
     window.addEventListener("mouseup", (ev) => {
-      if (p.sel) {
+      // Same guard: this listener is on the window, so every release anywhere in
+      // the app reaches every pane. Without !done, a lingering copied wash would
+      // re-read and re-copy itself on the next click made anywhere.
+      if (p.sel && !p.sel.done) {
         const sel = p.sel;
         if (sel.moved) {
           finishSelection(p);            // a real drag → read + copy, keep the wash
@@ -1429,7 +1432,10 @@
       if (p.modes.mouse) sendMouse(p, "u", btn, ev);
     });
     p.canvas.addEventListener("mousemove", (ev) => {
-      if (p.sel) {
+      // A copied drag keeps its wash on screen (p.sel.done) until a keystroke
+      // clears it — but it is finished, so the pointer must not go on extending
+      // it. Requiring the button still be held also covers a mouseup we missed.
+      if (p.sel && !p.sel.done && (ev.buttons & 1)) {
         const [x, y] = cellOf(p, ev);
         if (x === p.sel.cursor.x && y === p.sel.cursor.y) return; // one update per cell
         p.sel.cursor = { x, y };
