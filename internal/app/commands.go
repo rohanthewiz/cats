@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/rohanthewiz/cats/internal/layout"
+	"github.com/rohanthewiz/cats/internal/startdir"
 )
 
 // This file is the protocol-neutral §7 command dispatcher. It mutates the
@@ -541,7 +542,12 @@ func (d *Dispatcher) Dispatch(name string, dec ParamDecoder, r Responder) {
 			bad(err)
 			return
 		}
-		id, err := d.session.CreateWorkspace()
+		cwd, err := workspaceStartDir(p.Path, d.session.Cwd())
+		if err != nil {
+			r.Fail(err.Error())
+			return
+		}
+		id, err := d.session.CreateWorkspaceAt(cwd)
 		if err != nil {
 			r.Fail(err.Error())
 			return
@@ -795,6 +801,27 @@ func (d *Dispatcher) inheritedSplitCwd(target *layout.PaneID) string {
 		return ""
 	}
 	return d.backend.PaneMeta(uint32(src)).Cwd
+}
+
+// workspaceStartDir resolves workspace.create's optional Path against the
+// session default, following WorkspaceCreateParams' three states: nil inherits
+// sessionCwd, an explicitly empty string means the user's home ("start me
+// somewhere neutral", the cleared field in the new-workspace dialog), and a
+// typed path is expanded and checked. A path that does not resolve is returned
+// as an error so the caller sees "no such directory" instead of a workspace
+// quietly rooted somewhere else.
+func workspaceStartDir(path *string, sessionCwd string) (string, error) {
+	if path == nil {
+		return sessionCwd, nil
+	}
+	dir, err := startdir.Resolve(*path, sessionCwd)
+	if err != nil {
+		return "", err
+	}
+	if dir == "" { // the field was cleared
+		return startdir.Usable(), nil
+	}
+	return dir, nil
 }
 
 // decodeOptional decodes params whose fields are all optional: no params decodes

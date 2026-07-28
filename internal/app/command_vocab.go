@@ -406,8 +406,17 @@ type WorkspaceParams struct {
 // sends. Name pins the new workspace's label (what workspace.rename would set);
 // leaving it empty keeps auto-naming, where the label follows the workspace's
 // identity cwd.
+//
+// Path is the directory the workspace's first pane starts in, and it is a
+// pointer because its three states differ: absent (nil) inherits the session's
+// default directory — the historical behaviour, and what `catctl new-ws` sends;
+// present but empty starts at the user's home directory — an explicit "not
+// here" from the new-workspace dialog; and a non-empty value is that directory,
+// with "~"/"$VAR"/relative forms expanded and its existence verified (a bad
+// path fails the command rather than silently landing somewhere else).
 type WorkspaceCreateParams struct {
-	Name string `json:"name,omitempty"`
+	Name string  `json:"name,omitempty"`
+	Path *string `json:"path,omitempty"`
 }
 
 // WorkspaceCreateResult is CmdResult.Data for workspace.create: the new

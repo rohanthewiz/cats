@@ -3,6 +3,8 @@ package app
 import (
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -877,6 +879,72 @@ func TestDispatchWorkspaceCreate(t *testing.T) {
 			if ws.ID == got.ID && ws.Name == "" {
 				t.Fatal("unnamed workspace has no display name; auto-naming was lost")
 			}
+		}
+	})
+}
+
+// workspace.create's optional path decides where the new workspace's panes
+// spawn: absent inherits the session cwd, present-but-empty means the user's
+// home, and a typed path is expanded — or, when it does not exist, refused
+// outright rather than silently rooted somewhere else.
+func TestDispatchWorkspaceCreatePath(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	proj := filepath.Join(home, "proj")
+	if err := os.Mkdir(proj, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// created dispatches workspace.create with the given params and returns the
+	// new workspace's identity cwd (what every pane in it spawns in).
+	created := func(t *testing.T, h cmdHarness, p WorkspaceCreateParams) string {
+		t.Helper()
+		r := h.resp()
+		h.d.Dispatch(CmdWorkspaceCreate, params(t, p), r)
+		id := okData[WorkspaceCreateResult](t, r).ID
+		for _, ws := range h.s.Workspaces() {
+			if ws.ID == id {
+				return ws.IdentityCwd
+			}
+		}
+		t.Fatalf("workspace %s missing after create", id)
+		return ""
+	}
+	ptr := func(s string) *string { return &s }
+
+	t.Run("absent inherits the session cwd", func(t *testing.T) {
+		h := newCmdHarness(t)
+		if got := created(t, h, WorkspaceCreateParams{}); got != h.s.Cwd() {
+			t.Fatalf("identity cwd = %q, want the session cwd %q", got, h.s.Cwd())
+		}
+	})
+
+	t.Run("empty starts at home", func(t *testing.T) {
+		h := newCmdHarness(t)
+		if got := created(t, h, WorkspaceCreateParams{Path: ptr("")}); got != home {
+			t.Fatalf("identity cwd = %q, want the home directory %q", got, home)
+		}
+	})
+
+	t.Run("expands a typed path", func(t *testing.T) {
+		h := newCmdHarness(t)
+		if got := created(t, h, WorkspaceCreateParams{Path: ptr("~/proj")}); got != proj {
+			t.Fatalf("identity cwd = %q, want %q", got, proj)
+		}
+	})
+
+	t.Run("a bad path fails the command", func(t *testing.T) {
+		h := newCmdHarness(t)
+		before := len(h.s.Workspaces())
+		r := h.resp()
+
+		h.d.Dispatch(CmdWorkspaceCreate, params(t, WorkspaceCreateParams{Path: ptr("/no/such/dir")}), r)
+
+		if !r.failCall || !strings.Contains(r.errMsg, "no such directory") {
+			t.Fatalf("bad path: fail=%v err=%q, want a no-such-directory failure", r.failCall, r.errMsg)
+		}
+		if len(h.s.Workspaces()) != before {
+			t.Fatalf("a refused create must not add a workspace (%d → %d)", before, len(h.s.Workspaces()))
 		}
 	})
 }

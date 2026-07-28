@@ -401,7 +401,12 @@ func buildOptWorkspace(args []string) (json.RawMessage, error) {
 
 // buildNewWorkspace: new-ws [name...]. The trailing words join into one name, so
 // `catctl new-ws api rewrite` needs no quoting (same convention as rename-ws).
-// No arguments sends no params at all, keeping the historical wire shape.
+// No arguments sends no params at all, keeping the historical wire shape — and
+// with no path the server roots the workspace in the session's own directory.
+// A start directory needs the raw escape hatch, since main re-parses flags after
+// the verb and an ergonomic verb only ever sees positional args:
+//
+//	catctl workspace.create --params '{"name":"api","path":"~/src/api"}'
 func buildNewWorkspace(args []string) (json.RawMessage, error) {
 	if len(args) == 0 {
 		return nil, nil

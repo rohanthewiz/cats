@@ -123,6 +123,8 @@
   .modal input[type=text] { width:100%; box-sizing:border-box; background:var(--bg); color:var(--fg);
     border:1px solid var(--line); border-radius:5px; padding:6px 8px; font:inherit; outline:none; }
   .modal input[type=text]:focus { border-color:var(--accent); }
+  .modal .field + .field { margin-top:10px; } /* multi-field dialogs (new workspace) */
+  .modal .field label { display:block; color:var(--muted); font-size:11px; margin-bottom:4px; }
   .modal .hint { color:var(--muted); font-size:11px; margin-top:8px; }
   .modal .btns { display:flex; gap:8px; justify-content:flex-end; padding:10px 14px; border-top:1px solid var(--line); }
   .modal .btns button { background:var(--panel); color:var(--fg); border:1px solid var(--line); border-radius:5px;
@@ -1486,31 +1488,49 @@
     return b;
   }
 
-  // dialogInput: a rename-style prompt. Enter saves, Esc cancels; an empty
-  // value is passed through (cats semantics: empty clears the custom name).
-  function dialogInput(opts) {
+  // dialogFields: a prompt over one or more text fields (opts.fields:
+  // [{label?, value?, placeholder?}]). Enter submits from any field and Esc
+  // cancels, so a multi-field dialog still costs one keystroke for anyone who
+  // only cares about the first; Tab walks the fields natively. onSubmit gets the
+  // values in field order. Labels are shown only when a dialog has more than the
+  // one obvious field.
+  function dialogFields(opts) {
     openOverlay((ov) => {
       const m = document.createElement("div"); m.className = "modal";
       const h = document.createElement("header"); h.textContent = opts.title; m.appendChild(h);
       const body = document.createElement("div"); body.className = "body";
-      const input = document.createElement("input");
-      input.type = "text"; input.value = opts.value || ""; input.spellcheck = false;
-      body.appendChild(input);
+      const inputs = opts.fields.map((f) => {
+        const wrap = document.createElement("div"); wrap.className = "field";
+        if (f.label) { const l = document.createElement("label"); l.textContent = f.label; wrap.appendChild(l); }
+        const input = document.createElement("input");
+        input.type = "text"; input.value = f.value || ""; input.spellcheck = false;
+        if (f.placeholder) input.placeholder = f.placeholder;
+        wrap.appendChild(input); body.appendChild(wrap);
+        return input;
+      });
       if (opts.hint) { const t = document.createElement("div"); t.className = "hint"; t.textContent = opts.hint; body.appendChild(t); }
       m.appendChild(body);
-      const submit = () => { const v = input.value; closeModal(); opts.onSubmit(v); };
+      const submit = () => { const vs = inputs.map((i) => i.value); closeModal(); opts.onSubmit(...vs); };
       const btns = document.createElement("div"); btns.className = "btns";
       btns.appendChild(mkModalBtn("cancel", "", closeModal));
       btns.appendChild(mkModalBtn(opts.submitLabel || "save", "primary", submit));
       m.appendChild(btns);
-      input.addEventListener("keydown", (e) => {
-        e.stopPropagation();
-        if (e.key === "Enter") { e.preventDefault(); submit(); }
-        else if (e.key === "Escape") { e.preventDefault(); closeModal(); }
-      });
+      for (const input of inputs) {
+        input.addEventListener("keydown", (e) => {
+          e.stopPropagation();
+          if (e.key === "Enter") { e.preventDefault(); submit(); }
+          else if (e.key === "Escape") { e.preventDefault(); closeModal(); }
+        });
+      }
       ov.appendChild(m);
-      requestAnimationFrame(() => { input.focus(); input.select(); });
+      requestAnimationFrame(() => { inputs[0].focus(); inputs[0].select(); });
     });
+  }
+
+  // dialogInput: a rename-style prompt. Enter saves, Esc cancels; an empty
+  // value is passed through (cats semantics: empty clears the custom name).
+  function dialogInput(opts) {
+    dialogFields({ ...opts, fields: [{ value: opts.value }] });
   }
 
   // dialogConfirm: an explicit yes/no gate for destructive commands. Enter
@@ -1560,17 +1580,23 @@
       onSubmit: (name) => sendCmd("tab.rename", { num: t.num, name }),
     });
   }
-  // newWorkspace: name the workspace up front instead of making the user create
-  // it and then rename it. Empty is a first-class answer — the server keeps
-  // auto-naming (the label follows the workspace's cwd) — so the dialog costs one
-  // Enter for anyone who doesn't care.
+  // newWorkspace: name the workspace and pick where it starts up front, instead
+  // of making the user create it and then fix both. Either field may be left
+  // empty: no name keeps auto-naming (the label follows the workspace's cwd),
+  // and a cleared start path starts the workspace in the user's home directory —
+  // the escape hatch for a session whose default cwd is somewhere useless. The
+  // path is prefilled with the focused pane's live cwd, the same neighbour
+  // inheritance new tabs and splits use, so the common case is still one Enter.
   function newWorkspace() {
-    dialogInput({
+    dialogFields({
       title: "new workspace",
-      value: "",
-      hint: "enter creates · empty keeps auto-naming (the cwd's name) · esc cancels",
+      fields: [
+        { label: "name", value: "", placeholder: "optional — auto-named after the start directory" },
+        { label: "start path", value: focusedPaneCwd(), placeholder: "empty starts in your home directory" },
+      ],
+      hint: "enter creates · tab moves between fields · esc cancels",
       submitLabel: "create",
-      onSubmit: (name) => sendCmd("workspace.create", { name }),
+      onSubmit: (name, path) => sendCmd("workspace.create", { name, path }),
     });
   }
   function renameWorkspace(w) {
