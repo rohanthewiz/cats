@@ -29,6 +29,11 @@
   #brand { font-size:13px; font-weight:600; letter-spacing:.5px; color:#e8e8e8;
     padding:12px 14px; border-bottom:1px solid var(--line); }
   #brand small { color:var(--muted); font-weight:400; margin-left:6px; }
+  /* Build badge: the short git hash this catway was built from (trailing '*' =
+     built from a modified tree). Its hover card carries the commit subject —
+     see initBuildBadge in JS. Mostly it answers "is this install stale?". */
+  #brand small.hash { cursor:help; }
+  #brand small.hash:hover { color:var(--accent); }
   #sidebar section { padding:10px 6px 8px; }
   /* Splitter between Workspaces / Panes / Agents — the headings alone read as
      one long list once a workspace has more than a couple of panes. */
@@ -643,42 +648,27 @@
       // enter and move still shows current title/agent/state.
       li.addEventListener("mouseenter", (e) => showPaneTip(e, pr));
       li.addEventListener("mousemove", (e) => showPaneTip(e, pr));
-      li.addEventListener("mouseleave", hidePaneTip);
+      li.addEventListener("mouseleave", hideTip);
       paneListEl.appendChild(li);
     }
   }
 
-  // ---- Pane-list hover tooltip ----
+  // ---- Hover card ----
   // A single reused element (cheaper than per-row popups, and only ever one is
-  // visible). Rebuilt on each show since the underlying pane state is live.
+  // visible), shared by every hover target. Callers pass [label, value, valueCls]
+  // rows; empty values drop out, so a caller can list optional fields flatly.
   const paneTipEl = document.createElement("div");
   paneTipEl.id = "panetip";
   document.body.appendChild(paneTipEl);
 
-  function showPaneTip(e, pr) {
-    const p = panes.get(pr.pane);
+  function showTip(e, items) {
     paneTipEl.innerHTML = "";
-    const row = (k, v, vcls) => {
-      if (v === undefined || v === null || v === "") return;
+    for (const [k, v, vcls] of items) {
+      if (v === undefined || v === null || v === "") continue;
       const kk = document.createElement("span"); kk.className = "k"; kk.textContent = k;
       const vv = document.createElement("span"); vv.className = "v" + (vcls ? " " + vcls : ""); vv.textContent = v;
       paneTipEl.appendChild(kk); paneTipEl.appendChild(vv);
-    };
-    row("Pane", paneRef(pr.pub, pr.pane), "pub");
-    if (p) {
-      row("Title", p.title);
-      row("Dir", p.cwd, "mono");
-      if (p.agent) row("Agent", p.agent + " · " + (p.agentState || "unknown"));
-      if (p.exited !== null && p.exited !== undefined) row("Exited", "code " + p.exited, "exited");
     }
-    row("Focus", pr.focused ? "focused" : "");
-    // Geometry + link state, relocated here from the status bar: the pane's own
-    // terminal grid (from its last frame, falling back to the layout's inner
-    // rect before the first frame lands) and then the window grid it sits in.
-    const gw = (p && p.W) || pr.inner[2], gh = (p && p.H) || pr.inner[3];
-    if (gw && gh) row("Size", gw + "×" + gh + " cells");
-    if (cols && rows) row("Window", cols + "×" + rows + " cells");
-    row("Link", connState.text, connState.err ? "err" : "ok");
     // Position the popup to the right of the cursor, clamped into the viewport
     // (measured after making it visible so its size is known).
     paneTipEl.classList.add("show");
@@ -690,7 +680,52 @@
     paneTipEl.style.top = Math.max(4, y) + "px";
   }
 
-  function hidePaneTip() { paneTipEl.classList.remove("show"); }
+  function hideTip() { paneTipEl.classList.remove("show"); }
+
+  // Pane-list rows truncate title/agent to fit their narrow column, so the full
+  // details are only reachable on hover. Rebuilt on each show since the
+  // underlying pane state is live.
+  function showPaneTip(e, pr) {
+    const p = panes.get(pr.pane);
+    const items = [["Pane", paneRef(pr.pub, pr.pane), "pub"]];
+    if (p) {
+      items.push(["Title", p.title]);
+      items.push(["Dir", p.cwd, "mono"]);
+      if (p.agent) items.push(["Agent", p.agent + " · " + (p.agentState || "unknown")]);
+      if (p.exited !== null && p.exited !== undefined) items.push(["Exited", "code " + p.exited, "exited"]);
+    }
+    items.push(["Focus", pr.focused ? "focused" : ""]);
+    // Geometry + link state, relocated here from the status bar: the pane's own
+    // terminal grid (from its last frame, falling back to the layout's inner
+    // rect before the first frame lands) and then the window grid it sits in.
+    const gw = (p && p.W) || pr.inner[2], gh = (p && p.H) || pr.inner[3];
+    if (gw && gh) items.push(["Size", gw + "×" + gh + " cells"]);
+    if (cols && rows) items.push(["Window", cols + "×" + rows + " cells"]);
+    items.push(["Link", connState.text, connState.err ? "err" : "ok"]);
+    showTip(e, items);
+  }
+
+  // ---- Build badge ----
+  // The short git hash of the commit this catway was built from, stamped at link
+  // time and served as window.__catsBuild (see internal/buildinfo + page.go). It
+  // sits beside the brand because the common confusion is a stale install — an
+  // app bundle still carrying an older catway — and the hash names the build at a
+  // glance; hovering expands it to the commit's subject line.
+  (function initBuildBadge() {
+    const b = window.__catsBuild;
+    if (!b || !b.hash) return; // built outside a checkout — no badge
+    const el = document.createElement("small");
+    el.className = "hash";
+    el.textContent = b.hash + (b.dirty ? "*" : "");
+    const items = [
+      ["Build", b.hash + (b.dirty ? " · modified tree" : "")],
+      ["Commit", b.subject],
+    ];
+    el.addEventListener("mouseenter", (e) => showTip(e, items));
+    el.addEventListener("mousemove", (e) => showTip(e, items));
+    el.addEventListener("mouseleave", hideTip);
+    document.getElementById("brand").appendChild(el);
+  })();
 
   function renderTabbar(msg) {
     tabbarEl.innerHTML = "";

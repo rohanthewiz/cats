@@ -18,6 +18,18 @@ GOOS     := $(shell go env GOOS)
 GOARCH   := $(shell go env GOARCH)
 DIST     := dist/cats_$(VERSION)_$(GOOS)_$(GOARCH)
 
+# Build stamp: the git identity linked into the binaries. catway serves it to the
+# sidebar brand, so a running instance names the commit it was built from — the
+# quickest way to spot a stale install. The commit subject rides base64-encoded
+# because it is free to contain spaces, quotes and '$', none of which survive a
+# recipe's -ldflags string intact, while base64's alphabet is inert throughout.
+# Unstamped builds (plain `go build`) still show a hash — internal/buildinfo
+# falls back to the toolchain's own VCS stamping.
+STAMP_PKG := github.com/rohanthewiz/cats/internal/buildinfo
+GIT_HASH  := $(shell git rev-parse --short HEAD 2>/dev/null)
+GIT_SUBJ  := $(shell git log -1 --pretty=%s 2>/dev/null | base64 | tr -d '\n')
+STAMP     := -ldflags "-X $(STAMP_PKG).hash=$(GIT_HASH) -X $(STAMP_PKG).subjectB64=$(GIT_SUBJ)"
+
 .PHONY: all vt build test build-ghostty test-ghostty race-ghostty binaries \
         local dist macapp macapp-client fmt-check vet vet-ghostty check clean
 
@@ -49,7 +61,7 @@ race-ghostty:
 
 binaries:
 	@mkdir -p bin
-	$(foreach b,$(BINS),$(GHOSTTY) go build $(TAGS) -trimpath -o bin/$(b) ./cmd/$(b) &&) true
+	$(foreach b,$(BINS),$(GHOSTTY) go build $(TAGS) -trimpath $(STAMP) -o bin/$(b) ./cmd/$(b) &&) true
 	@ls -lh bin
 
 # --- personal install --------------------------------------------------------
@@ -66,7 +78,7 @@ LOCAL_MAP := catway:catway cathost:cathost catctl:catctl
 
 local:
 	@mkdir -p $(LOCAL_BIN)
-	$(foreach p,$(LOCAL_MAP),$(GHOSTTY) go build $(TAGS) -trimpath \
+	$(foreach p,$(LOCAL_MAP),$(GHOSTTY) go build $(TAGS) -trimpath $(STAMP) \
 	    -o $(LOCAL_BIN)/$(word 2,$(subst :, ,$(p))) ./cmd/$(word 1,$(subst :, ,$(p))) &&) true
 	@for p in $(LOCAL_MAP); do ls -lh $(LOCAL_BIN)/$${p#*:}; done
 

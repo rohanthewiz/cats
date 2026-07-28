@@ -4,23 +4,25 @@ import (
 	"encoding/json"
 	"strings"
 
+	"github.com/rohanthewiz/cats/internal/buildinfo"
 	"github.com/rohanthewiz/cats/internal/config"
 )
 
-// renderPage bakes the config's front-end settings into the served HTML: a
-// <style> that overrides the :root CSS custom properties (theme colours + font)
-// and a <script> that publishes the copy-mode keybindings as window.__catsKeys
-// for index.html to consult. Both are injected just before </head> so they win
-// the cascade / load before the app script runs. The base page keeps working
-// with no injection (its stylesheet has fallback values and the JS has a default
-// binding table), so this only ever narrows behaviour toward the config.
+// renderPage bakes the front-end's server-side settings into the served HTML: a
+// <style> that overrides the :root CSS custom properties (theme colours + font),
+// a <script> that publishes the copy-mode keybindings as window.__catsKeys, and
+// a <script> that publishes this binary's git identity as window.__catsBuild.
+// All are injected just before </head> so they win the cascade / load before the
+// app script runs. The base page keeps working with no injection (its stylesheet
+// has fallback values, the JS has a default binding table, and the build badge
+// is simply omitted), so this only ever narrows behaviour toward the config.
 //
 // The config file is operator-controlled and local, but we still sanitise the
 // CSS pieces so a stray value can't break out of <style> into markup; the
-// keybindings ride through json.Marshal, whose default HTML escaping keeps a
-// "</script>" in a value inert.
+// keybindings and build info ride through json.Marshal, whose default HTML
+// escaping keeps a "</script>" in a value inert.
 func renderPage(base []byte, cfg config.Config) []byte {
-	inject := themeStyle(cfg.Theme) + keybindingsScript(cfg.Keybindings)
+	inject := themeStyle(cfg.Theme) + keybindingsScript(cfg.Keybindings) + buildScript()
 	html := string(base)
 	if i := strings.LastIndex(html, "</head>"); i >= 0 {
 		return []byte(html[:i] + inject + html[i:])
@@ -65,6 +67,21 @@ func keybindingsScript(k config.Keybindings) string {
 		return ""
 	}
 	return "<script id=\"cats-config-keys\">window.__catsKeys=" + string(data) + ";</script>\n"
+}
+
+// buildScript publishes the binary's git identity for the sidebar's build badge.
+// An unknown hash (built outside a git checkout) emits nothing at all, and the
+// front end then leaves the badge off rather than showing a placeholder.
+func buildScript() string {
+	bi := buildinfo.Get()
+	if bi.Hash == "" {
+		return ""
+	}
+	data, err := json.Marshal(bi)
+	if err != nil {
+		return ""
+	}
+	return "<script id=\"cats-build\">window.__catsBuild=" + string(data) + ";</script>\n"
 }
 
 // sanitizeCSSName keeps a CSS custom-property name to [A-Za-z0-9-] so it stays a
