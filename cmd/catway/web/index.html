@@ -895,7 +895,10 @@
       const meta = document.createElement("span"); meta.className = "ameta";
       meta.textContent = paneRef(it.pub, it.pane) + " · " + (it.seen ? it.state : "done");
       li.appendChild(dot); li.appendChild(name); li.appendChild(meta);
-      li.addEventListener("click", () => sendCmd("pane.focus", { pane: it.pane }));
+      // agent.focus, not pane.focus: the agents list is global, so the target
+      // may sit in another workspace/tab and has to be revealed into the
+      // viewport (pane.focus only moves the focus flag within the current one).
+      li.addEventListener("click", () => sendCmd("agent.focus", { pane: it.pane }));
       agentListEl.appendChild(li);
     }
   }
