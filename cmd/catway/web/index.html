@@ -520,6 +520,22 @@
   // idle+unseen renders as the "done" attention tier (cats's teal dot).
   function markerState(it) { return it.state === "idle" && !it.seen ? "done" : it.state; }
 
+  // paneRef renders a server handle ("w1:p3") for display, swapping the opaque
+  // workspace id for the workspace's name ("cats:p3"). Everywhere a pane
+  // reference has to stand on its own — a tooltip, a dialog title, the agents
+  // rollup and palette, both of which span every workspace — the name is what
+  // the user actually recognizes. The PANES list is the one exception: its
+  // column is narrow and its workspace is the active one, right above it, so
+  // it keeps the compact handle (see renderPaneList).
+  function paneRef(pub, paneID) {
+    if (!pub) return "#" + paneID;
+    const i = pub.indexOf(":");
+    if (i < 0) return pub;
+    const id = pub.slice(0, i);
+    const ws = layoutMsg && layoutMsg.workspaces.find((w) => w.id === id);
+    return ((ws && ws.name) || id) + pub.slice(i);
+  }
+
   // attentionRank orders marker states for aggregation (cats's
   // workspace_attention_priority): blocked > done(unseen) > working > idle.
   function attentionRank(st) {
@@ -603,6 +619,9 @@
       const li = document.createElement("li");
       li.className = "pn" + (pr.focused ? " focused" : "");
       const dot = document.createElement("span"); dot.className = "dot"; dot.textContent = pr.focused ? "▸" : "";
+      // Raw "w1:p3" handle here, not paneRef's named form: these rows are all
+      // the active workspace's, named directly above, and the column is too
+      // narrow to spend on a repeated name.
       const pub = document.createElement("span"); pub.className = "pub"; pub.textContent = pr.pub || ("#" + pr.pane);
       li.appendChild(dot); li.appendChild(pub);
       if (p && p.title) { const t = document.createElement("span"); t.className = "ttl"; t.textContent = p.title; li.appendChild(t); }
@@ -645,7 +664,7 @@
       const vv = document.createElement("span"); vv.className = "v" + (vcls ? " " + vcls : ""); vv.textContent = v;
       paneTipEl.appendChild(kk); paneTipEl.appendChild(vv);
     };
-    row("Pane", pr.pub || ("#" + pr.pane), "pub");
+    row("Pane", paneRef(pr.pub, pr.pane), "pub");
     if (p) {
       row("Title", p.title);
       row("Dir", p.cwd, "mono");
@@ -837,7 +856,7 @@
       const dot = document.createElement("span"); dot.className = "adot " + stClass(markerState(it)); dot.textContent = "●";
       const name = document.createElement("span"); name.className = "aname"; name.textContent = it.agent;
       const meta = document.createElement("span"); meta.className = "ameta";
-      meta.textContent = (it.pub || ("#" + it.pane)) + " · " + (it.seen ? it.state : "done");
+      meta.textContent = paneRef(it.pub, it.pane) + " · " + (it.seen ? it.state : "done");
       li.appendChild(dot); li.appendChild(name); li.appendChild(meta);
       li.addEventListener("click", () => sendCmd("pane.focus", { pane: it.pane }));
       agentListEl.appendChild(li);
@@ -1197,7 +1216,7 @@
     p.cm = { cursor: start, anchor: null, rect: false };
     copyModePane = p;
     p.sel = null;
-    setModeBar("COPY " + (p.pub || "#" + p.id), "hjkl/arrows move · v select · r rect · y copy · Esc exit");
+    setModeBar("COPY " + paneRef(p.pub, p.id), "hjkl/arrows move · v select · r rect · y copy · Esc exit");
     scheduleDraw(p);
   }
 
@@ -1492,7 +1511,7 @@
   function renamePane(id) {
     const p = panes.get(id);
     dialogInput({
-      title: "rename pane " + ((p && p.pub) || ("#" + id)),
+      title: "rename pane " + paneRef(p && p.pub, id),
       value: (p && p.title) || "",
       hint: "enter saves · empty clears the custom name · esc cancels",
       onSubmit: (name) => sendCmd("pane.rename", { pane: id, name }),
@@ -2163,7 +2182,7 @@
         const a = byPane.get(pi.pane);
         return {
           kind: "pane",
-          label: (pi.handle || ("#" + pi.pane)) + (pi.name ? " · " + pi.name : ""),
+          label: paneRef(pi.handle, pi.pane) + (pi.name ? " · " + pi.name : ""),
           meta: a ? a.agent + ":" + a.state : (pi.focused ? "focused" : ""),
           stateClass: a ? stClass(a.state) : "",
           fn: () => sendCmd("agent.focus", { pane: pi.pane }),
