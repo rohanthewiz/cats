@@ -88,7 +88,24 @@ func command(path string, args ...string) *exec.Cmd {
 	c := exec.Command(path, args...)
 	c.Stdout, c.Stderr = os.Stdout, os.Stderr
 	c.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	c.Dir = daemonDir()
 	return c
+}
+
+// daemonDir is the working directory the daemons run in. Launched from Finder
+// (or `open`) our cwd is "/", which the daemons would inherit and hand to every
+// pane's shell — a new terminal at the filesystem root. Use the home directory
+// instead. Launched from a dev shell we keep that shell's cwd, so `cd project
+// && catapp` still opens panes in the project.
+func daemonDir() string {
+	cwd, err := os.Getwd()
+	if err == nil && cwd != "" && cwd != "/" {
+		return cwd
+	}
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		return home
+	}
+	return "" // inherit; nothing better to offer
 }
 
 // stop tears the backend down in reverse order: SIGTERM the catway (it saves

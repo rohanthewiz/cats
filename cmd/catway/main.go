@@ -155,8 +155,7 @@ func main() {
 		log.Fatalf("catway: read embedded page: %v", err)
 	}
 
-	cwd, _ := os.Getwd()
-	o, err := buildOrch(eff.CathostSocket, cwd, effPersist)
+	o, err := buildOrch(eff.CathostSocket, spawnRoot(), effPersist)
 	if err != nil {
 		log.Fatalf("catway: %v", err)
 	}
@@ -269,6 +268,23 @@ func main() {
 	// signal. The signal goroutine above got the same signal and is driving the
 	// graceful shutdown (save + final capture → os.Exit); block until it does.
 	select {}
+}
+
+// spawnRoot is the directory new panes spawn in when nothing more specific
+// applies (no workspace identity cwd, no restored/override cwd): the process
+// cwd, except that a GUI launch (Finder, `open`, launchd) hands us "/" — a
+// terminal that opens at the filesystem root is useless, so fall back to the
+// user's home there. A catway started from a shell keeps that shell's
+// directory, which is the whole point of `cd project && catway`.
+func spawnRoot() string {
+	cwd, err := os.Getwd()
+	if err == nil && cwd != "" && cwd != "/" {
+		return cwd
+	}
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		return home
+	}
+	return cwd
 }
 
 // buildOrch constructs the orchestrator, restoring the persisted session when
