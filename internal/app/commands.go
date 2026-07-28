@@ -308,9 +308,18 @@ func (d *Dispatcher) Dispatch(name string, dec ParamDecoder, r Responder) {
 			r.Fail(fmt.Sprintf("bad split direction %q", sp.Direction))
 			return
 		}
-		if _, err := d.session.SplitPane(optPaneID(sp.Pane), dir); err != nil {
+		// Resolve the source pane's cwd before the split, for the same reason a new
+		// tab takes its neighbor's: the new pane is another shell in the work the
+		// user is already doing.
+		inherited := d.inheritedSplitCwd(optPaneID(sp.Pane))
+		np, err := d.session.SplitPane(optPaneID(sp.Pane), dir)
+		if err != nil {
 			r.Fail(err.Error())
 			return
+		}
+		// Before ApplyModel, which is what creates the new pane's PTY.
+		if inherited != "" {
+			d.backend.StageSpawn(uint32(np), SpawnOverride{Cwd: inherited})
 		}
 		d.backend.ApplyModel()
 		r.OK(nil)
@@ -437,6 +446,9 @@ func (d *Dispatcher) Dispatch(name string, dec ParamDecoder, r Responder) {
 			bad(err)
 			return
 		}
+		// Resolve the left-hand neighbor before the create, while it is still the
+		// workspace's last tab.
+		inherited := d.inheritedTabCwd()
 		num, err := d.session.CreateTab()
 		if err != nil {
 			r.Fail(err.Error())
@@ -456,8 +468,13 @@ func (d *Dispatcher) Dispatch(name string, dec ParamDecoder, r Responder) {
 			_ = d.session.RenameTab(num, p.Title)
 		}
 		// Stage the spawn override before ApplyModel: that call reconciles the
-		// daemon's PTY set and is what actually creates the pane's process.
-		if ov, ok := p.spawnOverride(); ok {
+		// daemon's PTY set and is what actually creates the pane's process. An
+		// explicit cwd always wins over the inherited one.
+		ov, stage := p.spawnOverride()
+		if ov.Cwd == "" && inherited != "" {
+			ov.Cwd, stage = inherited, true
+		}
+		if stage {
 			d.backend.StageSpawn(res.Pane, ov)
 		}
 		d.backend.ApplyModel()
@@ -746,6 +763,38 @@ func (d *Dispatcher) Dispatch(name string, dec ParamDecoder, r Responder) {
 	default:
 		r.Fail(fmt.Sprintf("command %q not supported yet (WS2 in progress)", name))
 	}
+}
+
+// inheritedTabCwd is where a new tab opens when its caller named no cwd: the
+// live working directory of the tab it lands beside — the workspace's last tab,
+// since tab.create appends to the right end of the bar. Opening a tab next to
+// one you are working in means "another shell here", and the neighbor's cwd is
+// what the user sees as "here"; the workspace identity cwd it otherwise falls
+// back to is only the directory the workspace *started* in.
+//
+// The pane's cwd comes from the Backend, which seeds it with the pane's spawn
+// directory and refreshes it from OSC 7 — so a shell that never reports still
+// yields the directory it was launched in, and the chain of inheritance holds.
+// "" (no neighbor, or a pane the backend does not know) leaves Session.CreateTab's
+// own default in place.
+func (d *Dispatcher) inheritedTabCwd() string {
+	pane, ok := d.session.NewTabNeighborPane()
+	if !ok {
+		return ""
+	}
+	return d.backend.PaneMeta(uint32(pane)).Cwd
+}
+
+// inheritedSplitCwd is where a pane split off target opens: the live cwd of the
+// pane being split, which is the tab-level rule (inheritedTabCwd) applied to the
+// one pane a split unambiguously comes from. "" — an unresolvable target, or a
+// pane the backend does not know — leaves the workspace's spawn cwd in place.
+func (d *Dispatcher) inheritedSplitCwd(target *layout.PaneID) string {
+	src, err := d.session.ResolvePaneTarget(target)
+	if err != nil {
+		return ""
+	}
+	return d.backend.PaneMeta(uint32(src)).Cwd
 }
 
 // decodeOptional decodes params whose fields are all optional: no params decodes

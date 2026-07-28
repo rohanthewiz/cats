@@ -62,12 +62,17 @@ type pane struct {
 	// read by readPump.
 	streamOutput atomic.Bool
 
+	// oscCwd records that this pane's shell has reported a cwd over OSC 7 at least
+	// once, which retires detectPump's process probe for it (readPump writes,
+	// detectPump reads).
+	oscCwd atomic.Bool
+
 	// metaMu guards the last-emitted "chrome" — cwd/title/agent — so a reconnecting
 	// client can be resynced with the pane's current state by another goroutine.
-	// readPump writes cwd/title; detectPump writes the agent fields; resyncPane reads
-	// all of them.
+	// readPump writes title (and cwd from OSC 7); detectPump writes the agent fields
+	// (and cwd from the process probe); resyncPane reads all of them.
 	metaMu         sync.Mutex
-	lastPwd        string // last OSC 7 cwd emitted, for change detection + resync
+	lastPwd        string // last cwd emitted, for change detection + resync
 	lastTitle      string // last OSC 0/2 title emitted, for change detection + resync
 	lastAgent      string // last pane_agent identity ("" = plain shell)
 	lastAgentState string // last pane_agent state (idle|working|blocked|unknown)
@@ -96,6 +101,15 @@ func (p *pane) writePTY(b []byte) error {
 	defer p.ptyMu.Unlock()
 	_, err := p.ptmx.Write(b)
 	return err
+}
+
+// childPid is the pane's own process — the shell whose cwd the working-directory
+// probe reads. 0 when the child never started (nothing to inspect).
+func (p *pane) childPid() int {
+	if p.cmd == nil || p.cmd.Process == nil {
+		return 0
+	}
+	return p.cmd.Process.Pid
 }
 
 // setCwdMeta records a new cwd and reports whether it changed (so the caller only
@@ -574,8 +588,14 @@ func (h *Host) readPump(p *pane) {
 				h.emit(NewPaneOutput(p.id, chunk))
 			}
 			// Scan the raw stream for OSC passthrough the emulator doesn't surface.
-			if cwd, ok := p.osc.scan(buf[:n]); ok && p.setCwdMeta(cwd) {
-				h.emit(NewPaneCwd(p.id, cwd))
+			if cwd, ok := p.osc.scan(buf[:n]); ok {
+				// A shell that reports its own cwd is authoritative from here on —
+				// it can name a directory the local process probe cannot see at all
+				// (an ssh session's remote path), so the probe stands down.
+				p.oscCwd.Store(true)
+				if p.setCwdMeta(cwd) {
+					h.emit(NewPaneCwd(p.id, cwd))
+				}
 			}
 			for _, clip := range p.osc52.scan(buf[:n]) {
 				h.emit(NewPaneClipboard(p.id, clip))
@@ -630,6 +650,10 @@ func (h *Host) detectPump(p *pane) {
 	var lastScanSeq uint64
 	var hasLastScanSeq bool
 
+	// lastCwdSeq is the output count at the last working-directory probe; 0 makes
+	// the pane's first output trigger one.
+	var lastCwdSeq uint64
+
 	var pending pendingIdle
 
 	// Process-probe throttle state.
@@ -656,6 +680,20 @@ func (h *Host) detectPump(p *pane) {
 			return // pane closed/removed
 		}
 		now := time.Now()
+
+		// Working directory: the shell's own cwd, for the shells that never emit
+		// OSC 7 (the default zsh/bash setup on both platforms). Skipped entirely
+		// once a pane has reported one itself, and gated on new output since the
+		// last probe — a `cd` always draws a fresh prompt, and an idle pane costs
+		// nothing.
+		if !p.oscCwd.Load() {
+			if seq := p.detectSeq.Load(); seq != lastCwdSeq {
+				lastCwdSeq = seq
+				if cwd := detect.ProcessCwd(p.childPid()); cwd != "" && p.setCwdMeta(cwd) {
+					h.emit(NewPaneCwd(p.id, cwd))
+				}
+			}
+		}
 
 		// Identity: a cheap tcgetpgrp every tick gates the expensive enumeration.
 		foregroundPgid := detect.ForegroundPGID(p.ptmx.Fd())

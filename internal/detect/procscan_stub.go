@@ -7,3 +7,7 @@ func ForegroundAgent(fd uintptr) string { return "" }
 
 // ForegroundPGID is unsupported on this platform; -1 means "no foreground group".
 func ForegroundPGID(fd uintptr) int { return -1 }
+
+// ProcessCwd is unsupported on this platform; panes fall back to whatever cwd
+// their shell reports over OSC 7.
+func ProcessCwd(pid int) string { return "" }

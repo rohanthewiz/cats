@@ -61,6 +61,22 @@ func ForegroundAgent(fd uintptr) string {
 	return leader
 }
 
+// ProcessCwd returns pid's current working directory, or "" when it cannot be
+// read (a pid that has exited, one this process may not inspect, or a directory
+// that has since been removed). Callers pass the pane's own PTY child — the
+// shell whose `cd` moves the directory — because the terminal itself reports one
+// only if the shell emits OSC 7, which most default shell setups do not.
+func ProcessCwd(pid int) string {
+	if pid <= 0 {
+		return ""
+	}
+	dir, err := os.Readlink("/proc/" + strconv.Itoa(pid) + "/cwd")
+	if err != nil || strings.HasSuffix(dir, " (deleted)") {
+		return ""
+	}
+	return dir
+}
+
 // procPgrp reads the process group from /proc/<pid>/stat (field 5, after comm).
 func procPgrp(pid int) int {
 	data, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/stat")

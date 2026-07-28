@@ -163,7 +163,8 @@ func BorderPath(id string) ([]bool, bool) {
 	return path, true
 }
 
-// SplitParams: pane.split. Pane nil = the focused pane.
+// SplitParams: pane.split. Pane nil = the focused pane. The new pane spawns in
+// the split pane's live working directory (Dispatcher.inheritedSplitCwd).
 type SplitParams struct {
 	Pane      *uint32 `json:"pane,omitempty"`
 	Direction string  `json:"direction"` // SplitH | SplitV
@@ -503,14 +504,16 @@ type PaneMeta struct {
 }
 
 // TabCreateParams is the optional params block for tab.create. The zero value
-// (or no params at all — the historical wire shape) keeps the old behavior: a
-// default-shell tab in the workspace's identity cwd. The optional fields let an
-// automation client (catctl plugin run, scripts) open a fully-formed tab in one
-// round trip instead of tab.create → tab.rename → typing a command into the
-// shell:
+// (or no params at all — the historical wire shape) is a default-shell tab that
+// inherits its left-hand neighbor tab's live cwd (the dispatcher's
+// inheritedTabCwd), falling back to the workspace's identity cwd. The optional
+// fields let an automation client (catctl plugin run, scripts) open a
+// fully-formed tab in one round trip instead of tab.create → tab.rename →
+// typing a command into the shell:
 //
 //   - Title pins the tab's display name (what tab.rename would set).
-//   - Cwd overrides the spawn directory for the tab's root pane.
+//   - Cwd overrides the spawn directory for the tab's root pane, beating the
+//     inherited one.
 //   - Command is an argv to exec as the pane's process instead of a shell —
 //     the pane runs the program directly, so its exit closes the pane and no
 //     shell history/prompt noise precedes it (same mechanism as agent resume).

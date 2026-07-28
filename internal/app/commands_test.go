@@ -935,7 +935,9 @@ func TestDispatchTabCreateSpawn(t *testing.T) {
 		t.Fatalf("new tab %d missing from tab.list %+v", got.Num, tabs)
 	}
 
-	// A bare tab.create (no params) must not stage anything.
+	// A bare tab.create stages nothing when there is no cwd to inherit either —
+	// the backend knows no pane metadata here (see TestDispatchTabCreateInheritsCwd
+	// for the inheriting case).
 	r = h.resp()
 	h.d.Dispatch(CmdTabCreate, noParams(), r)
 	got2 := okData[TabCreateResult](t, r)
@@ -948,6 +950,90 @@ func TestDispatchTabCreateSpawn(t *testing.T) {
 	h.d.Dispatch(CmdTabCreate, params(t, TabCreateParams{Command: []string{""}}), r)
 	if !r.failCall || !strings.Contains(r.errMsg, "bad params") {
 		t.Fatalf("empty command[0]: fail=%v msg=%q", r.failCall, r.errMsg)
+	}
+}
+
+// A tab opened with no cwd of its own starts in its left-hand neighbor's
+// working directory — the tab it lands beside on the bar, which is the
+// workspace's last tab whatever the user is currently looking at.
+func TestDispatchTabCreateInheritsCwd(t *testing.T) {
+	h := newCmdHarness(t)
+	h.b.paneMeta = map[uint32]PaneMeta{}
+	tabCwd := func(idx int, cwd string) {
+		root := h.s.ActiveWorkspace().Tabs[idx].RootPane
+		h.b.paneMeta[uint32(root)] = PaneMeta{Cwd: cwd}
+	}
+	tabCwd(0, "/tmp/one")
+
+	r := h.resp()
+	h.d.Dispatch(CmdTabCreate, noParams(), r)
+
+	got := okData[TabCreateResult](t, r)
+	// The staging must still precede applyModel — the call that creates the PTY.
+	if lg := *h.log; len(lg) != 3 || lg[0] != "stageSpawn" || lg[1] != "applyModel" {
+		t.Fatalf("tab.create effects = %v, want [stageSpawn applyModel ok]", lg)
+	}
+	if ov := h.b.staged[got.Pane]; ov.Cwd != "/tmp/one" {
+		t.Fatalf("inherited cwd = %q, want %q", ov.Cwd, "/tmp/one")
+	}
+
+	// The neighbor is the last tab, not the focused one: with the user back on
+	// tab 1, a third tab still lands beside tab 2 and inherits its cwd.
+	tabCwd(1, "/tmp/two")
+	if err := h.s.FocusTab(1); err != nil {
+		t.Fatalf("focus tab 1: %v", err)
+	}
+	r = h.resp()
+	h.d.Dispatch(CmdTabCreate, noParams(), r)
+	got = okData[TabCreateResult](t, r)
+	if ov := h.b.staged[got.Pane]; ov.Cwd != "/tmp/two" {
+		t.Fatalf("inherited cwd = %q, want the last tab's %q", ov.Cwd, "/tmp/two")
+	}
+
+	// An explicit cwd beats the inherited one, and still carries the rest of the
+	// override with it.
+	r = h.resp()
+	h.d.Dispatch(CmdTabCreate, params(t, TabCreateParams{Cwd: "/opt/pinned", Command: []string{"top"}}), r)
+	got = okData[TabCreateResult](t, r)
+	ov := h.b.staged[got.Pane]
+	if ov.Cwd != "/opt/pinned" || len(ov.Command) != 1 || ov.Command[0] != "top" {
+		t.Fatalf("staged override = %+v, want cwd /opt/pinned with command [top]", ov)
+	}
+}
+
+// A split opens where the pane it came from is working — the tab-level rule
+// applied to the one pane a split unambiguously descends from.
+func TestDispatchPaneSplitInheritsCwd(t *testing.T) {
+	h := newCmdHarness(t)
+	src, _ := h.s.FocusedPane()
+	h.b.paneMeta = map[uint32]PaneMeta{uint32(src): {Cwd: "/srv/app"}}
+
+	r := h.resp()
+	h.d.Dispatch(CmdPaneSplit, params(t, SplitParams{Direction: SplitH}), r)
+
+	if r.failCall {
+		t.Fatalf("pane.split failed: %s", r.errMsg)
+	}
+	// The staging must precede applyModel — the call that creates the PTY.
+	if lg := *h.log; len(lg) != 3 || lg[0] != "stageSpawn" || lg[1] != "applyModel" {
+		t.Fatalf("pane.split effects = %v, want [stageSpawn applyModel ok]", lg)
+	}
+	// The split focuses the new pane, so that is the one that was staged.
+	np, _ := h.s.FocusedPane()
+	if np == src {
+		t.Fatal("split did not focus the new pane")
+	}
+	if ov := h.b.staged[uint32(np)]; ov.Cwd != "/srv/app" {
+		t.Fatalf("new pane cwd = %q, want the split pane's %q", ov.Cwd, "/srv/app")
+	}
+
+	// A pane the backend knows nothing about stages nothing at all.
+	h.b.paneMeta = nil
+	r = h.resp()
+	h.d.Dispatch(CmdPaneSplit, params(t, SplitParams{Direction: SplitV}), r)
+	after, _ := h.s.FocusedPane()
+	if _, ok := h.b.staged[uint32(after)]; ok {
+		t.Fatalf("split staged an override for pane %d with no cwd to inherit", after)
 	}
 }
 

@@ -2,7 +2,9 @@
 // later stages) its state. Stage A covers process-based identity: given a pane's
 // PTY, find the foreground process group and map its command(s) to a canonical
 // agent label. The Go daemon owns the PTY child, so this lives here rather than
-// in the Rust orchestrator.
+// in the Rust orchestrator. The same per-platform process inspection also answers
+// where a pane's shell currently is (ProcessCwd) — the one question OSC 7 would
+// answer if every shell emitted it.
 //
 // The label vocabulary mirrors cats's detect::identify_agent table so the Rust
 // side can map labels back via parse_agent_label.

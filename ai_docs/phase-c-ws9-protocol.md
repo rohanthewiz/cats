@@ -91,7 +91,12 @@ panes, but agent chrome is global):
 
 **Per-pane chrome events** (incremental; source = β events of the same name):
 - `{t:"pane_title", pane, title}` (β `:289`; "" clears)
-- `{t:"pane_cwd", pane, cwd}` (β `:235`)
+- `{t:"pane_cwd", pane, cwd}` (β `:235`). Three sources, in ascending authority: the
+  directory the PTY spawned in (announced at create so a pane always has one), the
+  cathost detect pump reading the shell process's own cwd (how a plain `cd` is noticed —
+  most default shell setups never emit OSC 7), and OSC 7 itself, which retires the probe
+  for that pane once seen since a reporting shell can name directories the local probe
+  cannot see at all (an ssh session's remote path).
 - `{t:"pane_agent", pane, agent, state, seen}` (β `:249` + server's Seen tracking; also
   patches the `agents` rollup client-side)
 - `{t:"pane_modes", pane, mouse:bool, alt_screen:bool}` — the **display-relevant subset**
@@ -224,6 +229,17 @@ adds environment variables. `cwd`/`env` without `command` still apply to the def
 shell. No params keeps the historical bare-shell behavior. Relatedly, every pane's
 environment now carries `CATS_CONTROL_SOCKET`, so in-pane automation (cats-todo, plugin
 binaries) finds the control socket even on a non-default path.
+
+Later still, `cwd` gained a default rather than staying unset: a `tab.create` that names
+no directory inherits the live cwd of the tab it lands beside — the workspace's last tab,
+since new tabs append to the right end of the bar — read through `Backend.PaneMeta` and
+staged like an explicit one (`Dispatcher.inheritedTabCwd`). An explicit `cwd` still wins,
+and a neighbor the backend knows nothing about falls back to the workspace identity cwd
+as before. The neighbor is positional, not the focused tab: a new tab opens where the tab
+to its left is working, so `cd`-ing into a project once carries into every tab opened
+after it. `pane.split` inherits on the same principle from the pane it splits
+(`Dispatcher.inheritedSplitCwd`), which needs no positional rule — a split has exactly
+one source.
 
 ## 8. Visibility & frame streaming policy
 

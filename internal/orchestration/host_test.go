@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"net"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -139,6 +140,51 @@ func TestHostReportsPaneCwd(t *testing.T) {
 		}
 	}
 	t.Fatal("never received pane_cwd")
+}
+
+// Most default shell setups never emit OSC 7, so a pane's directory would
+// otherwise be frozen at the one it spawned in. The detect pump reads the
+// shell's own cwd instead, and a plain `cd` moves it.
+func TestHostReportsPaneCwdWithoutOSC7(t *testing.T) {
+	c := startTestHost(t)
+
+	// The probe reports the kernel's path, which on macOS resolves /var → /private/var.
+	want, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("resolve temp dir: %v", err)
+	}
+
+	cp := NewCreatePane(5, 40, 5)
+	cp.Command = "/bin/sh"
+	// cd with no OSC 7 report at all, then print (the probe is gated on new
+	// output) and linger while the pump ticks.
+	cp.Args = []string{"-c", "cd " + want + "; printf 'moved\\n'; sleep 2"}
+	if err := WriteMessage(c, cp); err != nil {
+		t.Fatalf("create_pane: %v", err)
+	}
+
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		typ, payload := readEvent(t, c)
+		switch typ {
+		case MsgPaneCwd:
+			var pc PaneCwd
+			if err := json.Unmarshal(payload, &pc); err != nil {
+				t.Fatalf("decode pane_cwd: %v", err)
+			}
+			if pc.PaneID != 5 {
+				t.Fatalf("pane_cwd for pane %d, want 5", pc.PaneID)
+			}
+			// The first report is the spawn-dir seed; keep reading until the
+			// probe notices the shell moved.
+			if pc.Cwd == want {
+				return
+			}
+		case MsgError:
+			t.Fatalf("unexpected error event: %s", string(payload))
+		}
+	}
+	t.Fatalf("never saw pane_cwd for %s", want)
 }
 
 func TestHostReportsAgent(t *testing.T) {

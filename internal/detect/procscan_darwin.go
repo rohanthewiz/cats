@@ -4,6 +4,7 @@ package detect
 
 /*
 #include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
 #include <libproc.h>
 #include <sys/sysctl.h>
@@ -25,6 +26,17 @@ static int proc_comm(int pid, char *buf, int size) {
 
 static int proc_path(int pid, char *buf, int size) {
     return proc_pidpath(pid, buf, (uint32_t)size);
+}
+
+// proc_cwd copies pid's current working directory into buf; returns its length
+// (0 on failure — a dead pid, or a path that does not fit).
+static int proc_cwd(int pid, char *buf, int size) {
+    struct proc_vnodepathinfo vpi;
+    if (proc_pidinfo(pid, PROC_PIDVNODEPATHINFO, 0, &vpi, sizeof(vpi)) <= 0) return 0;
+    size_t len = strlen(vpi.pvi_cdir.vip_path);
+    if (len == 0 || (int)len >= size) return 0;
+    memcpy(buf, vpi.pvi_cdir.vip_path, len + 1);
+    return (int)len;
 }
 
 // proc_args fetches KERN_PROCARGS2 for pid into buf; returns bytes written (0 on failure).
@@ -88,6 +100,22 @@ func ForegroundAgent(fd uintptr) string {
 		}
 	}
 	return leader
+}
+
+// ProcessCwd returns pid's current working directory, or "" when it cannot be
+// read (a pid that has exited, or one this process may not inspect). Callers
+// pass the pane's own PTY child — the shell whose `cd` moves the directory —
+// because the terminal itself reports one only if the shell emits OSC 7, which
+// most default shell setups do not.
+func ProcessCwd(pid int) string {
+	if pid <= 0 {
+		return ""
+	}
+	buf := make([]C.char, pathBufSize)
+	if n := C.proc_cwd(C.int(pid), &buf[0], C.int(len(buf))); n <= 0 {
+		return ""
+	}
+	return C.GoString(&buf[0])
 }
 
 // identifyPid checks a process's comm, exec-path basename, and argv for an agent.

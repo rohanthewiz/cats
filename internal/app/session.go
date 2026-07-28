@@ -367,9 +367,23 @@ func (s *Session) ClosePane(target *layout.PaneID) (layout.PaneID, error) {
 
 // --- Tab commands (§7) — operate on the active workspace ---------------------
 
+// NewTabNeighborPane returns the pane a tab created right now would land next
+// to: the root pane of the active workspace's last tab, since CreateTab appends
+// to the right end of the tab bar. The runtime resolves that pane's live cwd so
+// the new tab opens where its left-hand neighbor is working (the dispatcher's
+// inheritedTabCwd). False when the workspace somehow holds no tabs.
+func (s *Session) NewTabNeighborPane() (layout.PaneID, bool) {
+	tabs := s.ActiveWorkspace().Tabs
+	if len(tabs) == 0 {
+		return 0, false
+	}
+	return tabs[len(tabs)-1].RootPane, true
+}
+
 // CreateTab appends a tab to the active workspace and switches to it. Returns
 // the new tab's public number. The tab spawns in the workspace's identity cwd
-// (a worktree workspace's checkout), falling back to the session cwd.
+// (a worktree workspace's checkout), falling back to the session cwd — the
+// dispatcher layers the neighbor tab's live cwd over that when it knows one.
 func (s *Session) CreateTab() (int, error) {
 	ws := s.ActiveWorkspace()
 	cwd := ws.IdentityCwd
@@ -538,6 +552,15 @@ func (s *Session) MoveWorkspace(id string, insertIdx int) (bool, error) {
 		}
 	}
 	return true, nil
+}
+
+// ResolvePaneTarget resolves the pane an optionally-addressed command means: the
+// named pane, or the focused one when target is nil — the rule every pane command
+// follows. Exported so a caller that must know the subject *before* the mutation
+// runs (the dispatcher reads the split source's cwd) resolves it the same way the
+// mutation will.
+func (s *Session) ResolvePaneTarget(target *layout.PaneID) (layout.PaneID, error) {
+	return s.resolvePaneTarget(target)
 }
 
 // --- Internal helpers --------------------------------------------------------
