@@ -67,6 +67,7 @@ import (
 	"github.com/rohanthewiz/cats/internal/gwauth"
 	"github.com/rohanthewiz/cats/internal/gwtls"
 	"github.com/rohanthewiz/cats/internal/persist"
+	"github.com/rohanthewiz/cats/internal/startdir"
 	"github.com/rohanthewiz/cats/internal/worktree"
 )
 
@@ -277,14 +278,38 @@ func main() {
 // user's home there. A catway started from a shell keeps that shell's
 // directory, which is the whole point of `cd project && catway`.
 func spawnRoot() string {
-	cwd, err := os.Getwd()
-	if err == nil && cwd != "" && cwd != "/" {
-		return cwd
+	cwd, _ := os.Getwd()
+	return startdir.Usable(cwd)
+}
+
+// healStartDirs repairs a restored session's spawn directories against root.
+// The snapshot outlives the launch that produced it: a session first saved from
+// a GUI launch (before spawnRoot existed, or from a build that predates it)
+// carries "/" as its session cwd and in every workspace identity, and a
+// directory can simply be deleted between runs. Restore is a pure model
+// conversion, so the repair belongs here — without it a single bad launch
+// pins every future workspace to the filesystem root forever.
+func healStartDirs(sess *app.Session, root string) {
+	if cwd := startdir.Usable(sess.Cwd(), root); cwd != sess.Cwd() {
+		log.Printf("catway: restored session cwd %q unusable, using %q", sess.Cwd(), cwd)
+		sess.SetCwd(cwd)
 	}
-	if home, err := os.UserHomeDir(); err == nil && home != "" {
-		return home
+	for _, ws := range sess.Workspaces() {
+		ws.IdentityCwd = startdir.Usable(ws.IdentityCwd, sess.Cwd())
 	}
-	return cwd
+}
+
+// healPaneCwds drops saved per-pane directories that are no longer worth
+// respawning in (the same "/" and deleted-directory cases healStartDirs covers).
+// A dropped entry is not an error: createPane simply falls back to the pane's
+// workspace identity cwd, which healStartDirs has already made usable.
+func healPaneCwds(cwds map[uint32]string) map[uint32]string {
+	for pid, cwd := range cwds {
+		if startdir.Usable(cwd) != cwd {
+			delete(cwds, pid)
+		}
+	}
+	return cwds
 }
 
 // buildOrch constructs the orchestrator, restoring the persisted session when
@@ -321,7 +346,8 @@ func buildOrch(socket, cwd string, pc config.Persistence) (*orch, error) {
 			log.Printf("catway: session restore failed, starting fresh: %v", err)
 			sess = nil
 		} else {
-			savedCwds = cwds
+			healStartDirs(sess, cwd)
+			savedCwds = healPaneCwds(cwds)
 			savedAgents = paneAgents
 			total := len(snap.Workspaces)
 			log.Printf("catway: restored session from %s (%d workspaces, %d panes)",

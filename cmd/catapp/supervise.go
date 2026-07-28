@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"syscall"
 	"time"
+
+	"github.com/rohanthewiz/cats/internal/startdir"
 )
 
 // backend is the supervised daemon pair for local mode: a persistent cathost
@@ -98,14 +100,8 @@ func command(path string, args ...string) *exec.Cmd {
 // instead. Launched from a dev shell we keep that shell's cwd, so `cd project
 // && catapp` still opens panes in the project.
 func daemonDir() string {
-	cwd, err := os.Getwd()
-	if err == nil && cwd != "" && cwd != "/" {
-		return cwd
-	}
-	if home, err := os.UserHomeDir(); err == nil && home != "" {
-		return home
-	}
-	return "" // inherit; nothing better to offer
+	cwd, _ := os.Getwd()
+	return startdir.Usable(cwd) // "" (nothing usable) inherits ours
 }
 
 // stop tears the backend down in reverse order: SIGTERM the catway (it saves

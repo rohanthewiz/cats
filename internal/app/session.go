@@ -55,6 +55,12 @@ func (s *Session) ActiveWorkspace() *workspace.Workspace { return s.workspaces[s
 // Cwd is the session's default working directory for new panes.
 func (s *Session) Cwd() string { return s.cwd }
 
+// SetCwd replaces the session's default working directory. The runtime calls it
+// after restoring a snapshot, whose saved cwd may no longer be usable — an old
+// snapshot taken from a GUI launch carries "/", and a directory can be deleted
+// between runs (cf. cmd/catway's healStartDirs).
+func (s *Session) SetCwd(cwd string) { s.cwd = cwd }
+
 // FocusedPane resolves the active workspace's active tab's focused pane.
 func (s *Session) FocusedPane() (layout.PaneID, bool) {
 	return s.ActiveWorkspace().FocusedPaneID()
