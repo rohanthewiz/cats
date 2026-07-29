@@ -1,0 +1,37 @@
+site_name: cats
+site_description: >-
+  A terminal workspace manager for herding AI coding agents — workspaces, tabs
+  and BSP panes, served to the browser or a native macOS window.
+
+docs_dir: docs
+
+nav:
+  - Home: index.md
+  - Getting started: getting-started.md
+  - Concepts: concepts.md
+  - Architecture:
+      - Overview: architecture/index.md
+      - "Mode 1 — Standalone Mac": architecture/standalone-mac.md
+      - "Mode 2 — Mac client / Linux server": architecture/mac-client-linux-server.md
+      - "Mode 3 — Web client / Mac server": architecture/web-client-mac-server.md
+      - Choosing a topology: architecture/choosing-a-topology.md
+      - Keystroke to pixel: architecture/request-lifecycle.md
+  - Protocols:
+      - Overview: protocols/index.md
+      - Orchestration seam: protocols/orchestration-seam.md
+      - Browser protocol: protocols/browser-protocol.md
+      - Control API: protocols/control-api.md
+      - Hook API: protocols/hook-api.md
+  - Subsystems:
+      - Session model: subsystems/session-model.md
+      - Terminal and input: subsystems/terminal.md
+      - Agent detection: subsystems/agent-detection.md
+      - Persistence and restore: subsystems/persistence.md
+      - Auth and TLS: subsystems/auth-and-tls.md
+      - Plugins: subsystems/plugins.md
+      - Git worktrees: subsystems/worktrees.md
+  - Reference:
+      - Configuration: reference/configuration.md
+      - CLI: reference/cli.md
+      - Build and packaging: reference/build-and-packaging.md
+      - Troubleshooting: reference/troubleshooting.md

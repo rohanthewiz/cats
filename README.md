@@ -13,6 +13,20 @@ Three binaries make up the app:
 | `cathost` | Terminal backend daemon: owns PTYs + VT emulation (libghostty-vt) per pane; run `-persistent` so shells survive catway restarts |
 | `catctl` | CLI client for the control API — the same command table the browser uses — plus offline agent-integration installers |
 
+## Documentation
+
+Full docs live in [`docs/`](docs/) as an mkdocs-style site (`mkdocs.yml` at the
+repo root), served with [gkdocs](https://github.com/rohanthewiz/gkdocs):
+
+```sh
+MKDOCS_CONFIG=mkdocs.yml PORT=8000 go run github.com/rohanthewiz/gkdocs/cmd/gkdocs
+```
+
+Start with [Architecture → Overview](docs/architecture/index.md) for the
+component map and the three run topologies (standalone Mac, Mac client + Linux
+server, web client + Mac server), or
+[Getting started](docs/getting-started.md) to build and run.
+
 ## Features
 
 - **Workspaces → tabs → panes** with BSP splits, drag-to-resize, zoom, and
