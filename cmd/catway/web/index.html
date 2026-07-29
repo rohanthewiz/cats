@@ -403,8 +403,10 @@
     info.className = "info";
     const ctl = document.createElement("div");
     ctl.className = "ctl";
-    ctl.appendChild(mkBtn("⊟", "split left/right", "", () => sendCmd("pane.split", { pane: id, direction: "h" })));
-    ctl.appendChild(mkBtn("⊞", "split top/bottom", "", () => sendCmd("pane.split", { pane: id, direction: "v" })));
+    // Glyphs mirror the resulting layout: ◫ = vertical divider (side by side),
+    // ⊟ = horizontal divider (stacked).
+    ctl.appendChild(mkBtn("◫", "split left/right", "", () => sendCmd("pane.split", { pane: id, direction: "h" })));
+    ctl.appendChild(mkBtn("⊟", "split top/bottom", "", () => sendCmd("pane.split", { pane: id, direction: "v" })));
     ctl.appendChild(mkBtn("⤢", "toggle zoom", "", () => sendCmd("pane.zoom", { pane: id })));
     ctl.appendChild(mkBtn("⬚", "copy mode (keyboard select)", "", () => enterCopyMode(id)));
     ctl.appendChild(mkBtn("⧉", "copy scrollback to clipboard", "", () => copyScrollback(id)));
@@ -2416,7 +2418,7 @@
       right.appendChild(helpSection("copy mode (⬚ on a pane header)",
         actions.map(([what, acts]) => [what, acts.flatMap((a) => table[a] || [])])));
       right.appendChild(helpSection("pane header buttons", [
-        ["split left/right · top/bottom", ["⊟", "⊞"]],
+        ["split left/right · top/bottom", ["◫", "⊟"]],
         ["zoom", ["⤢"]],
         ["copy mode · copy scrollback", ["⬚", "⧉"]],
         ["rename · close", ["✎", "✕"]],
