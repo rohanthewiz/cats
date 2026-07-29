@@ -502,12 +502,14 @@ type PaneInfo struct {
 
 // PaneMeta is the runtime-side metadata for one pane, supplied by the Backend
 // (the session cannot know it): the arbitrated agent identity the sidebar shows
-// (hook authority first, daemon detection second), the pane's live title, and
-// its current working directory. All fields may be empty — an unknown pane, no
-// agent detected, or a title/cwd not yet reported.
+// (hook authority first, daemon detection second), the model that agent is
+// running under, the pane's live title, and its current working directory. All
+// fields may be empty — an unknown pane, no agent detected, or a
+// title/cwd/model not yet reported.
 type PaneMeta struct {
 	Agent      string `json:"agent,omitempty"`       // detected agent label ("claude", "codex", …)
 	AgentState string `json:"agent_state,omitempty"` // agent activity state ("working", "idle", …); only when Agent is set
+	AgentModel string `json:"agent_model,omitempty"` // LLM the agent is running under; only some agents resolve one
 	Title      string `json:"title,omitempty"`       // live terminal title
 	Cwd        string `json:"cwd,omitempty"`         // live working directory
 }

@@ -115,9 +115,9 @@ wanted. The full vocabulary is in [Control API](control-api.md#command-vocabular
 flowchart TD
   D["cathost streams everything<br/>over the seam — detection needs it"]
   F{"is the pane in this connection's<br/>active workspace + tab?"}
-  Y["send pane_frame / pane_diff"]
-  N["drop content; the pane keeps running"]
-  C["chrome: agents, titles, cwd, agent state<br/>always sent, for every pane"]
+  Y["send pane_frame / pane_diff,<br/>plus that pane's chrome:<br/>pane_title / pane_cwd /<br/>pane_agent / pane_modes / pane_exited"]
+  N["drop both; the pane keeps running"]
+  C["agents rollup: always sent,<br/>covering every pane in the session"]
 
   D --> F
   F -->|"yes"| Y
@@ -127,11 +127,20 @@ flowchart TD
 
 Filtering happens at the **server → front end** hop, not at the seam. On
 `tab.focus` or `workspace.focus`, the server sends the new viewport's `layout`
-followed by a **full** frame per newly-visible pane.
+followed by a **full** frame per newly-visible pane, then that pane's cached
+chrome (`broadcastPaneChrome`) — which is why per-pane chrome can follow
+visibility without the front end losing anything it is showing.
 
-Chrome is deliberately never filtered: the sidebar and the notification path need
-state for panes you are not looking at. That is what makes "an agent finished in
-another workspace" a thing you can be told about.
+The `agents` rollup is the deliberate exception: it covers every pane in the
+session, so the sidebar roster and the notification path have state for panes you
+are not looking at. That is what makes "an agent finished in another workspace" a
+thing you can be told about.
+
+Anything else a front end wants about an off-screen pane it asks for, rather than
+waiting to be told. `pane.list` reports every pane in the session with its live
+title, cwd and agent merged in (`PaneMeta`), which is how catway's sidebar Panes
+section spans all workspaces and tabs while the `layout` message it renders
+viewport state from carries only the active tab.
 
 ## Multiple connections
 

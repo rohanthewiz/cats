@@ -1105,12 +1105,13 @@ func TestDispatchPaneSplitInheritsCwd(t *testing.T) {
 	}
 }
 
-// pane.list and pane.get merge the backend's runtime metadata (agent/title/cwd)
-// into each PaneInfo; panes the backend knows nothing about stay zero-valued.
+// pane.list and pane.get merge the backend's runtime metadata (agent, its state
+// and model, title, cwd) into each PaneInfo; panes the backend knows nothing
+// about stay zero-valued.
 func TestDispatchPaneMetaMerge(t *testing.T) {
 	h := newCmdHarness(t)
 	focused, _ := h.s.FocusedPane()
-	meta := PaneMeta{Agent: "claude", AgentState: "working", Title: "vim", Cwd: "/tmp/x"}
+	meta := PaneMeta{Agent: "claude", AgentState: "working", AgentModel: "claude-opus-5", Title: "vim", Cwd: "/tmp/x"}
 	h.b.paneMeta = map[uint32]PaneMeta{uint32(focused): meta}
 
 	r := h.resp()

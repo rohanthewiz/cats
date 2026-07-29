@@ -1106,7 +1106,10 @@ func (o *orch) PaneMeta(pane uint32) app.PaneMeta {
 	}
 	meta := app.PaneMeta{Title: rt.title, Cwd: rt.cwd}
 	if agent, state := rt.effectiveAgent(); agent != "" {
-		meta.Agent, meta.AgentState = agent, state
+		// The model rides the agent: it is resolved from that agent's transcript
+		// (agentmodel.go), so reporting it for a pane with no agent would be
+		// reporting a leftover.
+		meta.Agent, meta.AgentState, meta.AgentModel = agent, state, rt.agentModel
 	}
 	return meta
 }

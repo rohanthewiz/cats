@@ -177,6 +177,11 @@ to `pane.send_input` — the difference is one flag.
 | `pane.get` | `pane [pane]` |
 
 These are answered straight from the `Session` with no backend effects.
+`pane.list` / `pane.get` add one merge on top of it: each pane's runtime metadata
+(`PaneMeta` — `agent`, `agent_state`, `agent_model`, `title`, `cwd`) comes from
+the backend's per-pane cache, so a client sees the same arbitrated agent identity
+and live title the browser chrome shows, for every pane in the session rather
+than only the ones on screen. Every field is omitted when empty.
 
 ### Worktrees, config, plugins, server
 

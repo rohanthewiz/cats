@@ -57,6 +57,15 @@
   #pane-list li, #agent-list li { cursor:pointer; }
   #pane-list li:hover, #agent-list li:hover { background:var(--panel2); }
   #pane-list li.focused { background:var(--chrome-focus); color:#e8e8e8; }
+  /* The list spans every workspace now, so it carries its own scroll — otherwise
+     a session with a few tabs of panes pushes Agents off the sidebar. */
+  #pane-list { max-height:34vh; overflow-y:auto; }
+  /* Panes outside the current viewport (another tab or workspace): real, but
+     elsewhere — muted handle, and a click reveals rather than focuses. */
+  #pane-list li.off .pub { color:var(--muted); }
+  #pane-list li.off .ttl { opacity:.65; }
+  /* Hairline where the flat list crosses into the next workspace. */
+  #pane-list li.wsbreak { margin-top:5px; padding-top:5px; border-top:1px solid var(--line); }
   #pane-list .dot { color:var(--accent); width:8px; display:inline-block; }
   #pane-list .pub { color:var(--accent); }
   #pane-list .ttl { color:var(--muted); overflow:hidden; text-overflow:ellipsis; }
@@ -346,6 +355,12 @@
   const panes = new Map();       // pane id -> pane state
   let copyModePane = null;       // the pane in keyboard copy-mode, or null
   let agentItems = [];           // last agents rollup (drives sidebar + workspace summaries)
+  // Last pane.list snapshot: every pane in the session, across all workspaces and
+  // tabs (the Panes sidebar section, see renderPaneList). The layout message can't
+  // serve it — it carries the active tab's panes alone — so this is a query result
+  // held between refreshes. busy/again/wait coalesce refresh requests so a chatty
+  // pane can't queue one round trip per title change (refreshPaneList).
+  let paneInv = [], paneInvBusy = false, paneInvAgain = false, paneInvWait = null;
 
   function measure() {
     measureCtx.font = `${FONT_PX}px ui-monospace, Menlo, monospace`;
@@ -485,7 +500,7 @@
       }
     }
     renderWorkspaces(msg);
-    renderPaneList(msg);
+    refreshPaneList(); // structure changed: re-render, then re-query the inventory
     renderTabbar(msg);
     renderBorders(msg);
   }
@@ -716,37 +731,107 @@
     wsListEl.appendChild(add);
   }
 
-  function renderPaneList(msg) {
+  // The Panes section is the session's whole pane inventory — every workspace and
+  // tab, matching the global Agents rollup below it — so its rows come from the
+  // cached pane.list snapshot rather than from the layout message, which only ever
+  // carries the active tab's panes.
+  //
+  // Per row, two sources are merged. Viewport state (visible / focused) comes from
+  // the layout: it is pushed, so a focus move lands without waiting on a query,
+  // and it is what actually decides what is on screen (a zoomed tab hides its
+  // other panes). Title/cwd/agent come from local pane state for on-screen panes,
+  // where live pushes keep them fresher than any snapshot, and from the snapshot
+  // for the rest — pane_title/pane_cwd are broadcast for visible panes only, so
+  // off-screen titles exist nowhere else in the browser. The agents rollup wins on
+  // agent state when it knows the pane: it carries the seen flag, which is what
+  // renders a run that finished off-screen as "done".
+  function renderPaneList() {
     paneListEl.innerHTML = "";
-    for (const pr of msg.panes) {
-      const p = panes.get(pr.pane);
-      const li = document.createElement("li");
-      li.className = "pn" + (pr.focused ? " focused" : "");
-      const dot = document.createElement("span"); dot.className = "dot"; dot.textContent = pr.focused ? "▸" : "";
-      const pub = document.createElement("span"); pub.className = "pub"; pub.textContent = paneRef(pr.pub, pr.pane);
-      li.appendChild(dot); li.appendChild(pub);
-      if (p && p.title) { const t = document.createElement("span"); t.className = "ttl"; t.textContent = p.title; li.appendChild(t); }
-      if (p && p.agent) {
-        const a = document.createElement("span"); a.className = "ag " + stClass(p.agentState); a.textContent = p.agent;
-        li.appendChild(a);
+    const vis = new Map((layoutMsg ? layoutMsg.panes : []).map((pr) => [pr.pane, pr]));
+    // Until the first snapshot lands (page load) the layout's own panes stand in,
+    // so the section is never briefly blank.
+    const inv = paneInv.length ? paneInv
+      : Array.from(vis.values()).map((pr) => ({ pane: pr.pane, handle: pr.pub, focused: pr.focused }));
+    const byPane = new Map(agentItems.map((a) => [a.pane, a]));
+    let prevWs = null;
+    for (const pi of inv) {
+      const pr = vis.get(pi.pane), p = panes.get(pi.pane);
+      const live = !!(pr && p); // on screen: prefer local state over the snapshot
+      const row = {
+        pane: pi.pane, pub: pi.handle || (pr && pr.pub) || "",
+        visible: !!pr, focused: pr ? !!pr.focused : !!pi.focused,
+      };
+      if (live) {
+        row.title = p.title; row.cwd = p.cwd;
+        row.agent = p.agent; row.state = p.agentState; row.model = p.agentModel;
+      } else {
+        // A custom name overrides the terminal title, as effectiveTitle does
+        // server-side for the panes whose titles are pushed.
+        row.title = pi.name || pi.title || ""; row.cwd = pi.cwd || "";
+        row.agent = pi.agent || ""; row.state = pi.agent_state || ""; row.model = pi.agent_model || "";
       }
-      li.addEventListener("click", () => { if (!dragConsumedClick && !pr.focused) sendCmd("pane.focus", { pane: pr.pane }); });
+      const a = byPane.get(pi.pane);
+      if (a) { row.agent = a.agent; row.state = markerState(a); }
+
+      const li = document.createElement("li");
+      li.className = "pn" + (row.visible && row.focused ? " focused" : "") + (row.visible ? "" : " off");
+      const wsID = row.pub.split(":")[0];
+      if (prevWs !== null && wsID !== prevWs) li.classList.add("wsbreak");
+      prevWs = wsID;
+      const dot = document.createElement("span"); dot.className = "dot";
+      dot.textContent = row.visible && row.focused ? "▸" : "";
+      const pub = document.createElement("span"); pub.className = "pub"; pub.textContent = paneRef(row.pub, row.pane);
+      li.appendChild(dot); li.appendChild(pub);
+      if (row.title) { const t = document.createElement("span"); t.className = "ttl"; t.textContent = row.title; li.appendChild(t); }
+      if (row.agent) {
+        const ag = document.createElement("span"); ag.className = "ag " + stClass(row.state); ag.textContent = row.agent;
+        li.appendChild(ag);
+      }
+      // A row can name a pane in another workspace or tab, which pane.focus cannot
+      // reach (it only moves the focus flag inside the current viewport), so those
+      // are revealed the way the agents list reveals its own: agent.focus.
+      li.addEventListener("click", () => {
+        if (dragConsumedClick) return;
+        if (!row.visible) sendCmd("agent.focus", { pane: row.pane });
+        else if (!row.focused) sendCmd("pane.focus", { pane: row.pane });
+      });
       // The pane header's affordances, mirrored: double-click renames,
       // right-click opens the pane menu, and dragging a row onto a pane on
       // screen swaps the two (beginPaneSwapDrag hit-tests the live pane
-      // rects, so a sidebar origin works the same as a header origin).
-      li.addEventListener("dblclick", () => renamePane(pr.pane));
-      li.addEventListener("contextmenu", (e) => { e.preventDefault(); openCtx(e.clientX, e.clientY, paneMenuItems(pr.pane)); });
-      li.addEventListener("mousedown", (e) => beginPaneSwapDrag(e, pr.pane));
+      // rects, so a sidebar origin works the same as a header origin). Swapping
+      // slots is an active-tab operation (Session.SwapPanes), so only on-screen
+      // rows arm the drag — an off-screen row has no slot to trade.
+      li.addEventListener("dblclick", () => renamePane(row.pane));
+      li.addEventListener("contextmenu", (e) => { e.preventDefault(); openCtx(e.clientX, e.clientY, paneMenuItems(row.pane)); });
+      if (row.visible) li.addEventListener("mousedown", (e) => beginPaneSwapDrag(e, row.pane));
       // Reveal the untruncated pane details on hover. mousemove keeps the popup
-      // riding just right of the pointer; mouseleave tears it down. We pass the
-      // live pane object by id (not the closure's `p`) so a re-render between
-      // enter and move still shows current title/agent/state.
-      li.addEventListener("mouseenter", (e) => showPaneTip(e, pr));
-      li.addEventListener("mousemove", (e) => showPaneTip(e, pr));
+      // riding just right of the pointer; mouseleave tears it down. showPaneTip
+      // re-reads live pane state by id, so a re-render between enter and move
+      // still shows the current title/agent/state.
+      li.addEventListener("mouseenter", (e) => showPaneTip(e, row));
+      li.addEventListener("mousemove", (e) => showPaneTip(e, row));
       li.addEventListener("mouseleave", hideTip);
       paneListEl.appendChild(li);
     }
+  }
+
+  // refreshPaneList redraws the section now from what the browser already knows,
+  // then re-queries pane.list for the parts only the server has (off-screen
+  // titles, panes that appeared or closed elsewhere). Every caller is a push that
+  // could have changed the inventory; the query is debounced and single-flight, so
+  // a burst of them costs one round trip plus at most one follow-up.
+  function refreshPaneList() {
+    renderPaneList();
+    if (paneInvBusy) { paneInvAgain = true; return; }
+    if (paneInvWait) return;
+    paneInvWait = setTimeout(() => {
+      paneInvWait = null; paneInvBusy = true;
+      sendCmdAwait("pane.list", {}, (res) => {
+        paneInvBusy = false;
+        if (res.ok && res.data) { paneInv = res.data.panes || []; renderPaneList(); }
+        if (paneInvAgain) { paneInvAgain = false; refreshPaneList(); }
+      });
+    }, 120);
   }
 
   // ---- Hover card ----
@@ -780,24 +865,27 @@
 
   // Pane-list rows truncate title/agent to fit their narrow column, so the full
   // details are only reachable on hover. Rebuilt on each show since the
-  // underlying pane state is live.
-  function showPaneTip(e, pr) {
-    const p = panes.get(pr.pane);
-    const items = [["Pane", paneRef(pr.pub, pr.pane), "pub"]];
-    if (p) {
-      items.push(["Title", p.title]);
-      items.push(["Dir", p.cwd, "mono"]);
-      if (p.agent) items.push(["Agent", p.agent + " · " + (p.agentState || "unknown")]);
-      // The LLM the agent is running under, read from its transcript server-side
-      // (agentmodel.go). Only claude reports one, and only once it has answered.
-      if (p.agentModel) items.push(["Model", p.agentModel]);
-      if (p.exited !== null && p.exited !== undefined) items.push(["Exited", "code " + p.exited, "exited"]);
-    }
-    items.push(["Focus", pr.focused ? "focused" : ""]);
+  // underlying pane state is live. row is a renderPaneList row — the merged view
+  // of one pane, on screen or not; the fields only the viewport has (model, exit
+  // code, grid size) come from local pane state and are simply absent for a pane
+  // sitting in another tab.
+  function showPaneTip(e, row) {
+    const p = row.visible ? panes.get(row.pane) : null;
+    const items = [["Pane", paneRef(row.pub, row.pane), "pub"]];
+    items.push(["Title", row.title]);
+    items.push(["Dir", row.cwd, "mono"]);
+    if (row.agent) items.push(["Agent", row.agent + " · " + (row.state || "unknown")]);
+    // The LLM the agent is running under, read from its transcript server-side
+    // (agentmodel.go). Only claude reports one, and only once it has answered.
+    // Off-screen panes get it from the pane.list snapshot, same as their agent.
+    if (row.model) items.push(["Model", row.model]);
+    if (p && p.exited !== null && p.exited !== undefined) items.push(["Exited", "code " + p.exited, "exited"]);
+    items.push(["Focus", row.visible ? (row.focused ? "focused" : "") : "off screen"]);
     // Geometry + link state, relocated here from the status bar: the pane's own
     // terminal grid (from its last frame, falling back to the layout's inner
     // rect before the first frame lands) and then the window grid it sits in.
-    const gw = (p && p.W) || pr.inner[2], gh = (p && p.H) || pr.inner[3];
+    const inner = (p && p.info && p.info.inner) || [0, 0, 0, 0];
+    const gw = p ? (p.W || inner[2]) : 0, gh = p ? (p.H || inner[3]) : 0;
     if (gw && gh) items.push(["Size", gw + "×" + gh + " cells"]);
     if (cols && rows) items.push(["Window", cols + "×" + rows + " cells"]);
     items.push(["Link", connState.text, connState.err ? "err" : "ok"]);
@@ -999,10 +1087,8 @@
       li.addEventListener("click", () => sendCmd("agent.focus", { pane: it.pane }));
       agentListEl.appendChild(li);
     }
+    refreshPaneList(); // pane rows take agent identity + state from the rollup
   }
-
-  // Refresh the sidebar pane list when a pane's title/agent changed out of band.
-  function refreshPaneList() { if (layoutMsg) renderPaneList(layoutMsg); }
 
   // ---- Rendering ----
   function scheduleDraw(p) {
@@ -1666,11 +1752,14 @@
   }
 
   // ---- Rename dialogs + close confirms (WS8): tab/workspace finally wired ----
+  // Reachable from a sidebar row for any pane in the session, so the handle and
+  // the prefilled name fall back to the pane.list snapshot when the pane is not on
+  // screen and has no local state.
   function renamePane(id) {
-    const p = panes.get(id);
+    const p = panes.get(id), pi = paneInv.find((x) => x.pane === id);
     dialogInput({
-      title: "rename pane " + paneRef(p && p.pub, id),
-      value: (p && p.title) || "",
+      title: "rename pane " + paneRef((p && p.pub) || (pi && pi.handle), id),
+      value: (p && p.info ? p.title : (pi && (pi.name || pi.title))) || "",
       hint: "enter saves · empty clears the custom name · esc cancels",
       onSubmit: (name) => sendCmd("pane.rename", { pane: id, name }),
     });
@@ -1755,15 +1844,24 @@
   }, true);
   window.addEventListener("blur", () => closeCtx());
 
+  // The sidebar lists panes from every workspace, so this menu also opens on panes
+  // that are not on screen. Those get the workspace-resolved actions — split,
+  // capture, rename, close — plus a reveal; zoom and copy mode are left out, being
+  // scoped to the active tab and to a rendered pane respectively.
   function paneMenuItems(id, onCanvas) {
+    const p = panes.get(id);
+    const onScreen = !!(p && p.info);
     const items = [];
     if (onCanvas) items.push({ label: "paste", fn: pasteText }, "-");
+    if (!onScreen) items.push({ label: "reveal pane", fn: () => sendCmd("agent.focus", { pane: id }) }, "-");
     items.push(
       { label: "split left/right", fn: () => sendCmd("pane.split", { pane: id, direction: "h" }) },
       { label: "split top/bottom", fn: () => sendCmd("pane.split", { pane: id, direction: "v" }) },
-      { label: "toggle zoom", fn: () => sendCmd("pane.zoom", { pane: id }) },
-      "-",
-      { label: "copy mode", fn: () => enterCopyMode(id) },
+    );
+    if (onScreen) items.push({ label: "toggle zoom", fn: () => sendCmd("pane.zoom", { pane: id }) });
+    items.push("-");
+    if (onScreen) items.push({ label: "copy mode", fn: () => enterCopyMode(id) });
+    items.push(
       { label: "copy scrollback", fn: () => copyScrollback(id) },
       "-",
       { label: "rename pane…", fn: () => renamePane(id) },
@@ -2669,6 +2767,11 @@
     const proto = location.protocol === "https:" ? "wss" : "ws";
     ws = new WebSocket(`${proto}://${location.host}/ws`);
     ws.onopen = () => {
+      // A pane.list still in flight when the socket died never gets its callback,
+      // which would leave the single-flight guard latched and freeze the Panes
+      // section for the rest of the session. The reconnect's layout re-queries.
+      clearTimeout(paneInvWait); paneInvWait = null;
+      paneInvBusy = false; paneInvAgain = false;
       sendMsg({ t: "init", v: PV, cols, rows, dpr,
         cell_w_px: Math.round(cellW * dpr), cell_h_px: Math.round(cellH * dpr) });
     };
