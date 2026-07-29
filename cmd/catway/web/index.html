@@ -82,6 +82,9 @@
   #tabbar .tab { font-size:12px; color:var(--muted); padding:0 10px; display:flex; align-items:center; gap:6px;
     border-bottom:2px solid transparent; white-space:nowrap; cursor:pointer; }
   #tabbar .tab:hover { color:#ddd; }
+  /* Very short names ("1", "12") would otherwise render a sliver of a tab, so the
+     label carries a centered floor width. Longer names outgrow it and are unaffected. */
+  #tabbar .tab .tname { min-width:2em; text-align:center; }
   #tabbar .tab.active { color:#e8e8e8; border-bottom-color:var(--accent); }
   #tabbar .tab .x { color:var(--muted); font-size:10px; }
   #tabbar .tab .x:hover { color:var(--err); }
@@ -827,6 +830,7 @@
       const el = document.createElement("div");
       el.className = "tab" + (t.active ? " active" : "");
       const label = document.createElement("span");
+      label.className = "tname";
       label.textContent = t.name + (t.zoomed ? " ⤢" : "");
       el.appendChild(label);
       const mark = tabMarker(t.num);
