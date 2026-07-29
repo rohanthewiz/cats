@@ -83,6 +83,7 @@ func (o *orch) publishAgent(rt *paneRuntime) {
 		o.broadcast(browserproto.NewPaneAgent(rt.id, agent, state, !rt.unseen))
 	}
 	o.broadcast(o.agentsMsg())
+	o.refreshTabNames() // an agent appearing/leaving moves its tab's auto-name rung
 	o.emitEvent(app.EventPaneAgent, rt.id, app.PaneAgentEvent{Pane: rt.id, Agent: agent, State: state})
 
 	if kind == "" {
@@ -138,7 +139,9 @@ func (o *orch) notifyContext(pid uint32) string {
 		}
 		ctx := ws.DisplayName() + " · " + strconv.Itoa(i+1)
 		if len(ws.Tabs) > 1 {
-			ctx += " · " + ws.Tabs[tabIdx].DisplayName()
+			// The derived auto-name, so the toast names the tab the way the
+			// tab bar does — "claude · cats", not a bare number.
+			ctx += " · " + o.session.TabDisplayName(ws.Tabs[tabIdx], o.PaneMeta)
 		}
 		return ctx
 	}

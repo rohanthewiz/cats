@@ -735,7 +735,9 @@ func (d *Dispatcher) Dispatch(name string, dec ParamDecoder, r Responder) {
 			bad(err)
 			return
 		}
-		tabs, resolved, ok := d.session.ListTabs(p.Workspace)
+		// Backend meta feeds auto-naming, so tab.list reports the same derived
+		// names the browser tab bar shows.
+		tabs, resolved, ok := d.session.ListTabs(p.Workspace, d.backend.PaneMeta)
 		if !ok {
 			r.Fail(fmt.Sprintf("unknown workspace %q", p.Workspace))
 			return

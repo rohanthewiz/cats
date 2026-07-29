@@ -7,7 +7,7 @@
 <style>
   :root {
     /* GoNotes-style dark green theme: warm gray-green surfaces, green accent.
-       --chrome/--chrome-focus survive the pane header's removal as the
+       --chrome/--chrome-focus paint the pane header strip and double as the
        hover/selection surfaces (pane list, ctx menu, palette rows). */
     --bg:#1f2420; --fg:#d6ddd6; --accent:#4db380; --panel:#242a25; --panel2:#2b322c;
     /* --muted carries every secondary label (sidebar headings, status bar,
@@ -93,19 +93,44 @@
   .pane { position:absolute; box-sizing:border-box; }
   .pane.dragging { opacity:.5; }
   .pane.droptarget { outline:2px solid var(--accent); outline-offset:-2px; }
+  /* Pane chrome = the per-pane header strip (restored; it left in the green-
+     theme facelift and its absence hurt more than the row it costs). Exactly
+     one terminal row tall (the server reserves chromeRows in each pane's inner
+     rect), so the icon buttons buy glyph size by giving up vertical padding:
+     17px symbols with line-height 1 and no top/bottom padding stay clear of
+     the strip's overflow:hidden clip at a ~19px row, while synthetic bold
+     thickens the hairline box-drawing symbols (⊟ ⊞ ⤢ ⬚ ⧉) that were the
+     hardest to read. */
+  .pane .chrome { position:absolute; left:0; top:0; right:0; overflow:hidden; display:flex;
+    align-items:center; gap:0; font-size:12px; color:var(--muted); background:var(--chrome);
+    padding:0 5px 0 9px; box-sizing:border-box; }
+  .pane.focused .chrome { color:#e6efe7; background:var(--chrome-focus); }
+  .pane .chrome .info { flex:1; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+  .pane .chrome .info .pub { color:var(--accent); }
+  .pane .chrome .info .agent { color:var(--warn); }
+  .pane .chrome .info .exited { color:var(--err); }
+  /* Pane-scoped mode chips (copy mode, zoom) ride the header of the pane they
+     describe — the tab-row status area only keeps the app-global affordances. */
+  .pane .chrome .info .mode { color:var(--warn); font-weight:600; }
+  .pane .chrome .zoom { flex:none; color:var(--accent); cursor:pointer; padding:0 6px; }
+  .pane .chrome .ctl { display:flex; gap:1px; flex:none; }
+  .pane .chrome .ctl button { background:none; border:none; color:var(--muted); cursor:pointer;
+    font-size:17px; font-weight:600; line-height:1; padding:0 6px; border-radius:3px;
+    font-family:inherit; }
+  .pane .chrome .ctl button:hover { background:rgba(255,255,255,.16); color:#fff; }
+  .pane.focused .chrome .ctl button { color:#cfe0d3; }
+  .pane .chrome .ctl button.close:hover { background:var(--err); color:#fff; }
   .pane canvas { position:absolute; display:block; }
   .pane.focused canvas { outline:1px solid var(--accent-dim); outline-offset:-1px; }
 
   /* ---- Status affordances ----
-     Connection state and the window grid size used to live here; they moved
-     into the pane hover card (see #panetip) and, for failures, the banner —
-     this is now only modes and affordances, at readable contrast. It rides at
-     the right end of the tab row rather than in a bar of its own, so the panes
-     keep the full height below the tabs. Empty spans collapse so the gap does
-     not pad the right edge when no mode is active. */
+     Only the app-global pair lives here now — the ⌘K palette hint and the ⚙
+     menu — pinned at the right end of the tab row so the panes keep the full
+     height below the tabs. The pane-scoped indicators that used to share the
+     row (ZOOM chip, copy-mode bar) ride the header of the pane they describe
+     instead: a global bar naming one pane's mode read as the app's. */
   #statusbar { flex:none; display:flex; align-items:center; gap:14px; padding:0 12px;
     font-size:12px; color:var(--muted); border-left:1px solid var(--line); }
-  #statusbar > span:empty { display:none; }
 
   /* ---- Toasts ---- */
   #toasts { position:fixed; right:10px; top:38px; display:flex; flex-direction:column; gap:6px; z-index:6; }
@@ -226,9 +251,6 @@
   #banner.linkerr { background:#2a1c1c; border-bottom-color:var(--err); color:#ffd7d7; }
 
   /* ---- Status bar extras (WS8) ---- */
-  #mode { color:var(--warn); font-weight:600; }
-  #modehint { color:var(--muted); }
-  #zoomind { color:var(--accent); cursor:pointer; display:none; }
   #palhint { color:var(--muted); cursor:pointer; white-space:nowrap; }
   #palhint:hover { color:var(--accent); }
   #gear { cursor:pointer; font-size:16px; position:relative; }
@@ -269,9 +291,6 @@
     <div id="topbar">
       <div id="tabbar"></div>
       <div id="statusbar">
-        <span id="mode"></span>
-        <span id="modehint"></span>
-        <span id="zoomind" title="zoomed — click to unzoom">ZOOM ⤢</span>
         <span id="palhint" title="command palette (⌘K / Ctrl+Alt+K)">⌘K palette</span>
         <span id="gear" title="menu">⚙</span>
       </div>
@@ -300,9 +319,6 @@
   const agentListEl = document.getElementById("agent-list");
   const tabbarEl = document.getElementById("tabbar");
   const toastsEl = document.getElementById("toasts");
-  const modeEl = document.getElementById("mode");
-  const modeHintEl = document.getElementById("modehint");
-  const zoomIndEl = document.getElementById("zoomind");
   const palHintEl = document.getElementById("palhint");
   const gearEl = document.getElementById("gear");
   const bannerEl = document.getElementById("banner");
@@ -323,6 +339,7 @@
 
   let ws = null, cellW = 9, cellH = 19, cols = 0, rows = 0;
   let layoutMsg = null;          // last layout message
+  let tabZoomed = false;         // active tab zoomed (applyLayout; header ZOOM chip)
   const panes = new Map();       // pane id -> pane state
   let copyModePane = null;       // the pane in keyboard copy-mode, or null
   let agentItems = [];           // last agents rollup (drives sidebar + workspace summaries)
@@ -377,21 +394,51 @@
   function newPane(id) {
     const el = document.createElement("div");
     el.className = "pane";
+    const chrome = document.createElement("div");
+    chrome.className = "chrome";
+    const info = document.createElement("div");
+    info.className = "info";
+    const ctl = document.createElement("div");
+    ctl.className = "ctl";
+    ctl.appendChild(mkBtn("⊟", "split left/right", "", () => sendCmd("pane.split", { pane: id, direction: "h" })));
+    ctl.appendChild(mkBtn("⊞", "split top/bottom", "", () => sendCmd("pane.split", { pane: id, direction: "v" })));
+    ctl.appendChild(mkBtn("⤢", "toggle zoom", "", () => sendCmd("pane.zoom", { pane: id })));
+    ctl.appendChild(mkBtn("⬚", "copy mode (keyboard select)", "", () => enterCopyMode(id)));
+    ctl.appendChild(mkBtn("⧉", "copy scrollback to clipboard", "", () => copyScrollback(id)));
+    ctl.appendChild(mkBtn("✎", "rename pane", "", () => renamePane(id)));
+    ctl.appendChild(mkBtn("✕", "close pane", "close", () => sendCmd("pane.close", { pane: id })));
+    chrome.appendChild(info); chrome.appendChild(ctl);
     const canvas = document.createElement("canvas");
-    el.appendChild(canvas);
+    el.appendChild(chrome); el.appendChild(canvas);
     panesEl.appendChild(el);
-    const p = { id, el, canvas, ctx: canvas.getContext("2d", { alpha: false }),
+    const p = { id, el, chrome, chromeInfo: info, canvas, ctx: canvas.getContext("2d", { alpha: false }),
       pub: "", info: null, W: 0, H: 0, cells: [], links: [], cur: null,
       gs: 1, ox: 0, oy: 0,   // grid inset: scale + centring offsets (setInset)
       defFg: THEME_FG, defBg: THEME_BG, modes: { mouse: false, alt: false },
       title: "", cwd: "", agent: "", agentState: "", exited: null,
       pressed: -1, lastCell: "", dirty: false, scroll: null, sel: null, cm: null };
-    // No per-pane header: clicking the canvas focuses, right-click opens the
-    // pane menu (attachMouse), and title/agent details live in the sidebar
-    // pane list (with its hover card) — where rename and swap also moved.
+    // Clicking the header (not its buttons) focuses the pane; double-click
+    // renames, right-click opens the pane menu (chrome or canvas); holding
+    // and moving drags the pane onto another to swap slots. The sidebar pane
+    // rows keep the same affordances — the header is also the escape hatch on
+    // mouse-capturing apps, where right-clicking the canvas goes to the app.
+    chrome.addEventListener("mousedown", (e) => {
+      if (p.info && !p.info.focused) sendCmd("pane.focus", { pane: id });
+      beginPaneSwapDrag(e, id);
+    });
+    chrome.addEventListener("dblclick", () => renamePane(id));
+    chrome.addEventListener("contextmenu", (e) => { e.preventDefault(); openCtx(e.clientX, e.clientY, paneMenuItems(id)); });
     attachMouse(p);
     panes.set(id, p);
     return p;
+  }
+
+  function mkBtn(label, title, cls, fn) {
+    const b = document.createElement("button");
+    b.textContent = label; b.title = title; if (cls) b.className = cls;
+    b.addEventListener("mousedown", (e) => e.stopPropagation());
+    b.addEventListener("click", (e) => { e.stopPropagation(); e.preventDefault(); fn(); });
+    return b;
   }
 
   function pane(id) { return panes.get(id) || newPane(id); }
@@ -399,6 +446,9 @@
   // ---- Layout (D3): position pane DOM from computed rects + render chrome ----
   function applyLayout(msg) {
     layoutMsg = msg;
+    // Zoom is tab state but renders as pane state: a zoomed tab sends only its
+    // focused pane, whose header carries the ZOOM chip (see renderChrome).
+    tabZoomed = msg.tabs.some((t) => t.active && t.zoomed);
     const seen = new Set();
     for (const pr of msg.panes) {
       const p = pane(pr.pane);
@@ -410,6 +460,7 @@
       p.el.style.width = (rw * cellW) + "px";
       p.el.style.height = (rh * cellH) + "px";
       p.el.classList.toggle("focused", !!pr.focused);
+      p.chrome.style.height = ((iy - ry) * cellH) + "px";
       p.canvas.style.left = ((ix - rx) * cellW) + "px";
       p.canvas.style.top = ((iy - ry) * cellH) + "px";
       p.canvas.style.width = (iw * cellW) + "px";
@@ -419,6 +470,7 @@
       // Sizing the canvas resets its context (transform included), so the
       // padded transform is (re)installed per frame in draw() — see setInset.
       setInset(p, iw * cellW, ih * cellH);
+      renderChrome(p);
       scheduleDraw(p);
     }
     for (const [id, p] of panes) {
@@ -431,7 +483,6 @@
     renderPaneList(msg);
     renderTabbar(msg);
     renderBorders(msg);
-    renderStatusExtras(msg);
   }
 
   // ---- Pane text inset ------------------------------------------------------
@@ -524,12 +575,41 @@
     window.addEventListener("mouseup", up);
   }
 
-  // ---- Status bar extras (WS8): zoom indicator + focused-pane info ----
-  function renderStatusExtras(msg) {
-    const zoomed = msg.tabs.some((t) => t.active && t.zoomed);
-    // Explicit "inline" rather than "": the rule's own display:none is what an
-    // empty inline style falls back to, which would keep the chip hidden.
-    zoomIndEl.style.display = zoomed ? "inline" : "none";
+  // ---- Chrome: per-pane header (styled HTML, WS8) ----
+  // The identity line (pub · title · cwd · agent · exited) plus the pane-scoped
+  // mode chips: keyboard copy-mode replaces the identity while active — its
+  // hints need the room, and the mode is what you need to know about the pane
+  // just then — and a zoomed pane carries a clickable ZOOM chip.
+  function renderChrome(p) {
+    p.chromeInfo.innerHTML = "";
+    const add = (cls, text) => {
+      const s = document.createElement("span");
+      if (cls) s.className = cls;
+      s.textContent = text;
+      p.chromeInfo.appendChild(s);
+    };
+    add("pub", p.pub || ("#" + p.id));
+    if (p.cm) {
+      add("mode", "  COPY");
+      add("", "  hjkl/arrows move · v select · r rect · y copy · Esc exit");
+    } else {
+      if (p.title) add("", "  " + p.title);
+      if (p.cwd) add("", "  " + p.cwd);
+      if (p.agent) add("agent", "  " + p.agent + ":" + p.agentState);
+      if (p.exited !== null) add("exited", "  exited (" + p.exited + ")");
+    }
+    const zoom = p.chrome.querySelector(".zoom");
+    if (tabZoomed && p.info && p.info.focused) {
+      if (!zoom) {
+        const z = document.createElement("span");
+        z.className = "zoom"; z.textContent = "ZOOM ⤢"; z.title = "zoomed — click to unzoom";
+        z.addEventListener("mousedown", (e) => e.stopPropagation());
+        z.addEventListener("click", (e) => { e.stopPropagation(); sendCmd("pane.zoom", { pane: p.id }); });
+        p.chrome.insertBefore(z, p.chrome.querySelector(".ctl"));
+      }
+    } else if (zoom) {
+      zoom.remove();
+    }
   }
 
   // ---- Sidebar (WS8) ----
@@ -646,10 +726,10 @@
         li.appendChild(a);
       }
       li.addEventListener("click", () => { if (!dragConsumedClick && !pr.focused) sendCmd("pane.focus", { pane: pr.pane }); });
-      // With the pane header gone, its non-click affordances live here too:
-      // double-click renames, right-click opens the pane menu, and dragging a
-      // row onto a pane on screen swaps the two (beginPaneSwapDrag hit-tests
-      // the live pane rects, so a sidebar origin works the same).
+      // The pane header's affordances, mirrored: double-click renames,
+      // right-click opens the pane menu, and dragging a row onto a pane on
+      // screen swaps the two (beginPaneSwapDrag hit-tests the live pane
+      // rects, so a sidebar origin works the same as a header origin).
       li.addEventListener("dblclick", () => renamePane(pr.pane));
       li.addEventListener("contextmenu", (e) => { e.preventDefault(); openCtx(e.clientX, e.clientY, paneMenuItems(pr.pane)); });
       li.addEventListener("mousedown", (e) => beginPaneSwapDrag(e, pr.pane));
@@ -1039,17 +1119,17 @@
         p.scroll = msg.scroll || null;
         scheduleDraw(p); break;
       }
-      case "pane_title": { const p = pane(msg.pane); p.title = msg.title; refreshPaneList(); break; }
-      case "pane_cwd": { const p = pane(msg.pane); p.cwd = msg.cwd; break; } // hover card reads it live
+      case "pane_title": { const p = pane(msg.pane); p.title = msg.title; renderChrome(p); refreshPaneList(); break; }
+      case "pane_cwd": { const p = pane(msg.pane); p.cwd = msg.cwd; renderChrome(p); break; }
       case "pane_agent": {
         const p = pane(msg.pane); p.agent = msg.agent; p.agentState = msg.state;
-        refreshPaneList(); break;
+        renderChrome(p); refreshPaneList(); break;
       }
       case "pane_modes": {
         const p = pane(msg.pane); p.modes = { mouse: !!msg.mouse, alt: !!msg.alt_screen };
         break;
       }
-      case "pane_exited": { const p = pane(msg.pane); p.exited = msg.code; refreshPaneList(); break; }
+      case "pane_exited": { const p = pane(msg.pane); p.exited = msg.code; renderChrome(p); refreshPaneList(); break; }
       case "agents": renderAgents(msg.items); break;
       case "clipboard": // OSC 52 write from a pane app — no user activation
         try { clipWrite(b64decode(msg.data)).catch(() => {}); } catch (e) {}
@@ -1265,24 +1345,17 @@
     p.cm = { cursor: start, anchor: null, rect: false };
     copyModePane = p;
     p.sel = null;
-    setModeBar("COPY " + paneRef(p.pub, p.id), "hjkl/arrows move · v select · r rect · y copy · Esc exit");
+    renderChrome(p); // the pane's header shows the COPY chip + key hints
     scheduleDraw(p);
   }
 
   function exitCopyMode() {
     const p = copyModePane;
     copyModePane = null;
-    setModeBar("", "");
     if (!p) return;
     p.cm = null; p.sel = null;
+    renderChrome(p);
     scheduleDraw(p);
-  }
-
-  // setModeBar shows a persistent mode indicator + keybind hints in the status
-  // bar (cats's bottom mode bars) while a keyboard mode is active.
-  function setModeBar(mode, hint) {
-    modeEl.textContent = mode;
-    modeHintEl.textContent = hint;
   }
 
   // cmSyncSel mirrors the copy-mode range onto p.sel so drawSelection washes it
@@ -1957,9 +2030,11 @@
   // "here". Without it, tab.create falls back to the server's start directory
   // and the action lands in a project the user never chose. "" (no focused
   // pane / cwd not yet reported) omits the field and keeps that default.
+  // Deliberately no title: pinning the manifest label would block tab
+  // auto-naming forever; the plugin's own OSC title names the tab live.
   function pluginRunAction(p, a) {
     closeModal();
-    const params = { title: a.title || p.name || p.id, command: a.argv, env: p.env || {} };
+    const params = { command: a.argv, env: p.env || {} };
     const cwd = focusedPaneCwd();
     if (cwd) params.cwd = cwd;
     sendCmdAwait("tab.create", params, (res) => {
@@ -2308,11 +2383,11 @@
         ["rectangular selection", ["Alt+drag"]],
         ["pane / tab / workspace menu", ["right-click"]],
         ["resize splits", ["drag the border"]],
-        ["swap panes", ["drag a sidebar pane row onto a pane"]],
+        ["swap panes", ["drag a pane header or sidebar row onto a pane"]],
         ["reorder tabs / workspaces", ["drag"]],
         ["rename pane / tab / workspace", ["double-click its title"]],
         ["scrollback", ["wheel", "drag the scrollbar"]],
-        ["launcher menu", ["⚙ in the status bar"]],
+        ["launcher menu", ["⚙ at the right of the tab row"]],
       ]));
       cols.appendChild(left);
 
@@ -2328,8 +2403,14 @@
       ];
       const table = (window.__catsKeys && window.__catsKeys.copyMode) || COPY_MODE_DEFAULT;
       const right = document.createElement("div");
-      right.appendChild(helpSection("copy mode (right-click a pane → copy mode)",
+      right.appendChild(helpSection("copy mode (⬚ on a pane header)",
         actions.map(([what, acts]) => [what, acts.flatMap((a) => table[a] || [])])));
+      right.appendChild(helpSection("pane header buttons", [
+        ["split left/right · top/bottom", ["⊟", "⊞"]],
+        ["zoom", ["⤢"]],
+        ["copy mode · copy scrollback", ["⬚", "⧉"]],
+        ["rename · close", ["✎", "✕"]],
+      ]));
       cols.appendChild(right);
 
       body.appendChild(cols);
@@ -2595,12 +2676,11 @@
     }, 120);
   });
 
-  // Status-bar affordances: the zoom chip unzooms, the palette hint opens it,
-  // the gear opens the global launcher menu (cats's bottom-corner menu:
-  // settings / keybinds / plugins / reload config / update line when one is
-  // pending / stop server standing in for detach — the web has no client to
-  // detach).
-  zoomIndEl.addEventListener("click", () => sendCmd("pane.zoom", {}));
+  // Status-bar affordances: the palette hint opens it, the gear opens the
+  // global launcher menu (cats's bottom-corner menu: settings / keybinds /
+  // plugins / reload config / update line when one is pending / stop server
+  // standing in for detach — the web has no client to detach). The zoom chip
+  // moved into the zoomed pane's own header (renderChrome).
   palHintEl.addEventListener("click", () => openPalette());
   gearEl.addEventListener("click", (e) => {
     const items = [

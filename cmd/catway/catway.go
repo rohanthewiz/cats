@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -24,10 +25,11 @@ import (
 )
 
 // chromeRows is reserved at the top of every pane rect for browser-side pane
-// decoration. The per-pane header strip was removed (title/cwd/agent moved to
-// the sidebar pane list and its hover card), so the terminal grid now fills
-// the whole rect.
-const chromeRows = 0
+// decoration — the per-pane header strip (pub · title · cwd · agent, the
+// pane-scoped mode chips, and the icon buttons). It was briefly 0 when the
+// strip was dropped in the green-theme facelift; the strip is back, so the
+// terminal grid gives the row up again.
+const chromeRows = 1
 
 // defaultArea is the layout area assumed until the first browser reports its
 // grid via init/resize.
@@ -120,7 +122,12 @@ type orch struct {
 	// broadcastTitle dedupes against it so focus/title churn doesn't spam every
 	// connection with identical title messages.
 	lastTitle string
-	mailbox   chan func()
+	// lastTabNames is the active workspace's derived tab names as last put on
+	// the wire (viewportLayout records it). Tab auto-naming depends on pane
+	// meta, so the meta ingest paths call refreshTabNames, which diffs against
+	// this to rebroadcast the layout only when a visible name actually changed.
+	lastTabNames string
+	mailbox      chan func()
 	// stop is the process-shutdown hook wired by main (server.stop). It flushes
 	// pending browser writes, then exits — the persistent cathost daemon is a
 	// separate process and survives. nil in tests, where stop is a no-op.
@@ -294,15 +301,69 @@ func (o *orch) post(fn func()) { o.mailbox <- fn }
 // --- Layout / daemon reconciliation ------------------------------------------
 
 // viewportLayout builds the browser layout message for the current viewport
-// (active workspace's active tab), reserving chromeRows (currently none) in
-// each pane's inner rect.
+// (active workspace's active tab), reserving chromeRows in each pane's inner
+// rect and swapping each auto-named tab's number for its derived name
+// (Session.TabDisplayName over the runtime pane meta — the same patch-after-
+// BuildLayout pattern the layout's agent summary uses). The derived names are
+// recorded on lastTabNames so refreshTabNames can tell when a meta change
+// actually renamed something.
 func (o *orch) viewportLayout() browserproto.Layout {
 	msg := browserproto.BuildLayout(o.session.Workspaces(), o.session.ActiveIndex(), o.area)
 	for i := range msg.Panes {
 		cols, rows := innerGrid(msg.Panes[i].Rect)
 		msg.Panes[i].Inner = browserproto.Rect{msg.Panes[i].Rect[0], msg.Panes[i].Rect[1] + chromeRows, cols, rows}
 	}
+	if ws := o.activeWorkspace(); ws != nil && len(ws.Tabs) == len(msg.Tabs) {
+		for i, tab := range ws.Tabs {
+			msg.Tabs[i].Name = o.session.TabDisplayName(tab, o.PaneMeta)
+		}
+	}
+	o.lastTabNames = tabNamesOf(msg)
 	return msg
+}
+
+// activeWorkspace is the session's active workspace, nil when the index is
+// somehow out of range (BuildLayout guards the same way).
+func (o *orch) activeWorkspace() *workspace.Workspace {
+	wss := o.session.Workspaces()
+	if i := o.session.ActiveIndex(); i >= 0 && i < len(wss) {
+		return wss[i]
+	}
+	return nil
+}
+
+// tabNamesOf flattens a layout message's tab names for change detection.
+func tabNamesOf(msg browserproto.Layout) string {
+	var b strings.Builder
+	for _, t := range msg.Tabs {
+		b.WriteString(t.Name)
+		b.WriteByte(0)
+	}
+	return b.String()
+}
+
+// refreshTabNames rebroadcasts the viewport layout iff some visible tab's
+// derived name changed. The meta ingest paths (OSC title, OSC 7 cwd, agent
+// arbitration, pane.rename) call this because auto-names are computed from
+// that meta, but none of those paths otherwise touches the layout; structural
+// changes need no call — every layout rebroadcast re-derives the names anyway.
+// Diffing against lastTabNames keeps meta churn (a busy agent retitling its
+// pane every spinner tick) from spamming layouts when the derived name is
+// unaffected.
+func (o *orch) refreshTabNames() {
+	ws := o.activeWorkspace()
+	if ws == nil {
+		return
+	}
+	var b strings.Builder
+	for _, tab := range ws.Tabs {
+		b.WriteString(o.session.TabDisplayName(tab, o.PaneMeta))
+		b.WriteByte(0)
+	}
+	if b.String() == o.lastTabNames {
+		return
+	}
+	o.broadcast(o.viewportLayout()) // viewportLayout re-records lastTabNames
 }
 
 // innerGrid is a pane rect's terminal grid after reserving the chrome row.
@@ -953,6 +1014,7 @@ func (o *orch) BroadcastPaneTitle(pane uint32) {
 		o.broadcast(browserproto.NewPaneTitle(pane, o.effectiveTitle(pane)))
 	}
 	o.broadcastTitle()
+	o.refreshTabNames() // a pane custom name is the top auto-name rung
 	o.saveSoon()
 }
 

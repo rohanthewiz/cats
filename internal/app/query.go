@@ -44,8 +44,9 @@ func (s *Session) ListWorkspaces() []WorkspaceInfo {
 
 // ListTabs describes the tabs of one workspace ("" = the active workspace),
 // echoing the resolved workspace id. ok is false only when a non-empty id names
-// no known workspace (tab.list).
-func (s *Session) ListTabs(workspaceID string) (tabs []TabInfo, resolved string, ok bool) {
+// no known workspace (tab.list). meta feeds tab auto-naming (TabDisplayName);
+// nil skips derivation and reports the plain custom-name-or-number.
+func (s *Session) ListTabs(workspaceID string, meta func(uint32) PaneMeta) (tabs []TabInfo, resolved string, ok bool) {
 	idx := s.active
 	if workspaceID != "" {
 		i, found := s.workspaceIndexByID(workspaceID)
@@ -57,9 +58,13 @@ func (s *Session) ListTabs(workspaceID string) (tabs []TabInfo, resolved string,
 	ws := s.workspaces[idx]
 	out := make([]TabInfo, 0, len(ws.Tabs))
 	for i, tab := range ws.Tabs {
+		name := tab.DisplayName()
+		if meta != nil {
+			name = s.TabDisplayName(tab, meta)
+		}
 		out = append(out, TabInfo{
 			Num:    tab.Number,
-			Name:   tab.DisplayName(),
+			Name:   name,
 			Active: i == ws.ActiveTabIndex(),
 			Zoomed: tab.Zoomed,
 			Panes:  tab.Layout.PaneCount(),

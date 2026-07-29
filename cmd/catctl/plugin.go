@@ -169,8 +169,10 @@ func pluginList(args []string) int {
 
 // pluginRun launches an action in a fresh tab: one tab.create round trip
 // carrying the resolved argv, the invoking directory as cwd (a plugin like
-// cats-todo keys per-project state off it), the action title as the tab name,
-// and the plugin identity env vars.
+// cats-todo keys per-project state off it), and the plugin identity env vars.
+// Deliberately no Title: a pinned title would block tab auto-naming forever,
+// while the plugin's own OSC title (or its cwd) names the tab live — cats-todo
+// reads "todo: <project>" instead of a stale manifest label.
 func pluginRun(args []string, socket string) int {
 	if len(args) < 1 || len(args) > 2 {
 		fmt.Fprintln(os.Stderr, "usage: catctl plugin run <id> [action]")
@@ -191,13 +193,8 @@ func pluginRun(args []string, socket string) int {
 		return 1
 	}
 
-	title := action.Title
-	if title == "" {
-		title = inst.Name
-	}
 	cwd, _ := os.Getwd()
 	params, err := json.Marshal(app.TabCreateParams{
-		Title:   title,
 		Cwd:     cwd,
 		Command: plugin.ActionArgv(inst, action),
 		Env: map[string]string{

@@ -236,6 +236,7 @@ func (d *daemon) dispatch(mt orchestration.MessageType, payload []byte) {
 				o.broadcast(browserproto.NewPaneTitle(ev.PaneID, o.effectiveTitle(ev.PaneID)))
 			}
 			o.broadcastTitle()
+			o.refreshTabNames() // an auto-named tab may be riding this title
 			o.emitEvent(app.EventPaneTitle, ev.PaneID, app.PaneTitleEvent{Pane: ev.PaneID, Title: ev.Title})
 		})
 
@@ -253,6 +254,7 @@ func (d *daemon) dispatch(mt orchestration.MessageType, payload []byte) {
 			if o.visible[ev.PaneID] {
 				o.broadcast(browserproto.NewPaneCwd(ev.PaneID, ev.Cwd))
 			}
+			o.refreshTabNames() // cwd basenames feed the agent/shell auto-name rungs
 			o.emitEvent(app.EventPaneCwd, ev.PaneID, app.PaneCwdEvent{Pane: ev.PaneID, Cwd: ev.Cwd})
 			o.saveSoon() // pane cwds ride the session file (restore re-spawns there)
 		})
