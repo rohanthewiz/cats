@@ -97,8 +97,10 @@ panes, but agent chrome is global):
   most default shell setups never emit OSC 7), and OSC 7 itself, which retires the probe
   for that pane once seen since a reporting shell can name directories the local probe
   cannot see at all (an ssh session's remote path).
-- `{t:"pane_agent", pane, agent, state, seen}` (β `:249` + server's Seen tracking; also
-  patches the `agents` rollup client-side)
+- `{t:"pane_agent", pane, agent, state, model?, seen}` (β `:249` + server's Seen tracking;
+  also patches the `agents` rollup client-side). `model` is the LLM the agent is currently
+  running under, read from the agent's own transcript server-side (catway's
+  `agentmodel.go`) — omitted whenever it is unknown, which is every agent but claude.
 - `{t:"pane_modes", pane, mouse:bool, alt_screen:bool}` — the **display-relevant subset**
   of β `PaneModes` (`:332`): `mouse` gates pointer capture vs native text selection;
   `alt_screen` gates the scrollbar. The full mode state stays server-side where the input

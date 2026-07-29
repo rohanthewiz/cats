@@ -49,7 +49,7 @@ func TestRoundTrip(t *testing.T) {
 			Agent: "claude", State: AgentWorking, Seen: true}}), DecodeDown},
 		{"pane_title", NewPaneTitle(pane, "vim"), DecodeDown},
 		{"pane_cwd", NewPaneCwd(pane, "/tmp/x"), DecodeDown},
-		{"pane_agent", NewPaneAgent(pane, "claude", AgentBlocked, false), DecodeDown},
+		{"pane_agent", NewPaneAgent(pane, "claude", AgentBlocked, "claude-opus-5", false), DecodeDown},
 		{"pane_modes", PaneModes{T: MsgPaneModes, Pane: pane, Mouse: true, AltScreen: true}, DecodeDown},
 		{"pane_exited", NewPaneExited(pane, 130), DecodeDown},
 		{"pane_frame", PaneFrame{T: MsgPaneFrame, Pane: pane, W: 2, H: 1,

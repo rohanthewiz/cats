@@ -415,7 +415,7 @@
       pub: "", info: null, W: 0, H: 0, cells: [], links: [], cur: null,
       gs: 1, ox: 0, oy: 0,   // grid inset: scale + centring offsets (setInset)
       defFg: THEME_FG, defBg: THEME_BG, modes: { mouse: false, alt: false },
-      title: "", cwd: "", agent: "", agentState: "", exited: null,
+      title: "", cwd: "", agent: "", agentState: "", agentModel: "", exited: null,
       pressed: -1, lastCell: "", dirty: false, scroll: null, sel: null, cm: null };
     // Clicking the header (not its buttons) focuses the pane; double-click
     // renames, right-click opens the pane menu (chrome or canvas); holding
@@ -783,6 +783,9 @@
       items.push(["Title", p.title]);
       items.push(["Dir", p.cwd, "mono"]);
       if (p.agent) items.push(["Agent", p.agent + " · " + (p.agentState || "unknown")]);
+      // The LLM the agent is running under, read from its transcript server-side
+      // (agentmodel.go). Only claude reports one, and only once it has answered.
+      if (p.agentModel) items.push(["Model", p.agentModel]);
       if (p.exited !== null && p.exited !== undefined) items.push(["Exited", "code " + p.exited, "exited"]);
     }
     items.push(["Focus", pr.focused ? "focused" : ""]);
@@ -1123,6 +1126,9 @@
       case "pane_cwd": { const p = pane(msg.pane); p.cwd = msg.cwd; renderChrome(p); break; }
       case "pane_agent": {
         const p = pane(msg.pane); p.agent = msg.agent; p.agentState = msg.state;
+        // Absent (an agent with no resolvable model) clears it — a stale model
+        // must not outlive the agent the server reported it for.
+        p.agentModel = msg.model || "";
         renderChrome(p); refreshPaneList(); break;
       }
       case "pane_modes": {

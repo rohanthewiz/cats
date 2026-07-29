@@ -62,6 +62,14 @@ type paneRuntime struct {
 	hookSuppressed map[string]hookSuppression
 	pubAgent       string
 	pubState       string
+	// agentModel is the LLM the pane's agent is currently running under, read
+	// from the agent's transcript (agentmodel.go); "" when unknown or when no
+	// agent whose model is resolvable is running. modelAt stamps the last
+	// resolution and modelBusy marks one in flight — together they throttle the
+	// reads, which happen off the loop goroutine.
+	agentModel string
+	modelAt    time.Time
+	modelBusy  bool
 	// unseen marks an agent completion that landed while the pane was off the
 	// viewport (cats's pane.seen, inverted so the zero value means seen).
 	// Set by publishAgent on a finished transition, cleared when the pane
@@ -118,6 +126,11 @@ type orch struct {
 	// focus_changed. Seeded in newOrch so pre-existing panes never emit retroactively.
 	structPanes map[uint32]string
 	structFocus uint32
+	// claudeProjects is the root claude keeps its transcripts under, which is
+	// where a pane's current model is read from (agentmodel.go). Resolved once at
+	// construction; "" disables model resolution (and lets tests point it at a
+	// fixture tree).
+	claudeProjects string
 	// lastTitle is the app-level browser-tab title last broadcast (WS8):
 	// broadcastTitle dedupes against it so focus/title churn doesn't spam every
 	// connection with identical title messages.
@@ -277,6 +290,7 @@ func newOrchWith(socket, cwd string, sess *app.Session) *orch {
 		resumePlans:    make(map[uint32][]string),
 		spawnPlans:     make(map[uint32]app.SpawnOverride),
 		capturedHist:   make(map[uint32]string),
+		claudeProjects: claudeProjectsDir(),
 		mailbox:        make(chan func(), 256),
 	}
 	o.daemon = &daemon{o: o, socket: socket}
@@ -1210,7 +1224,7 @@ func (o *orch) broadcastPaneChrome(pid uint32) {
 		o.broadcast(browserproto.NewPaneCwd(pid, rt.cwd))
 	}
 	if agent, state := rt.effectiveAgent(); agent != "" {
-		o.broadcast(browserproto.NewPaneAgent(pid, agent, state, true))
+		o.broadcast(browserproto.NewPaneAgent(pid, agent, state, rt.agentModel, true))
 	}
 	if rt.exited != nil {
 		o.broadcast(browserproto.NewPaneExited(pid, *rt.exited))
@@ -1353,7 +1367,7 @@ func (o *orch) registerConn(c *client, init *browserproto.Init) {
 			o.send(c, browserproto.NewPaneCwd(pid, rt.cwd))
 		}
 		if agent, state := rt.effectiveAgent(); agent != "" {
-			o.send(c, browserproto.NewPaneAgent(pid, agent, state, true))
+			o.send(c, browserproto.NewPaneAgent(pid, agent, state, rt.agentModel, true))
 		}
 		if rt.exited != nil {
 			o.send(c, browserproto.NewPaneExited(pid, *rt.exited))

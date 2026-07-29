@@ -121,17 +121,20 @@ func NewPaneCwd(pane uint32, cwd string) PaneCwd {
 }
 
 // PaneAgent reports one pane's agent identity + state change (also patches the
-// Agents rollup client-side). Agent is "" for a plain shell.
+// Agents rollup client-side). Agent is "" for a plain shell. Model is the LLM
+// the agent is currently running under, omitted when unknown (only claude is
+// resolvable today — see catway's agentmodel.go).
 type PaneAgent struct {
 	T     Type   `json:"t"`
 	Pane  uint32 `json:"pane"`
 	Agent string `json:"agent"`
 	State string `json:"state"`
+	Model string `json:"model,omitempty"`
 	Seen  bool   `json:"seen"`
 }
 
-func NewPaneAgent(pane uint32, agent, state string, seen bool) PaneAgent {
-	return PaneAgent{T: MsgPaneAgent, Pane: pane, Agent: agent, State: state, Seen: seen}
+func NewPaneAgent(pane uint32, agent, state, model string, seen bool) PaneAgent {
+	return PaneAgent{T: MsgPaneAgent, Pane: pane, Agent: agent, State: state, Model: model, Seen: seen}
 }
 
 // PaneModes is the display-relevant subset of β PaneModes: Mouse gates pointer

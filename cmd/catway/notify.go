@@ -66,6 +66,10 @@ func (o *orch) publishAgent(rt *paneRuntime) {
 		prevState = "unknown"
 	}
 	rt.pubAgent, rt.pubState = agent, state
+	// Re-resolve the pane's model (agentmodel.go) before the broadcast below:
+	// an agent that just left clears it synchronously, and a refresh that has to
+	// go to disk lands as its own later broadcast.
+	o.refreshAgentModel(rt, agent)
 
 	kind := notifyKind(prevState, prevAgent, state, agent)
 	// Attention marker (cats's pane.seen, apply_pane_state_change): leaving
@@ -80,7 +84,7 @@ func (o *orch) publishAgent(rt *paneRuntime) {
 	}
 
 	if o.visible[rt.id] {
-		o.broadcast(browserproto.NewPaneAgent(rt.id, agent, state, !rt.unseen))
+		o.broadcast(browserproto.NewPaneAgent(rt.id, agent, state, rt.agentModel, !rt.unseen))
 	}
 	o.broadcast(o.agentsMsg())
 	o.refreshTabNames() // an agent appearing/leaving moves its tab's auto-name rung
