@@ -13,7 +13,7 @@
     /* --muted carries every secondary label (sidebar headings, status bar,
        hints); kept near 7:1 on the panel surface so 10–12px labels stay legible. */
     --line:#38403a; --muted:#9db0a2; --chrome:#2b322c; --chrome-focus:#3a4a3f;
-    --ok:#6ac47a; --warn:#e0b64e; --err:#e57373; --done:#00bfe6;
+    --ok:#6ac47a; --warn:#e0b64e; --err:#e57373; --done:#00ccf5;
     /* Accent desaturated most of the way to gray: the focused pane's outline
        sits right next to terminal text all day, so it reads as a gray-green
        hairline just above --line rather than a green marker. */
@@ -77,6 +77,14 @@
   .st-working { color:var(--warn); } .st-blocked { color:var(--err); }
   .st-idle { color:var(--ok); } .st-unknown { color:var(--muted); }
   .st-done { color:var(--done); } /* finished off-screen, not yet seen */
+  /* A working agent's dot breathes: the one state that is mid-change, so it is
+     the one marker that moves. Only the dots pulse — the agent-name text in a
+     pane row shares .st-working and would be hard to read blinking. */
+  .adot.st-working, .tmark.st-working, #ws-list .st-working { animation:dotpulse 1.5s ease-in-out infinite; }
+  @keyframes dotpulse { 0%,100% { opacity:1; } 50% { opacity:.3; } }
+  @media (prefers-reduced-motion:reduce) {
+    .adot.st-working, .tmark.st-working, #ws-list .st-working { animation:none; }
+  }
   #agent-list li { gap:6px; }
   /* The agent sitting in the focused pane, highlighted the same way its pane row
      is — the two sections then read as one selection, not two. */
