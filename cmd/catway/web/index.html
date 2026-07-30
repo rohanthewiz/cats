@@ -13,7 +13,7 @@
     /* --muted carries every secondary label (sidebar headings, status bar,
        hints); kept near 7:1 on the panel surface so 10–12px labels stay legible. */
     --line:#38403a; --muted:#9db0a2; --chrome:#2b322c; --chrome-focus:#3a4a3f;
-    --ok:#6ac47a; --warn:#e0b64e; --err:#e57373; --done:#4fd1c5;
+    --ok:#6ac47a; --warn:#e0b64e; --err:#e57373; --done:#00bfe6;
     /* Accent desaturated most of the way to gray: the focused pane's outline
        sits right next to terminal text all day, so it reads as a gray-green
        hairline just above --line rather than a green marker. */
@@ -124,9 +124,15 @@
     padding:0 5px 0 9px; box-sizing:border-box; }
   .pane.focused .chrome { color:#e6efe7; background:var(--chrome-focus); }
   .pane .chrome .info { flex:1; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+  /* A pane whose child has exited keeps its header readable but stops competing
+     with the live ones: the identity text drops to --muted at normal weight,
+     leaving the red "exited (N)" as the only emphasised run in the row. The
+     per-span rules below follow this one so they win the specificity tie and
+     the handle keeps its accent. */
+  .pane.dead .chrome .info { color:var(--muted); font-weight:400; }
   .pane .chrome .info .pub { color:var(--accent); }
   .pane .chrome .info .agent { color:var(--warn); }
-  .pane .chrome .info .exited { color:var(--err); }
+  .pane .chrome .info .exited { color:var(--err); font-weight:600; }
   /* Pane-scoped mode chips (copy mode, zoom) ride the header of the pane they
      describe — the tab-row status area only keeps the app-global affordances. */
   .pane .chrome .info .mode { color:var(--warn); font-weight:600; }
@@ -628,6 +634,7 @@
   // just then — and a zoomed pane carries a clickable ZOOM chip.
   function renderChrome(p) {
     p.chromeInfo.innerHTML = "";
+    p.el.classList.toggle("dead", p.exited !== null && p.exited !== undefined);
     const add = (cls, text) => {
       const s = document.createElement("span");
       if (cls) s.className = cls;
