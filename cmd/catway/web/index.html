@@ -13,6 +13,9 @@
     /* --muted carries every secondary label (sidebar headings, status bar,
        hints); kept near 7:1 on the panel surface so 10–12px labels stay legible. */
     --line:#38403a; --muted:#9db0a2; --chrome:#2b322c; --chrome-focus:#3a4a3f;
+    /* Sidebar section titles pull out of --muted into a light yellow so the
+       three groups read as dividers rather than as more secondary label text. */
+    --heading:#f0dfa0;
     --ok:#6ac47a; --warn:#e0b64e; --err:#e57373; --done:#00ccf5;
     /* Accent desaturated most of the way to gray: the focused pane's outline
        sits right next to terminal text all day, so it reads as a gray-green
@@ -41,8 +44,8 @@
   /* Splitter between Workspaces / Panes / Agents — the headings alone read as
      one long list once a workspace has more than a couple of panes. */
   #sidebar section + section { border-top:1px solid var(--line); }
-  #sidebar h2 { font-size:10px; text-transform:uppercase; letter-spacing:.8px; color:var(--muted);
-    margin:0 0 6px; padding:0 8px; }
+  #sidebar h2 { font-size:10px; text-transform:uppercase; letter-spacing:.8px; color:var(--heading);
+    font-weight:700; margin:0 0 6px; padding:0 8px; }
   #sidebar ul { list-style:none; margin:0; padding:0; }
   #sidebar li { font-size:12px; padding:4px 8px; border-radius:4px; white-space:nowrap;
     overflow:hidden; text-overflow:ellipsis; cursor:default; display:flex; align-items:baseline; gap:6px; }
