@@ -66,9 +66,11 @@ binaries:
 
 # --- personal install --------------------------------------------------------
 
-# Build each shipped binary straight into ~/bin under a short alias.
+# Install each shipped binary into ~/bin under a short alias.
 # The map is "cmd:alias" pairs — edit here to rename or add targets. Splitting
 # on ':' keeps the source dir (./cmd/$(cmd)) decoupled from the installed name.
+# Every cmd named here must also be in BINS: this installs by copying bin/,
+# it does not compile.
 LOCAL_BIN := $(HOME)/bin
 # cats-todo is deliberately absent: it lives in its own repo and is built by
 # the plugin host (`catctl plugin install rohanthewiz/cats-todo` runs the
@@ -76,10 +78,19 @@ LOCAL_BIN := $(HOME)/bin
 # the plugin flow can't provide.
 LOCAL_MAP := catway:catway cathost:cathost catctl:catctl
 
-local:
+# Copies from bin/ rather than compiling a second time, so a ~/bin install and
+# an .app bundle made from the same tree hold byte-identical daemons — two
+# compiles of the same source can still differ (a mid-build edit, a stale
+# PKG_CONFIG_PATH), and "same bytes" is the only version claim worth making.
+# Copy-then-rename because overwriting a *running* binary in place fails with
+# ETXTBSY on macOS; a rename swaps the directory entry and leaves the live
+# process on its old inode.
+local: binaries
 	@mkdir -p $(LOCAL_BIN)
-	$(foreach p,$(LOCAL_MAP),$(GHOSTTY) go build $(TAGS) -trimpath $(STAMP) \
-	    -o $(LOCAL_BIN)/$(word 2,$(subst :, ,$(p))) ./cmd/$(word 1,$(subst :, ,$(p))) &&) true
+	$(foreach p,$(LOCAL_MAP),cp bin/$(word 1,$(subst :, ,$(p))) \
+	    $(LOCAL_BIN)/$(word 2,$(subst :, ,$(p))).new && \
+	    mv -f $(LOCAL_BIN)/$(word 2,$(subst :, ,$(p))).new \
+	    $(LOCAL_BIN)/$(word 2,$(subst :, ,$(p))) &&) true
 	@for p in $(LOCAL_MAP); do ls -lh $(LOCAL_BIN)/$${p#*:}; done
 
 # --- packaging ----------------------------------------------------------------
@@ -99,11 +110,38 @@ dist: binaries
 APP_ID        := dev.cats.app
 APP_CLIENT_ID := dev.cats.client
 
+# Where `macapp` installs the finished bundle. /Applications is root:admin with
+# group write, so an admin account needs no sudo; a non-admin one does
+# (`sudo make macapp` — or point this at ~/Applications, which needs no
+# privilege at all). One destination only: a second registered copy of
+# $(APP_ID) makes "which build launches" a LaunchServices coin toss.
+APP_DEST := /Applications
+
 # macapp (Variant 1, self-contained): launcher + the three static ghostty daemons
 # → dist/Cats.app. Runs fully local. Depends on `binaries` for the daemons; the
 # vendored VT engine must be built first (`make vt`).
-macapp: binaries
+#
+# Also depends on `local`: the bundle and ~/bin are two installs of the same
+# three daemons, and updating one alone is how they drift — a `catctl` on $PATH
+# older than the running app speaks a vocabulary the app has moved past, and the
+# version each reports stops meaning anything. Both come off one `binaries`
+# build, so this bundles and installs the same bytes in one pass.
+#
+# The install replaces the bundle wholesale rather than copying *into* the old
+# one: cp -R over a live bundle merges, leaving whatever files the new build no
+# longer ships behind in Contents/MacOS. It is staged next to the target (same
+# filesystem) so the swap is a rename. Removing the bundle of a *running* app is
+# safe — the live process holds its inodes and keeps going; it simply is not the
+# version on disk until relaunched, which is what the printed version is for.
+macapp: binaries local
 	scripts/build-macapp.sh self "Cats" $(APP_ID) $(VERSION)
+	@echo "==> installing to $(APP_DEST)/Cats.app"
+	@rm -rf "$(APP_DEST)/Cats.app.new"
+	cp -R "dist/Cats.app" "$(APP_DEST)/Cats.app.new"
+	rm -rf "$(APP_DEST)/Cats.app"
+	mv "$(APP_DEST)/Cats.app.new" "$(APP_DEST)/Cats.app"
+	@/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" \
+	    "$(APP_DEST)/Cats.app/Contents/Info.plist"
 
 # macapp-client (Variant 2, thin): launcher only, baked to remote mode →
 # dist/Cats Client.app. No backend binaries, so no ghostty/Zig toolchain needed.
