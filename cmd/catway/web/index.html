@@ -64,8 +64,12 @@
      elsewhere — muted handle, and a click reveals rather than focuses. */
   #pane-list li.off .pub { color:var(--muted); }
   #pane-list li.off .ttl { opacity:.65; }
-  /* Hairline where the flat list crosses into the next workspace. */
-  #pane-list li.wsbreak { margin-top:5px; padding-top:5px; border-top:1px solid var(--line); }
+  /* Hairline where the flat list crosses into the next workspace. It is its own
+     row rather than a border on the first pane of the group, so a focused pane
+     there highlights at the same height as every other row instead of painting
+     its background across the divider. */
+  #pane-list li.wsbreak { padding:0; margin:5px 8px; height:0; border-top:1px solid var(--line);
+    cursor:default; pointer-events:none; }
   #pane-list .dot { color:var(--accent); width:8px; display:inline-block; }
   #pane-list .pub { color:var(--accent); }
   #pane-list .ttl { color:var(--muted); overflow:hidden; text-overflow:ellipsis; }
@@ -797,7 +801,11 @@
       const li = document.createElement("li");
       li.className = "pn" + (row.visible && row.focused ? " focused" : "") + (row.visible ? "" : " off");
       const wsID = row.pub.split(":")[0];
-      if (prevWs !== null && wsID !== prevWs) li.classList.add("wsbreak");
+      if (prevWs !== null && wsID !== prevWs) {
+        const sep = document.createElement("li");
+        sep.className = "wsbreak"; sep.setAttribute("aria-hidden", "true");
+        paneListEl.appendChild(sep);
+      }
       prevWs = wsID;
       const dot = document.createElement("span"); dot.className = "dot";
       dot.textContent = row.visible && row.focused ? "▸" : "";
