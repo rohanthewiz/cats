@@ -627,7 +627,7 @@
       s.textContent = text;
       p.chromeInfo.appendChild(s);
     };
-    add("pub", p.pub || ("#" + p.id));
+    add("pub", paneRef(p.pub, p.id));
     if (p.cm) {
       add("mode", "  COPY");
       add("", "  hjkl/arrows move · v select · r rect · y copy · Esc exit");
@@ -663,8 +663,10 @@
 
   // paneRef renders a server handle ("w1:p3") for display, swapping the opaque
   // workspace id for the workspace's name ("cats:p3"). Every pane reference the
-  // user sees goes through here — tooltip, dialog title, agents rollup, palette,
-  // copy-mode bar and the sidebar PANES rows — so one form is worth learning.
+  // user sees goes through here — the pane header, tooltip, dialog title, agents
+  // rollup, palette, copy-mode bar and the sidebar PANES rows — so one form is
+  // worth learning. Before the first layout arrives there is no name to resolve;
+  // the id stands in, and applyLayout re-renders each header once it does.
   function paneRef(pub, paneID) {
     if (!pub) return "#" + paneID;
     const i = pub.indexOf(":");
@@ -2011,7 +2013,7 @@
   }
   function renameWorkspace(w) {
     dialogInput({
-      title: "rename workspace " + w.id,
+      title: "rename workspace " + (w.name || w.id),
       value: w.name,
       hint: "enter saves · empty reverts to auto-naming · esc cancels",
       onSubmit: (name) => sendCmd("workspace.rename", { id: w.id, name }),
