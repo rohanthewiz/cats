@@ -70,7 +70,6 @@
      its background across the divider. */
   #pane-list li.wsbreak { padding:0; margin:5px 8px; height:0; border-top:1px solid var(--line);
     cursor:default; pointer-events:none; }
-  #pane-list .dot { color:var(--accent); width:8px; display:inline-block; }
   #pane-list .pub { color:var(--accent); }
   #pane-list .ttl { color:var(--muted); overflow:hidden; text-overflow:ellipsis; }
   #pane-list .ag, #agent-list .aname { margin-left:auto; }
@@ -79,6 +78,9 @@
   .st-idle { color:var(--ok); } .st-unknown { color:var(--muted); }
   .st-done { color:var(--done); } /* finished off-screen, not yet seen */
   #agent-list li { gap:6px; }
+  /* The agent sitting in the focused pane, highlighted the same way its pane row
+     is — the two sections then read as one selection, not two. */
+  #agent-list li.focused { background:var(--chrome-focus); color:#e8e8e8; }
   #agent-list .aname { color:#e8e8e8; margin-left:0; }
   #agent-list .ameta { color:var(--muted); font-size:10px; margin-left:auto; }
   #agent-list li.empty { color:var(--muted); font-style:italic; cursor:default; }
@@ -524,6 +526,7 @@
     }
     renderWorkspaces(msg);
     refreshPaneList(); // structure changed: re-render, then re-query the inventory
+    markFocusedAgent();
     renderTabbar(msg);
     renderBorders(msg);
   }
@@ -807,10 +810,10 @@
         paneListEl.appendChild(sep);
       }
       prevWs = wsID;
-      const dot = document.createElement("span"); dot.className = "dot";
-      dot.textContent = row.visible && row.focused ? "▸" : "";
+      // No focus marker glyph: li.focused's background says it, and a per-row
+      // gutter for a mark only one row ever carries indents the whole list.
       const pub = document.createElement("span"); pub.className = "pub"; pub.textContent = paneRef(row.pub, row.pane);
-      li.appendChild(dot); li.appendChild(pub);
+      li.appendChild(pub);
       if (row.title) { const t = document.createElement("span"); t.className = "ttl"; t.textContent = row.title; li.appendChild(t); }
       if (row.agent) {
         const ag = document.createElement("span"); ag.className = "ag " + stClass(row.state); ag.textContent = row.agent;
@@ -1105,8 +1108,11 @@
       const li = document.createElement("li"); li.className = "empty"; li.textContent = "none";
       agentListEl.appendChild(li); return;
     }
+    const foc = focusedPaneId();
     for (const it of items) {
       const li = document.createElement("li"); li.className = "agent";
+      li.dataset.pane = it.pane; // markFocusedAgent re-marks rows without a re-render
+      if (it.pane === foc) li.classList.add("focused");
       const dot = document.createElement("span"); dot.className = "adot " + stClass(markerState(it)); dot.textContent = "●";
       const name = document.createElement("span"); name.className = "aname"; name.textContent = it.agent;
       const meta = document.createElement("span"); meta.className = "ameta";
@@ -1119,6 +1125,16 @@
       agentListEl.appendChild(li);
     }
     refreshPaneList(); // pane rows take agent identity + state from the rollup
+  }
+
+  // A focus move arrives in the layout, not in the agents rollup, so the marked
+  // row is retargeted in place — re-running renderAgents would rebuild the list
+  // (and re-query the pane inventory) for a class change.
+  function markFocusedAgent() {
+    const foc = focusedPaneId();
+    for (const li of agentListEl.children) {
+      if (li.dataset.pane) li.classList.toggle("focused", li.dataset.pane === foc);
+    }
   }
 
   // ---- Rendering ----
