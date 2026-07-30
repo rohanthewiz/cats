@@ -35,6 +35,13 @@ func assistant(model string) string {
 	return `{"type":"assistant","isSidechain":false,"message":{"role":"assistant","model":"` + model + `"}}`
 }
 
+// assistantEffort is an assistant record as current claude writes it: the effort
+// sits at the top level, beside the message rather than in it.
+func assistantEffort(model, effort string) string {
+	return `{"type":"assistant","isSidechain":false,"effort":"` + effort +
+		`","message":{"role":"assistant","model":"` + model + `"}}`
+}
+
 // A hook-reported session id names the transcript outright, wherever claude
 // slugged it — the pane's cwd does not have to agree.
 func TestClaudeModelBySessionID(t *testing.T) {
@@ -93,6 +100,32 @@ func TestLastAssistantModelSkipsSidechainAndSynthetic(t *testing.T) {
 	}
 	if got := lastAssistantModel(filepath.Join(projects, "-p", "missing.jsonl")); got != "" {
 		t.Fatalf("missing file: model = %q, want empty", got)
+	}
+}
+
+// The effort the last main-thread record ran at is appended to the model, and it
+// comes from that same record — an earlier turn's effort does not leak forward.
+// A record naming no effort (or junk where the word should be) reports the model
+// alone rather than a dangling separator.
+func TestLastAssistantModelCarriesEffort(t *testing.T) {
+	projects := t.TempDir()
+	path := writeTranscript(t, projects, "-p", "s.jsonl", 0,
+		assistantEffort("claude-opus-5", "medium"),
+		assistantEffort("claude-opus-5", "high"),
+		`{"type":"assistant","isSidechain":true,"effort":"low","message":{"model":"claude-haiku-4-5"}}`)
+	if got := lastAssistantModel(path); got != "claude-opus-5 · high" {
+		t.Fatalf("model = %q, want \"claude-opus-5 · high\"", got)
+	}
+
+	bare := writeTranscript(t, projects, "-p", "bare.jsonl", 0, assistant("claude-opus-5"))
+	if got := lastAssistantModel(bare); got != "claude-opus-5" {
+		t.Fatalf("no effort: model = %q, want claude-opus-5", got)
+	}
+
+	junk := writeTranscript(t, projects, "-p", "junk.jsonl", 0,
+		assistantEffort("claude-opus-5", "a very wordy effort"))
+	if got := lastAssistantModel(junk); got != "claude-opus-5" {
+		t.Fatalf("junk effort: model = %q, want claude-opus-5", got)
 	}
 }
 

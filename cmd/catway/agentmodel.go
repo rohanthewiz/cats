@@ -28,6 +28,13 @@ import (
 // best-effort from the pane's cwd otherwise (a pane whose integration is not
 // installed still gets an answer, which is the common case).
 //
+// The same record names the reasoning effort the turn ran at (a top-level
+// "effort", sibling to the message), which /effort switches between turns just as
+// /model switches the model. It rides along in the one model string rather than a
+// field of its own: the hover card shows the pair as one line, so nothing between
+// here and there — pane state, the wire protocol, the pane.list snapshot — has to
+// learn about it.
+//
 // Only claude is wired up; every other agent keeps its history somewhere else in
 // its own shape, so their panes simply show no model.
 //
@@ -51,6 +58,12 @@ const (
 	// modelTailBytes bounds the tail read. Transcripts run to megabytes; the
 	// last assistant record is all but always within a few KB of the end.
 	modelTailBytes = 256 << 10
+	// modelEffortSep joins the model with the effort it ran at, matching the
+	// hover card's own "agent · state" spelling.
+	modelEffortSep = " · "
+	// maxEffortLen bounds what is accepted as an effort label — the values are
+	// words ("low", "medium", "high", "xhigh", "max").
+	maxEffortLen = 16
 )
 
 // refreshAgentModel resolves rt's model in the background when one is due,
@@ -190,7 +203,16 @@ func claudeTranscript(projects, cwd, session string) string {
 // isTranscriptID gates the session id before it goes into a glob pattern: hook
 // reports are only validated for length and control characters (hooks.go), and
 // a value carrying glob metacharacters would match files that are not its own.
-func isTranscriptID(s string) bool {
+func isTranscriptID(s string) bool { return isBareToken(s) }
+
+// isEffortLabel gates the transcript's effort value before it is shown: the field
+// is whatever claude wrote there, and only a short bare word belongs in a one-line
+// model string beside the model itself.
+func isEffortLabel(s string) bool { return len(s) <= maxEffortLen && isBareToken(s) }
+
+// isBareToken reports whether s is a non-empty run of alphanumerics, '-' and '_' —
+// no whitespace, no glob metacharacters, nothing needing escaping downstream.
+func isBareToken(s string) bool {
 	if s == "" {
 		return false
 	}
@@ -232,15 +254,17 @@ func claudeSlug(cwd string, keepUnderscore bool) string {
 type transcriptRecord struct {
 	Type        string `json:"type"`
 	IsSidechain bool   `json:"isSidechain"`
+	Effort      string `json:"effort"` // top-level, not part of the message
 	Message     struct {
 		Model string `json:"model"`
 	} `json:"message"`
 }
 
 // lastAssistantModel is the model named by the transcript's last assistant
-// record. Only main-thread records count: a sidechain record names the model a
-// sub-agent ran under, and claude stamps "<synthetic>" on messages it fabricated
-// (an API error, an interrupt) rather than sampled.
+// record, suffixed with the effort that record ran at when it names a usable one
+// ("claude-opus-5 · high"). Only main-thread records count: a sidechain record
+// names the model a sub-agent ran under, and claude stamps "<synthetic>" on
+// messages it fabricated (an API error, an interrupt) rather than sampled.
 func lastAssistantModel(path string) string {
 	f, err := os.Open(path)
 	if err != nil {
@@ -277,6 +301,9 @@ func lastAssistantModel(path string) string {
 			continue
 		}
 		if m := rec.Message.Model; m != "" && m != "<synthetic>" {
+			if isEffortLabel(rec.Effort) {
+				return m + modelEffortSep + rec.Effort
+			}
 			return m
 		}
 	}

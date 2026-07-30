@@ -122,8 +122,9 @@ func NewPaneCwd(pane uint32, cwd string) PaneCwd {
 
 // PaneAgent reports one pane's agent identity + state change (also patches the
 // Agents rollup client-side). Agent is "" for a plain shell. Model is the LLM
-// the agent is currently running under, omitted when unknown (only claude is
-// resolvable today — see catway's agentmodel.go).
+// the agent is currently running under — display text, so it may carry the
+// reasoning effort alongside it ("claude-opus-5 · high") — omitted when unknown
+// (only claude is resolvable today — see catway's agentmodel.go).
 type PaneAgent struct {
 	T     Type   `json:"t"`
 	Pane  uint32 `json:"pane"`

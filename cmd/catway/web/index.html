@@ -894,8 +894,10 @@
     items.push(["Title", row.title]);
     items.push(["Dir", row.cwd, "mono"]);
     if (row.agent) items.push(["Agent", row.agent + " · " + (row.state || "unknown")]);
-    // The LLM the agent is running under, read from its transcript server-side
-    // (agentmodel.go). Only claude reports one, and only once it has answered.
+    // The LLM the agent is running under — with the reasoning effort it last ran
+    // at appended, when the transcript named one — read from that transcript
+    // server-side (agentmodel.go), already one display string. Only claude
+    // reports one, and only once it has answered.
     // Off-screen panes get it from the pane.list snapshot, same as their agent.
     if (row.model) items.push(["Model", row.model]);
     if (p && p.exited !== null && p.exited !== undefined) items.push(["Exited", "code " + p.exited, "exited"]);
