@@ -65,6 +65,12 @@
   #ws-list li.active { color:#e8e8e8; }
   #ws-list li .sum { color:var(--muted); font-size:calc(10px * var(--sb-scale)); margin-left:auto; }
   #ws-list li .sum span { margin-left:4px; }
+  /* The finger-with-a-string a workspace wears while its cats-todo backlog has
+     unfinished items in it.
+     It rides the text baseline like the glyphs around it, and takes --heading so
+     it reads as a reminder rather than as another agent-state dot. */
+  #ws-list li .todo { flex:0 0 auto; color:var(--heading); align-self:center;
+    width:calc(14px * var(--sb-scale)); height:calc(14px * var(--sb-scale)); margin-left:-2px; }
   #ws-list li.add { color:var(--muted); font-style:italic; cursor:pointer; }
   #ws-list li.add:hover { color:var(--accent); background:none; }
   #pane-list li, #agent-list li { cursor:pointer; }
@@ -425,6 +431,7 @@
   // held between refreshes. busy/again/wait coalesce refresh requests so a chatty
   // pane can't queue one round trip per title change (refreshPaneList).
   let paneInv = [], paneInvBusy = false, paneInvAgain = false, paneInvWait = null;
+  const SVGNS = "http://www.w3.org/2000/svg"; // createElementNS: SVG isn't HTML
   // Workspace ids whose pane group is folded shut in the sidebar, and the ids the
   // last render actually drew (what collapse-all/expand-all act on). Which groups
   // you keep open is a per-browser display preference like the font size, so it
@@ -576,8 +583,9 @@
         p.el.remove(); panes.delete(id);
       }
     }
-    renderWorkspaces(msg);
-    refreshPaneList(); // structure changed: re-render, then re-query the inventory
+    // Structure changed: re-render the inventory-fed sections (Workspaces rows
+    // included), then re-query the inventory behind them.
+    refreshPaneList();
     markFocusedAgent();
     renderTabbar(msg);
     renderBorders(msg);
@@ -768,6 +776,61 @@
     return frag.childNodes.length ? frag : null;
   }
 
+  // todoOpenCount reads the unfinished-item count a cats-todo manager advertises
+  // in its terminal title — "todo: cats (3)", "todo: global (1)", or bare "todo
+  // (2)" (the plugin's model.paneTitle). A manager whose backlog is empty or all
+  // done drops the suffix, so it answers 0 exactly as a pane that is not a
+  // manager at all does; only the presence of work is being counted here.
+  //
+  // The title is the one channel every launch carries. The plugin host's
+  // CATS_PLUGIN_ID reaches the process but not the pane record, a manager started
+  // by hand from a shell has no plugin id to begin with, and neither would say
+  // how much is left in the backlog — which is the whole question.
+  function todoOpenCount(t) {
+    const m = /^todo(?:: .+?)? \((\d+)\)$/.exec(t || "");
+    return m ? Number(m[1]) : 0;
+  }
+
+  // todoMark: a finger with a string tied around it, worn by a workspace whose
+  // cats-todo backlog still has unfinished items in it — the string is there
+  // because something was left to remember. A manager sitting open on a cleared
+  // backlog earns nothing: a mark every workspace wears all day is decoration.
+  //
+  // Counts come from the pane inventory rather than the agents rollup, which
+  // never sees a todo pane (the manager is a TUI, not an agent), and from its raw
+  // title rather than the pane's live one — the live title is the *effective*
+  // title, so a pane.rename would otherwise blank the count.
+  function todoMark(wsId) {
+    let n = 0;
+    for (const pi of paneInv) {
+      if (!pi.handle || pi.handle.split(":")[0] !== wsId) continue;
+      n += todoOpenCount(pi.title);
+    }
+    if (!n) return null;
+    const svg = document.createElementNS(SVGNS, "svg");
+    svg.setAttribute("class", "todo");
+    svg.setAttribute("viewBox", "0 0 16 16");
+    svg.setAttribute("fill", "none");
+    svg.setAttribute("stroke", "currentColor");
+    svg.setAttribute("stroke-width", "1.3");
+    svg.setAttribute("stroke-linecap", "round");
+    svg.setAttribute("stroke-linejoin", "round");
+    // Three strokes, in the order you'd read them: the raised finger, the string
+    // wrapped around it (an ellipse, so it reads as going behind), and the loose
+    // end hanging off the knot. Any more detail than this dissolves at 16px.
+    for (const d of ["M6 4v8.2a2 2 0 0 0 4 0V4a2 2 0 0 0-4 0z",
+                     "M4.6 5.6a3.4 1.5 0 1 0 6.8 0 3.4 1.5 0 1 0-6.8 0",
+                     "M11.2 6.5c2 .7 2.4 2.1 1.4 3.1"]) {
+      const path = document.createElementNS(SVGNS, "path");
+      path.setAttribute("d", d);
+      svg.appendChild(path);
+    }
+    const t = document.createElementNS(SVGNS, "title");
+    t.textContent = n === 1 ? "1 unfinished todo" : n + " unfinished todos";
+    svg.appendChild(t);
+    return svg;
+  }
+
   // tabMarker: the highest-attention agent state among a tab's panes, as a
   // colored dot on the tab (cats's bell/activity markers; the rollup's tab
   // field keys the grouping — tab bar rows are the active workspace's tabs).
@@ -796,6 +859,10 @@
       const name = document.createElement("span");
       name.textContent = (w.active ? "● " : "○ ") + w.name;
       li.appendChild(name);
+      // The todo mark sits with the name — it says something about the project,
+      // not about a pane — while the agent counts stay pinned to the right edge.
+      const todo = todoMark(w.id);
+      if (todo) li.appendChild(todo);
       const sum = workspaceSummary(w.id);
       if (sum) {
         const s = document.createElement("span"); s.className = "sum"; s.appendChild(sum);
@@ -963,18 +1030,28 @@
   // titles, panes that appeared or closed elsewhere). Every caller is a push that
   // could have changed the inventory; the query is debounced and single-flight, so
   // a burst of them costs one round trip plus at most one follow-up.
+  //
+  // The workspace rows ride along: their todo marks read the same inventory, so
+  // a manager opening or closing has to reach both sections at once.
   function refreshPaneList() {
-    renderPaneList();
+    renderInventoryViews();
     if (paneInvBusy) { paneInvAgain = true; return; }
     if (paneInvWait) return;
     paneInvWait = setTimeout(() => {
       paneInvWait = null; paneInvBusy = true;
       sendCmdAwait("pane.list", {}, (res) => {
         paneInvBusy = false;
-        if (res.ok && res.data) { paneInv = res.data.panes || []; renderPaneList(); }
+        if (res.ok && res.data) { paneInv = res.data.panes || []; renderInventoryViews(); }
         if (paneInvAgain) { paneInvAgain = false; refreshPaneList(); }
       });
     }, 120);
+  }
+
+  // The two views the pane inventory feeds: the Panes section, and the todo marks
+  // on the Workspaces rows above it.
+  function renderInventoryViews() {
+    renderPaneList();
+    if (layoutMsg) renderWorkspaces(layoutMsg);
   }
 
   // ---- Hover card ----
