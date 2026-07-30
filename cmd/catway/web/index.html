@@ -31,7 +31,18 @@
   }
   html,body { margin:0; height:100%; background:var(--bg); color:var(--fg);
     font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; overflow:hidden; }
-  #app { position:fixed; inset:0; display:grid; grid-template-columns:var(--sidebar-w) 1fr; }
+  #app { position:fixed; inset:0; display:grid; grid-template-columns:var(--sidebar-w) 5px 1fr; }
+
+  /* ---- Splitter ----
+     A five-pixel gutter between the sidebar and the terminals. It sits in its
+     own grid column rather than straddling the border, so dragging it never
+     lands on a pane's edge, and it keeps the sidebar's own hairline as the
+     visible seam until you actually reach for it. */
+  #splitter { cursor:col-resize; background:transparent; }
+  #splitter:hover, #splitter.drag { background:var(--accent-dim); }
+  /* While dragging, the pointer is captured but the panes below still hand out
+     text cursors and selections; this shuts both off for the duration. */
+  body.splitting { cursor:col-resize; user-select:none; }
 
   /* ---- Sidebar ---- */
   #sidebar { background:var(--panel); border-right:1px solid var(--line);
@@ -369,6 +380,7 @@
     <section><h2>Panes<span class="hctl" id="pane-hctl"></span></h2><ul id="pane-list"></ul></section>
     <section><h2>Agents</h2><ul id="agent-list"><li class="empty">none</li></ul></section>
   </aside>
+  <div id="splitter" title="drag to resize the sidebar (double-click to reset)"></div>
   <div id="main">
     <div id="topbar">
       <div id="tabbar"></div>
@@ -404,6 +416,7 @@
   const palHintEl = document.getElementById("palhint");
   const gearEl = document.getElementById("gear");
   const bannerEl = document.getElementById("banner");
+  const splitterEl = document.getElementById("splitter");
   const dpr = window.devicePixelRatio || 1;
   const measureCtx = document.createElement("canvas").getContext("2d");
 
@@ -3254,11 +3267,69 @@
   window.addEventListener("resize", () => {
     clearTimeout(resizeTimer);
     resizeTimer = setTimeout(() => {
+      // A window narrowed since the last drag can leave the stored sidebar
+      // width past its 60% ceiling; re-clamp before deriving the grid.
+      const sbw = parseInt(document.documentElement.style.getPropertyValue("--sidebar-w"), 10);
+      if (sbw > 0) setSidebarWidth(sbw);
       gridSize();
       sendMsg({ t: "resize", cols, rows });
       // (No status refresh here any more — the window grid size is reported by
       // the pane hover card, which reads cols/rows live when it opens.)
     }, 120);
+  });
+
+  // ---- Sidebar splitter ----
+  // The width is a per-browser display preference like the terminal font size,
+  // so it lives in localStorage rather than in the server-persisted session.
+  // Setting --sidebar-w on the root overrides the stylesheet's scale-derived
+  // default, and everything that has to clear the sidebar (the banner) follows
+  // for free because it reads the same variable.
+  const SBW_KEY = "cats.sidebar_w", SBW_MIN = 150;
+  const sbwMax = () => Math.max(SBW_MIN, Math.round(window.innerWidth * 0.6));
+  function setSidebarWidth(px) {
+    px = Math.min(sbwMax(), Math.max(SBW_MIN, Math.round(px)));
+    document.documentElement.style.setProperty("--sidebar-w", px + "px");
+    try { localStorage.setItem(SBW_KEY, String(px)); } catch (e) { /* not persisted */ }
+  }
+  try {
+    const storedW = parseInt(localStorage.getItem(SBW_KEY), 10);
+    if (storedW >= SBW_MIN) document.documentElement.style.setProperty("--sidebar-w", storedW + "px");
+  } catch (e) { /* storage disabled — keep the stylesheet default */ }
+
+  // Panes are laid out from cols/rows, so a drag has to re-derive the grid and
+  // tell the server. That is debounced while the pointer moves (the same 120ms
+  // the window resize uses) and flushed once on release.
+  let sbwTimer = null;
+  function sidebarResized(now) {
+    clearTimeout(sbwTimer);
+    const fire = () => { gridSize(); sendMsg({ t: "resize", cols, rows }); };
+    if (now) fire(); else sbwTimer = setTimeout(fire, 120);
+  }
+  splitterEl.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    splitterEl.setPointerCapture(e.pointerId);
+    splitterEl.classList.add("drag");
+    document.body.classList.add("splitting");
+    // Where in the gutter it was grabbed, so the splitter stays under the
+    // cursor instead of jumping its own width on the first move.
+    const grabDx = e.clientX - splitterEl.getBoundingClientRect().left;
+    const move = (ev) => { setSidebarWidth(ev.clientX - grabDx); sidebarResized(false); };
+    const up = () => {
+      splitterEl.removeEventListener("pointermove", move);
+      splitterEl.classList.remove("drag");
+      document.body.classList.remove("splitting");
+      sidebarResized(true);
+    };
+    splitterEl.addEventListener("pointermove", move);
+    splitterEl.addEventListener("pointerup", up, { once: true });
+    splitterEl.addEventListener("pointercancel", up, { once: true });
+  });
+  // Double-click hands the column back to the stylesheet's --sb-scale default.
+  splitterEl.addEventListener("dblclick", () => {
+    document.documentElement.style.removeProperty("--sidebar-w");
+    try { localStorage.removeItem(SBW_KEY); } catch (e) { /* nothing to clear */ }
+    sidebarResized(true);
   });
 
   // Status-bar affordances: the palette hint opens it, the gear opens the
