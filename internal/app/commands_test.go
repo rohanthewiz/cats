@@ -49,6 +49,8 @@ type fakeBackend struct {
 	lastPlgList  Responder
 	lastPlgUnins Responder
 	lastPlgUninP PluginUninstallParams
+	lastPathList Responder
+	lastPathP    PathListParams
 	// paneMeta is the canned per-pane metadata PaneMeta answers with (nil ⇒ all
 	// zero values), letting pane.list/pane.get tests assert the merge.
 	paneMeta map[uint32]PaneMeta
@@ -122,6 +124,11 @@ func (b *fakeBackend) StartPluginUninstall(r Responder, p PluginUninstallParams)
 	b.rec("plgUninstall")
 	b.lastPlgUnins = r
 	b.lastPlgUninP = p
+}
+func (b *fakeBackend) StartPathList(r Responder, p PathListParams) {
+	b.rec("pathList")
+	b.lastPathList = r
+	b.lastPathP = p
 }
 func (b *fakeBackend) ConfigGet(r Responder) { b.rec("cfgGet"); r.OK(ConfigGetResult{Path: "/cfg"}) }
 func (b *fakeBackend) ConfigSet(r Responder, p ConfigSetParams) {
@@ -791,6 +798,36 @@ func TestDispatchPluginUninstall(t *testing.T) {
 	}
 	if h.b.lastPlgUnins != Responder(r) || h.b.lastPlgUninP.ID != "acme.todo" {
 		t.Fatalf("plugin.uninstall not forwarded: %+v", h.b.lastPlgUninP)
+	}
+}
+
+// path.list is result-only like the other listings: no reply channel means no
+// listing to send. Params are optional (a bare path.list is "the anchor
+// directory") and forwarded verbatim; the backend's directory read resolves the
+// responder later.
+func TestDispatchPathList(t *testing.T) {
+	silent := newCmdHarness(t)
+	r := &fakeResponder{log: silent.log, wants: false}
+	silent.d.Dispatch(CmdPathList, noParams(), r)
+	if len(*silent.log) != 0 || silent.b.lastPathList != nil {
+		t.Fatalf("reply-less path.list should do nothing, log=%v", *silent.log)
+	}
+
+	h := newCmdHarness(t)
+	rr := h.resp()
+	h.d.Dispatch(CmdPathList, noParams(), rr)
+	if rr.okCall || rr.failCall {
+		t.Fatalf("path.list must not resolve synchronously")
+	}
+	if got := *h.log; len(got) != 1 || got[0] != "pathList" || h.b.lastPathList != Responder(rr) {
+		t.Fatalf("path.list effects = %v", got)
+	}
+
+	h = newCmdHarness(t)
+	rr = h.resp()
+	h.d.Dispatch(CmdPathList, params(t, PathListParams{Dir: "~/projs/", Recents: true}), rr)
+	if h.b.lastPathP.Dir != "~/projs/" || !h.b.lastPathP.Recents {
+		t.Fatalf("path.list params not forwarded: %+v", h.b.lastPathP)
 	}
 }
 

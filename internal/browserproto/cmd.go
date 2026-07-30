@@ -46,6 +46,7 @@ const (
 	CmdConfigSet          = app.CmdConfigSet
 	CmdPluginList         = app.CmdPluginList
 	CmdPluginUninstall    = app.CmdPluginUninstall
+	CmdPathList           = app.CmdPathList
 	CmdSessionGet         = app.CmdSessionGet
 	CmdWorkspaceList      = app.CmdWorkspaceList
 	CmdTabList            = app.CmdTabList
@@ -115,4 +116,6 @@ type (
 	PluginListResult      = app.PluginListResult
 	PluginUninstallParams = app.PluginUninstallParams
 	PluginUninstallResult = app.PluginUninstallResult
+	PathListParams        = app.PathListParams
+	PathListResult        = app.PathListResult
 )

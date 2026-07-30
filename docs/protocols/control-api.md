@@ -183,13 +183,14 @@ the backend's per-pane cache, so a client sees the same arbitrated agent identit
 and live title the browser chrome shows, for every pane in the session rather
 than only the ones on screen. Every field is omitted when empty.
 
-### Worktrees, config, plugins, server
+### Worktrees, config, plugins, paths, server
 
 | Method | Ergonomic verb |
 |--------|----------------|
 | `worktree.list` / `worktree.create` / `worktree.open` / `worktree.remove` | — |
 | `config.get` / `config.set` | — |
 | `plugin.list` / `plugin.uninstall` | — |
+| `path.list` | — |
 | `agent.focus` | `agent <pane>` |
 | `server.reload_config` | `reload` |
 | `server.stop` | `stop` |
@@ -201,6 +202,30 @@ behind one `cmd_result`.
 
 Git work for worktree commands runs **off** the orchestrator loop, so a slow
 `git worktree add` never stalls input.
+
+`path.list` is what a front-end completes a directory against — the start-path
+picker in the new-workspace dialog is its only caller today:
+
+```bash
+catctl path.list --params '{"dir":"~/projs/","recents":true}'
+```
+
+`dir` is a path *as typed*: `~`, `$VAR` and relative forms all resolve (a
+relative one against the addressed — or focused — pane's live cwd, reported back
+as `cwd`), and a path that does not resolve answers `exists:false` with an
+`error` string rather than failing the command, because that is the normal state
+of a path someone is half-way through typing. The answer is one directory's
+whole listing (`dirs`, sorted, hidden names included, `truncated` when a very
+large directory was cut off) plus, when `recents` is set, the directories the
+user works in most: [cdx](https://github.com/rohanthewiz/cdx)'s frecency memory
+first, then this session's own live pane cwds, so the list is useful with or
+without cdx installed.
+
+Nothing is filtered or ranked against a query server-side, on purpose. The
+caller fuzzy-matches the listing locally, which keeps completion *inside* a
+directory instant for a browser that may be a long way from the server and costs
+one round trip per directory walked into. The directory read runs off the
+orchestrator loop, like the git and plugin work above.
 
 ## Raw vs ergonomic
 

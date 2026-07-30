@@ -97,6 +97,12 @@ type Backend interface {
 	StartPluginList(r Responder)
 	StartPluginUninstall(r Responder, p PluginUninstallParams)
 
+	// StartPathList answers the start-path picker's directory listing. Off-loop
+	// like the commands above — a listing can land on a cold network mount — and
+	// on the Backend seam because only the backend knows the anchor a relative
+	// path resolves against (the addressed pane's live cwd).
+	StartPathList(r Responder, p PathListParams)
+
 	// ReloadConfig acknowledges a config reload (a no-op today).
 	ReloadConfig() error
 	// Shutdown notifies observers the server is going away and triggers the quit.
@@ -694,6 +700,17 @@ func (d *Dispatcher) Dispatch(name string, dec ParamDecoder, r Responder) {
 			return
 		}
 		d.backend.StartPluginUninstall(r, p) // async: the directory removal resolves r later
+
+	case CmdPathList:
+		var p PathListParams
+		if err := decodeOptional(dec, &p); err != nil {
+			bad(err)
+			return
+		}
+		if !r.WantsReply() {
+			return // a listing yields only a result; with no reply channel there's nowhere to send it
+		}
+		d.backend.StartPathList(r, p) // async: the directory read resolves r later
 
 	case CmdConfigGet:
 		if !r.WantsReply() {

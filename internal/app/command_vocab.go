@@ -70,6 +70,12 @@ const (
 	CmdPluginList      = "plugin.list"
 	CmdPluginUninstall = "plugin.uninstall"
 
+	// Path listing (the start-path picker in the new-workspace dialog): one
+	// directory's subdirectories plus the user's frecency-ranked recent
+	// directories, so a front-end can complete a start path against the
+	// server's filesystem instead of asking the user to type it blind.
+	CmdPathList = "path.list"
+
 	// Read-only query commands (§7): they return a snapshot of session state
 	// and mutate nothing, so the dispatcher answers them straight from the
 	// Session with no Backend effects.
@@ -97,6 +103,7 @@ func CommandNames() []string {
 		CmdWorktreeList, CmdWorktreeCreate, CmdWorktreeOpen, CmdWorktreeRemove,
 		CmdConfigGet, CmdConfigSet,
 		CmdPluginList, CmdPluginUninstall,
+		CmdPathList,
 		CmdSessionGet, CmdWorkspaceList, CmdTabList, CmdPaneList, CmdPaneGet,
 	}
 }
@@ -738,6 +745,44 @@ type PluginUninstallParams struct {
 // human-readable outcome line the CLI prints.
 type PluginUninstallResult struct {
 	Message string `json:"message"`
+}
+
+// --- Path listing params & results (§7, start-path picker) --------------------
+
+// PathListParams: path.list. Dir is what the user has typed so far — a "~/",
+// "$VAR/", relative or absolute path — and is resolved leniently (nothing is
+// stat'ed to decide the answer). "" means the anchor directory itself: the
+// addressed pane's live cwd, or the focused pane's when Pane is nil, which is
+// the same neighbour inheritance new tabs and splits use.
+//
+// Recents asks for the frecency list too. A picker wants it once when it opens,
+// not on every keystroke of directory navigation, so it is opt-in per request.
+type PathListParams struct {
+	Dir     string  `json:"dir,omitempty"`
+	Pane    *uint32 `json:"pane,omitempty"`
+	Recents bool    `json:"recents,omitempty"`
+}
+
+// PathListResult is CmdResult.Data for path.list.
+//
+// The listing is deliberately unfiltered and unranked: Dirs is every
+// subdirectory of Dir, and the caller matches it against what the user is
+// typing. That keeps completion inside a directory a local, per-keystroke
+// operation for a browser that may be a long way from the server, and it costs
+// one round trip per directory the user walks into.
+//
+// Exists false (with Error explaining why) is the normal state of a path
+// mid-typing, not a command failure: Dirs is empty and the picker shows nothing
+// until the path resolves again.
+type PathListResult struct {
+	Dir       string   `json:"dir"`  // the resolved absolute directory Dirs is a listing of
+	Cwd       string   `json:"cwd"`  // the anchor a relative Dir was resolved against
+	Home      string   `json:"home"` // so a front-end can shorten/expand "~" the same way
+	Exists    bool     `json:"exists"`
+	Error     string   `json:"error,omitempty"`
+	Dirs      []string `json:"dirs,omitempty"` // subdirectory names, sorted, hidden included
+	Truncated bool     `json:"truncated,omitempty"`
+	Recents   []string `json:"recents,omitempty"` // absolute directories, best-first
 }
 
 // optPaneID converts an optional wire pane id into an optional layout.PaneID

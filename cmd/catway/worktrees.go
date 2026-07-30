@@ -22,7 +22,7 @@ import (
 // focused) pane's cwd. The workspace-membership match runs back on the loop so
 // it reflects the model at reply time, not request time.
 func (o *orch) StartWorktreeList(r app.Responder, p app.WorktreeListParams) {
-	cwd := o.worktreePaneCwd(p.Pane)
+	cwd := o.anchorPaneCwd(p.Pane)
 	go func() {
 		checkout, err := worktree.RepoRoot(cwd)
 		if err != nil {
@@ -41,7 +41,7 @@ func (o *orch) StartWorktreeList(r app.Responder, p app.WorktreeListParams) {
 // StartWorktreeCreate creates a new branch + checkout (`git worktree add -b`)
 // and opens a new workspace on it, focused and named after the branch.
 func (o *orch) StartWorktreeCreate(r app.Responder, p app.WorktreeCreateParams) {
-	cwd := o.worktreePaneCwd(p.Pane)
+	cwd := o.anchorPaneCwd(p.Pane)
 	branch := p.Branch
 	if branch == "" {
 		branch = worktree.GeneratedBranchSlug(time.Now().UnixMicro())
@@ -160,10 +160,11 @@ func (o *orch) StartWorktreeRemove(r app.Responder, p app.WorktreeRemoveParams) 
 	}()
 }
 
-// worktreePaneCwd resolves the directory the worktree commands anchor on: the
+// anchorPaneCwd resolves the directory a pane-addressed command anchors on: the
 // addressed (or focused) pane's live cwd, falling back to that pane's workspace
-// identity and then the process cwd. Loop-goroutine only.
-func (o *orch) worktreePaneCwd(pane *uint32) string {
+// identity and then the process cwd. The worktree commands anchor their repo on
+// it and path.list resolves relative paths against it. Loop-goroutine only.
+func (o *orch) anchorPaneCwd(pane *uint32) string {
 	var pid uint32
 	if pane != nil {
 		pid = *pane
