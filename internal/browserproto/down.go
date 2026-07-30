@@ -94,6 +94,12 @@ type AgentItem struct {
 	Agent     string `json:"agent"`
 	State     string `json:"state"`
 	Seen      bool   `json:"seen"` // false renders as "Done"
+	// SinceMs is how long the pane has held this state, as of the moment the
+	// rollup was built. The rollup only goes out on a change, so the browser
+	// converts it to an absolute instant on arrival and ticks the label itself.
+	// -1 when the state has never been published (age unknown) — 0 is a real
+	// value, since the rollup ships in the same breath as the change.
+	SinceMs int64 `json:"since_ms"`
 }
 
 func NewAgents(items []AgentItem) Agents { return Agents{T: MsgAgents, Items: items} }

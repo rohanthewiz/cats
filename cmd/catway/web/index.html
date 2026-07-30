@@ -21,9 +21,13 @@
        sits right next to terminal text all day, so it reads as a gray-green
        hairline just above --line rather than a green marker. */
     --accent-dim:#3d4a43;
+    /* --sb-scale sizes the whole left column as one unit: the column width and
+       every type size inside it are expressed against it, so the sidebar grows
+       or shrinks without any of its parts drifting out of proportion. */
+    --sb-scale:1.15;
     /* Sidebar column width. Anything else that has to clear the sidebar (the
        banner) reads it from here so the two can't drift apart. */
-    --sidebar-w:253px;
+    --sidebar-w:calc(253px * var(--sb-scale));
   }
   html,body { margin:0; height:100%; background:var(--bg); color:var(--fg);
     font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; overflow:hidden; }
@@ -32,7 +36,7 @@
   /* ---- Sidebar ---- */
   #sidebar { background:var(--panel); border-right:1px solid var(--line);
     display:flex; flex-direction:column; overflow-y:auto; min-height:0; }
-  #brand { font-size:13px; font-weight:600; letter-spacing:.5px; color:#e8e8e8;
+  #brand { font-size:calc(13px * var(--sb-scale)); font-weight:600; letter-spacing:.5px; color:#e8e8e8;
     padding:12px 14px; border-bottom:1px solid var(--line); }
   #brand small { color:var(--muted); font-weight:400; margin-left:6px; }
   /* Build badge: the short git hash this catway was built from (trailing '*' =
@@ -44,22 +48,22 @@
   /* Splitter between Workspaces / Panes / Agents — the headings alone read as
      one long list once a workspace has more than a couple of panes. */
   #sidebar section + section { border-top:1px solid var(--line); }
-  #sidebar h2 { font-size:10px; text-transform:uppercase; letter-spacing:.8px; color:var(--heading);
+  #sidebar h2 { font-size:calc(10px * var(--sb-scale)); text-transform:uppercase; letter-spacing:.8px; color:var(--heading);
     font-weight:700; margin:0 0 6px; padding:0 8px; display:flex; align-items:baseline; }
   /* Section-level controls, pinned to the heading's right edge. Muted until
      hovered so the heading still reads as a label, not a toolbar. */
   #sidebar h2 .hctl { margin-left:auto; display:flex; gap:1px; }
   #sidebar h2 .hctl button { background:none; border:0; padding:0 3px; cursor:pointer;
-    font:inherit; font-size:11px; line-height:1; color:var(--muted); }
+    font:inherit; font-size:calc(11px * var(--sb-scale)); line-height:1; color:var(--muted); }
   #sidebar h2 .hctl button:hover { color:var(--accent); }
   #sidebar ul { list-style:none; margin:0; padding:0; }
-  #sidebar li { font-size:12px; padding:4px 8px; border-radius:4px; white-space:nowrap;
+  #sidebar li { font-size:calc(12px * var(--sb-scale)); padding:4px 8px; border-radius:4px; white-space:nowrap;
     overflow:hidden; text-overflow:ellipsis; cursor:default; display:flex; align-items:baseline; gap:6px; }
   #ws-list { position:relative; }
   #ws-list li.ws { cursor:pointer; }
   #ws-list li.ws:hover { background:var(--panel2); }
   #ws-list li.active { color:#e8e8e8; }
-  #ws-list li .sum { color:var(--muted); font-size:10px; margin-left:auto; }
+  #ws-list li .sum { color:var(--muted); font-size:calc(10px * var(--sb-scale)); margin-left:auto; }
   #ws-list li .sum span { margin-left:4px; }
   #ws-list li.add { color:var(--muted); font-style:italic; cursor:pointer; }
   #ws-list li.add:hover { color:var(--accent); background:none; }
@@ -78,7 +82,7 @@
      boundary: the same visual break, but it now names the group and can fold it.
      Groups after the first keep the hairline above them, on the header row rather
      than on the first pane, so a focused pane never paints across the divider. */
-  #pane-list li.wsgrp { color:var(--muted); font-size:10px; text-transform:uppercase;
+  #pane-list li.wsgrp { color:var(--muted); font-size:calc(10px * var(--sb-scale)); text-transform:uppercase;
     letter-spacing:.5px; cursor:pointer; }
   #pane-list li.wsgrp.sep { border-top:1px solid var(--line); margin-top:5px; padding-top:7px; }
   #pane-list li.wsgrp:hover { background:var(--panel2); color:#ccc; }
@@ -87,11 +91,11 @@
   #pane-list li.wsgrp .gsum, #pane-list li.wsgrp .car { margin-left:auto; }
   #pane-list li.wsgrp .gsum + .car { margin-left:0; }
   #pane-list li.wsgrp .gsum { text-transform:none; letter-spacing:0; }
-  #pane-list li.wsgrp .car { font-size:9px; }
+  #pane-list li.wsgrp .car { font-size:calc(9px * var(--sb-scale)); }
   #pane-list .pub { color:var(--accent); }
   #pane-list .ttl { color:var(--muted); overflow:hidden; text-overflow:ellipsis; }
   #pane-list .ag, #agent-list .aname { margin-left:auto; }
-  .ag, .adot, .aname { font-size:11px; }
+  .ag, .adot, .aname { font-size:calc(11px * var(--sb-scale)); }
   .st-working { color:var(--warn); } .st-blocked { color:var(--err); }
   .st-idle { color:var(--ok); } .st-unknown { color:var(--muted); }
   .st-done { color:var(--done); } /* finished off-screen, not yet seen */
@@ -108,7 +112,10 @@
      is — the two sections then read as one selection, not two. */
   #agent-list li.focused { background:var(--chrome-focus); color:#e8e8e8; }
   #agent-list .aname { color:#e8e8e8; margin-left:0; }
-  #agent-list .ameta { color:var(--muted); font-size:10px; margin-left:auto; }
+  #agent-list .ameta { color:var(--muted); font-size:calc(10px * var(--sb-scale)); margin-left:auto; }
+  /* Time since the last state change, dimmer than the state it precedes: the
+     state is the fact, the age only qualifies how stale that fact is. */
+  #agent-list .aage { opacity:.75; }
   #agent-list li.empty { color:var(--muted); font-style:italic; cursor:default; }
   #agent-list li.empty:hover { background:none; }
 
@@ -1204,6 +1211,27 @@
   }
 
   // ---- Agents rollup (WS8): the `agents` message, previously dropped ----
+
+  // Coarse age of a state, one unit deep — the row is a glance, not a stopwatch.
+  function fmtAge(ms) {
+    const s = Math.max(0, Math.round(ms / 1000));
+    if (s < 60) return s + "s ago";
+    const m = Math.round(s / 60);
+    if (m < 60) return m + "m ago";
+    const h = Math.round(m / 60);
+    return h < 24 ? h + "h ago" : Math.round(h / 24) + "d ago";
+  }
+
+  // The rollup only arrives when a state moves, so the ages it stamped would sit
+  // frozen in between. One shared tick re-reads each row's absolute instant —
+  // every 5s, not every second: the label is a glance at staleness, and it is
+  // cheaper to let it lag a few seconds than to touch every row that often.
+  setInterval(() => {
+    for (const el of agentListEl.querySelectorAll(".aage")) {
+      el.textContent = fmtAge(Date.now() - Number(el.dataset.at)) + " · ";
+    }
+  }, 5000);
+
   function renderAgents(items) {
     agentItems = items || [];
     if (layoutMsg) { renderWorkspaces(layoutMsg); renderTabbar(layoutMsg); } // ws badges + tab markers derive from the rollup
@@ -1220,7 +1248,18 @@
       const dot = document.createElement("span"); dot.className = "adot " + stClass(markerState(it)); dot.textContent = "●";
       const name = document.createElement("span"); name.className = "aname"; name.textContent = it.agent;
       const meta = document.createElement("span"); meta.className = "ameta";
-      meta.textContent = paneRef(it.pub, it.pane) + " · " + (it.seen ? it.state : "done");
+      const st = it.seen ? it.state : "done";
+      meta.textContent = paneRef(it.pub, it.pane) + " · ";
+      // A working agent is mid-change, so "how long since it changed" says
+      // nothing there (and its dot already pulses). Every settled state carries
+      // its age instead — the answer to "is this still true?".
+      if (st !== "working" && it.since_ms >= 0) {
+        const age = document.createElement("span"); age.className = "aage";
+        age.dataset.at = String(Date.now() - it.since_ms); // absolute: the rollup won't come again until the state moves
+        age.textContent = fmtAge(it.since_ms) + " · ";
+        meta.appendChild(age);
+      }
+      meta.appendChild(document.createTextNode(st));
       li.appendChild(dot); li.appendChild(name); li.appendChild(meta);
       // agent.focus, not pane.focus: the agents list is global, so the target
       // may sit in another workspace/tab and has to be revealed into the

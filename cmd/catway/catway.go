@@ -62,6 +62,10 @@ type paneRuntime struct {
 	hookSuppressed map[string]hookSuppression
 	pubAgent       string
 	pubState       string
+	// stateAt stamps when pubState last actually changed — the sidebar shows the
+	// age of a settled state ("10s ago · idle"), so it must survive the repeated
+	// publishes that report the same state.
+	stateAt time.Time
 	// agentModel is the LLM the pane's agent is currently running under, read
 	// from the agent's transcript (agentmodel.go); "" when unknown or when no
 	// agent whose model is resolvable is running. modelAt stamps the last
@@ -617,9 +621,13 @@ func (o *orch) agentsMsg() browserproto.Agents {
 					continue
 				}
 				pub, _ := o.session.PublicPaneID(id)
+				since := int64(-1)
+				if !rt.stateAt.IsZero() {
+					since = time.Since(rt.stateAt).Milliseconds()
+				}
 				items = append(items, browserproto.AgentItem{
 					Pane: rt.id, Pub: pub, Workspace: ws.ID, Tab: tab.Number,
-					Agent: agent, State: state, Seen: !rt.unseen,
+					Agent: agent, State: state, Seen: !rt.unseen, SinceMs: since,
 				})
 			}
 		}

@@ -65,6 +65,9 @@ func (o *orch) publishAgent(rt *paneRuntime) {
 	if prevState == "" {
 		prevState = "unknown"
 	}
+	if rt.stateAt.IsZero() || state != rt.pubState {
+		rt.stateAt = time.Now()
+	}
 	rt.pubAgent, rt.pubState = agent, state
 	// Re-resolve the pane's model (agentmodel.go) before the broadcast below:
 	// an agent that just left clears it synchronously, and a refresh that has to

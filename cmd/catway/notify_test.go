@@ -5,6 +5,7 @@ package main
 import (
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/rohanthewiz/cats/internal/app"
 	"github.com/rohanthewiz/cats/internal/browserproto"
@@ -175,6 +176,34 @@ func TestAgentSeenMarkers(t *testing.T) {
 	o.handleCmd(c, cmd(t, "t2", browserproto.CmdTabFocus, browserproto.TabParams{Num: 1}))
 	if item := rollupItem(t, o, pid); !item.Seen {
 		t.Fatal("entering the viewport should mark the pane seen")
+	}
+}
+
+// The rollup's state age: unknown until the first publish, restamped only when
+// the state actually moves (so a republish of the same state doesn't reset it).
+func TestAgentStateAge(t *testing.T) {
+	o, err := newOrch(filepath.Join(t.TempDir(), "s.sock"), t.TempDir())
+	if err != nil {
+		t.Fatalf("newOrch: %v", err)
+	}
+	pid := uint32(o.session.AllPaneIDs()[0])
+
+	o.onPaneAgent(orchestration.PaneAgent{PaneID: pid, Agent: "claude", State: "idle"})
+	if got := rollupItem(t, o, pid).SinceMs; got < 0 {
+		t.Fatalf("first publish should stamp an age, got %d", got)
+	}
+
+	// Hold the state and republish: the age keeps counting from the change.
+	o.panes[pid].stateAt = time.Now().Add(-90 * time.Second)
+	o.onPaneAgent(orchestration.PaneAgent{PaneID: pid, Agent: "claude", State: "idle"})
+	if got := rollupItem(t, o, pid).SinceMs; got < 89_000 {
+		t.Fatalf("unchanged state should keep its age, got %d", got)
+	}
+
+	// A real change restarts it.
+	o.onPaneAgent(orchestration.PaneAgent{PaneID: pid, Agent: "claude", State: "working"})
+	if got := rollupItem(t, o, pid).SinceMs; got > 5_000 {
+		t.Fatalf("state change should restamp the age, got %d", got)
 	}
 }
 
