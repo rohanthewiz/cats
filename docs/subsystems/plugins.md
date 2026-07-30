@@ -4,6 +4,29 @@
 thin: a plugin is a **directory** with a `cats-plugin.toml` manifest plus
 whatever its build produces. The host's whole job is directory management.
 
+## Core principles
+
+Read these first. Most of the page below is a consequence of one of them, and a
+plugin author who has these in hand needs very little of the rest.
+
+1. **A plugin is a directory, not an API surface.** A manifest plus build output
+   under `~/.config/cats/plugins/<id>/` — a real directory (install) or a
+   symlink (link). There is nothing to register and nothing to implement.
+2. **An action is just an argv.** No plugin runtime, no callback table, no
+   lifecycle hooks. You declare a command; cats runs it.
+3. **The server never parses a manifest.** It is resolved host-side into an
+   argv, then launched via `tab.create`'s spawn params — see below.
+4. **A plugin is an ordinary program in an ordinary pane.** A real PTY, so a TUI
+   works, and the same binary runs by hand from any shell. That is how you
+   should develop it.
+5. **Talking back to cats is optional, and is just the control socket.** Every
+   pane exports `CATS_CONTROL_SOCKET`; a plugin drives the same §7 command
+   table as the browser and `catctl`. A plugin that only prints needs no cats
+   knowledge at all.
+6. **Any language works.** If a `[[build]]` step can produce it and a shell can
+   exec it, it is a plugin.
+7. **No sandbox, by design.** See [Security posture](#security-posture).
+
 ## The key design decision
 
 The **server never parses a manifest**.
@@ -79,6 +102,80 @@ The shape matches herdr's `herdr-plugin.toml`, so a herdr plugin ports by renami
 the file and swapping the id and command names. Herdr's `[[panes]]` table is
 deliberately absent: cats actions run their TUI directly in the tab that launches
 them, so a separate server-run pane entrypoint has no meaning.
+
+## Writing a plugin
+
+Three steps: make a directory, write the manifest, link it. Nothing here needs a
+running catway until the final `plugin run`.
+
+```
+~/dev/cats-hello/
+  cats-plugin.toml
+  hello.sh
+```
+
+```toml
+id          = "you.cats-hello"     # also the install directory name
+name        = "Hello cats"
+version     = "0.1.0"
+description = "Renames its own pane, then lists every pane cats knows about"
+platforms   = ["macos", "linux"]   # omit for "everywhere"; GOOS names also work
+
+# Run once in the plugin root at install/link time. Usually a `go build`.
+[[build]]
+command = ["chmod", "+x", "./hello.sh"]
+
+# Launchable entrypoints. Paths are relative to the plugin root.
+# The first action is the default for a bare `plugin run`.
+[[actions]]
+id      = "hello"
+title   = "Hello cats"
+command = ["./hello.sh"]
+```
+
+The plugin itself, using only what
+[the pane environment](#environment-a-plugin-gets) hands it:
+
+```sh
+#!/bin/sh
+# Every cats pane exports CATS_PANE_ID and CATS_CONTROL_SOCKET.
+# A plugin pane also gets CATS_PLUGIN_ID and CATS_PLUGIN_DIR (find your own
+# assets there — no argv[0] games).
+catctl rename-pane "$CATS_PANE_ID" "hello from $CATS_PLUGIN_ID"
+echo "my files live in $CATS_PLUGIN_DIR"
+catctl panes
+read -r _   # hold the pane open so you can read it
+```
+
+```bash
+catctl plugin link ~/dev/cats-hello     # symlink the checkout + run [[build]]
+catctl plugin list                      # confirm: id, version, actions
+catctl plugin run you.cats-hello        # launches in a fresh tab
+catctl plugin run you.cats-hello hello  # or name the action explicitly
+```
+
+The dev loop is a re-link: `catctl plugin link ~/dev/cats-hello` again (or
+**rebuild** in the plugins dialog) re-runs the build steps against local edits.
+Point `$CATS_PLUGINS_DIR` at a scratch directory while iterating and the real
+`~/.config` tree is never touched.
+
+A shell script is the smallest thing that demonstrates the contract, but the
+build step is where a compiled plugin belongs — `["go", "build", "-o",
+"./bin/tool", "."]` and an action of `["./bin/tool"]`.
+
+### Driving cats from a plugin
+
+For anything past `catctl` shell-outs, speak [the control
+protocol](../protocols/control-api.md) directly: one newline-framed JSON
+request in, one response out, over `$CATS_CONTROL_SOCKET`. Methods are the
+`app.Cmd*` names in `internal/app/command_vocab.go` — `pane.list`,
+`pane.send_input`, `tab.create`, `worktree.create`, and so on.
+
+`internal/ctlproto` is that transport if the plugin is Go: `ctlproto.ResolveSocket("")`
+picks up `CATS_CONTROL_SOCKET` (falling back to `/tmp/cats-control.sock`), and
+`ctlproto.Call` is the whole client — dial, one `Request`, one `Response`, close.
+A `ping` first is worth it: it tells the plugin whether it is running inside cats
+at all, so it can degrade instead of erroring, which is what cats-todo does.
 
 ## Install, link, update
 
