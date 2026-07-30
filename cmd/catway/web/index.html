@@ -45,7 +45,13 @@
      one long list once a workspace has more than a couple of panes. */
   #sidebar section + section { border-top:1px solid var(--line); }
   #sidebar h2 { font-size:10px; text-transform:uppercase; letter-spacing:.8px; color:var(--heading);
-    font-weight:700; margin:0 0 6px; padding:0 8px; }
+    font-weight:700; margin:0 0 6px; padding:0 8px; display:flex; align-items:baseline; }
+  /* Section-level controls, pinned to the heading's right edge. Muted until
+     hovered so the heading still reads as a label, not a toolbar. */
+  #sidebar h2 .hctl { margin-left:auto; display:flex; gap:1px; }
+  #sidebar h2 .hctl button { background:none; border:0; padding:0 3px; cursor:pointer;
+    font:inherit; font-size:11px; line-height:1; color:var(--muted); }
+  #sidebar h2 .hctl button:hover { color:var(--accent); }
   #sidebar ul { list-style:none; margin:0; padding:0; }
   #sidebar li { font-size:12px; padding:4px 8px; border-radius:4px; white-space:nowrap;
     overflow:hidden; text-overflow:ellipsis; cursor:default; display:flex; align-items:baseline; gap:6px; }
@@ -67,12 +73,21 @@
      elsewhere — muted handle, and a click reveals rather than focuses. */
   #pane-list li.off .pub { color:var(--muted); }
   #pane-list li.off .ttl { opacity:.65; }
-  /* Hairline where the flat list crosses into the next workspace. It is its own
-     row rather than a border on the first pane of the group, so a focused pane
-     there highlights at the same height as every other row instead of painting
-     its background across the divider. */
-  #pane-list li.wsbreak { padding:0; margin:5px 8px; height:0; border-top:1px solid var(--line);
-    cursor:default; pointer-events:none; }
+  /* Each workspace's panes sit under their own header row, which doubles as the
+     collapse toggle. It replaces the plain hairline the list used to draw at the
+     boundary: the same visual break, but it now names the group and can fold it.
+     Groups after the first keep the hairline above them, on the header row rather
+     than on the first pane, so a focused pane never paints across the divider. */
+  #pane-list li.wsgrp { color:var(--muted); font-size:10px; text-transform:uppercase;
+    letter-spacing:.5px; cursor:pointer; }
+  #pane-list li.wsgrp.sep { border-top:1px solid var(--line); margin-top:5px; padding-top:7px; }
+  #pane-list li.wsgrp:hover { background:var(--panel2); color:#ccc; }
+  /* Whichever marker comes first is pushed to the right edge; a collapsed group
+     shows its rollup ahead of the caret. */
+  #pane-list li.wsgrp .gsum, #pane-list li.wsgrp .car { margin-left:auto; }
+  #pane-list li.wsgrp .gsum + .car { margin-left:0; }
+  #pane-list li.wsgrp .gsum { text-transform:none; letter-spacing:0; }
+  #pane-list li.wsgrp .car { font-size:9px; }
   #pane-list .pub { color:var(--accent); }
   #pane-list .ttl { color:var(--muted); overflow:hidden; text-overflow:ellipsis; }
   #pane-list .ag, #agent-list .aname { margin-left:auto; }
@@ -338,7 +353,7 @@
   <aside id="sidebar">
     <div id="brand">cats</div>
     <section><h2>Workspaces</h2><ul id="ws-list"></ul></section>
-    <section><h2>Panes</h2><ul id="pane-list"></ul></section>
+    <section><h2>Panes<span class="hctl" id="pane-hctl"></span></h2><ul id="pane-list"></ul></section>
     <section><h2>Agents</h2><ul id="agent-list"><li class="empty">none</li></ul></section>
   </aside>
   <div id="main">
@@ -403,6 +418,19 @@
   // held between refreshes. busy/again/wait coalesce refresh requests so a chatty
   // pane can't queue one round trip per title change (refreshPaneList).
   let paneInv = [], paneInvBusy = false, paneInvAgain = false, paneInvWait = null;
+  // Workspace ids whose pane group is folded shut in the sidebar, and the ids the
+  // last render actually drew (what collapse-all/expand-all act on). Which groups
+  // you keep open is a per-browser display preference like the font size, so it
+  // persists in localStorage rather than in the session the server owns.
+  const PGRP_KEY = "cats.panes.collapsed";
+  let paneCollapsed = new Set(), paneGroupIDs = [];
+  try {
+    const raw = JSON.parse(localStorage.getItem(PGRP_KEY));
+    if (Array.isArray(raw)) paneCollapsed = new Set(raw);
+  } catch (e) { /* storage disabled or corrupt — start with everything expanded */ }
+  function savePaneCollapsed() {
+    try { localStorage.setItem(PGRP_KEY, JSON.stringify([...paneCollapsed])); } catch (e) { /* not persisted */ }
+  }
 
   function measure() {
     measureCtx.font = `${FONT_PX}px ui-monospace, Menlo, monospace`;
@@ -696,9 +724,13 @@
     if (!pub) return "#" + paneID;
     const i = pub.indexOf(":");
     if (i < 0) return pub;
-    const id = pub.slice(0, i);
-    const ws = layoutMsg && layoutMsg.workspaces.find((w) => w.id === id);
-    return ((ws && ws.name) || id) + pub.slice(i);
+    return wsName(pub.slice(0, i)) + pub.slice(i);
+  }
+
+  // The workspace's display name, falling back to its id until a layout arrives.
+  function wsName(id) {
+    const w = layoutMsg && layoutMsg.workspaces.find((x) => x.id === id);
+    return (w && w.name) || id;
   }
 
   // attentionRank orders marker states for aggregation (cats's
@@ -791,6 +823,12 @@
   // off-screen titles exist nowhere else in the browser. The agents rollup wins on
   // agent state when it knows the pane: it carries the seen flag, which is what
   // renders a run that finished off-screen as "done".
+  //
+  // Rows are gathered per workspace before any DOM is built: the inventory already
+  // arrives grouped by workspace then tab (Session.ListPanes), so a run of rows
+  // sharing a handle prefix is exactly one group. Each group gets a header row that
+  // folds it — a collapsed group's rows are never built, and its header carries the
+  // rollup they would have shown.
   function renderPaneList() {
     paneListEl.innerHTML = "";
     const vis = new Map((layoutMsg ? layoutMsg.panes : []).map((pr) => [pr.pane, pr]));
@@ -799,7 +837,7 @@
     const inv = paneInv.length ? paneInv
       : Array.from(vis.values()).map((pr) => ({ pane: pr.pane, handle: pr.pub, focused: pr.focused }));
     const byPane = new Map(agentItems.map((a) => [a.pane, a]));
-    let prevWs = null;
+    const groups = [];
     for (const pi of inv) {
       const pr = vis.get(pi.pane), p = panes.get(pi.pane);
       const live = !!(pr && p); // on screen: prefer local state over the snapshot
@@ -819,51 +857,99 @@
       const a = byPane.get(pi.pane);
       if (a) { row.agent = a.agent; row.state = markerState(a); }
 
-      const li = document.createElement("li");
-      li.className = "pn" + (row.visible && row.focused ? " focused" : "") + (row.visible ? "" : " off");
       const wsID = row.pub.split(":")[0];
-      if (prevWs !== null && wsID !== prevWs) {
-        const sep = document.createElement("li");
-        sep.className = "wsbreak"; sep.setAttribute("aria-hidden", "true");
-        paneListEl.appendChild(sep);
-      }
-      prevWs = wsID;
-      // No focus marker glyph: li.focused's background says it, and a per-row
-      // gutter for a mark only one row ever carries indents the whole list.
-      const pub = document.createElement("span"); pub.className = "pub"; pub.textContent = paneRef(row.pub, row.pane);
-      li.appendChild(pub);
-      if (row.title) { const t = document.createElement("span"); t.className = "ttl"; t.textContent = row.title; li.appendChild(t); }
-      if (row.agent) {
-        const ag = document.createElement("span"); ag.className = "ag " + stClass(row.state); ag.textContent = row.agent;
-        li.appendChild(ag);
-      }
-      // A row can name a pane in another workspace or tab, which pane.focus cannot
-      // reach (it only moves the focus flag inside the current viewport), so those
-      // are revealed the way the agents list reveals its own: agent.focus.
-      li.addEventListener("click", () => {
-        if (dragConsumedClick) return;
-        if (!row.visible) sendCmd("agent.focus", { pane: row.pane });
-        else if (!row.focused) sendCmd("pane.focus", { pane: row.pane });
-      });
-      // The pane header's affordances, mirrored: double-click renames,
-      // right-click opens the pane menu, and dragging a row onto a pane on
-      // screen swaps the two (beginPaneSwapDrag hit-tests the live pane
-      // rects, so a sidebar origin works the same as a header origin). Swapping
-      // slots is an active-tab operation (Session.SwapPanes), so only on-screen
-      // rows arm the drag — an off-screen row has no slot to trade.
-      li.addEventListener("dblclick", () => renamePane(row.pane));
-      li.addEventListener("contextmenu", (e) => { e.preventDefault(); openCtx(e.clientX, e.clientY, paneMenuItems(row.pane)); });
-      if (row.visible) li.addEventListener("mousedown", (e) => beginPaneSwapDrag(e, row.pane));
-      // Reveal the untruncated pane details on hover. mousemove keeps the popup
-      // riding just right of the pointer; mouseleave tears it down. showPaneTip
-      // re-reads live pane state by id, so a re-render between enter and move
-      // still shows the current title/agent/state.
-      li.addEventListener("mouseenter", (e) => showPaneTip(e, row));
-      li.addEventListener("mousemove", (e) => showPaneTip(e, row));
-      li.addEventListener("mouseleave", hideTip);
-      paneListEl.appendChild(li);
+      if (!groups.length || groups[groups.length - 1].ws !== wsID) groups.push({ ws: wsID, rows: [] });
+      groups[groups.length - 1].rows.push(row);
     }
+
+    paneGroupIDs = groups.map((g) => g.ws);
+    groups.forEach((g, i) => {
+      paneListEl.appendChild(paneGroupEl(g, i > 0));
+      if (!paneCollapsed.has(g.ws)) for (const row of g.rows) paneListEl.appendChild(paneRowEl(row));
+    });
   }
+
+  // paneGroupEl builds one workspace's header row. Collapsed, it stands in for the
+  // rows it hides, so it reports what they would have said in aggregate: how many
+  // of the group's panes are running an agent, out of how many panes.
+  function paneGroupEl(g, sep) {
+    const collapsed = paneCollapsed.has(g.ws);
+    const li = document.createElement("li");
+    li.className = "wsgrp" + (sep ? " sep" : "");
+    const name = document.createElement("span");
+    name.textContent = wsName(g.ws) || "—";
+    li.appendChild(name);
+    if (collapsed) {
+      const agents = g.rows.filter((r) => r.agent).length;
+      const s = document.createElement("span");
+      s.className = "gsum";
+      const n = (c, w) => c + " " + w + (c === 1 ? "" : "s");
+      s.textContent = n(agents, "agent") + " / " + n(g.rows.length, "pane");
+      li.appendChild(s);
+    }
+    const car = document.createElement("span");
+    car.className = "car"; car.textContent = collapsed ? "▶" : "▼";
+    li.appendChild(car);
+    li.title = (collapsed ? "expand " : "collapse ") + (wsName(g.ws) || "workspace");
+    li.addEventListener("click", () => {
+      if (collapsed) paneCollapsed.delete(g.ws); else paneCollapsed.add(g.ws);
+      savePaneCollapsed();
+      renderPaneList();
+    });
+    return li;
+  }
+
+  function paneRowEl(row) {
+    const li = document.createElement("li");
+    li.className = "pn" + (row.visible && row.focused ? " focused" : "") + (row.visible ? "" : " off");
+    // No focus marker glyph: li.focused's background says it, and a per-row
+    // gutter for a mark only one row ever carries indents the whole list.
+    const pub = document.createElement("span"); pub.className = "pub"; pub.textContent = paneRef(row.pub, row.pane);
+    li.appendChild(pub);
+    if (row.title) { const t = document.createElement("span"); t.className = "ttl"; t.textContent = row.title; li.appendChild(t); }
+    if (row.agent) {
+      const ag = document.createElement("span"); ag.className = "ag " + stClass(row.state); ag.textContent = row.agent;
+      li.appendChild(ag);
+    }
+    // A row can name a pane in another workspace or tab, which pane.focus cannot
+    // reach (it only moves the focus flag inside the current viewport), so those
+    // are revealed the way the agents list reveals its own: agent.focus.
+    li.addEventListener("click", () => {
+      if (dragConsumedClick) return;
+      if (!row.visible) sendCmd("agent.focus", { pane: row.pane });
+      else if (!row.focused) sendCmd("pane.focus", { pane: row.pane });
+    });
+    // The pane header's affordances, mirrored: double-click renames,
+    // right-click opens the pane menu, and dragging a row onto a pane on
+    // screen swaps the two (beginPaneSwapDrag hit-tests the live pane
+    // rects, so a sidebar origin works the same as a header origin). Swapping
+    // slots is an active-tab operation (Session.SwapPanes), so only on-screen
+    // rows arm the drag — an off-screen row has no slot to trade.
+    li.addEventListener("dblclick", () => renamePane(row.pane));
+    li.addEventListener("contextmenu", (e) => { e.preventDefault(); openCtx(e.clientX, e.clientY, paneMenuItems(row.pane)); });
+    if (row.visible) li.addEventListener("mousedown", (e) => beginPaneSwapDrag(e, row.pane));
+    // Reveal the untruncated pane details on hover. mousemove keeps the popup
+    // riding just right of the pointer; mouseleave tears it down. showPaneTip
+    // re-reads live pane state by id, so a re-render between enter and move
+    // still shows the current title/agent/state.
+    li.addEventListener("mouseenter", (e) => showPaneTip(e, row));
+    li.addEventListener("mousemove", (e) => showPaneTip(e, row));
+    li.addEventListener("mouseleave", hideTip);
+    return li;
+  }
+
+  // The Panes heading's own controls: fold or unfold every workspace group at
+  // once. They act on the groups the last render drew, so a workspace that no
+  // longer has panes doesn't linger in the collapsed set.
+  (function initPaneHeadingCtl() {
+    const el = document.getElementById("pane-hctl");
+    el.appendChild(mkBtn("⊞", "expand all workspaces", "", () => {
+      paneCollapsed.clear(); savePaneCollapsed(); renderPaneList();
+    }));
+    el.appendChild(mkBtn("⊟", "collapse all workspaces", "", () => {
+      paneCollapsed = new Set(paneGroupIDs); savePaneCollapsed(); renderPaneList();
+    }));
+  })();
 
   // refreshPaneList redraws the section now from what the browser already knows,
   // then re-queries pane.list for the parts only the server has (off-screen
