@@ -125,19 +125,123 @@ catctl plugin install rohanthewiz/cats-todo
 catctl plugin run rohanthewiz.cats-todo
 ```
 
-### Plugins
+## Plugins
 
-The plugin host (`internal/plugin`) manages `~/.config/cats/plugins/`: a
-plugin is a directory with a `cats-plugin.toml` manifest (id, version,
-`[[build]]` steps, `[[actions]]` — the same shape as herdr's manifest; see
-[cats-todo's `cats-plugin.toml`](https://github.com/rohanthewiz/cats-todo/blob/main/cats-plugin.toml)
-for the reference) plus whatever its build
-produces. Installing and linking are offline; `run` launches an action in a
-fresh tab via `tab.create`'s spawn params, with the invoking directory as the
-pane's cwd and `CATS_PLUGIN_ID`/`CATS_PLUGIN_DIR` (plus every pane's
-`CATS_PANE_ID`/`CATS_CONTROL_SOCKET`) in its environment — the manifest never
-crosses the socket (the server's own `plugin.list` reads it host-side and
-answers with resolved argv).
+The plugin host (`internal/plugin`) manages `~/.config/cats/plugins/`.
+
+### Core principles
+
+Read these first — a plugin is much less machinery than the word suggests.
+
+1. **A plugin is a directory, not an API surface.** It holds a
+   `cats-plugin.toml` manifest plus whatever its build produces. The host's
+   whole job is directory management:
+   `~/.config/cats/plugins/<id>/` — a real directory (install) or a symlink
+   (link).
+2. **An action is just an argv.** There is no plugin runtime, no callback
+   registry, no lifecycle to implement. You declare a command; cats runs it.
+3. **The server never parses a manifest.** `catctl plugin run` (and the
+   server's own `plugin.list`) reads the manifest *host-side* and resolves it
+   to an argv, then launches it in a fresh tab via `tab.create`'s spawn
+   params. Nothing plugin-shaped crosses the wire, so the blast radius of a
+   bad manifest is one tab — never the server.
+4. **A plugin is an ordinary program in an ordinary pane.** It gets a real
+   PTY, so a TUI works. It is equally runnable by hand from any shell — which
+   is exactly how you should develop it.
+5. **Talking back to cats is optional, and is just the control socket.** Every
+   pane already exports `CATS_CONTROL_SOCKET`; a plugin drives cats with the
+   same §7 command table the browser and `catctl` use. A plugin that only
+   prints things needs no cats knowledge at all.
+6. **Any language works.** Go, a shell script, Python — if a `[[build]]` step
+   can produce it and a shell can exec it, it is a plugin.
+7. **No sandbox, by design.** A plugin is code you chose to install, built by
+   commands its own manifest names, run as you. Treat it like anything else
+   you build from source.
+
+### Writing a plugin
+
+Three steps: make a directory, write the manifest, link it.
+
+```
+~/dev/cats-hello/
+  cats-plugin.toml
+  hello.sh
+```
+
+`cats-plugin.toml` — the whole contract:
+
+```toml
+id          = "you.cats-hello"     # also the install directory name
+name        = "Hello cats"
+version     = "0.1.0"
+description = "Renames its own pane, then lists every pane cats knows about"
+platforms   = ["macos", "linux"]   # omit for "everywhere"; GOOS names also work
+
+# Run once in the plugin root at install/link time. Usually a `go build`.
+[[build]]
+command = ["chmod", "+x", "./hello.sh"]
+
+# Launchable entrypoints. Paths are relative to the plugin root.
+# The first action is the default for a bare `plugin run`.
+[[actions]]
+id      = "hello"
+title   = "Hello cats"
+command = ["./hello.sh"]
+```
+
+`hello.sh` — the plugin itself, using only what the pane environment hands it:
+
+```sh
+#!/bin/sh
+# Every cats pane exports CATS_PANE_ID and CATS_CONTROL_SOCKET.
+# A plugin pane also gets CATS_PLUGIN_ID and CATS_PLUGIN_DIR (find your own
+# assets there — no argv[0] games).
+catctl rename-pane "$CATS_PANE_ID" "hello from $CATS_PLUGIN_ID"
+echo "my files live in $CATS_PLUGIN_DIR"
+catctl panes
+read -r _   # hold the pane open so you can read it
+```
+
+Link it and run it:
+
+```bash
+catctl plugin link ~/dev/cats-hello     # symlink the checkout + run [[build]]
+catctl plugin list                      # confirm: id, version, actions
+catctl plugin run you.cats-hello        # launches in a fresh tab
+catctl plugin run you.cats-hello hello  # or name the action explicitly
+```
+
+Edit, then `catctl plugin link ~/dev/cats-hello` again (or **rebuild** in the
+plugins dialog) to re-run the build steps against your local edits.
+
+For anything beyond `catctl` shell-outs, speak the control protocol directly:
+one newline-framed JSON request in, one response out, over
+`$CATS_CONTROL_SOCKET` (`internal/ctlproto`; method names are the `app.Cmd*`
+values in `internal/app/command_vocab.go`, e.g. `pane.list`, `pane.send_input`,
+`tab.create`). [`cats-todo`](https://github.com/rohanthewiz/cats-todo) is the
+reference implementation of that client — its
+[`cats-plugin.toml`](https://github.com/rohanthewiz/cats-todo/blob/main/cats-plugin.toml)
+is the reference manifest, and it lives in its own repo precisely to prove the
+plugin path works from outside this tree.
+
+Manifest fields in full, plus the install/link/update mechanics, are in
+[`docs/subsystems/plugins.md`](docs/subsystems/plugins.md).
+
+### Installing and managing plugins
+
+Install, link, list, update and uninstall are **offline** — no running
+`catway` needed. Only `run` dials the control socket, and only to issue
+`tab.create`.
+
+```bash
+catctl plugin install rohanthewiz/cats-todo     # clone from GitHub + build
+catctl plugin install <git-url> --ref v0.1.0    # pin a branch or tag
+catctl plugin link ./cats-todo                  # dev mode: symlink a checkout
+catctl plugin update rohanthewiz.some-plugin    # fetch recorded source + rebuild
+catctl plugin list                              # ids, versions, actions
+catctl plugin run rohanthewiz.cats-todo         # launch in a new tab
+catctl plugin uninstall rohanthewiz.cats-todo
+```
 
 The web UI has the same surface: gear menu → **plugins** (also in the ⌘K
 palette) lists installed plugins with run / update / uninstall per row and an
@@ -157,16 +261,6 @@ shorthand and clones instead. Linked rows show their checkout path, and swap `up
 (which has no remote to pull from) for **rebuild**, a re-link that re-runs the
 manifest's build steps to pick up local edits; **unlink** removes only the
 link, never the checkout.
-
-```bash
-catctl plugin install rohanthewiz/cats-todo     # clone from GitHub + build
-catctl plugin install <git-url> --ref v0.1.0    # pin a branch or tag
-catctl plugin link ./cats-todo                  # dev mode: symlink a checkout
-catctl plugin update rohanthewiz.some-plugin    # fetch recorded source + rebuild
-catctl plugin list                              # ids, versions, actions
-catctl plugin run rohanthewiz.cats-todo         # launch in a new tab
-catctl plugin uninstall rohanthewiz.cats-todo
-```
 
 ## Layout
 
