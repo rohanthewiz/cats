@@ -473,3 +473,49 @@ func TestBrokenDevLink(t *testing.T) {
 		t.Fatalf("link after clearing broken link: %v", err)
 	}
 }
+
+// TestBuildStepSeesInvokingDirectory pins the contract runBuildStep exists for:
+// a build step runs in the plugin root but is told, via InstallCwdEnvVar, where
+// the user was standing when they ran the installer. A step that wants to set
+// something up in the user's project has no other way to find it.
+func TestBuildStepSeesInvokingDirectory(t *testing.T) {
+	testRoot(t)
+	// The build step records both directories so the test can tell them apart.
+	checkout := writePlugin(t, `
+id = "acme.cwd"
+name = "Cwd"
+version = "0.1.0"
+
+[[build]]
+command = ["sh", "-c", "printf '%s\n%s\n' \"$PWD\" \"$CATS_PLUGIN_INSTALL_CWD\" > .dirs"]
+
+[[actions]]
+id = "demo"
+title = "Demo"
+command = ["./bin/demo"]
+`)
+
+	if _, err := Link(checkout, nil); err != nil {
+		t.Fatalf("link: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(checkout, ".dirs"))
+	if err != nil {
+		t.Fatalf("build step did not run: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("build step recorded %q, want two directories", string(data))
+	}
+	stepCwd, invokedFrom := lines[0], lines[1]
+
+	realCheckout, _ := filepath.EvalSymlinks(checkout)
+	if got, _ := filepath.EvalSymlinks(stepCwd); got != realCheckout {
+		t.Errorf("build step ran in %s, want the plugin root %s", stepCwd, realCheckout)
+	}
+	wd, _ := os.Getwd()
+	realWd, _ := filepath.EvalSymlinks(wd)
+	if got, _ := filepath.EvalSymlinks(invokedFrom); got != realWd {
+		t.Errorf("%s = %s, want the host's working directory %s", InstallCwdEnvVar, invokedFrom, realWd)
+	}
+}

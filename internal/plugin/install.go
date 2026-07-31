@@ -8,6 +8,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/creack/pty"
 )
 
 // Install clones source (an "owner/repo" GitHub shorthand or a full git URL /
@@ -192,19 +194,72 @@ func expandTilde(path string) string {
 	return filepath.Join(home, path[2:])
 }
 
+// InstallCwdEnvVar names the directory the user ran the installer from, and is
+// exported to every [[build]] step.
+//
+// Build steps run with cmd.Dir set to the plugin root, which is right for
+// building but leaves a step unable to answer "which project is the user
+// actually working in?" — the plugin root is the only directory it can see.
+// The host process's own working directory is that answer (catctl inherits the
+// user's shell cwd), so it is passed down explicitly rather than left to a
+// step to guess. A step that does not care simply ignores it.
+const InstallCwdEnvVar = "CATS_PLUGIN_INSTALL_CWD"
+
 // runBuild executes the manifest's [[build]] steps in order, in the plugin
 // root, streaming output to out. Steps run with the host's environment — a
 // plugin build needs the same PATH/toolchain the user has.
 func runBuild(dir string, steps []BuildStep, out io.Writer) error {
 	for i, st := range steps {
-		if err := runStep(dir, st.Command, out); err != nil {
+		if err := runBuildStep(dir, st.Command, out); err != nil {
 			return fmt.Errorf("build step %d (%s): %w", i+1, strings.Join(st.Command, " "), err)
 		}
 	}
 	return nil
 }
 
-// runStep runs one argv in dir with output streamed to out.
+// runBuildStep runs one [[build]] argv. It is runStep plus the two things a
+// build step needs and a git invocation must not get:
+//
+//   - the invoking directory (InstallCwdEnvVar), so a step can offer to set
+//     something up in the user's project rather than in the plugin checkout.
+//   - the terminal, so a step may ask the user a question at install time —
+//     but only when the host actually has one. Inherited unconditionally, a
+//     step that reads stdin would hang a headless or scripted install forever
+//     instead of seeing the immediate EOF it gets today.
+//
+// git keeps the old no-stdin behavior deliberately: with a terminal attached,
+// a clone of a private repo would sit at a credential prompt inside what the
+// user experiences as "catctl is installing", rather than failing fast.
+func runBuildStep(dir string, argv []string, out io.Writer) error {
+	cmd := exec.Command(argv[0], argv[1:]...)
+	cmd.Dir = dir
+	if out != nil {
+		cmd.Stdout, cmd.Stderr = out, out
+	}
+	if wd, err := os.Getwd(); err == nil {
+		cmd.Env = append(os.Environ(), InstallCwdEnvVar+"="+wd)
+	}
+	if hostHasTerminal() {
+		cmd.Stdin = os.Stdin
+	}
+	return cmd.Run()
+}
+
+// hostHasTerminal reports whether this process's stdin is an interactive
+// terminal rather than a pipe, a file, or nothing.
+//
+// It asks the fd for its window size — a terminal-only ioctl — instead of
+// checking for a character device. The distinction matters here: /dev/null is a
+// character device, and it is precisely what stdin becomes when catctl itself
+// is run with stdin unset. Handing that to a build step as "a terminal" would
+// invite the step to prompt into something that answers instantly with EOF.
+func hostHasTerminal() bool {
+	_, _, err := pty.Getsize(os.Stdin)
+	return err == nil
+}
+
+// runStep runs one argv in dir with output streamed to out, with no stdin —
+// used for the host's own git invocations (see runBuildStep).
 func runStep(dir string, argv []string, out io.Writer) error {
 	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Dir = dir

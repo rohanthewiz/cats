@@ -178,6 +178,9 @@ description = "Renames its own pane, then lists every pane cats knows about"
 platforms   = ["macos", "linux"]   # omit for "everywhere"; GOOS names also work
 
 # Run once in the plugin root at install/link time. Usually a `go build`.
+# A step is told where the user invoked the installer from
+# ($CATS_PLUGIN_INSTALL_CWD) and inherits the terminal when there is one, so it
+# can offer first-run setup in their project — see docs/subsystems/plugins.md.
 [[build]]
 command = ["chmod", "+x", "./hello.sh"]
 

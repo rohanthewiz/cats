@@ -95,13 +95,35 @@ command = ["./bin/cats-todo"]
 | `id` | the directory name under the plugins root |
 | `platforms` | limits where the plugin installs |
 | `min_cats_version` | carried for forward compatibility but **not enforced** — cats has no single server version constant yet, and enforcing against the wrong number would be worse than not enforcing |
-| `[[build]]` | commands run in the plugin root at install/link time |
+| `[[build]]` | commands run in the plugin root at install/link time (see [Build step environment](#build-step-environment)) |
 | `[[actions]]` | launchable entrypoints; command paths are relative to the plugin root and resolved at launch |
 
 The shape matches herdr's `herdr-plugin.toml`, so a herdr plugin ports by renaming
 the file and swapping the id and command names. Herdr's `[[panes]]` table is
 deliberately absent: cats actions run their TUI directly in the tab that launches
 them, so a separate server-run pane entrypoint has no meaning.
+
+### Build step environment
+
+A build step runs in the plugin root with the host's environment, plus:
+
+| | |
+|-|-|
+| `CATS_PLUGIN_INSTALL_CWD` | the directory the user ran the installer *from* |
+| stdin | the host's terminal — **only** when the host has one |
+
+Both exist so a build step can do first-run setup in the user's project. The
+step's own working directory is the plugin root, so without
+`CATS_PLUGIN_INSTALL_CWD` a step cannot tell which project the user is in; and
+without stdin it cannot ask before touching it. cats-todo uses exactly this
+pair to offer, once, to create a project's committed backlog.
+
+Stdin is inherited conditionally on purpose: unconditionally, a step that reads
+stdin would hang a headless or scripted install forever rather than seeing the
+immediate EOF it would otherwise get. Design a step to work either way — check
+whether stdin is a terminal, and fall back to printing instructions. The host's
+own `git` calls keep the old no-stdin behavior, so a private-repo clone still
+fails fast instead of stalling at an invisible credential prompt.
 
 ## Writing a plugin
 
