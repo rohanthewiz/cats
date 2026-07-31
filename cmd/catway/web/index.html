@@ -767,16 +767,34 @@
     return st === "blocked" ? 4 : st === "done" ? 3 : st === "working" ? 2 : st === "idle" ? 1 : 0;
   }
 
+  // workspaceRollups buckets both of the lists a workspace row reads — the
+  // agents rollup and the pane inventory — by workspace, in one pass each.
+  // Asking per row instead cost O(workspaces × agents + workspaces × panes) on
+  // every render, and these lists are already grouped by workspace.
+  function workspaceRollups() {
+    const states = new Map(), todos = new Map();
+    for (const it of agentItems) {
+      let c = states.get(it.workspace);
+      if (!c) states.set(it.workspace, c = { blocked: 0, done: 0, working: 0, idle: 0 });
+      const st = markerState(it);
+      if (c[st] !== undefined) c[st]++;
+    }
+    for (const pi of paneInv) {
+      if (!pi.handle) continue;
+      const n = todoOpenCount(pi.title);
+      if (!n) continue;
+      const i = pi.handle.indexOf(":"); // "w1:p3" → "w1"
+      const ws = i < 0 ? pi.handle : pi.handle.slice(0, i);
+      todos.set(ws, (todos.get(ws) || 0) + n);
+    }
+    return { states, todos };
+  }
+
   // workspaceSummary compresses a workspace's detected-agent states into a
   // compact badge ("●1 ●2" colored by state), computed client-side from the
   // agents rollup — the server's per-item workspace field keys the grouping.
-  function workspaceSummary(wsId) {
-    const counts = { blocked: 0, done: 0, working: 0, idle: 0 };
-    for (const it of agentItems) {
-      if (it.workspace !== wsId) continue;
-      const st = markerState(it);
-      if (counts[st] !== undefined) counts[st]++;
-    }
+  function workspaceSummary(counts) {
+    if (!counts) return null;
     const frag = document.createDocumentFragment();
     for (const st of ["blocked", "done", "working", "idle"]) {
       if (!counts[st]) continue;
@@ -813,12 +831,7 @@
   // never sees a todo pane (the manager is a TUI, not an agent), and from its raw
   // title rather than the pane's live one — the live title is the *effective*
   // title, so a pane.rename would otherwise blank the count.
-  function todoMark(wsId) {
-    let n = 0;
-    for (const pi of paneInv) {
-      if (!pi.handle || pi.handle.split(":")[0] !== wsId) continue;
-      n += todoOpenCount(pi.title);
-    }
+  function todoMark(n) {
     if (!n) return null;
     const svg = document.createElementNS(SVGNS, "svg");
     svg.setAttribute("class", "todo");
@@ -847,15 +860,22 @@
   // tabMarker: the highest-attention agent state among a tab's panes, as a
   // colored dot on the tab (cats's bell/activity markers; the rollup's tab
   // field keys the grouping — tab bar rows are the active workspace's tabs).
-  function tabMarker(tabNum) {
+  //
+  // tabAttention does the grouping once for the whole bar, for the same reason
+  // workspaceRollups exists: per-tab scanning is O(tabs × agents) per render.
+  function tabAttention() {
+    const best = new Map();
     const aw = activeWorkspace();
-    if (!aw) return null;
-    let best = null;
+    if (!aw) return best;
     for (const it of agentItems) {
-      if (it.workspace !== aw.id || it.tab !== tabNum) continue;
+      if (it.workspace !== aw.id) continue;
       const st = markerState(it);
-      if (!best || attentionRank(st) > attentionRank(best)) best = st;
+      const cur = best.get(it.tab);
+      if (cur === undefined || attentionRank(st) > attentionRank(cur)) best.set(it.tab, st);
     }
+    return best;
+  }
+  function tabMarker(best) {
     if (!best || best === "idle" || best === "unknown") return null;
     const s = document.createElement("span");
     s.className = "tmark " + stClass(best);
@@ -866,6 +886,7 @@
 
   function renderWorkspaces(msg) {
     wsListEl.innerHTML = "";
+    const { states, todos } = workspaceRollups();
     for (const w of msg.workspaces) {
       const li = document.createElement("li");
       li.className = "ws" + (w.active ? " active" : "");
@@ -874,9 +895,9 @@
       li.appendChild(name);
       // The todo mark sits with the name — it says something about the project,
       // not about a pane — while the agent counts stay pinned to the right edge.
-      const todo = todoMark(w.id);
+      const todo = todoMark(todos.get(w.id) || 0);
       if (todo) li.appendChild(todo);
-      const sum = workspaceSummary(w.id);
+      const sum = workspaceSummary(states.get(w.id));
       if (sum) {
         const s = document.createElement("span"); s.className = "sum"; s.appendChild(sum);
         li.appendChild(s);
@@ -1062,7 +1083,20 @@
 
   // The two views the pane inventory feeds: the Panes section, and the todo marks
   // on the Workspaces rows above it.
+  //
+  // Coalesced to one frame, because the callers arrive in bursts. Switching tab
+  // lands a layout, an agents rollup, and then pane_title/pane_agent/pane_exited
+  // for every pane that just came into view — each of which asks for these views.
+  // Both are full wipe-and-rebuilds over the whole session's inventory, so
+  // rebuilding per message made a switch cost O(panes in tab × panes in session)
+  // to paint the last one anyway. The 120ms query debounce below never covered
+  // this; it guards only the round trip.
+  let invFrame = 0;
   function renderInventoryViews() {
+    if (invFrame) return;
+    invFrame = requestAnimationFrame(() => { invFrame = 0; renderInventoryViewsNow(); });
+  }
+  function renderInventoryViewsNow() {
     renderPaneList();
     if (layoutMsg) renderWorkspaces(layoutMsg);
   }
@@ -1151,6 +1185,7 @@
 
   function renderTabbar(msg) {
     tabbarEl.innerHTML = "";
+    const attention = tabAttention();
     for (const t of msg.tabs) {
       const el = document.createElement("div");
       el.className = "tab" + (t.active ? " active" : "");
@@ -1158,7 +1193,7 @@
       label.className = "tname";
       label.textContent = t.name + (t.zoomed ? " ⤢" : "");
       el.appendChild(label);
-      const mark = tabMarker(t.num);
+      const mark = tabMarker(attention.get(t.num));
       if (mark) el.appendChild(mark);
       el.addEventListener("click", () => { if (!dragConsumedClick && !t.active) sendCmd("tab.focus", { num: t.num }); });
       el.addEventListener("dblclick", () => renameTab(t));
@@ -1861,27 +1896,6 @@
       p.pressed = ev.button;
       sendMouse(p, "d", ev.button, ev);
     });
-    window.addEventListener("mouseup", (ev) => {
-      // Same guard: this listener is on the window, so every release anywhere in
-      // the app reaches every pane. Without !done, a lingering copied wash would
-      // re-read and re-copy itself on the next click made anywhere.
-      if (p.sel && !p.sel.done) {
-        const sel = p.sel;
-        if (sel.moved) {
-          finishSelection(p);            // a real drag → read + copy, keep the wash
-        } else {
-          p.sel = null;                  // a click → follow a hyperlink under it
-          scheduleDraw(p);
-          const c = p.cells[sel.anchor.y * p.W + sel.anchor.x];
-          if (c && c.h && p.links[c.h - 1]) window.open(p.links[c.h - 1], "_blank", "noopener");
-        }
-        return;
-      }
-      if (p.pressed < 0 || ev.button !== p.pressed) return;
-      const btn = p.pressed;
-      p.pressed = -1;
-      if (p.modes.mouse) sendMouse(p, "u", btn, ev);
-    });
     p.canvas.addEventListener("mousemove", (ev) => {
       // A copied drag keeps its wash on screen (p.sel.done) until a keystroke
       // clears it — but it is finished, so the pointer must not go on extending
@@ -1918,6 +1932,38 @@
       if (!p.modes.mouse) openCtx(ev.clientX, ev.clientY, paneMenuItems(p.id, true));
     });
   }
+
+  // Release is watched on the window, not the canvas: a drag that ends outside
+  // the pane still has to finish its selection, and a mouse-capturing app still
+  // has to see the button go up.
+  //
+  // One listener for all panes, iterating the live map. Per-pane registration
+  // leaked: applyLayout tears every pane down on each tab switch (the layout
+  // carries the active tab only) and an element removal does not unregister a
+  // window listener, so dead panes kept firing here — and kept their cell grids
+  // alive — for the life of the page.
+  window.addEventListener("mouseup", (ev) => {
+    for (const p of panes.values()) {
+      // Without !done, a lingering copied wash would re-read and re-copy itself
+      // on the next click made anywhere.
+      if (p.sel && !p.sel.done) {
+        const sel = p.sel;
+        if (sel.moved) {
+          finishSelection(p);            // a real drag → read + copy, keep the wash
+        } else {
+          p.sel = null;                  // a click → follow a hyperlink under it
+          scheduleDraw(p);
+          const c = p.cells[sel.anchor.y * p.W + sel.anchor.x];
+          if (c && c.h && p.links[c.h - 1]) window.open(p.links[c.h - 1], "_blank", "noopener");
+        }
+        continue;
+      }
+      if (p.pressed < 0 || ev.button !== p.pressed) continue;
+      const btn = p.pressed;
+      p.pressed = -1;
+      if (p.modes.mouse) sendMouse(p, "u", btn, ev);
+    }
+  });
 
   // ---- Overlay + modal infrastructure (WS8) ----
   //
