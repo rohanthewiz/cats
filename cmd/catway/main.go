@@ -227,6 +227,7 @@ func main() {
 		go o.runHistoryCapture() // periodic scrollback sweep for cold-restore seeds
 	}
 	go o.runAgentModels() // periodic re-read of each agent pane's current model
+	go o.runUsage()       // periodic re-read of the account's rate-limit windows
 
 	// TLS: operator PEMs, or an auto-generated self-signed pair.
 	tlsOn := eff.TLS.Enabled || eff.TLS.Cert != "" || eff.TLS.Key != ""

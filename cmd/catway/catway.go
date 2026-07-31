@@ -135,6 +135,11 @@ type orch struct {
 	// construction; "" disables model resolution (and lets tests point it at a
 	// fixture tree).
 	claudeProjects string
+	// usage is the account's last-read rate-limit standing (usage.go), nil
+	// until the first poll lands. Held so a browser connecting between polls is
+	// sent the current numbers rather than an empty section for up to two
+	// minutes; setUsage dedupes against it.
+	usage *browserproto.Usage
 	// lastTitle is the app-level browser-tab title last broadcast (WS8):
 	// broadcastTitle dedupes against it so focus/title churn doesn't spam every
 	// connection with identical title messages.
@@ -1388,6 +1393,9 @@ func (o *orch) registerConn(c *client, init *browserproto.Init) {
 		o.daemon.send(orchestration.NewRequestResync(pid))
 	}
 	o.send(c, o.agentsMsg())
+	if o.usage != nil {
+		o.send(c, *o.usage)
+	}
 	o.send(c, browserproto.NewTitle(o.appTitle()))
 	if !o.daemon.connected() {
 		o.send(c, browserproto.NewError(0, "cathost daemon not connected — retrying"))

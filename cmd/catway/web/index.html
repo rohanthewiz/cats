@@ -93,6 +93,34 @@
   #sidebar ul { list-style:none; margin:0; padding:0; }
   #sidebar li { font-size:calc(12px * var(--sb-scale)); padding:4px 8px; border-radius:4px; white-space:nowrap;
     overflow:hidden; text-overflow:ellipsis; cursor:default; display:flex; align-items:baseline; gap:6px; }
+  /* Usage rows stack a label line over a meter, so the row is two lines tall
+     rather than the one line every other sidebar row is. */
+  #usage-list li { display:block; padding:3px 8px 5px; cursor:default; }
+  #usage-list li:hover { background:none; }
+  #usage-list li.empty { color:var(--muted); font-style:italic; }
+  #usage-list .urow { display:flex; align-items:baseline; gap:6px; }
+  #usage-list .uname { color:var(--fg-strong); }
+  /* The reading sits hard right against the window name, and is the one thing
+     in the row worth reading at a glance when the bar is only a hint. */
+  #usage-list .uval { margin-left:auto; color:var(--muted); font-variant-numeric:tabular-nums; }
+  #usage-list li.high .uval { color:var(--warn); }
+  #usage-list li.crit .uval { color:var(--err); }
+  #usage-list .ureset { color:var(--muted); font-size:calc(9px * var(--sb-scale)); opacity:.8; }
+  #usage-list .umeter { margin-top:3px; height:4px; border-radius:2px; background:var(--panel2);
+                        overflow:hidden; }
+  #usage-list .umeter > i { display:block; height:100%; width:0; background:var(--accent);
+                            border-radius:2px; transition:width .4s ease; }
+  #usage-list li.high .umeter > i { background:var(--warn); }
+  #usage-list li.crit .umeter > i { background:var(--err); }
+  /* A local estimate has a token count but no allowance to measure it against,
+     so there is no bar to fill — the track is dropped rather than drawn empty,
+     which would read as "0% used". */
+  #usage-list li.unknown .umeter { display:none; }
+  #usage-list .unote { color:var(--muted); font-size:calc(9px * var(--sb-scale));
+                       font-style:italic; padding:1px 8px 3px; }
+  @media (prefers-reduced-motion: reduce) {
+    #usage-list .umeter > i { transition:none; }
+  }
   #ws-list { position:relative; }
   #ws-list li.ws { cursor:pointer; }
   #ws-list li.ws:hover { background:var(--panel2); }
@@ -406,6 +434,7 @@
 <div id="app">
   <aside id="sidebar">
     <div id="brand">cats</div>
+    <section><h2>Usage</h2><ul id="usage-list"><li class="empty">…</li></ul></section>
     <section><h2>Workspaces</h2><ul id="ws-list"></ul></section>
     <section><h2>Panes<span class="hctl" id="pane-hctl"></span></h2><ul id="pane-list"></ul></section>
     <section><h2>Agents</h2><ul id="agent-list"><li class="empty">none</li></ul></section>
@@ -441,6 +470,7 @@
   const wsListEl = document.getElementById("ws-list");
   const paneListEl = document.getElementById("pane-list");
   const agentListEl = document.getElementById("agent-list");
+  const usageListEl = document.getElementById("usage-list");
   const tabbarEl = document.getElementById("tabbar");
   const toastsEl = document.getElementById("toasts");
   const palHintEl = document.getElementById("palhint");
@@ -1400,6 +1430,95 @@
     window.addEventListener("mouseup", up);
   }
 
+  // ---- Usage: the account's standing against Claude's rate-limit windows ----
+
+  // The server polls every couple of minutes and pushes only on a change, so
+  // the reset countdowns it stamped would sit frozen in between — same problem
+  // the agent-age labels have, and the same fix: keep the absolute instant on
+  // the element and re-render the label on a tick of our own.
+  let usageMsg = null;
+
+  // Coarse time-to-reset, one unit deep, in the same register as fmtAge.
+  function fmtUntil(ms) {
+    const s = Math.round(ms / 1000);
+    if (s <= 0) return "resetting";
+    if (s < 60) return "resets in " + s + "s";
+    const m = Math.round(s / 60);
+    if (m < 60) return "resets in " + m + "m";
+    const h = Math.round(m / 60);
+    return h < 24 ? "resets in " + h + "h" : "resets in " + Math.round(h / 24) + "d";
+  }
+
+  function renderUsage(msg) {
+    usageMsg = msg || null;
+    usageListEl.innerHTML = "";
+    if (!usageMsg) {
+      const li = document.createElement("li");
+      li.className = "empty"; li.textContent = "…";
+      usageListEl.appendChild(li); return;
+    }
+    usageListEl.appendChild(usageRow("5 hr", usageMsg.five_hour));
+    usageListEl.appendChild(usageRow("Week", usageMsg.weekly));
+    // Only the fallback explains itself. An account reading is the expected
+    // case and needs no caption; an estimate has to say that it is one, and
+    // why the real numbers were not available.
+    if (usageMsg.source === "local") {
+      const li = document.createElement("li");
+      li.className = "unote";
+      li.textContent = usageMsg.err ? "estimate · " + usageMsg.err : "local estimate";
+      usageListEl.appendChild(li);
+    }
+  }
+
+  function usageRow(name, w) {
+    w = w || {};
+    const li = document.createElement("li");
+    // pct < 0 is "no denominator" — the local estimate counts tokens but has
+    // nothing to measure them against, so the row shows the count and the CSS
+    // drops the meter rather than drawing an empty one.
+    const pct = typeof w.pct === "number" ? w.pct : -1;
+    const known = pct >= 0;
+    if (!known) li.classList.add("unknown");
+    else if (pct >= 90) li.classList.add("crit");
+    else if (pct >= 75) li.classList.add("high");
+
+    const row = document.createElement("div"); row.className = "urow";
+    const nm = document.createElement("span"); nm.className = "uname"; nm.textContent = name;
+    row.appendChild(nm);
+
+    const at = w.resets_at ? Date.parse(w.resets_at) : NaN;
+    if (!Number.isNaN(at)) {
+      const r = document.createElement("span"); r.className = "ureset";
+      r.dataset.at = String(at); // absolute: the push won't come again until the number moves
+      r.textContent = fmtUntil(at - Date.now());
+      row.appendChild(r);
+    }
+
+    const val = document.createElement("span"); val.className = "uval";
+    val.textContent = known ? Math.round(pct) + "%" : (w.detail || "—");
+    row.appendChild(val);
+    li.appendChild(row);
+
+    const meter = document.createElement("div"); meter.className = "umeter";
+    const fill = document.createElement("i");
+    fill.style.width = known ? Math.min(100, Math.max(0, pct)) + "%" : "0";
+    meter.appendChild(fill);
+    li.appendChild(meter);
+
+    li.title = known
+      ? name + ": " + pct.toFixed(1) + "% of the window used"
+      : name + ": " + (w.detail || "unknown") + " (local estimate — no limit to measure against)";
+    return li;
+  }
+
+  // The countdown is the only part that moves between pushes, so the tick
+  // rewrites those labels alone rather than re-rendering the rows.
+  setInterval(() => {
+    for (const el of usageListEl.querySelectorAll(".ureset")) {
+      el.textContent = fmtUntil(Number(el.dataset.at) - Date.now());
+    }
+  }, 30000);
+
   // ---- Agents rollup (WS8): the `agents` message, previously dropped ----
 
   // Coarse age of a state, one unit deep — the row is a glance, not a stopwatch.
@@ -1609,6 +1728,7 @@
       }
       case "pane_exited": { const p = pane(msg.pane); p.exited = msg.code; renderChrome(p); refreshPaneList(); break; }
       case "agents": renderAgents(msg.items); break;
+      case "usage": renderUsage(msg); break;
       case "clipboard": // OSC 52 write from a pane app — no user activation
         try { clipWrite(b64decode(msg.data)).catch(() => {}); } catch (e) {}
         break;

@@ -298,6 +298,47 @@ func NewTheme(name string, colors map[string]string, font string) Theme {
 	return Theme{T: MsgTheme, Name: name, Colors: colors, Font: font}
 }
 
+// Usage is the account's standing against Claude's rate-limit windows — the
+// same two numbers claude's own /usage screen shows, surfaced in the sidebar so
+// "how much of the week have I spent?" is answerable without leaving the pane
+// you are working in.
+//
+// Source names where the numbers came from, because the two answers are not the
+// same kind of answer: "account" is the authoritative per-window utilization
+// read from the account itself, "local" is the fallback estimate summed from
+// claude's transcripts on this machine. A local estimate knows how many tokens
+// were spent but not what they were spent against, so it carries no percentage
+// (see UsageWindow.Pct) — the sidebar renders it as a figure rather than a bar,
+// which is the honest rendering of a number with no denominator.
+//
+// Err is a short reason the account read failed, shown beside whatever the
+// fallback managed. It never carries the credential or the raw response.
+type Usage struct {
+	T        Type        `json:"t"`
+	Source   string      `json:"source"` // "account" | "local"
+	FiveHour UsageWindow `json:"five_hour"`
+	Weekly   UsageWindow `json:"weekly"`
+	Err      string      `json:"err,omitempty"`
+}
+
+// UsageWindow is one rate-limit window. Pct is the share of the window's
+// allowance already spent (0–100), or -1 when there is no denominator to divide
+// by — the local fallback fills Detail instead and leaves Pct at -1, so a
+// missing number reads as missing rather than as zero. ResetsAt is when the
+// window rolls over (RFC 3339), "" when unknown.
+type UsageWindow struct {
+	Pct      float64 `json:"pct"`
+	ResetsAt string  `json:"resets_at,omitempty"`
+	Detail   string  `json:"detail,omitempty"`
+}
+
+// UsagePctUnknown is UsageWindow.Pct's "no denominator" value.
+const UsagePctUnknown = -1
+
+func NewUsage(source string, fiveHour, weekly UsageWindow, errMsg string) Usage {
+	return Usage{T: MsgUsage, Source: source, FiveHour: fiveHour, Weekly: weekly, Err: errMsg}
+}
+
 // UpdateReady announces an available self-update; chrome shows a banner.
 type UpdateReady struct {
 	T       Type   `json:"t"`

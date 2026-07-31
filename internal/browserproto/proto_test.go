@@ -66,6 +66,15 @@ func TestRoundTrip(t *testing.T) {
 		{"error", NewError(pane, "pane gone"), DecodeDown},
 		{"shutdown", NewShutdown(), DecodeDown},
 		{"update_ready", NewUpdateReady("1.2.3", "brew upgrade cats"), DecodeDown},
+		{"usage", NewUsage("account",
+			UsageWindow{Pct: 11, ResetsAt: "2026-07-31T23:10:00.655263+00:00"},
+			UsageWindow{Pct: 19, ResetsAt: "2026-08-05T21:00:00Z"}, ""), DecodeDown},
+		// The fallback's shape: no percentage, a token figure instead, and the
+		// reason the account read was unavailable riding along.
+		{"usage_local", NewUsage("local",
+			UsageWindow{Pct: UsagePctUnknown, Detail: "1.2M tok"},
+			UsageWindow{Pct: UsagePctUnknown, Detail: "14.8M tok"},
+			"no claude credential"), DecodeDown},
 		{"cmd_result", mustCmdResult(t, "42", true, "", ReadResult{Text: "hello\n"}), DecodeDown},
 
 		// Up.
