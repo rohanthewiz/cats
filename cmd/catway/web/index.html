@@ -128,11 +128,19 @@
   #ws-list li .sum { color:var(--muted); font-size:calc(10px * var(--sb-scale)); margin-left:auto; }
   #ws-list li .sum span { margin-left:4px; }
   /* The finger-with-a-string a workspace wears while its cats-todo backlog has
-     unfinished items in it.
+     unfinished items in it, with how many are left set as a superscript beside
+     it — the finger says there is something to remember, the number says how
+     much. The two are one mark, so they share a wrapper and skip the row's 6px
+     gap; the wrapper aligns its children at the top, which is what puts the
+     count up at the fingertip.
      It rides the text baseline like the glyphs around it, and takes --todo so
      it reads as a reminder rather than as another agent-state dot. */
-  #ws-list li .todo { flex:0 0 auto; color:var(--todo); align-self:center;
-    width:calc(14px * var(--sb-scale)); height:calc(14px * var(--sb-scale)); margin-left:-2px; }
+  #ws-list li .todo-mark { flex:0 0 auto; align-self:center; color:var(--todo);
+    display:inline-flex; align-items:flex-start; }
+  #ws-list li .todo { width:calc(14px * var(--sb-scale)); height:calc(14px * var(--sb-scale));
+    margin-left:-2px; }
+  #ws-list li .todo-n { font-size:calc(8px * var(--sb-scale)); line-height:1; font-weight:600;
+    margin-left:-1px; }
   #ws-list li.add { color:var(--muted); font-style:italic; cursor:pointer; }
   #ws-list li.add:hover { color:var(--accent); background:none; }
   #pane-list li, #agent-list li { cursor:pointer; }
@@ -919,8 +927,9 @@
 
   // todoMark: a finger with a string tied around it, worn by a workspace whose
   // cats-todo backlog still has unfinished items in it — the string is there
-  // because something was left to remember. A manager sitting open on a cleared
-  // backlog earns nothing: a mark every workspace wears all day is decoration.
+  // because something was left to remember — carrying the count of what is left
+  // as a superscript. A manager sitting open on a cleared backlog earns nothing:
+  // a mark every workspace wears all day is decoration.
   //
   // Counts come from the pane inventory rather than the agents rollup, which
   // never sees a todo pane (the manager is a TUI, not an agent), and from its raw
@@ -946,10 +955,15 @@
       path.setAttribute("d", d);
       svg.appendChild(path);
     }
-    const t = document.createElementNS(SVGNS, "title");
-    t.textContent = n === 1 ? "1 unfinished todo" : n + " unfinished todos";
-    svg.appendChild(t);
-    return svg;
+    const wrap = document.createElement("span");
+    wrap.className = "todo-mark";
+    wrap.title = n === 1 ? "1 unfinished todo" : n + " unfinished todos";
+    wrap.appendChild(svg);
+    const sup = document.createElement("sup");
+    sup.className = "todo-n";
+    sup.textContent = String(n);
+    wrap.appendChild(sup);
+    return wrap;
   }
 
   // tabMarker: the highest-attention agent state among a tab's panes, as a
