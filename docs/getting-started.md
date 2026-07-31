@@ -92,7 +92,7 @@ Worth doing first — it saves looking up pane ids by hand, since the completer
 asks the running server for them:
 
 ```bash
-echo 'eval "$(catctl completion zsh)"' >> ~/.zshrc    # after compinit
+echo 'eval "$(catctl completion zsh)"' >> ~/.zshrc
 ```
 
 Bash and fish are supported too, and installed plugins get completion for their

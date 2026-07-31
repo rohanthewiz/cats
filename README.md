@@ -111,7 +111,7 @@ Shell completion covers all of it — and reaches into the live session, so
 `catctl focus <TAB>` offers real pane ids labelled with their agent or title:
 
 ```bash
-eval "$(catctl completion zsh)"       # ~/.zshrc, after compinit; also bash / fish
+eval "$(catctl completion zsh)"       # ~/.zshrc, anywhere; also bash / fish
 ```
 
 Plugins are completed too: installed ids and their actions, plus any command a

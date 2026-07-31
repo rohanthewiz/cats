@@ -178,7 +178,7 @@ script from your shell's rc file:
 
 ```bash
 echo 'eval "$(catctl completion bash)"' >> ~/.bashrc
-echo 'eval "$(catctl completion zsh)"'  >> ~/.zshrc    # after compinit
+echo 'eval "$(catctl completion zsh)"'  >> ~/.zshrc
 catctl completion fish > ~/.config/fish/completions/catctl.fish
 ```
 

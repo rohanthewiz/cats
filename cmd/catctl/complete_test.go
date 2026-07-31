@@ -301,6 +301,21 @@ command = ["./bin/demo", "__complete"]
 			t.Errorf("%s: registration function name not folded, got:\n%s", tc.name, s)
 		}
 	}
+
+	// zsh only: compdef does not exist until compinit has run, and plenty of
+	// .zshrc files never run it. Every registration must go through
+	// __cats_register, which either calls compdef or queues for the flush —
+	// a bare top-level compdef is the "command not found" at every prompt.
+	s := script(zshBody, zshRegister)
+	for line := range strings.SplitSeq(s, "\n") {
+		if strings.HasPrefix(line, "compdef ") {
+			t.Errorf("zsh: unguarded top-level %q; register via __cats_register", line)
+		}
+	}
+	if !strings.Contains(s, "__cats_register _catctl catctl") ||
+		!strings.Contains(s, "__cats_register _catctl_for_demo_tool demo-tool") {
+		t.Errorf("zsh: registrations do not go through __cats_register, got:\n%s", s)
+	}
 }
 
 // A completer that says too much cannot flood the shell.
