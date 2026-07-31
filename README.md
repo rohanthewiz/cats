@@ -13,6 +13,53 @@ Three binaries make up the app:
 | `cathost` | Terminal backend daemon: owns PTYs + VT emulation (libghostty-vt) per pane; run `-persistent` so shells survive catway restarts |
 | `catctl` | CLI client for the control API — the same command table the browser uses — plus offline agent-integration installers |
 
+## Getting started
+
+Go 1.26+ and `git` are the only prerequisites — the VT engine is vendored, and
+building it downloads a pinned Zig into `.tools/` (gitignored, no system
+changes).
+
+```bash
+make vt          # one-time: build the vendored libghostty-vt
+make local       # catway + cathost + catctl into ~/bin (keep it on your PATH)
+```
+
+Then either run the binaries by hand:
+
+```bash
+cathost -socket /tmp/cats-cathost.sock -persistent &   # terminal backend
+CATS_PASSWORD=changeme catway --addr :8421             # the cats server
+# open http://localhost:8421 and sign in
+```
+
+…or run it as a self-contained Mac app, which supervises its own `cathost` and
+`catway` on a private socket and shows their UI in a WebKit window:
+
+```bash
+make macapp        # builds dist/Cats.app and installs it to /Applications
+open -a Cats
+```
+
+Two things worth doing on day one:
+
+```bash
+echo 'eval "$(catctl completion zsh)"' >> ~/.zshrc   # completion knows live pane ids
+catctl integration install claude                    # richer agent state via hooks
+```
+
+**Install the [`cats-todo`](https://github.com/rohanthewiz/cats-todo) plugin**
+— it is the recommended companion, and the reference plugin. Keep a backlog of
+prompts per-project or globally, then *drop* one into a Claude Code session,
+either an existing agent pane or a fresh tab that launches the agent for you:
+
+```bash
+catctl plugin install rohanthewiz/cats-todo
+catctl plugin run rohanthewiz.cats-todo
+```
+
+Fuller walkthrough in [Getting started](docs/getting-started.md); more on
+`cats-todo` [below](#cats-todo--prompt-backlog).
+
 ## Documentation
 
 Full docs live in [`docs/`](docs/) as an mkdocs-style site (`mkdocs.yml` at the
