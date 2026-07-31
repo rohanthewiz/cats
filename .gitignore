@@ -5,9 +5,11 @@
 *.out
 
 # Built command binaries (produced by `go build` in cmd/*)
+/catway
 /catway2
 /catctl
 /cathost
+/cmd/catway/catway
 /cmd/catway2/catway2
 /cmd/catctl/catctl
 /cmd/cathost/cathost
