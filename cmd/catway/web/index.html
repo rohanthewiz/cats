@@ -2086,12 +2086,16 @@
   // a round trip happens only when the directory being completed *inside*
   // changes — worth caring about when the browser is a WAN away from the server.
   //
-  // Two modes, following cdx: with no "/" typed yet the fragment matches recents
-  // and the anchor directory's children together; once a path is under way it
-  // completes inside the named directory, prefix matches first. The selection
-  // starts on the best match while a fragment is being completed, and on
-  // *nothing* when the text already names a directory (a trailing "/", or an
-  // untouched prefill) — there, what the user typed is the answer.
+  // Three modes. An untouched prefill (see pristine) is not a fragment at all:
+  // the field already names a directory, so the drop-down opens on the recents
+  // plus that directory's own children — the history is one arrow key away, with
+  // nothing to type and nothing to backspace. Once the user takes the field over,
+  // it follows cdx: with no "/" typed yet the fragment matches recents and the
+  // anchor directory's children together; once a path is under way it completes
+  // inside the named directory, prefix matches first. The selection starts on the
+  // best match while a fragment is being completed, and on *nothing* when the
+  // text already names a directory (a trailing "/", or that untouched prefill) —
+  // there, what the field already says is the answer.
   function attachPathPicker(input, wrap) {
     const listEl = document.createElement("div");
     listEl.className = "picker";
@@ -2103,6 +2107,13 @@
     const cache = new Map(); // typed base ("" | "~/projs/" | "/usr/") -> path.list result
     const inflight = new Set();
     let rows = [], sel = -1;
+    // A prefilled field arrives naming a directory the user never typed, so its
+    // text is not a fragment being completed — it is where they already are.
+    // While it stays untouched the picker lists *inside* it and offers the
+    // recents alongside, which is the whole point of a drop-down: somewhere else
+    // to go, visible the moment the dialog opens, with nothing to type and
+    // nothing to backspace first.
+    let pristine = !!input.value.trim();
 
     const shortHome = (p) => (home && (p === home ? "~" : (p.startsWith(home + "/") ? "~" + p.slice(home.length) : p))) || p;
     const joinPath = (dir, name) => (dir.endsWith("/") ? dir + name : dir + "/" + name);
@@ -2111,6 +2122,7 @@
     // its trailing slash) and the fragment being completed. A "" base is "no
     // separator yet" — the anchor directory, matched fuzzily.
     function splitBase(text) {
+      if (pristine) return [text.replace(/\/+$/, "") + "/", ""]; // all base, no fragment
       if (text === "~" || text === "." || text === "..") return [text + "/", ""];
       const i = text.lastIndexOf("/");
       return i < 0 ? ["", text] : [text.slice(0, i + 1), text.slice(i + 1)];
@@ -2148,7 +2160,7 @@
       const dirs = (d.dirs || []).filter((n) => frag.startsWith(".") || !n.startsWith("."));
       const dirRow = (n) => ({ kind: "dir", label: n + "/", path: joinPath(d.dir, n) });
 
-      if (base) { // completing inside a named directory
+      if (base && !pristine) { // completing inside a named directory
         const lf = frag.toLowerCase();
         let names = dirs.filter((n) => n.toLowerCase().startsWith(lf));
         if (!names.length && frag) names = fuzzyRank(frag, dirs, (n) => n);
@@ -2219,6 +2231,7 @@
     // dialog finally submits can never depend on which directory a relative path
     // would have been resolved against.
     function drill(r) {
+      pristine = false; // the field is theirs now, not the prefill's
       input.value = shortHome(r.path) + "/";
       render();
     }
@@ -2229,7 +2242,7 @@
       render(true);
     }
 
-    input.addEventListener("input", () => render());
+    input.addEventListener("input", () => { pristine = false; render(); });
     input.addEventListener("focus", () => { wrap.classList.add("focus"); render(); });
     input.addEventListener("blur", () => wrap.classList.remove("focus"));
 
