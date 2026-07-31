@@ -81,7 +81,11 @@ is the side-by-side comparison.
   tokens for headless clients and optional TLS —
   [Auth and TLS](subsystems/auth-and-tls.md).
 * **Plugins** installed from GitHub or linked from a local checkout, launched
-  into a fresh tab — [Plugins](subsystems/plugins.md).
+  into a fresh tab — [Plugins](subsystems/plugins.md). Start with
+  [`cats-todo`](https://github.com/rohanthewiz/cats-todo), the recommended
+  companion: a prompt backlog you can *drop* into a Claude Code session, and the
+  reference implementation of a plugin —
+  `catctl plugin install rohanthewiz/cats-todo`.
 * **Configuration** in YAML with live-reloadable theme and keybindings —
   [Configuration](reference/configuration.md).
 
