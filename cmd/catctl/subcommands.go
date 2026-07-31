@@ -25,10 +25,30 @@ import (
 type subcommand struct {
 	verb     string
 	method   string
-	synopsis string // argument shape, e.g. "split [h|v] [pane]"
-	summary  string // one-line description for help
+	synopsis string    // argument shape, e.g. "split [h|v] [pane]"
+	args     []argKind // what each positional slot completes (complete.go); nil = nothing to offer
+	summary  string    // one-line description for help
 	build    func(args []string) (json.RawMessage, error)
 }
+
+// argKind names the candidate source for one positional slot, so shell
+// completion can offer live pane ids where the synopsis says <pane>. It sits
+// beside synopsis deliberately: the two describe the same argument list, and an
+// author who edits one has the other in view. Slots past the end of args — a
+// variadic <name...> or <text...> tail, a number, a free-text pattern — offer
+// nothing, which is also argNone's meaning.
+type argKind int
+
+const (
+	argNone      argKind = iota // no candidates (free text, numbers)
+	argPane                     // live pane ids, from pane.list
+	argTab                      // live tab numbers, from tab.list
+	argWorkspace                // live workspace ids, from workspace.list
+	argDirection                // left|right|up|down
+	argSplitDir                 // h|v
+	argCycleDir                 // next|prev
+	argTheme                    // installed theme names, from theme.list
+)
 
 // usageErr reports malformed subcommand arguments; its message is the verb's
 // synopsis so the CLI can point the user at the right shape.
@@ -40,52 +60,62 @@ func (e usageErr) Error() string { return "usage: catctl " + e.synopsis }
 // Grouped queries → pane → tab → workspace → misc, mirroring §7.
 var subcommands = []subcommand{
 	// Liveness.
-	{"ping", ctlproto.MethodPing, "ping", "check the server is reachable", noParams},
+	{"ping", ctlproto.MethodPing, "ping", nil, "check the server is reachable", noParams},
 
 	// Read-only queries.
-	{"session", app.CmdSessionGet, "session", "session summary", noParams},
-	{"workspaces", app.CmdWorkspaceList, "workspaces", "list workspaces", noParams},
-	{"tabs", app.CmdTabList, "tabs [workspace]", "list tabs (active workspace by default)", buildTabList},
-	{"panes", app.CmdPaneList, "panes", "list all panes", noParams},
-	{"pane", app.CmdPaneGet, "pane [pane]", "describe one pane (focused by default)", buildOptPane},
-	{"events", ctlproto.MethodEventsSubscribe, "events [pane]", "stream pane events until interrupted (Ctrl-C)", buildEvents},
+	{"session", app.CmdSessionGet, "session", nil, "session summary", noParams},
+	{"workspaces", app.CmdWorkspaceList, "workspaces", nil, "list workspaces", noParams},
+	{"tabs", app.CmdTabList, "tabs [workspace]", []argKind{argWorkspace}, "list tabs (active workspace by default)", buildTabList},
+	{"panes", app.CmdPaneList, "panes", nil, "list all panes", noParams},
+	{"pane", app.CmdPaneGet, "pane [pane]", []argKind{argPane}, "describe one pane (focused by default)", buildOptPane},
+	{"events", ctlproto.MethodEventsSubscribe, "events [pane]", []argKind{argPane}, "stream pane events until interrupted (Ctrl-C)", buildEvents},
 
 	// Pane commands.
-	{"split", app.CmdPaneSplit, "split [h|v] [pane]", "split a pane (h by default)", buildSplit},
-	{"close", app.CmdPaneClose, "close [pane]", "close a pane (focused by default)", buildOptPane},
-	{"focus", app.CmdPaneFocus, "focus <pane>", "focus a pane", buildPane},
-	{"focus-dir", app.CmdPaneFocusDirection, "focus-dir <left|right|up|down>", "focus the neighbour in a direction", buildDir},
-	{"cycle", app.CmdPaneCycle, "cycle [prev]", "focus the next pane (prev for previous)", buildCycle},
-	{"last", app.CmdPaneLast, "last", "focus the previously focused pane", noParams},
-	{"swap", app.CmdPaneSwap, "swap <left|right|up|down>", "swap with the neighbour in a direction", buildDir},
-	{"zoom", app.CmdPaneZoom, "zoom [pane]", "toggle pane zoom (focused by default)", buildOptPane},
-	{"rename-pane", app.CmdPaneRename, "rename-pane <pane> <name...>", "rename a pane (empty name clears)", buildRenamePane},
-	{"resize", app.CmdPaneResizeBorder, "resize <border> <ratio>", "set a split border's ratio", buildResize},
-	{"scroll", app.CmdScroll, "scroll <pane> <delta>", "scroll a pane by delta lines (negative = up)", buildScroll},
-	{"capture", app.CmdCapture, "capture <pane> [lines]", "capture a pane's text (whole buffer, or last N lines)", buildCapture},
-	{"read", app.CmdRead, "read <pane> <r0> <c0> <r1> <c1>", "read the text between two [row,col] points", buildRead},
-	{"wait", app.CmdWaitForOutput, "wait <pane> <pattern> [timeout_secs]", "wait until a pane's output contains a pattern", buildWait},
-	{"send", app.CmdPaneSendInput, "send <pane> <text...>", "type text into a pane without submitting it", buildSend},
-	{"run", app.CmdPaneSendInput, "run <pane> [text...]", "type text into a pane and submit it with Enter", buildRun},
+	{"split", app.CmdPaneSplit, "split [h|v] [pane]", []argKind{argSplitDir, argPane}, "split a pane (h by default)", buildSplit},
+	{"close", app.CmdPaneClose, "close [pane]", []argKind{argPane}, "close a pane (focused by default)", buildOptPane},
+	{"focus", app.CmdPaneFocus, "focus <pane>", []argKind{argPane}, "focus a pane", buildPane},
+	{"focus-dir", app.CmdPaneFocusDirection, "focus-dir <left|right|up|down>", []argKind{argDirection}, "focus the neighbour in a direction", buildDir},
+	{"cycle", app.CmdPaneCycle, "cycle [prev]", []argKind{argCycleDir}, "focus the next pane (prev for previous)", buildCycle},
+	{"last", app.CmdPaneLast, "last", nil, "focus the previously focused pane", noParams},
+	{"swap", app.CmdPaneSwap, "swap <left|right|up|down>", []argKind{argDirection}, "swap with the neighbour in a direction", buildDir},
+	{"zoom", app.CmdPaneZoom, "zoom [pane]", []argKind{argPane}, "toggle pane zoom (focused by default)", buildOptPane},
+	{"rename-pane", app.CmdPaneRename, "rename-pane <pane> <name...>", []argKind{argPane}, "rename a pane (empty name clears)", buildRenamePane},
+	{"resize", app.CmdPaneResizeBorder, "resize <border> <ratio>", nil, "set a split border's ratio", buildResize},
+	{"scroll", app.CmdScroll, "scroll <pane> <delta>", []argKind{argPane}, "scroll a pane by delta lines (negative = up)", buildScroll},
+	{"capture", app.CmdCapture, "capture <pane> [lines]", []argKind{argPane}, "capture a pane's text (whole buffer, or last N lines)", buildCapture},
+	{"read", app.CmdRead, "read <pane> <r0> <c0> <r1> <c1>", []argKind{argPane}, "read the text between two [row,col] points", buildRead},
+	{"wait", app.CmdWaitForOutput, "wait <pane> <pattern> [timeout_secs]", []argKind{argPane}, "wait until a pane's output contains a pattern", buildWait},
+	{"send", app.CmdPaneSendInput, "send <pane> <text...>", []argKind{argPane}, "type text into a pane without submitting it", buildSend},
+	{"run", app.CmdPaneSendInput, "run <pane> [text...]", []argKind{argPane}, "type text into a pane and submit it with Enter", buildRun},
 
 	// Tab commands.
-	{"tab", app.CmdTabFocus, "tab <num>", "focus a tab", buildTabFocus},
-	{"new-tab", app.CmdTabCreate, "new-tab", "create a tab", noParams},
-	{"close-tab", app.CmdTabClose, "close-tab [num]", "close a tab (active by default)", buildOptTab},
-	{"rename-tab", app.CmdTabRename, "rename-tab <num> <name...>", "rename a tab (empty name clears)", buildRenameTab},
+	{"tab", app.CmdTabFocus, "tab <num>", []argKind{argTab}, "focus a tab", buildTabFocus},
+	{"new-tab", app.CmdTabCreate, "new-tab", nil, "create a tab", noParams},
+	{"close-tab", app.CmdTabClose, "close-tab [num]", []argKind{argTab}, "close a tab (active by default)", buildOptTab},
+	{"rename-tab", app.CmdTabRename, "rename-tab <num> <name...>", []argKind{argTab}, "rename a tab (empty name clears)", buildRenameTab},
 
 	// Workspace commands.
-	{"ws", app.CmdWorkspaceFocus, "ws <id>", "focus a workspace", buildWorkspace},
-	{"new-ws", app.CmdWorkspaceCreate, "new-ws [name...]", "create a workspace (auto-named when no name is given)", buildNewWorkspace},
-	{"close-ws", app.CmdWorkspaceClose, "close-ws [id]", "close a workspace (active by default)", buildOptWorkspace},
-	{"rename-ws", app.CmdWorkspaceRename, "rename-ws <id> <name...>", "rename a workspace (empty name clears)", buildRenameWorkspace},
+	{"ws", app.CmdWorkspaceFocus, "ws <id>", []argKind{argWorkspace}, "focus a workspace", buildWorkspace},
+	{"new-ws", app.CmdWorkspaceCreate, "new-ws [name...]", nil, "create a workspace (auto-named when no name is given)", buildNewWorkspace},
+	{"close-ws", app.CmdWorkspaceClose, "close-ws [id]", []argKind{argWorkspace}, "close a workspace (active by default)", buildOptWorkspace},
+	{"rename-ws", app.CmdWorkspaceRename, "rename-ws <id> <name...>", []argKind{argWorkspace}, "rename a workspace (empty name clears)", buildRenameWorkspace},
 
 	// Misc.
-	{"agent", app.CmdAgentFocus, "agent <pane>", "reveal an agent's pane", buildPane},
-	{"themes", app.CmdThemeList, "themes", "list available UI themes", noParams},
-	{"theme", app.CmdConfigSet, "theme <name>", "switch the UI theme (clears color overrides)", buildTheme},
-	{"reload", app.CmdServerReloadConfig, "reload", "reload server config", noParams},
-	{"stop", app.CmdServerStop, "stop", "stop the server (terminals survive)", noParams},
+	{"agent", app.CmdAgentFocus, "agent <pane>", []argKind{argPane}, "reveal an agent's pane", buildPane},
+	{"themes", app.CmdThemeList, "themes", nil, "list available UI themes", noParams},
+	{"theme", app.CmdConfigSet, "theme <name>", []argKind{argTheme}, "switch the UI theme (clears color overrides)", buildTheme},
+	{"reload", app.CmdServerReloadConfig, "reload", nil, "reload server config", noParams},
+	{"stop", app.CmdServerStop, "stop", nil, "stop the server (terminals survive)", noParams},
+}
+
+// argAt reports the candidate source for the n-th positional argument (0-based)
+// of this verb. Past the declared slots — a <name...> tail, extra numbers —
+// there is nothing to offer.
+func (sc subcommand) argAt(n int) argKind {
+	if n < 0 || n >= len(sc.args) {
+		return argNone
+	}
+	return sc.args[n]
 }
 
 // lookupSubcommand finds an ergonomic verb by name.

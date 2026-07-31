@@ -98,6 +98,7 @@ command = ["./bin/cats-todo"]
 | `min_cats_version` | carried for forward compatibility but **not enforced** — cats has no single server version constant yet, and enforcing against the wrong number would be worse than not enforcing |
 | `[[build]]` | commands run in the plugin root at install/link time (see [Build step environment](#build-step-environment)) |
 | `[[actions]]` | launchable entrypoints; command paths are relative to the plugin root and resolved at launch |
+| `[[completions]]` | shell commands this plugin knows how to complete (see [Shell completion](#shell-completion)) |
 
 The shape matches herdr's `herdr-plugin.toml`, so a herdr plugin ports by renaming
 the file and swapping the id and command names. Herdr's `[[panes]]` table is
@@ -106,6 +107,58 @@ them, so a separate server-run pane entrypoint has no meaning.
 
 `[[actions]]` may be omitted entirely for a plugin that only ships passive
 assets — the one current asset kind is UI themes (below).
+
+## Shell completion
+
+A plugin's own command can complete itself in the user's shell. It claims the
+command name in its manifest:
+
+```toml
+[[completions]]
+binary  = "cats-todo"                          # the name typed in the shell
+command = ["./bin/cats-todo", "__complete"]    # plugin-root-relative, like an action
+```
+
+`catctl completion <shell>` reads every installed manifest and emits a
+registration per declared binary, so one `eval` in a shell rc covers `catctl`
+and every plugin at once. Tab on a `cats-todo` line goes to
+`catctl __complete --for cats-todo`, which execs the plugin's completer and
+passes its reply through.
+
+The protocol is the same one `catctl __complete` speaks. The completer receives
+the words typed so far, the last being the (possibly empty) word under the
+cursor, and prints:
+
+```
+value<TAB>description       # one per candidate; the description is optional
+:nofiles                    # terminating directive — or :files / :dirs
+```
+
+The cwd is the user's, so a completer can answer for the project they are
+standing in; `CATS_PLUGIN_ID` and `CATS_PLUGIN_DIR` are exported as they are for
+a launched action. The shell is blocked while this runs, so catctl bounds it at
+two seconds and 64 KiB, normalises the output, and falls back to an empty menu
+if the completer hangs, crashes or floods.
+
+A plugin with no completion code of its own can give static lists instead, which
+catctl serves without running anything — `subcommands` in the first word
+position, `flags` wherever the word starts with a dash:
+
+```toml
+[[completions]]
+binary      = "cats-tool"
+subcommands = ["add", "list"]
+flags       = ["--force"]
+```
+
+The trade-off between the two forms is descriptions and context: only the
+dynamic form can say what a candidate means, or offer files after one flag and
+nothing after another.
+
+Because the plugin list is read when the script is generated, a plugin installed
+today is completable in the **next** shell you open — which is why the
+documented install is an `eval` at shell startup rather than a file written
+once. See the [CLI reference](../reference/cli.md#catctl-completion).
 
 ## Shipping themes
 
@@ -287,6 +340,10 @@ catctl plugin uninstall rohanthewiz.cats-todo
 
 Install, link, list, update and uninstall are **offline** — they need no running
 `catway`. Only `run` dials the control socket, and only to issue `tab.create`.
+
+Every one of these completes: `plugin run <TAB>` offers installed ids with their
+names and versions, and a second `<TAB>` offers that plugin's action ids with
+their titles (see [Shell completion](#shell-completion)).
 
 ## The UI surface
 

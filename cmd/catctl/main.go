@@ -8,8 +8,9 @@
 //
 //	catctl [flags] <verb> [args...]           ergonomic subcommand
 //	catctl [flags] <method> [--params '<json>']  raw §7 command (escape hatch)
-//	catctl help                               list the ergonomic verbs
+//	catctl help [verb]                        the verb table, or one verb's page
 //	catctl commands                           list the raw §7 method names
+//	catctl completion <bash|zsh|fish>         shell completion script
 //	catctl integration <install|uninstall|status|help> ...  agent hook installers
 //	catctl plugin <install|link|uninstall|list|run|help> ...  plugin host
 //	catctl probe [--url ...] [--script ...]   browser-protocol WebSocket probe
@@ -52,6 +53,13 @@
 //	catctl read    --params '{"pane":1,"anchor":[0,0],"cursor":[0,5],"rect":true}'
 //	catctl capture --params '{"pane":1,"scope":1,"lines":100,"ansi":true}'
 //
+// Shell completion is served by the hidden `__complete` verb and installed by
+// evaluating `catctl completion <bash|zsh|fish>` from a shell rc. It knows the
+// whole vocabulary below plus, against a running server, live pane ids, tab
+// numbers, workspace ids and theme names — and it extends to plugins, both the
+// installed ids/actions `plugin run` takes and any command name a plugin claims
+// in its manifest (complete.go, completion.go).
+//
 // Global flags go before the verb (e.g. `catctl --socket … split h`). Exit
 // status: 0 on success, 1 if the command failed, 2 on a usage/transport error.
 package main
@@ -74,6 +82,19 @@ import (
 func main() { os.Exit(run()) }
 
 func run() int {
+	// Completion dispatches before flag.Parse: __complete is handed a raw copy of
+	// someone else's half-typed command line, which is free to hold flags catctl
+	// does not know (a family's, a plugin's) or a lone "-" — none of which the
+	// global FlagSet should ever see, and any one of which would make it exit.
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "__complete":
+			return runComplete(os.Args[2:])
+		case "completion":
+			return runCompletion(os.Args[2:])
+		}
+	}
+
 	socket := flag.String("socket", "",
 		"control socket path (env "+ctlproto.SocketEnvVar+"; default "+ctlproto.DefaultSocket+")")
 	paramsJSON := flag.String("params", "", "command params as a JSON object")
@@ -115,13 +136,17 @@ func run() int {
 		return runProbe(rest[1:])
 	}
 
+	// help takes a topic (a verb, a family, a raw method) that the global FlagSet
+	// has no business parsing — `catctl help --json` should describe the flag, not
+	// set it — so it dispatches before the re-parse too.
+	if method == "help" {
+		return runHelp(rest[1:])
+	}
+
 	_ = flag.CommandLine.Parse(rest[1:])
 	pos := flag.Args() // positional args after the verb (an ergonomic verb's operands)
 
 	switch method {
-	case "help", "-h", "--help":
-		usage()
-		return 0
 	case "commands":
 		for _, n := range app.CommandNames() {
 			fmt.Println(n)
@@ -252,7 +277,9 @@ func usage() {
 Usage:
   catctl [flags] <verb> [args...]            ergonomic subcommand
   catctl [flags] <method> [--params '<json>']   raw §7 command (escape hatch)
+  catctl help [verb]                         this table, or one verb's page
   catctl commands                            list the raw §7 method names
+  catctl completion <bash|zsh|fish>          shell completion script (see help completion)
   catctl integration install|uninstall <target>   install/remove agent hooks (offline)
   catctl integration status [--outdated-only]     integration install states (offline)
   catctl plugin install|link|uninstall|list ...   plugin host (offline; catctl plugin help)

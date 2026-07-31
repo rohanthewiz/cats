@@ -104,8 +104,18 @@ catctl send 1 vim notes.md            # type into pane 1 (staged; nothing runs)
 catctl run 1 make test                # type and submit with Enter
 catctl events 1                       # stream pane events until Ctrl-C
 catctl reload                         # re-render page after config edits
-catctl help                           # the full verb list
+catctl help [verb]                    # the verb list, or one verb's page
 ```
+
+Shell completion covers all of it — and reaches into the live session, so
+`catctl focus <TAB>` offers real pane ids labelled with their agent or title:
+
+```bash
+eval "$(catctl completion zsh)"       # ~/.zshrc, after compinit; also bash / fish
+```
+
+Plugins are completed too: installed ids and their actions, plus any command a
+plugin claims in its manifest (`cats-todo add -<TAB>`).
 
 `catctl integration install claude` installs the cats hook integration
 into an agent's own config tree (offline — no catway needed); `catctl probe`

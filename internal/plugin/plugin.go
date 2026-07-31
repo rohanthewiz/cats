@@ -205,3 +205,61 @@ func ActionArgv(inst Installed, a Action) []string {
 	}
 	return argv
 }
+
+// CompletionArgv anchors a dynamic completion's command to the plugin root, the
+// same way ActionArgv anchors an action's — the completer runs while the user's
+// shell sits in some unrelated directory, so "./bin/tool" has to be made
+// absolute here or it resolves against the wrong tree.
+func CompletionArgv(inst Installed, c Completion) []string {
+	argv := append([]string(nil), c.Command...)
+	if len(argv) > 0 && !filepath.IsAbs(argv[0]) {
+		argv[0] = filepath.Join(inst.Dir, argv[0])
+	}
+	return argv
+}
+
+// LookupCompletion finds the installed plugin that claims a shell command name.
+func LookupCompletion(binary string) (BinaryCompletion, bool) {
+	for _, bc := range Completions() {
+		if bc.Completion.Binary == binary {
+			return bc, true
+		}
+	}
+	return BinaryCompletion{}, false
+}
+
+// BinaryCompletion pairs a completion entry with the plugin that declared it —
+// what the shell-script generator needs to name the command and what
+// __complete needs to run it.
+type BinaryCompletion struct {
+	Plugin     Installed
+	Completion Completion
+}
+
+// Completions enumerates every completion entry across installed plugins.
+// Broken entries (Err set) are skipped — their manifest never parsed, so they
+// declare nothing. Two plugins claiming one binary name is resolved first-wins
+// in List's sorted order, so the winner is stable rather than
+// filesystem-dependent, and the generated shell script never registers one
+// command twice.
+func Completions() []BinaryCompletion {
+	plugins, err := List()
+	if err != nil {
+		return nil
+	}
+	var out []BinaryCompletion
+	seen := map[string]bool{}
+	for _, p := range plugins {
+		if p.Err != nil {
+			continue
+		}
+		for _, c := range p.Completions {
+			if seen[c.Binary] {
+				continue
+			}
+			seen[c.Binary] = true
+			out = append(out, BinaryCompletion{Plugin: p, Completion: c})
+		}
+	}
+	return out
+}

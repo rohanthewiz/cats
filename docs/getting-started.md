@@ -83,8 +83,20 @@ catctl split h 2                      # split pane 2 side-by-side
 catctl run 1 make test                # type into pane 1 and press Enter
 catctl wait 1 "BUILD SUCCESSFUL" 120  # block until pane 1 prints the pattern
 catctl events 1                       # stream pane events until Ctrl-C
-catctl help                           # the full verb list
+catctl help [verb]                    # the verb list, or one verb's page
 ```
+
+## Turn on shell completion
+
+Worth doing first — it saves looking up pane ids by hand, since the completer
+asks the running server for them:
+
+```bash
+echo 'eval "$(catctl completion zsh)"' >> ~/.zshrc    # after compinit
+```
+
+Bash and fish are supported too, and installed plugins get completion for their
+own commands. See the [CLI reference](reference/cli.md#catctl-completion).
 
 ## Wire up an agent's hooks
 

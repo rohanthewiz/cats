@@ -1,0 +1,287 @@
+package main
+
+// completion.go emits the shell-side half of catctl's completion: a small
+// script per shell that collects the words typed so far, hands them to
+// `catctl __complete` (complete.go), and renders the candidates it gets back.
+//
+// The scripts are deliberately dumb. They know the wire format — "value<TAB>
+// description" lines terminated by a ":files"/":dirs"/":nofiles" directive — and
+// nothing else, so adding a verb, a flag or a plugin never means touching shell
+// code. Each shell gets one shared helper plus one registration per command.
+//
+// # Plugins
+//
+// A plugin declares the command names it can complete ([[completions]] in its
+// manifest). Those registrations are emitted here, at generation time, pointing
+// back at `catctl __complete --for <binary>`. That is why the documented install
+// is an eval in your shell rc rather than a file written once:
+//
+//	eval "$(catctl completion zsh)"       # ~/.zshrc, after compinit
+//	eval "$(catctl completion bash)"      # ~/.bashrc
+//	catctl completion fish > ~/.config/fish/completions/catctl.fish
+//
+// Re-running it each time a shell starts is what makes a plugin installed today
+// completable in the next terminal you open (fish users re-run the redirect).
+//
+// The script bodies are raw constants with an @EXE@ placeholder rather than
+// format strings: shell parameter expansion is full of '%' ("${line%%$'\t'*}"),
+// and a printf verb table is the wrong thing to read them through.
+
+import (
+	"fmt"
+	"os"
+	"strings"
+
+	"github.com/rohanthewiz/cats/internal/plugin"
+)
+
+// exePlaceholder marks where the generated script names the catctl to call back
+// into.
+const exePlaceholder = "@EXE@"
+
+// runCompletion implements `catctl completion <shell>`.
+func runCompletion(args []string) int {
+	if len(args) != 1 {
+		printCompletionHelp()
+		return 2
+	}
+	var body, register string
+	switch args[0] {
+	case "bash":
+		body, register = bashBody, bashRegister
+	case "zsh":
+		body, register = zshBody, zshRegister
+	case "fish":
+		body, register = fishBody, fishRegister
+	case "help", "--help", "-h":
+		printCompletionHelp()
+		return 0
+	default:
+		fmt.Fprintf(os.Stderr, "catctl: unknown shell %q\n", args[0])
+		printCompletionHelp()
+		return 2
+	}
+	os.Stdout.WriteString(script(body, register))
+	return 0
+}
+
+// script substitutes the executable into a shell's body and appends one
+// registration block per plugin-declared command.
+func script(body, register string) string {
+	exe := shellQuote(self())
+	var b strings.Builder
+	b.WriteString(strings.ReplaceAll(body, exePlaceholder, exe))
+	for _, bc := range plugin.Completions() {
+		bin := bc.Completion.Binary
+		r := strings.NewReplacer(
+			exePlaceholder, exe,
+			"@BINARY@", bin,
+			"@QBINARY@", shellQuote(bin),
+			"@FUNC@", funcSuffix(bin),
+			"@PLUGIN@", bc.Plugin.ID,
+		)
+		b.WriteString(r.Replace(register))
+	}
+	return b.String()
+}
+
+func printCompletionHelp() {
+	fmt.Fprint(os.Stderr, `catctl completion — print a shell completion script
+
+Usage:
+  catctl completion <bash|zsh|fish>
+
+Install (each shell re-runs it at startup, so plugins installed later are
+picked up by the next terminal you open):
+
+  bash   echo 'eval "$(catctl completion bash)"' >> ~/.bashrc
+  zsh    echo 'eval "$(catctl completion zsh)"' >> ~/.zshrc    # after compinit
+  fish   catctl completion fish > ~/.config/fish/completions/catctl.fish
+
+Completes verbs and raw §7 methods, flags, integration targets, installed
+plugins and their actions, and — against a running server — live pane ids, tab
+numbers, workspace ids and theme names. Plugins that declare [[completions]] in
+their manifest get their own command registered too.
+`)
+}
+
+// self is the catctl the generated script calls back into: the very binary that
+// generated it, which is the one whose vocabulary the script describes. Falling
+// back to a bare name lets a $PATH lookup save an exotic environment where the
+// executable cannot name itself.
+func self() string {
+	exe, err := os.Executable()
+	if err != nil || exe == "" {
+		return "catctl"
+	}
+	return exe
+}
+
+// shellQuote wraps a string in single quotes. Bash, zsh and fish all end the
+// quoted run, escape one literal quote, and reopen it the same way, so the one
+// form serves every script here.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// funcSuffix turns a command name into something usable in a shell function
+// name. The manifest already bounds binary names to [A-Za-z0-9._-], so this only
+// has to fold the punctuation.
+func funcSuffix(binary string) string {
+	return strings.Map(func(r rune) rune {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+			return r
+		default:
+			return '_'
+		}
+	}, binary)
+}
+
+// --- bash -----------------------------------------------------------------------
+
+const bashBody = "# catctl completion for bash — generated by `catctl completion bash`.\n" +
+	`# Install: eval "$(catctl completion bash)" in ~/.bashrc
+
+__cats_complete() {
+    local exe=$1; shift
+    local -a pre=("$@")
+    local -a cwords=("${COMP_WORDS[@]:1:COMP_CWORD}")
+    local out line directive=':nofiles'
+    COMPREPLY=()
+    out=$("$exe" __complete "${pre[@]}" -- "${cwords[@]}" 2>/dev/null) || return
+    while IFS= read -r line; do
+        [[ -z $line ]] && continue
+        case $line in
+            :*) directive=$line ;;
+            # Candidates arrive already filtered by the typed prefix, so the
+            # value goes into COMPREPLY verbatim; the description after the tab
+            # is dropped (bash has nowhere to show it).
+            *)  COMPREPLY+=("${line%%$'\t'*}") ;;
+        esac
+    done <<< "$out"
+    # Only fall back to filenames when we had nothing of our own to say.
+    if [[ ${#COMPREPLY[@]} -eq 0 ]] && type compopt &>/dev/null; then
+        case $directive in
+            :files) compopt -o default ;;
+            :dirs)  compopt -o dirnames ;;
+        esac
+    fi
+}
+
+# -o nosort keeps our ordering (verbs before raw §7 methods); it needs bash 4.4,
+# and an older bash simply sorts.
+__cats_register() {
+    complete -o nosort -F "$1" "$2" 2>/dev/null || complete -F "$1" "$2"
+}
+
+_catctl() { __cats_complete @EXE@; }
+__cats_register _catctl catctl
+`
+
+const bashRegister = `
+# from plugin @PLUGIN@
+_catctl_for_@FUNC@() { __cats_complete @EXE@ --for @QBINARY@; }
+__cats_register _catctl_for_@FUNC@ @BINARY@
+`
+
+// --- zsh ------------------------------------------------------------------------
+
+const zshBody = "#compdef catctl\n" +
+	"# catctl completion for zsh — generated by `catctl completion zsh`.\n" +
+	`# Install: eval "$(catctl completion zsh)" in ~/.zshrc, *after* compinit.
+
+__cats_complete() {
+    local exe=$1; shift
+    local -a pre; pre=("$@")
+    # words[1] is the command itself; everything from 2 up to the cursor is what
+    # __complete wants, the last element being the word being completed (which
+    # zsh leaves as an empty string at a fresh word — quoted so it survives).
+    local -a cwords; cwords=("${(@)words[2,$CURRENT]}")
+    local out
+    out=$("$exe" __complete "${pre[@]}" -- "${cwords[@]}" 2>/dev/null) || return 1
+
+    local -a items
+    local line value desc directive=':nofiles'
+    for line in ${(f)out}; do
+        case $line in
+            :*) directive=$line ;;
+            *)
+                value=${line%%$'\t'*}
+                desc=''
+                [[ $line == *$'\t'* ]] && desc=${line#*$'\t'}
+                # _describe splits an entry at its first colon, so a colon in the
+                # value (never in the description) has to be escaped.
+                items+=("${value//:/\\:}${desc:+:$desc}")
+                ;;
+        esac
+    done
+
+    if (( ${#items} )); then
+        _describe -V -t catctl 'catctl' items
+        return
+    fi
+    case $directive in
+        :files) _files ;;
+        :dirs)  _files -/ ;;
+    esac
+    return 1
+}
+
+_catctl() { __cats_complete @EXE@ }
+compdef _catctl catctl
+`
+
+const zshRegister = `
+# from plugin @PLUGIN@
+_catctl_for_@FUNC@() { __cats_complete @EXE@ --for @QBINARY@ }
+compdef _catctl_for_@FUNC@ @BINARY@
+`
+
+// --- fish -----------------------------------------------------------------------
+
+const fishBody = "# catctl completion for fish — generated by `catctl completion fish`.\n" +
+	`# Install: catctl completion fish > ~/.config/fish/completions/catctl.fish
+# Re-run it after installing a plugin, so the plugin's own command is registered.
+
+# The path lives in a variable because a "complete -a" argument has to stay
+# single-quoted: fish stores that text and substitutes it at completion time,
+# and double quotes would run the substitution here, once, at load. A variable
+# reference inside the single quotes is expanded late, and survives a path with
+# spaces in it — which an inline quoted path could not.
+set -g __cats_exe @EXE@
+
+function __cats_complete
+    set -l exe $argv[1]
+    set -l pre $argv[2..-1]
+    set -l tokens (commandline -opc)
+    set -e tokens[1]
+    # An empty current token is an empty *list*, which would vanish from the
+    # argument vector and make __complete read the previous word as the one being
+    # completed. Force it to a one-element list holding the empty string.
+    set -l cur (commandline -ct)
+    if not set -q cur[1]
+        set cur ""
+    end
+    for line in ($exe __complete $pre -- $tokens $cur 2>/dev/null)
+        switch $line
+            case ':files'
+                __fish_complete_path $cur
+            case ':dirs'
+                __fish_complete_directories $cur
+            case ':*'
+                # any other directive: nothing to add
+            case '*'
+                # fish reads "value<TAB>description" natively.
+                echo $line
+        end
+    end
+end
+
+complete -c catctl -f -a '(__cats_complete $__cats_exe)'
+`
+
+const fishRegister = `
+# from plugin @PLUGIN@
+complete -c @BINARY@ -f -a '(__cats_complete $__cats_exe --for @BINARY@)'
+`

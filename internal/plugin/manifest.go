@@ -48,9 +48,10 @@ type Manifest struct {
 	MinCatsVersion string `toml:"min_cats_version"`
 	// Platforms limits where the plugin installs ("linux", "macos"; empty =
 	// everywhere). herdr's names are kept, with Go's GOOS values accepted too.
-	Platforms []string    `toml:"platforms"`
-	Build     []BuildStep `toml:"build"`
-	Actions   []Action    `toml:"actions"`
+	Platforms   []string     `toml:"platforms"`
+	Build       []BuildStep  `toml:"build"`
+	Actions     []Action     `toml:"actions"`
+	Completions []Completion `toml:"completions"`
 }
 
 // BuildStep is one [[build]] entry: a command run in the plugin root at
@@ -67,6 +68,41 @@ type Action struct {
 	Title   string   `toml:"title"`
 	Command []string `toml:"command"`
 }
+
+// Completion is one [[completions]] entry: the plugin's claim that it knows how
+// to complete a command name in the user's shell. `catctl completion <shell>`
+// emits a registration for every declared Binary, and the shell then routes
+// that command's completions back through `catctl __complete --for <binary>`.
+// Going through catctl rather than binding the plugin binary directly keeps one
+// protocol in the shell script and lets a plugin choose either style below.
+//
+// Two styles, checked in this order:
+//
+//   - Dynamic: Command is an argv (plugin-root-relative, like an action's) that
+//     speaks the completion protocol — catctl appends the words typed so far and
+//     the program prints "value<TAB>description" lines plus a trailing directive
+//     (":files" / ":dirs" / ":nofiles"). Descriptions and context-sensitive
+//     candidates are only possible this way.
+//   - Static: Subcommands and Flags are fixed candidate lists that catctl serves
+//     itself. Subcommands are offered only in the first word position, Flags
+//     wherever the word starts with "-". Enough for a shell-script plugin that
+//     has no completion code of its own.
+type Completion struct {
+	Binary      string   `toml:"binary"`
+	Command     []string `toml:"command"`
+	Subcommands []string `toml:"subcommands"`
+	Flags       []string `toml:"flags"`
+}
+
+// Dynamic reports whether the entry delegates to a program (as opposed to the
+// static Subcommands/Flags lists).
+func (c Completion) Dynamic() bool { return len(c.Command) > 0 }
+
+// binaryPattern bounds a completion's binary name: it is pasted into generated
+// shell scripts as a word, so anything that could carry shell syntax (spaces,
+// quotes, '$', separators) is rejected at manifest load rather than escaped at
+// emit time — a manifest author should see the mistake, not a mangled script.
+var binaryPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)
 
 // idPattern bounds what an id may look like. The id doubles as the install
 // directory name, so anything that could escape the plugins root (separators,
@@ -121,7 +157,39 @@ func (m Manifest) Validate() error {
 			return fmt.Errorf("build[%d]: command must name a program", i)
 		}
 	}
+	seenBinary := map[string]bool{}
+	for i, c := range m.Completions {
+		switch {
+		case c.Binary == "":
+			return fmt.Errorf("completions[%d]: missing binary", i)
+		case !binaryPattern.MatchString(c.Binary) || strings.Contains(c.Binary, ".."):
+			return fmt.Errorf("completions[%d]: invalid binary %q (letters, digits, '.', '_', '-'; no path separators)", i, c.Binary)
+		case seenBinary[c.Binary]:
+			return fmt.Errorf("duplicate completion binary %q", c.Binary)
+		}
+		seenBinary[c.Binary] = true
+		if c.Dynamic() {
+			if strings.TrimSpace(c.Command[0]) == "" {
+				return fmt.Errorf("completions[%q]: command must name a program", c.Binary)
+			}
+			continue
+		}
+		if len(c.Subcommands) == 0 && len(c.Flags) == 0 {
+			return fmt.Errorf("completions[%q]: needs a command, or subcommands/flags to offer", c.Binary)
+		}
+	}
 	return nil
+}
+
+// FindCompletion resolves a completion entry by the command name typed in the
+// shell.
+func (m Manifest) FindCompletion(binary string) (Completion, bool) {
+	for _, c := range m.Completions {
+		if c.Binary == binary {
+			return c, true
+		}
+	}
+	return Completion{}, false
 }
 
 // SupportsPlatform reports whether the manifest allows goos. herdr spells

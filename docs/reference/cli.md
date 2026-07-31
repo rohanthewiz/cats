@@ -82,12 +82,18 @@ The control-API client. Links no libghostty — a plain `go build`.
 ```
 catctl [flags] <verb> [args...]                 ergonomic subcommand
 catctl [flags] <method> [--params '<json>']     raw command
-catctl help                                     list the ergonomic verbs
+catctl help [verb]                              the verb table, or one verb's page
 catctl commands                                 list the raw method names
+catctl completion <bash|zsh|fish>               shell completion script
 catctl integration <install|uninstall|status|help> ...
 catctl plugin <install|link|uninstall|list|run|update|help> ...
 catctl probe [--url ...] [--script ...]
 ```
+
+`catctl help <verb>` prints one verb's page — its synopsis, the raw method it
+builds, what each argument completes to, and the notes that do not fit a
+one-liner (`catctl help wait`, `catctl help send`). It also takes a family name
+or a raw method.
 
 Global flags go **before** the verb:
 
@@ -164,6 +170,70 @@ pane already knows which cats it is talking to:
 catctl split v                  # split the pane I am in
 catctl rename-pane "$CATS_PANE_ID" build
 ```
+
+### `catctl completion`
+
+Shell completion for `catctl` **and for plugins**. Install it by evaluating the
+script from your shell's rc file:
+
+```bash
+echo 'eval "$(catctl completion bash)"' >> ~/.bashrc
+echo 'eval "$(catctl completion zsh)"'  >> ~/.zshrc    # after compinit
+catctl completion fish > ~/.config/fish/completions/catctl.fish
+```
+
+What it completes:
+
+| Where | Candidates |
+|-------|------------|
+| first word | the ergonomic verbs and the families; raw method names once a prefix is typed |
+| `<pane>` | **live pane ids**, described by handle, agent or title |
+| `<num>` | **live tab numbers**, with names |
+| `<id>` / `[workspace]` | **live workspace ids**, with names |
+| `theme <name>` | installed theme names, active one marked |
+| `focus-dir`, `swap`, `split`, `cycle` | the direction words |
+| `integration install\|uninstall` | agent targets, each showing its install state |
+| `plugin run\|update\|uninstall` | installed plugin ids, then that plugin's action ids |
+| `plugin link` | directories |
+| flags | the global flags, plus a family's own (`--ref`, probe's `--url`, …) |
+
+The live rows come from a read-only query over the control socket, capped at
+half a second: with no server running you simply get no candidates, never a
+pause at the prompt. A `--socket` already typed on the line is honoured, so
+completion queries the same server the command will reach.
+
+Everything is served by a hidden `catctl __complete` verb, so the vocabulary
+lives in Go and cannot drift from a hand-written shell script. The generated
+scripts only know the wire format: `value<TAB>description` lines terminated by a
+`:nofiles` / `:files` / `:dirs` directive.
+
+#### Plugins complete themselves
+
+A plugin can claim a command name in its manifest, and the generated script
+registers that command alongside `catctl`:
+
+```toml
+[[completions]]
+binary  = "cats-todo"
+command = ["./bin/cats-todo", "__complete"]
+```
+
+The shell routes Tab on a `cats-todo` line through
+`catctl __complete --for cats-todo`, which execs the plugin's completer (bounded
+to two seconds and 64 KiB) and passes its reply through. A plugin with no
+completion code of its own can list static candidates instead and let `catctl`
+serve them:
+
+```toml
+[[completions]]
+binary      = "cats-tool"
+subcommands = ["add", "list"]
+flags       = ["--force"]
+```
+
+Because the plugin list is read when the script is *generated*, the `eval` form
+is what keeps it current: a plugin installed today is completable in the next
+shell you open. See [Plugins](../subsystems/plugins.md#shell-completion).
 
 ### `catctl integration`
 

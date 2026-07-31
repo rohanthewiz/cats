@@ -69,6 +69,21 @@ func TestManifestValidate(t *testing.T) {
 			m.Actions = append(m.Actions, Action{ID: "a", Command: []string{"x"}})
 		}, "duplicate action id"},
 		{"empty build command", func(m *Manifest) { m.Build = []BuildStep{{}} }, "build[0]"},
+		{"completion without a binary", func(m *Manifest) {
+			m.Completions = []Completion{{Command: []string{"./x"}}}
+		}, "missing binary"},
+		{"completion binary with a path separator", func(m *Manifest) {
+			m.Completions = []Completion{{Binary: "bin/x", Flags: []string{"-a"}}}
+		}, "invalid binary"},
+		{"completion with nothing to offer", func(m *Manifest) {
+			m.Completions = []Completion{{Binary: "x"}}
+		}, "needs a command"},
+		{"duplicate completion binaries", func(m *Manifest) {
+			m.Completions = []Completion{
+				{Binary: "x", Flags: []string{"-a"}},
+				{Binary: "x", Command: []string{"./y"}},
+			}
+		}, "duplicate completion binary"},
 	}
 	for _, tc := range cases {
 		m := base
@@ -398,6 +413,53 @@ func TestUpdateLinkedRefused(t *testing.T) {
 	}
 	if _, _, err := Update("acme.demo", nil); err == nil || !strings.Contains(err.Error(), "linked") {
 		t.Fatalf("update of linked plugin err = %v, want linked refusal", err)
+	}
+}
+
+// Completions are enumerated across installed plugins and resolved by the
+// command name a shell would type, so `catctl completion <shell>` can register
+// them and `__complete --for` can find them again.
+func TestCompletionsLookup(t *testing.T) {
+	testRoot(t)
+	checkout := writePlugin(t, validManifest+`
+[[completions]]
+binary = "demo"
+command = ["./bin/demo", "__complete"]
+
+[[completions]]
+binary = "demo-lite"
+subcommands = ["add", "rm"]
+flags = ["--force"]
+`)
+	if _, err := Link(checkout, nil); err != nil {
+		t.Fatalf("link: %v", err)
+	}
+
+	all := Completions()
+	if len(all) != 2 {
+		t.Fatalf("Completions() = %+v, want 2", all)
+	}
+
+	bc, ok := LookupCompletion("demo")
+	if !ok || !bc.Completion.Dynamic() {
+		t.Fatalf("LookupCompletion(demo) = %+v, %v; want a dynamic entry", bc, ok)
+	}
+	// A manifest-relative argv only means something anchored to the plugin root:
+	// the completer runs while the shell sits in an unrelated directory.
+	argv := CompletionArgv(bc.Plugin, bc.Completion)
+	if want := filepath.Join(bc.Plugin.Dir, "bin", "demo"); argv[0] != want {
+		t.Errorf("CompletionArgv[0] = %q, want %q", argv[0], want)
+	}
+	if len(argv) != 2 || argv[1] != "__complete" {
+		t.Errorf("CompletionArgv = %v, want the trailing __complete preserved", argv)
+	}
+
+	lite, ok := LookupCompletion("demo-lite")
+	if !ok || lite.Completion.Dynamic() {
+		t.Fatalf("LookupCompletion(demo-lite) = %+v, %v; want a static entry", lite, ok)
+	}
+	if _, ok := LookupCompletion("nothing"); ok {
+		t.Error("LookupCompletion(nothing) found something")
 	}
 }
 
