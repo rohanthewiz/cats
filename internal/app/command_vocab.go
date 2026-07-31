@@ -62,6 +62,14 @@ const (
 	CmdConfigGet = "config.get"
 	CmdConfigSet = "config.set"
 
+	// Theme commands (settings modal + catctl + theme plugins): enumerate the
+	// available themes and manage the user's custom theme files. Switching the
+	// active theme is config.set (it's a config choice); these manage the
+	// theme *library*.
+	CmdThemeList   = "theme.list"
+	CmdThemeSave   = "theme.save"
+	CmdThemeDelete = "theme.delete"
+
 	// Plugin commands (plugins dialog): enumerate and remove installed plugins.
 	// Deliberately only the instant verbs — install/update shell out to git and
 	// a build, whose output a caller wants to *watch*, so the dialog launches
@@ -102,6 +110,7 @@ func CommandNames() []string {
 		CmdAgentFocus, CmdServerReloadConfig, CmdServerStop,
 		CmdWorktreeList, CmdWorktreeCreate, CmdWorktreeOpen, CmdWorktreeRemove,
 		CmdConfigGet, CmdConfigSet,
+		CmdThemeList, CmdThemeSave, CmdThemeDelete,
 		CmdPluginList, CmdPluginUninstall,
 		CmdPathList,
 		CmdSessionGet, CmdWorkspaceList, CmdTabList, CmdPaneList, CmdPaneGet,
@@ -659,10 +668,30 @@ type WorktreeRemoveParams struct {
 
 // --- Config params & results (§7, settings modal) -----------------------------
 
-// ConfigTheme is the theme section on the wire (config.get/config.set).
+// ConfigTheme is the theme section on the wire. In config.get's result it is
+// the EFFECTIVE appearance: Name is the active theme, Colors the fully
+// resolved palette, Font the font actually in use (the user's per-key
+// overrides ride separately in ConfigGetResult.ThemeOverrides). In config.set
+// it is the user's new choices — see ConfigSetParams for the merge/replace
+// semantics.
 type ConfigTheme struct {
+	Name   string            `json:"name,omitempty"`
 	Colors map[string]string `json:"colors,omitempty"`
 	Font   string            `json:"font,omitempty"`
+}
+
+// ThemeInfo is one available theme (config.get / theme.list). Colors is the
+// NORMALIZED palette — every canonical key present — so a front-end can
+// live-preview a theme switch without a round trip, and Font is resolved to a
+// concrete stack the same way. Source is "builtin", "user", or "plugin:<id>";
+// only "user" themes are deletable.
+type ThemeInfo struct {
+	Name   string            `json:"name"`
+	Label  string            `json:"label"`
+	Dark   bool              `json:"dark"`
+	Source string            `json:"source"`
+	Colors map[string]string `json:"colors"`
+	Font   string            `json:"font"`
 }
 
 // ConfigServerInfo is the read-only server section of config.get: informational
@@ -677,21 +706,59 @@ type ConfigServerInfo struct {
 	SessionTTL    string `json:"session_ttl"`
 }
 
-// ConfigGetResult is CmdResult.Data for config.get (and config.set, which
-// echoes the saved state). CopyMode's keys are the full known action set — the
-// settings modal derives its rows (and validation) from them.
+// ConfigGetResult is CmdResult.Data for config.get (and config.set /
+// theme.save / theme.delete, which echo the saved state). CopyMode's keys are
+// the full known action set — the settings modal derives its rows (and
+// validation) from them. Theme is the effective appearance; ThemeOverrides are
+// the user's raw per-key color overrides from the config file (what sits on
+// top of the named theme); Themes is the full available-theme registry.
 type ConfigGetResult struct {
-	Path     string              `json:"path"`
-	Theme    ConfigTheme         `json:"theme"`
-	CopyMode map[string][]string `json:"copy_mode"`
-	Server   ConfigServerInfo    `json:"server"`
+	Path           string              `json:"path"`
+	Theme          ConfigTheme         `json:"theme"`
+	ThemeOverrides map[string]string   `json:"theme_overrides,omitempty"`
+	Themes         []ThemeInfo         `json:"themes,omitempty"`
+	CopyMode       map[string][]string `json:"copy_mode"`
+	Server         ConfigServerInfo    `json:"server"`
 }
 
 // ConfigSetParams: config.set — only the live-appliable sections. Absent fields
-// keep their current values; colors and copy-mode actions merge key-wise.
+// keep their current values; copy-mode actions merge key-wise. The theme
+// section has two modes, keyed on Name: with Name set ("switch to this theme"),
+// Colors and Font REPLACE the stored overrides wholesale — an empty Colors
+// means "the theme, clean" — because stale overrides from the previous theme
+// are exactly what a switch must shed. With Name absent, Colors merge key-wise
+// and a non-empty Font replaces, preserving the pre-themes contract for
+// callers that just poke individual colors.
 type ConfigSetParams struct {
 	Theme    *ConfigTheme        `json:"theme,omitempty"`
 	CopyMode map[string][]string `json:"copy_mode,omitempty"`
+}
+
+// ThemeListResult is CmdResult.Data for theme.list.
+type ThemeListResult struct {
+	Active string      `json:"active"` // effective theme name
+	Themes []ThemeInfo `json:"themes"`
+}
+
+// ThemeSaveParams: theme.save — write (or overwrite) a user theme file. Colors
+// may be sparse; only the eight core keys are required (the rest derive — see
+// internal/theme). Dark is optional and auto-detected from the bg color when
+// absent. Activate additionally switches the config to the saved theme,
+// clearing any color overrides (they are presumed baked into what was saved).
+type ThemeSaveParams struct {
+	Name     string            `json:"name"`
+	Label    string            `json:"label,omitempty"`
+	Dark     *bool             `json:"dark,omitempty"`
+	Colors   map[string]string `json:"colors"`
+	Font     string            `json:"font,omitempty"`
+	Activate bool              `json:"activate,omitempty"`
+}
+
+// ThemeDeleteParams: theme.delete — remove a user theme file. Built-in and
+// plugin themes are not deletable through this command. Deleting the active
+// theme falls the config back to the default theme.
+type ThemeDeleteParams struct {
+	Name string `json:"name"`
 }
 
 // --- Plugin params & results (§7, plugins dialog) ------------------------------

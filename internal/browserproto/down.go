@@ -281,6 +281,23 @@ type Shutdown struct {
 
 func NewShutdown() Shutdown { return Shutdown{T: MsgShutdown} }
 
+// Theme pushes the effective UI theme to every connected browser, so a
+// config.set / theme switch / server.reload_config lands live everywhere —
+// not just on the issuing page and not only at the next page load. Colors is
+// the full resolved palette (CSS custom-property names without the "--"); the
+// front end applies them as inline :root properties and re-reads its canvas
+// colors. Name rides along for display only.
+type Theme struct {
+	T      Type              `json:"t"`
+	Name   string            `json:"name,omitempty"`
+	Colors map[string]string `json:"colors"`
+	Font   string            `json:"font,omitempty"`
+}
+
+func NewTheme(name string, colors map[string]string, font string) Theme {
+	return Theme{T: MsgTheme, Name: name, Colors: colors, Font: font}
+}
+
 // UpdateReady announces an available self-update; chrome shows a banner.
 type UpdateReady struct {
 	T       Type   `json:"t"`

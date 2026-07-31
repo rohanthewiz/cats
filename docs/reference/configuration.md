@@ -117,45 +117,88 @@ Where new checkouts are created. A leading `~` is expanded. Checkouts land at
 
 ## `theme`
 
-Colours are the served page's `:root` CSS custom properties, **without** the
-leading `--`. Only the ones you list are overridden.
+The UI is themed by **named themes** plus optional per-colour overrides. `name`
+picks a theme; `colors` (CSS custom-property names **without** the leading
+`--`) override individual keys of that theme; `font` overrides its font stack.
+Everything you don't name comes from the theme.
 
 ```yaml
 theme:
+  name: tokyo-night
   colors:
-    bg: "#1f2420"
-    fg: "#d6ddd6"
-    accent: "#4db380"
-    accent-dim: "#3d4a43"   # focused pane outline
-    panel: "#242a25"
-    panel2: "#2b322c"
-    line: "#38403a"
-    muted: "#9db0a2"
-    chrome: "#2b322c"
-    chrome-focus: "#3a4a3f"
-    ok: "#6ac47a"
-    warn: "#e0b64e"
-    err: "#e57373"
-    done: "#4fd1c5"         # unseen agent-completion markers
-  font: 'ui-monospace, "SF Mono", Menlo, Consolas, monospace'
+    accent: "#ff9e64"   # just this one key differs from the theme
+  # font: 'JetBrains Mono, monospace'
 ```
+
+Built-in themes: `cats-green` (the default), `darcula`, `tokyo-night`,
+`solarized-dark`, `solarized-light`, `super-warm`, `cool-blue`, `dark-game`,
+`dark-city`, `corporate`. `solarized-light` and `corporate` are light themes.
+`catctl themes` lists everything available (including custom and
+plugin-shipped themes); `catctl theme <name>` switches live.
+
+### Colour keys
+
+A theme (or an override map) can set any of these. Only the first eight are
+required in a custom theme — every other key is derived from them when absent
+(e.g. `panel` defaults to `bg`, `sel-fill` to a translucent `accent`):
 
 | Colour | Where it shows |
 |--------|----------------|
-| `bg` / `fg` | page background and default text |
-| `accent` / `accent-dim` | active highlights; `accent-dim` is the focused pane's hairline outline |
+| `bg` / `fg` | page background and default text *(required)* |
+| `muted` | secondary text: cwd, hints, section metadata *(required)* |
+| `line` | dividers and borders *(required)* |
+| `accent` | active highlights, links, the primary button *(required)* |
+| `ok` / `warn` / `err` | agent state badges and toasts *(required)* |
+| `accent-dim` | the focused pane's hairline outline |
+| `accent-fg` | text on accent-coloured surfaces (primary buttons) |
 | `panel` / `panel2` | sidebar and dialog surfaces |
-| `line` | dividers and borders |
-| `muted` | secondary text (cwd, hints) |
 | `chrome` / `chrome-focus` | the per-pane header strip, unfocused and focused |
-| `ok` / `warn` / `err` | agent state badges and toasts |
+| `chrome-fg` / `chrome-fg-dim` | the focused header's text and buttons |
+| `heading` | sidebar section titles |
+| `fg-strong` / `fg-soft` / `fg-bright` | the text-emphasis ladder (active labels / hover lift / loudest hover) |
+| `todo` | the workspace to-do reminder mark |
 | `done` | the unseen-completion marker on a pane whose agent finished while you were elsewhere |
+| `err-bg` / `err-fg` | the link-error banner's surface and text |
+| `hover` | the translucent wash on hovered icon buttons |
+| `sel-fill` / `cm-cursor` | drag-selection wash and copy-mode cursor outline (canvas) |
+| `scroll-thumb` / `scroll-thumb-idle` | the scrollback scrollbar's thumb, scrolled and at rest |
+| `term-fg` / `term-bg` | terminal canvas defaults when a program doesn't set its own colours |
 
 `font` is a CSS font stack for the terminal grid. The browser measures it and
 reports the resulting cell metrics in `init`, so changing the font relayouts
 everything.
 
-Apply with `catctl reload`.
+### Custom themes
+
+The settings modal (⚙ → settings) has a theme picker with live preview; edit
+any colours and **save as** a named theme to write
+`~/.config/cats/themes/<name>.yaml`. Theme files can also be authored by hand:
+
+```yaml
+# ~/.config/cats/themes/my-night.yaml
+label: My Night
+dark: true          # optional — auto-detected from bg
+colors:
+  bg: "#101418"
+  fg: "#d4dae2"
+  muted: "#7f8a99"
+  line: "#2a3240"
+  accent: "#5fa8f5"
+  ok: "#57c98a"
+  warn: "#d9a94a"
+  err: "#e06767"
+font: 'JetBrains Mono, monospace'   # optional
+```
+
+A user theme that reuses a built-in's name shadows it. Plugins can ship themes
+too — see [plugins](../subsystems/plugins.md). Over the control API the same
+library is scriptable via `theme.list` / `theme.save` / `theme.delete`.
+
+### Applying
+
+Theme changes apply **live to every connected client**: saving the settings
+modal, `catctl theme <name>`, and `catctl reload` (after a hand edit of the
+config or a theme file) all push the resolved palette over the WebSocket.
 
 ## `keybindings`
 

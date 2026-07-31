@@ -82,6 +82,8 @@ var subcommands = []subcommand{
 
 	// Misc.
 	{"agent", app.CmdAgentFocus, "agent <pane>", "reveal an agent's pane", buildPane},
+	{"themes", app.CmdThemeList, "themes", "list available UI themes", noParams},
+	{"theme", app.CmdConfigSet, "theme <name>", "switch the UI theme (clears color overrides)", buildTheme},
 	{"reload", app.CmdServerReloadConfig, "reload", "reload server config", noParams},
 	{"stop", app.CmdServerStop, "stop", "stop the server (terminals survive)", noParams},
 }
@@ -378,6 +380,16 @@ func buildTabList(args []string) (json.RawMessage, error) {
 		return nil, nil
 	}
 	return marshal(app.TabListParams{Workspace: args[0]})
+}
+
+// buildTheme: theme <name>. Naming a theme in config.set is the switch form —
+// the server replaces any per-key color overrides with the theme's clean
+// palette (see app.ConfigSetParams).
+func buildTheme(args []string) (json.RawMessage, error) {
+	if len(args) != 1 {
+		return nil, usageErr{"theme <name>"}
+	}
+	return marshal(app.ConfigSetParams{Theme: &app.ConfigTheme{Name: args[0]}})
 }
 
 // buildWorkspace: ws <id>.

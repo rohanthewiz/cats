@@ -91,7 +91,9 @@ func LoadManifest(dir string) (Manifest, error) {
 }
 
 // Validate enforces the invariants the rest of the host relies on (id usable
-// as a directory name, at least one runnable action, unique action ids).
+// as a directory name, unique action ids). Zero actions is legal: a plugin
+// can exist purely to ship passive assets — UI themes in themes/*.yaml — and
+// `catctl plugin run` already reports cleanly when there is nothing to run.
 func (m Manifest) Validate() error {
 	switch {
 	case m.ID == "":
@@ -100,8 +102,6 @@ func (m Manifest) Validate() error {
 		return fmt.Errorf("invalid id %q (letters, digits, '.', '_', '-'; no leading dot or '..')", m.ID)
 	case m.Version == "":
 		return fmt.Errorf("missing version")
-	case len(m.Actions) == 0:
-		return fmt.Errorf("at least one [[actions]] entry is required")
 	}
 	seen := map[string]bool{}
 	for i, a := range m.Actions {

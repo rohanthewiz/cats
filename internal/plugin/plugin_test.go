@@ -64,7 +64,6 @@ func TestManifestValidate(t *testing.T) {
 		{"dotdot id", func(m *Manifest) { m.ID = "a..b" }, "invalid id"},
 		{"leading dot id", func(m *Manifest) { m.ID = ".hidden" }, "invalid id"},
 		{"missing version", func(m *Manifest) { m.Version = "" }, "missing version"},
-		{"no actions", func(m *Manifest) { m.Actions = nil }, "at least one"},
 		{"empty action command", func(m *Manifest) { m.Actions[0].Command = nil }, "must name a program"},
 		{"dup action ids", func(m *Manifest) {
 			m.Actions = append(m.Actions, Action{ID: "a", Command: []string{"x"}})
@@ -517,5 +516,17 @@ command = ["./bin/demo"]
 	realWd, _ := filepath.EvalSymlinks(wd)
 	if got, _ := filepath.EvalSymlinks(invokedFrom); got != realWd {
 		t.Errorf("%s = %s, want the host's working directory %s", InstallCwdEnvVar, invokedFrom, realWd)
+	}
+}
+
+// A manifest with zero actions validates: a plugin may ship only passive
+// assets (e.g. UI themes under themes/), with nothing to run.
+func TestValidateAllowsAssetOnlyPlugin(t *testing.T) {
+	m := Manifest{ID: "just-themes", Version: "1.0.0"}
+	if err := m.Validate(); err != nil {
+		t.Fatalf("asset-only manifest should validate: %v", err)
+	}
+	if _, ok := m.FindAction(""); ok {
+		t.Fatal("FindAction on an asset-only plugin should report no action")
 	}
 }

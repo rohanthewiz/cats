@@ -7,9 +7,11 @@
 //
 // A missing file is not an error — every field has a default (Default), so an
 // empty or absent config yields the same behaviour catway had before configs
-// existed. Absent scalar keys keep their defaults; the theme and keybinding maps
-// merge key-wise, so a config that sets one colour or rebinds one action keeps
-// the defaults for everything it does not mention.
+// existed. Absent scalar keys keep their defaults; the keybinding map merges
+// key-wise, so a config that rebinds one action keeps the defaults for the
+// rest. The theme section stores only choices (a theme name + sparse colour
+// overrides) — the full palette is resolved against internal/theme at render
+// time, so there are no colour defaults here to merge against.
 //
 // House style (matching the rest of the repo): stdlib errors/fmt and prefixed
 // log messages, no serr.
@@ -89,11 +91,17 @@ type TLS struct {
 	Key     string `yaml:"key"`
 }
 
-// Theme is the front-end appearance: CSS custom-property overrides (without the
-// leading "--") and an optional font stack, injected into the served page.
+// Theme is the front-end appearance. Name selects a named theme (a built-in,
+// a user theme file, or a plugin-shipped one — see internal/theme); "" means
+// the default. Colors are per-key overrides layered ON TOP of the named
+// theme's palette (CSS custom-property names without the leading "--"), and
+// Font, when set, overrides the theme's font stack. The config file stores
+// only the user's choices; the full effective palette is resolved at render
+// time, so this package needs no knowledge of what themes exist.
 type Theme struct {
-	Colors map[string]string `yaml:"colors"`
-	Font   string            `yaml:"font"`
+	Name   string            `yaml:"name,omitempty"`
+	Colors map[string]string `yaml:"colors,omitempty"`
+	Font   string            `yaml:"font,omitempty"`
 }
 
 // Keybindings maps a front-end action to the keyboard keys that trigger it. Only
@@ -121,17 +129,11 @@ func (s Server) TTL() (time.Duration, error) {
 
 // --- defaults ----------------------------------------------------------------
 
-// defaultColors are the served page's :root CSS custom properties (index.html).
-// Keep in sync with the stylesheet's fallback values.
-var defaultColors = map[string]string{
-	"bg": "#1f2420", "fg": "#d6ddd6", "accent": "#4db380", "accent-dim": "#3d4a43",
-	"panel": "#242a25", "panel2": "#2b322c", "line": "#38403a", "muted": "#9db0a2",
-	"chrome": "#2b322c", "chrome-focus": "#3a4a3f", "heading": "#6cbf8d",
-	"todo": "#f0dfa0",
-	"ok": "#6ac47a", "warn": "#e0b64e", "err": "#e57373",
-}
-
-const defaultFont = `ui-monospace, "SF Mono", Menlo, Consolas, monospace`
+// The default palette and font used to live here as defaultColors/defaultFont;
+// they moved to internal/theme (the cats-green built-in and theme.DefaultFont)
+// when named themes arrived. The config's theme section now stores only the
+// user's *choices* — a theme name plus sparse overrides — so its defaults are
+// simply empty: no name (⇒ the default theme) and no overrides.
 
 // defaultCopyMode is the copy-mode action → keys table. Its keys are the full
 // set of known copy-mode actions; Validate rejects any others. Keep in sync with
@@ -165,7 +167,7 @@ func Default() Config {
 			SessionTTL:    "24h",
 		},
 		Persistence: Persistence{Enabled: true, HistoryLines: 2000, ResumeAgents: true},
-		Theme:       Theme{Colors: cloneStrMap(defaultColors), Font: defaultFont},
+		Theme:       Theme{Colors: map[string]string{}},
 		Keybindings: Keybindings{CopyMode: cloneKeyMap(defaultCopyMode)},
 		Worktrees:   Worktrees{Directory: "~/.cats/worktrees"},
 	}
@@ -201,8 +203,10 @@ func Load(override string) (Config, string, error) {
 }
 
 // parse decodes YAML onto a defaults copy (so absent scalars keep their
-// defaults) and merges the theme/keybinding maps key-wise (which unmarshal would
-// otherwise replace wholesale), then validates.
+// defaults) and merges the theme/keybinding maps key-wise (which unmarshal
+// would otherwise replace wholesale — and for theme.colors the merge base is
+// deliberately empty, normalizing an absent map to a non-nil one), then
+// validates.
 func parse(data []byte) (Config, error) {
 	cfg := Default()
 	if len(bytes.TrimSpace(data)) == 0 {

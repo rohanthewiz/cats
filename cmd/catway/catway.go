@@ -1142,7 +1142,8 @@ func (o *orch) ReloadConfig() error {
 	o.cfg = cfg // keep config.get / config.set working from the reloaded state
 	page := renderPage(o.baseHTML, cfg)
 	o.page.Store(&page)
-	log.Printf("catway: reloaded config from %s — theme + keybindings apply to new page loads; server settings need a restart", path)
+	o.broadcastTheme() // the theme lands live everywhere; keybindings still need a reload
+	log.Printf("catway: reloaded config from %s — theme applied live, keybindings apply to new page loads; server settings need a restart", path)
 	return nil
 }
 

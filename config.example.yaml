@@ -43,25 +43,18 @@ persistence:
 worktrees:
   directory: "~/.cats/worktrees"
 
-# Front-end appearance. Colors are the page's :root CSS custom properties
-# (without the leading --); only the ones you list are overridden.
-theme:
-  colors:
-    bg: "#1f2420"
-    fg: "#d6ddd6"
-    accent: "#4db380"
-    accent-dim: "#3d4a43"  # focused pane outline — gray-green hairline
-    panel: "#242a25"
-    panel2: "#2b322c"
-    line: "#38403a"
-    muted: "#9db0a2"
-    chrome: "#2b322c"
-    chrome-focus: "#3a4a3f"
-    ok: "#6ac47a"
-    warn: "#e0b64e"
-    err: "#e57373"
-    done: "#4fd1c5"   # unseen agent-completion markers
-  font: 'ui-monospace, "SF Mono", Menlo, Consolas, monospace'
+# Front-end appearance: a named theme plus optional per-color overrides.
+# Built-ins: cats-green (default), darcula, tokyo-night, solarized-dark,
+# solarized-light, super-warm, cool-blue, dark-game, dark-city, corporate.
+# Custom themes live in ~/.config/cats/themes/*.yaml, and plugins can ship
+# themes too; `catctl themes` lists everything, `catctl theme <name>` switches
+# live. Colors are the page's :root CSS custom properties (without the leading
+# --); only the ones you list here are overridden on top of the theme.
+theme: {}
+#  name: tokyo-night
+#  colors:
+#    accent: "#ff9e64"
+#  font: 'ui-monospace, "SF Mono", Menlo, Consolas, monospace'
 
 # Keyboard bindings. Keys are DOM KeyboardEvent.key values ("ArrowLeft", "h",
 # "Escape", "0", "$", "Enter", …). Only the actions you list are rebound; the

@@ -149,6 +149,8 @@ Misc:
 
 ```bash
 catctl agent <pane>             # reveal an agent's pane
+catctl themes                   # list available UI themes
+catctl theme <name>             # switch the UI theme, live (clears color overrides)
 catctl reload                   # re-render the page after a config edit
 catctl stop                     # stop the server (terminals survive)
 ```

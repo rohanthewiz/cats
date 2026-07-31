@@ -24,33 +24,35 @@ var errScroll = errors.New("unknown pane 7")
 // fakeBackend records the runtime effects the dispatcher drives and returns
 // canned answers for the gating queries.
 type fakeBackend struct {
-	log          *[]string
-	area         layout.Rect
-	paneExists   bool
-	daemonUp     bool
-	scrollErr    error
-	reloadErr    error
-	lastRead     Responder
-	lastCapture  Responder
-	lastWait     Responder
-	lastWaitP    WaitForOutputParams
-	lastScroll   [2]int
-	sendErr      error
-	lastSend     SendInputParams
-	lastTitle    uint32
-	lastWtList   Responder
-	lastWtCreate Responder
-	lastWtCreP   WorktreeCreateParams
-	lastWtOpen   Responder
-	lastWtOpenP  WorktreeOpenParams
-	lastWtRemove Responder
-	lastWtRemP   WorktreeRemoveParams
-	lastCfgSetP  ConfigSetParams
-	lastPlgList  Responder
-	lastPlgUnins Responder
-	lastPlgUninP PluginUninstallParams
-	lastPathList Responder
-	lastPathP    PathListParams
+	log            *[]string
+	area           layout.Rect
+	paneExists     bool
+	daemonUp       bool
+	scrollErr      error
+	reloadErr      error
+	lastRead       Responder
+	lastCapture    Responder
+	lastWait       Responder
+	lastWaitP      WaitForOutputParams
+	lastScroll     [2]int
+	sendErr        error
+	lastSend       SendInputParams
+	lastTitle      uint32
+	lastWtList     Responder
+	lastWtCreate   Responder
+	lastWtCreP     WorktreeCreateParams
+	lastWtOpen     Responder
+	lastWtOpenP    WorktreeOpenParams
+	lastWtRemove   Responder
+	lastWtRemP     WorktreeRemoveParams
+	lastCfgSetP    ConfigSetParams
+	lastThemeSaveP ThemeSaveParams
+	lastThemeDelP  ThemeDeleteParams
+	lastPlgList    Responder
+	lastPlgUnins   Responder
+	lastPlgUninP   PluginUninstallParams
+	lastPathList   Responder
+	lastPathP      PathListParams
 	// paneMeta is the canned per-pane metadata PaneMeta answers with (nil ⇒ all
 	// zero values), letting pane.list/pane.get tests assert the merge.
 	paneMeta map[uint32]PaneMeta
@@ -134,6 +136,17 @@ func (b *fakeBackend) ConfigGet(r Responder) { b.rec("cfgGet"); r.OK(ConfigGetRe
 func (b *fakeBackend) ConfigSet(r Responder, p ConfigSetParams) {
 	b.rec("cfgSet")
 	b.lastCfgSetP = p
+	r.OK(nil)
+}
+func (b *fakeBackend) ThemeList(r Responder) { b.rec("themeList"); r.OK(ThemeListResult{}) }
+func (b *fakeBackend) ThemeSave(r Responder, p ThemeSaveParams) {
+	b.rec("themeSave")
+	b.lastThemeSaveP = p
+	r.OK(nil)
+}
+func (b *fakeBackend) ThemeDelete(r Responder, p ThemeDeleteParams) {
+	b.rec("themeDelete")
+	b.lastThemeDelP = p
 	r.OK(nil)
 }
 
@@ -1163,5 +1176,41 @@ func TestDispatchPaneMetaMerge(t *testing.T) {
 	info := okData[PaneInfo](t, r)
 	if info.PaneMeta != meta {
 		t.Fatalf("pane.get meta = %+v, want %+v", info.PaneMeta, meta)
+	}
+}
+
+// --- theme.* -----------------------------------------------------------------
+
+// The theme library commands route to the backend, and the two mutating verbs
+// reject a missing name before any backend effect.
+func TestDispatchThemeCommands(t *testing.T) {
+	h := newCmdHarness(t)
+
+	r := h.resp()
+	h.d.Dispatch(CmdThemeSave, params(t, ThemeSaveParams{Name: "night", Colors: map[string]string{"bg": "#000000"}, Activate: true}), r)
+	if !r.okCall || h.b.lastThemeSaveP.Name != "night" || !h.b.lastThemeSaveP.Activate {
+		t.Fatalf("theme.save: ok=%v params=%+v", r.okCall, h.b.lastThemeSaveP)
+	}
+
+	r = h.resp()
+	h.d.Dispatch(CmdThemeDelete, params(t, ThemeDeleteParams{Name: "night"}), r)
+	if !r.okCall || h.b.lastThemeDelP.Name != "night" {
+		t.Fatalf("theme.delete: ok=%v params=%+v", r.okCall, h.b.lastThemeDelP)
+	}
+
+	for _, cmd := range []string{CmdThemeSave, CmdThemeDelete} {
+		r = h.resp()
+		h.d.Dispatch(cmd, params(t, map[string]any{}), r)
+		if !r.failCall {
+			t.Errorf("%s without a name should fail", cmd)
+		}
+	}
+
+	// theme.list with no reply channel short-circuits (nowhere to send it).
+	log := *h.log
+	silent := &fakeResponder{log: h.log, wants: false}
+	h.d.Dispatch(CmdThemeList, noParams(), silent)
+	if len(*h.log) != len(log) {
+		t.Fatal("no-reply theme.list should not reach the backend")
 	}
 }

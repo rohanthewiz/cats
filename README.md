@@ -296,15 +296,20 @@ patches a *copy* of the SDK to re-add the slice and points Zig at it via an
 `xcrun` shim. Zig itself is downloaded to `.tools/` (gitignored); no system
 changes are made.
 
-**Theming note (two sources of truth):** the served page's CSS custom
-properties are declared twice — the `:root` block in `cmd/catway/web/index.html`
-and the `defaultColors` map in `internal/config/config.go`. `renderPage`
-(`cmd/catway/page.go`) injects `defaultColors` as a second `:root{…}` block
-*after* the stylesheet, so for any var named in both, **the Go map wins** and
-editing `index.html` alone has no visible effect. Conversely, a var declared
-only in the stylesheet renders fine but can't be overridden from
-`theme.colors` in the config file. When adding or recoloring a var, change both
-places together.
+**Theming note (source of truth):** the theme system lives in
+`internal/theme` — the built-in palettes (`builtin.go`), the canonical color
+keys and the derivation table that fills sparse themes (`theme.go`), and the
+user/plugin theme-file loaders (`load.go`). `renderPage` (`cmd/catway/page.go`)
+resolves `config.Theme` (name + overrides) against that registry and injects
+the **full** palette as a `:root{…}` block *after* the stylesheet, so the
+resolved theme always wins the cascade; the `:root` block in
+`cmd/catway/web/index.html` is only the fallback for an uninjected page and
+mirrors the `cats-green` built-in. When adding a color var: add it to the
+derivation table (or required keys) in `internal/theme/theme.go`, give
+`cats-green` its hand-authored value, and reference `var(--...)` (with the
+same fallback value in `:root`) in the stylesheet. The canvas-side colors
+(`term-fg/bg`, `sel-fill`, `cm-cursor`, `scroll-thumb*`) are re-read from the
+CSS custom properties by `readThemeVars()` in the page script.
 
 ## History
 

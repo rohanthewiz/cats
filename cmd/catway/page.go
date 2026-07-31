@@ -2,10 +2,13 @@ package main
 
 import (
 	"encoding/json"
+	"log"
+	"sort"
 	"strings"
 
 	"github.com/rohanthewiz/cats/internal/buildinfo"
 	"github.com/rohanthewiz/cats/internal/config"
+	"github.com/rohanthewiz/cats/internal/theme"
 )
 
 // renderPage bakes the front-end's server-side settings into the served HTML: a
@@ -22,7 +25,7 @@ import (
 // keybindings and build info ride through json.Marshal, whose default HTML
 // escaping keeps a "</script>" in a value inert.
 func renderPage(base []byte, cfg config.Config) []byte {
-	inject := themeStyle(cfg.Theme) + keybindingsScript(cfg.Keybindings) + buildScript()
+	inject := themeStyle(resolveTheme(cfg)) + keybindingsScript(cfg.Keybindings) + buildScript()
 	html := string(base)
 	if i := strings.LastIndex(html, "</head>"); i >= 0 {
 		return []byte(html[:i] + inject + html[i:])
@@ -31,13 +34,48 @@ func renderPage(base []byte, cfg config.Config) []byte {
 	return []byte(inject + html)
 }
 
-// themeStyle renders the theme as a :root override plus a font rule.
-func themeStyle(t config.Theme) string {
+// resolveTheme turns the config's theme *choices* (a name + sparse overrides +
+// optional font) into the full effective palette, consulting the live theme
+// registry (built-ins + plugin themes + user theme files). The registry is
+// re-read on every call: renderPage runs only at startup, on config.set, and
+// on reload, and re-reading is what lets a freshly installed theme plugin or a
+// hand-edited theme file show up without a server restart. Problems degrade,
+// never fail — a broken theme file is logged and skipped, an unknown name
+// falls back to the default theme — because the page must always render.
+func resolveTheme(cfg config.Config) theme.Theme {
+	themes, warns := theme.Registry()
+	for _, w := range warns {
+		log.Printf("catway: theme: %v", w)
+	}
+	t, ok := theme.Resolve(cfg.Theme.Name, cfg.Theme.Colors, themes)
+	if !ok {
+		log.Printf("catway: theme %q not found — using %q", cfg.Theme.Name, t.Name)
+	}
+	// Font precedence: explicit config override > the theme's own > default.
+	if cfg.Theme.Font != "" {
+		t.Font = cfg.Theme.Font
+	}
+	if t.Font == "" {
+		t.Font = theme.DefaultFont
+	}
+	return t
+}
+
+// themeStyle renders the resolved theme as a :root override plus a font rule.
+// Keys are emitted sorted so the same theme always renders the same bytes
+// (map order would otherwise shuffle the block between renders).
+func themeStyle(t theme.Theme) string {
+	names := make([]string, 0, len(t.Colors))
+	for name := range t.Colors {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
 	var b strings.Builder
 	b.WriteString("<style id=\"cats-config-theme\">:root{")
-	for name, value := range t.Colors {
+	for _, name := range names {
 		n := sanitizeCSSName(name)
-		v := sanitizeCSSValue(value)
+		v := sanitizeCSSValue(t.Colors[name])
 		if n == "" || v == "" {
 			continue
 		}

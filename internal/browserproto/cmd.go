@@ -44,6 +44,9 @@ const (
 	CmdWorktreeRemove     = app.CmdWorktreeRemove
 	CmdConfigGet          = app.CmdConfigGet
 	CmdConfigSet          = app.CmdConfigSet
+	CmdThemeList          = app.CmdThemeList
+	CmdThemeSave          = app.CmdThemeSave
+	CmdThemeDelete        = app.CmdThemeDelete
 	CmdPluginList         = app.CmdPluginList
 	CmdPluginUninstall    = app.CmdPluginUninstall
 	CmdPathList           = app.CmdPathList
@@ -111,6 +114,10 @@ type (
 	ConfigServerInfo      = app.ConfigServerInfo
 	ConfigGetResult       = app.ConfigGetResult
 	ConfigSetParams       = app.ConfigSetParams
+	ThemeInfo             = app.ThemeInfo
+	ThemeListResult       = app.ThemeListResult
+	ThemeSaveParams       = app.ThemeSaveParams
+	ThemeDeleteParams     = app.ThemeDeleteParams
 	PluginInfo            = app.PluginInfo
 	PluginActionInfo      = app.PluginActionInfo
 	PluginListResult      = app.PluginListResult

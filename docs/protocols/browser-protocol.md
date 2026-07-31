@@ -76,6 +76,7 @@ for when the server picks which.
 | `error` | a server-side error to surface |
 | `shutdown` | the server is going away |
 | `update_ready` | a newer build is available |
+| `theme` | the full resolved UI palette (+ font), pushed on any theme change so every client restyles live |
 | `cmd_result` | the reply to a `cmd`, correlated by the client-chosen `id` |
 
 ## Up — front end to server

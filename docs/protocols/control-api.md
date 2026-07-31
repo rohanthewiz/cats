@@ -189,6 +189,7 @@ than only the ones on screen. Every field is omitted when empty.
 |--------|----------------|
 | `worktree.list` / `worktree.create` / `worktree.open` / `worktree.remove` | — |
 | `config.get` / `config.set` | — |
+| `theme.list` / `theme.save` / `theme.delete` | — |
 | `plugin.list` / `plugin.uninstall` | — |
 | `path.list` | — |
 | `agent.focus` | `agent <pane>` |

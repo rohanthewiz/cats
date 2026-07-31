@@ -88,6 +88,15 @@ type Backend interface {
 	ConfigGet(r Responder)
 	ConfigSet(r Responder, p ConfigSetParams)
 
+	// ThemeList / ThemeSave / ThemeDelete manage the theme library (theme.*):
+	// enumerate every available theme, write a user theme file, remove one.
+	// Synchronous like the config pair — same small local files, and they sit
+	// on the Backend seam because only the backend holds the theme registry
+	// and the live config the save/delete may re-point.
+	ThemeList(r Responder)
+	ThemeSave(r Responder, p ThemeSaveParams)
+	ThemeDelete(r Responder, p ThemeDeleteParams)
+
 	// StartPluginList / StartPluginUninstall run the plugin-host commands (the
 	// plugins dialog). Both are filesystem work under the plugins root, kept on
 	// the Backend seam (not called into internal/plugin here) for the same
@@ -725,6 +734,36 @@ func (d *Dispatcher) Dispatch(name string, dec ParamDecoder, r Responder) {
 			return
 		}
 		d.backend.ConfigSet(r, p)
+
+	case CmdThemeList:
+		if !r.WantsReply() {
+			return // a listing yields only a result
+		}
+		d.backend.ThemeList(r)
+
+	case CmdThemeSave:
+		var p ThemeSaveParams
+		if err := dec.Decode(&p); err != nil {
+			bad(err)
+			return
+		}
+		if p.Name == "" {
+			r.Fail("theme.save: name is required")
+			return
+		}
+		d.backend.ThemeSave(r, p)
+
+	case CmdThemeDelete:
+		var p ThemeDeleteParams
+		if err := dec.Decode(&p); err != nil {
+			bad(err)
+			return
+		}
+		if p.Name == "" {
+			r.Fail("theme.delete: name is required")
+			return
+		}
+		d.backend.ThemeDelete(r, p)
 
 	case CmdServerReloadConfig:
 		if err := d.backend.ReloadConfig(); err != nil {

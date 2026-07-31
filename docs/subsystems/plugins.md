@@ -61,6 +61,7 @@ over the control socket like any other automation client. Three things fall out:
   <id>/                            a real directory (install) or a symlink (link)
     cats-plugin.toml
     bin/<tool>                     whatever the build produced
+    themes/*.yaml                  optional UI themes (discovered by convention)
     .cats-plugin-source.json       install provenance (absent for links)
 ```
 
@@ -102,6 +103,42 @@ The shape matches herdr's `herdr-plugin.toml`, so a herdr plugin ports by renami
 the file and swapping the id and command names. Herdr's `[[panes]]` table is
 deliberately absent: cats actions run their TUI directly in the tab that launches
 them, so a separate server-run pane entrypoint has no meaning.
+
+`[[actions]]` may be omitted entirely for a plugin that only ships passive
+assets — the one current asset kind is UI themes (below).
+
+## Shipping themes
+
+A plugin can ship UI themes by placing theme files in a `themes/` directory
+next to its manifest:
+
+```
+my-themes/
+  cats-plugin.toml                 # id + version are enough; no actions needed
+  themes/
+    ember.yaml
+    glacier.yaml
+```
+
+There is **no manifest field** for themes — catway discovers
+`<plugins-root>/<id>/themes/*.yaml` by directory convention, which keeps the
+server's "never parses a plugin manifest" property intact. Each file uses the
+same format as a user theme (see
+[configuration → custom themes](../reference/configuration.md#custom-themes)):
+a `colors:` map with at least the eight core keys, optional `label:`, `dark:`
+and `font:`. The file's stem names the theme unless it sets `name:`.
+
+After `catctl plugin install <src>` the themes appear in the settings modal's
+picker (source-tagged `plugin:<id>`) and in `catctl themes`; nothing needs a
+restart — the registry is re-read whenever the theme resolves. Precedence on a
+name clash is user theme > plugin theme > built-in, so a user can restyle a
+plugin theme by saving over its name. Uninstalling the plugin removes its
+themes with it; a config still naming one falls back to the default theme
+with a logged warning.
+
+A plugin that wants to *apply* a theme (not just offer it) can drive the
+control socket like any other plugin: `catctl theme <name>`, or `theme.save`
+with `"activate": true` for a one-shot install-and-switch.
 
 ### Build step environment
 

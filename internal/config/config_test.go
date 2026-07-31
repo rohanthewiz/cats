@@ -18,8 +18,10 @@ func TestDefaultValid(t *testing.T) {
 	if ttl, err := d.Server.TTL(); err != nil || ttl != 24*time.Hour {
 		t.Fatalf("default TTL = %v, %v; want 24h", ttl, err)
 	}
-	if len(d.Theme.Colors) != len(defaultColors) {
-		t.Fatalf("default theme has %d colors, want %d", len(d.Theme.Colors), len(defaultColors))
+	// The theme section defaults to "no choices": no name (⇒ the default
+	// theme) and an empty-but-present overrides map.
+	if d.Theme.Name != "" || d.Theme.Colors == nil || len(d.Theme.Colors) != 0 {
+		t.Fatalf("default theme should be empty choices, got %+v", d.Theme)
 	}
 	if len(d.Keybindings.CopyMode) != len(defaultCopyMode) {
 		t.Fatalf("default copy_mode has %d actions, want %d", len(d.Keybindings.CopyMode), len(defaultCopyMode))
@@ -53,6 +55,7 @@ server:
   addr: "127.0.0.1:9000"
   auth: none
 theme:
+  name: darcula
   colors:
     bg: "#000000"
 keybindings:
@@ -70,15 +73,13 @@ keybindings:
 	if got.Server.CathostSocket != Default().Server.CathostSocket {
 		t.Fatalf("cathost socket should keep default, got %q", got.Server.CathostSocket)
 	}
-	// Overridden color wins; sibling colors keep defaults.
-	if got.Theme.Colors["bg"] != "#000000" {
-		t.Fatalf("bg override not applied: %q", got.Theme.Colors["bg"])
+	// The named color lands as an override; the map stays sparse (the full
+	// palette is resolved against the theme at render time, not here).
+	if got.Theme.Colors["bg"] != "#000000" || len(got.Theme.Colors) != 1 {
+		t.Fatalf("theme overrides = %v, want just bg", got.Theme.Colors)
 	}
-	if got.Theme.Colors["fg"] != defaultColors["fg"] {
-		t.Fatalf("fg should keep default, got %q", got.Theme.Colors["fg"])
-	}
-	if len(got.Theme.Colors) != len(defaultColors) {
-		t.Fatalf("partial theme should keep all default colors, got %d", len(got.Theme.Colors))
+	if got.Theme.Name != "darcula" {
+		t.Fatalf("theme.name = %q", got.Theme.Name)
 	}
 	// Rebound action wins; sibling actions keep defaults.
 	if !reflect.DeepEqual(got.Keybindings.CopyMode["yank"], []string{"y", "c"}) {
