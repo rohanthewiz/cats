@@ -112,6 +112,23 @@ This edits the agent's own config tree and needs no running `catway`. See
 [Agent detection](subsystems/agent-detection.md) and the
 [Hook API](protocols/hook-api.md).
 
+## Install the cats-todo plugin
+
+[`cats-todo`](https://github.com/rohanthewiz/cats-todo) is the recommended
+companion — a TUI prompt-backlog manager, and the reference implementation of a
+plugin talking the control protocol. Save prompts of future work per-project or
+globally, then *drop* one into a Claude Code session: an existing agent pane, or
+a fresh tab that launches the agent first.
+
+```bash
+catctl plugin install rohanthewiz/cats-todo   # clone from GitHub + build
+catctl plugin run rohanthewiz.cats-todo       # launch in a new tab
+```
+
+Install is offline; only `run` needs a live `catway`. The web UI has the same
+surface under gear menu → **plugins**. See [Plugins](subsystems/plugins.md) for
+the manifest format and for writing your own.
+
 ## Where state lives
 
 | What | Path |
