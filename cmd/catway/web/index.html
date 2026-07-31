@@ -13,9 +13,12 @@
     /* --muted carries every secondary label (sidebar headings, status bar,
        hints); kept near 7:1 on the panel surface so 10–12px labels stay legible. */
     --line:#38403a; --muted:#9db0a2; --chrome:#2b322c; --chrome-focus:#3a4a3f;
-    /* Sidebar section titles pull out of --muted into a light yellow so the
+    /* Sidebar section titles pull out of --muted into a medium green so the
        three groups read as dividers rather than as more secondary label text. */
-    --heading:#f0dfa0;
+    --heading:#6cbf8d;
+    /* The todo reminder mark keeps the old warm yellow: it has to stay clear of
+       the green agent-state dots so it reads as a reminder, not as a state. */
+    --todo:#f0dfa0;
     --ok:#6ac47a; --warn:#e0b64e; --err:#e57373; --done:#00ccf5;
     /* Accent desaturated most of the way to gray: the focused pane's outline
        sits right next to terminal text all day, so it reads as a gray-green
@@ -78,9 +81,9 @@
   #ws-list li .sum span { margin-left:4px; }
   /* The finger-with-a-string a workspace wears while its cats-todo backlog has
      unfinished items in it.
-     It rides the text baseline like the glyphs around it, and takes --heading so
+     It rides the text baseline like the glyphs around it, and takes --todo so
      it reads as a reminder rather than as another agent-state dot. */
-  #ws-list li .todo { flex:0 0 auto; color:var(--heading); align-self:center;
+  #ws-list li .todo { flex:0 0 auto; color:var(--todo); align-self:center;
     width:calc(14px * var(--sb-scale)); height:calc(14px * var(--sb-scale)); margin-left:-2px; }
   #ws-list li.add { color:var(--muted); font-style:italic; cursor:pointer; }
   #ws-list li.add:hover { color:var(--accent); background:none; }
