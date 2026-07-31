@@ -66,7 +66,10 @@ Full docs live in [`docs/`](docs/) as an mkdocs-style site (`mkdocs.yml` at the
 repo root), served with [gkdocs](https://github.com/rohanthewiz/gkdocs):
 
 ```sh
-MKDOCS_CONFIG=mkdocs.yml PORT=8000 go run github.com/rohanthewiz/gkdocs/cmd/gkdocs
+MKDOCS_CONFIG=mkdocs.yml PORT=8000 gkdocs
+
+# without gkdocs installed (it is not a dependency of this module):
+MKDOCS_CONFIG=mkdocs.yml PORT=8000 go run github.com/rohanthewiz/gkdocs/cmd/gkdocs@latest
 ```
 
 Start with [Architecture → Overview](docs/architecture/index.md) for the
