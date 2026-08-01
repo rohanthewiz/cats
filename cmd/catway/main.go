@@ -12,7 +12,8 @@
 // Access control (WS10): a shared password gates the UI. Browsers sign in at
 // /login and receive an HMAC-signed session cookie; headless clients present
 // the password as an Authorization: Bearer token. --tls serves HTTPS with an
-// auto-generated self-signed certificate (override with --tls-cert/--tls-key).
+// auto-generated self-signed certificate (override with --tls-cert/--tls-key,
+// or extend its subject alternative names with --tls-san).
 //
 // Build (same prerequisite as cmd/cathost — the vendored libghostty-vt,
 // built once via `make vt`):
@@ -34,7 +35,7 @@
 //	         [--control-socket /tmp/cats-control.sock] \
 //	         [--hook-socket /tmp/cats-hooks.sock] \
 //	         [--auth password|none] [--password SECRET] [--session-ttl 24h] \
-//	         [--tls] [--tls-cert cert.pem] [--tls-key key.pem] \
+//	         [--tls] [--tls-cert cert.pem] [--tls-key key.pem] [--tls-san NAME,…] \
 //	         [--persist=false] [--state-dir DIR] [--push-url URL]
 //
 // Push notifications (--push-url, or the config's push section) POST every
@@ -99,6 +100,8 @@ func main() {
 	useTLS := flag.Bool("tls", false, "serve HTTPS (auto self-signed cert unless --tls-cert/--tls-key given)")
 	tlsCert := flag.String("tls-cert", "", "TLS certificate PEM (implies --tls)")
 	tlsKey := flag.String("tls-key", "", "TLS private key PEM (implies --tls)")
+	tlsSANs := flag.String("tls-san", "",
+		"comma-separated extra names/IPs for the auto-generated certificate, e.g. cats.lan (implies --tls)")
 	persistOn := flag.Bool("persist", true, "persist and restore session state (WS3)")
 	stateDir := flag.String("state-dir", "", "session state directory (default $XDG_STATE_HOME/cats)")
 	pushURL := flag.String("push-url", "",
@@ -152,6 +155,9 @@ func main() {
 	}
 	if set["tls-key"] {
 		eff.TLS.Key = *tlsKey
+	}
+	if set["tls-san"] {
+		eff.TLS.SANs = splitCSV(*tlsSANs)
 	}
 	effPersist := cfg.Persistence
 	if set["persist"] {
@@ -265,11 +271,13 @@ func main() {
 	go o.runAgentModels() // periodic re-read of each agent pane's current model
 	go o.runUsage()       // periodic re-read of the account's rate-limit windows
 
-	// TLS: operator PEMs, or an auto-generated self-signed pair.
-	tlsOn := eff.TLS.Enabled || eff.TLS.Cert != "" || eff.TLS.Key != ""
+	// TLS: operator PEMs, or an auto-generated self-signed pair. Naming a cert,
+	// a key, or a SAN is itself the opt-in — each is meaningless without HTTPS,
+	// so requiring --tls alongside would only be a way to get it wrong.
+	tlsOn := eff.TLS.Enabled || eff.TLS.Cert != "" || eff.TLS.Key != "" || len(eff.TLS.SANs) > 0
 	var tlsCfg rweb.TLSCfg
 	if tlsOn {
-		certPath, keyPath, err := resolveTLS(eff.TLS.Cert, eff.TLS.Key)
+		certPath, keyPath, err := resolveTLS(eff.TLS.Cert, eff.TLS.Key, eff.TLS.SANs)
 		if err != nil {
 			log.Fatalf("catway: tls: %v", err)
 		}
@@ -493,9 +501,17 @@ func splitCSV(s string) []string {
 
 // resolveTLS returns the cert/key PEM paths to serve: the operator's files if
 // both are given, otherwise an auto-generated self-signed pair cached under the
-// user config dir (~/.config/cats or the platform equivalent).
-func resolveTLS(certFlag, keyFlag string) (certPath, keyPath string, err error) {
+// user config dir (~/.config/cats or the platform equivalent). sans are extra
+// names the generated certificate must cover; adding one re-mints it.
+func resolveTLS(certFlag, keyFlag string, sans []string) (certPath, keyPath string, err error) {
 	if certFlag != "" && keyFlag != "" {
+		// Say so rather than ignoring them. The operator asked for a name to be
+		// covered; silence here reads as "done" and the trust warning that
+		// follows would look like a bug in the SAN handling.
+		if len(sans) > 0 {
+			log.Printf("catway: ignoring tls.sans %v — they only apply to the auto-generated certificate, "+
+				"and --tls-cert/--tls-key were supplied", sans)
+		}
 		return certFlag, keyFlag, nil
 	}
 	if certFlag != "" || keyFlag != "" {
@@ -506,10 +522,15 @@ func resolveTLS(certFlag, keyFlag string) (certPath, keyPath string, err error) 
 		return "", "", fmt.Errorf("locate config dir: %w", err)
 	}
 	dir := filepath.Join(cfgDir, "cats")
-	certPath, keyPath, err = gwtls.EnsureSelfSigned(dir)
+	certPath, keyPath, err = gwtls.EnsureSelfSigned(dir, sans)
 	if err != nil {
 		return "", "", err
 	}
-	log.Printf("catway: using self-signed TLS certificate in %s (browsers warn on first connect)", dir)
+	if len(sans) > 0 {
+		log.Printf("catway: using self-signed TLS certificate in %s covering %v (browsers warn on first connect)",
+			dir, sans)
+	} else {
+		log.Printf("catway: using self-signed TLS certificate in %s (browsers warn on first connect)", dir)
+	}
 	return certPath, keyPath, nil
 }

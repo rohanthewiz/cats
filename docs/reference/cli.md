@@ -27,6 +27,7 @@ catway [--config PATH] [--addr :8421] [--socket /tmp/cats-cathost.sock]
        [--control-socket PATH] [--hook-socket PATH]
        [--auth password|none] [--password SECRET] [--session-ttl 24h]
        [--allowed-origins a,b] [--tls] [--tls-cert PEM] [--tls-key PEM]
+       [--tls-san NAME,IP]
        [--persist=false] [--state-dir DIR]
 ```
 
@@ -43,6 +44,7 @@ catway [--config PATH] [--addr :8421] [--socket /tmp/cats-cathost.sock]
 | `--allowed-origins` | — | comma-separated extra WebSocket origins |
 | `--tls` | off | auto self-signed unless cert/key given |
 | `--tls-cert` / `--tls-key` | — | both required together; either implies `--tls` |
+| `--tls-san` | — | comma-separated extra names/IPs for the **auto-generated** cert; implies `--tls`. Adding one re-mints |
 | `--persist` | `true` | |
 | `--state-dir` | `$XDG_STATE_HOME/cats` | |
 

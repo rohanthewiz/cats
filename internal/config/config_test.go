@@ -98,6 +98,10 @@ func TestValidateRejects(t *testing.T) {
 		"unknown action": "keybindings:\n  copy_mode:\n    teleport: [\"t\"]\n",
 		"empty key list": "keybindings:\n  copy_mode:\n    yank: []\n",
 		"lone tls cert":  "server:\n  tls:\n    cert: /x.pem\n",
+		// A SAN typo would otherwise surface months later as an unexplained
+		// browser trust warning, long after anyone connects it to this line.
+		"tls san as url":   "server:\n  tls:\n    sans: [\"https://cats.lan\"]\n",
+		"tls san hostport": "server:\n  tls:\n    sans: [\"cats.lan:8421\"]\n",
 
 		"push enabled without url": "push:\n  enabled: true\n",
 		"push non-http url":        "push:\n  enabled: true\n  url: ftp://ntfy.sh/t\n",

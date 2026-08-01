@@ -8,6 +8,13 @@ import "encoding/json"
 // version, the grid size of its pane-rendering area (it measures its own
 // font), device pixel ratio, and cell pixel metrics (forwarded to β
 // create_pane/resize for pixel-aware apps).
+//
+// Viewer declares a client that watches without owning the geometry. The
+// session has one grid, shared by every connection, so an unqualified second
+// client reshapes the first: a phone announcing 40x30 would resize the desktop's
+// panes to fit a phone. A viewer's Cols/Rows/CellWPx/CellHPx are ignored and its
+// Resize messages are dropped; it renders whatever grid the sizers established.
+// Omitted (false) is the historical behaviour, so browsers need no change.
 type Init struct {
 	T       Type    `json:"t"`
 	V       int     `json:"v"`
@@ -16,6 +23,7 @@ type Init struct {
 	DPR     float64 `json:"dpr"`
 	CellWPx uint32  `json:"cell_w_px"`
 	CellHPx uint32  `json:"cell_h_px"`
+	Viewer  bool    `json:"viewer,omitempty"`
 }
 
 // --- Input events (§6, D4: structured, encoded server-side) --------------------
@@ -36,13 +44,22 @@ const (
 )
 
 // Key is a structured keyboard event: W3C KeyboardEvent.code + .key. The
-// server routes it to the focused pane, runs keybinding interception, and
-// encodes VT bytes from the pane's live mode state — the browser never
-// pre-encodes.
+// server encodes VT bytes from the pane's live mode state and runs keybinding
+// interception — the browser never pre-encodes.
+//
+// Pane addresses the event, following Mouse's precedent. 0 (omitted) routes to
+// the session's focused pane, which is what a browser sends and what every
+// client sent before this field existed; pane ids start at 1
+// (internal/layout), so 0 is never a real pane. A non-zero pane is how a second
+// client types somewhere without stealing the desktop's cursor — and without
+// the race that follows it, where the desktop user clicks elsewhere and the
+// phone's next keystroke lands there. Addressed input is gated: see the server's
+// inputTarget.
 type Key struct {
 	T    Type   `json:"t"`
-	Code string `json:"code"` // e.g. "KeyA", "Enter", "ArrowLeft"
-	Key  string `json:"key"`  // e.g. "a", "Enter", "ArrowLeft"
+	Pane uint32 `json:"pane,omitempty"` // 0 = the focused pane
+	Code string `json:"code"`           // e.g. "KeyA", "Enter", "ArrowLeft"
+	Key  string `json:"key"`            // e.g. "a", "Enter", "ArrowLeft"
 	Mods uint8  `json:"mods"`
 	Kind string `json:"kind"` // KeyDown | KeyRepeat | KeyUp
 }
@@ -79,9 +96,11 @@ type Mouse struct {
 }
 
 // Paste is plain text; the server applies bracketed-paste wrapping per the
-// focused pane's mode.
+// target pane's mode. Pane addresses it exactly as Key.Pane does — the two
+// travel together, since a client that can type into a pane can paste into it.
 type Paste struct {
 	T    Type   `json:"t"`
+	Pane uint32 `json:"pane,omitempty"` // 0 = the focused pane
 	Data string `json:"data"`
 }
 

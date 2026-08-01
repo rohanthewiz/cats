@@ -29,6 +29,8 @@ import (
 	"time"
 
 	"github.com/goccy/go-yaml"
+
+	"github.com/rohanthewiz/cats/internal/gwtls"
 )
 
 // EnvVar overrides the config file path (after an explicit --config flag, before
@@ -149,6 +151,17 @@ type TLS struct {
 	Enabled bool   `yaml:"enabled"`
 	Cert    string `yaml:"cert"`
 	Key     string `yaml:"key"`
+	// SANs are extra subject alternative names for the auto-generated
+	// certificate — a LAN DNS name, or the hostname a relay will front — on top
+	// of the loopback/hostname/interface set gwtls discovers. Each entry is an IP
+	// literal or a bare DNS name; Validate rejects anything else.
+	//
+	// Ignored when Cert/Key name operator PEMs: those are whatever they are.
+	// Changing this list re-mints the certificate, which changes the fingerprint
+	// a client may have pinned, so it takes effect at restart rather than on
+	// server.reload_config. omitempty keeps an unset list out of a saved file so
+	// it round-trips as nil, matching AllowedOrigins.
+	SANs []string `yaml:"sans,omitempty"`
 }
 
 // Theme is the front-end appearance. Name selects a named theme (a built-in,
@@ -329,6 +342,11 @@ func (c Config) Validate() error {
 	}
 	if (c.Server.TLS.Cert == "") != (c.Server.TLS.Key == "") {
 		return errors.New("server.tls: cert and key must be set together")
+	}
+	// Fail at load, not at first HTTPS connect: a mistyped SAN would otherwise
+	// surface months later as an unexplained browser trust warning.
+	if _, _, err := gwtls.ParseSANs(c.Server.TLS.SANs); err != nil {
+		return fmt.Errorf("server.tls.sans: %w", err)
 	}
 	if c.Persistence.HistoryLines < 0 {
 		return fmt.Errorf("persistence.history_lines %d: must be >= 0", c.Persistence.HistoryLines)

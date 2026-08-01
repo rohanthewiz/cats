@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -38,6 +39,8 @@ func TestRoundTrip(t *testing.T) {
 	}{
 		// Down.
 		{"welcome", NewWelcome("too old"), DecodeDown},
+		{"welcome_caps", NewWelcome(""), DecodeDown},
+		{"clients", NewClients(2, 1, 200, 60), DecodeDown},
 		{"layout", Layout{T: MsgLayout,
 			Workspaces: []WorkspaceInfo{{ID: "w1", Name: "proj", Active: true, AgentSummary: "1 working"}},
 			Tabs:       []TabInfo{{Num: 1, Name: "1", Active: true}, {Num: 3, Name: "logs", Zoomed: true}},
@@ -79,7 +82,10 @@ func TestRoundTrip(t *testing.T) {
 
 		// Up.
 		{"init", Init{T: MsgInit, V: 1, Cols: 120, Rows: 40, DPR: 2, CellWPx: 9, CellHPx: 18}, DecodeUp},
+		{"init_viewer", Init{T: MsgInit, V: 1, DPR: 3, Viewer: true}, DecodeUp},
 		{"key", Key{T: MsgKey, Code: "KeyA", Key: "a", Mods: ModCtrl | ModAlt, Kind: KeyDown}, DecodeUp},
+		{"key_addressed", Key{T: MsgKey, Pane: pane, Code: "KeyA", Key: "a", Kind: KeyDown}, DecodeUp},
+		{"paste_addressed", Paste{T: MsgPaste, Pane: pane, Data: "ls -la\n"}, DecodeUp},
 		{"mouse", Mouse{T: MsgMouse, Pane: pane, X: 10, Y: 5, Btn: BtnNone,
 			Kind: MouseWheel, Mods: ModShift, DY: -3}, DecodeUp},
 		{"paste", Paste{T: MsgPaste, Data: "ls -la\n"}, DecodeUp},
@@ -116,8 +122,24 @@ func TestWireShapes(t *testing.T) {
 		msg  any
 		want string
 	}{
-		{"key", Key{T: MsgKey, Code: "KeyA", Key: "a", Mods: 6, Kind: "d"},
+		// The unaddressed key is byte-identical to what shipped before Key.Pane
+		// existed. That is the whole claim of an additive change: an old client's
+		// messages must not change shape, and a new field must not appear in them.
+		{"key omits the pane it did not address", Key{T: MsgKey, Code: "KeyA", Key: "a", Mods: 6, Kind: "d"},
 			`{"t":"key","code":"KeyA","key":"a","mods":6,"kind":"d"}`},
+		{"key addressed", Key{T: MsgKey, Pane: 7, Code: "KeyA", Key: "a", Mods: 6, Kind: "d"},
+			`{"t":"key","pane":7,"code":"KeyA","key":"a","mods":6,"kind":"d"}`},
+		{"paste omits the pane it did not address", Paste{T: MsgPaste, Data: "hi"},
+			`{"t":"paste","data":"hi"}`},
+		{"paste addressed", Paste{T: MsgPaste, Pane: 7, Data: "hi"},
+			`{"t":"paste","pane":7,"data":"hi"}`},
+		// Likewise init: a browser that never heard of viewers sends what it always did.
+		{"init omits viewer", Init{T: MsgInit, V: 1, Cols: 80, Rows: 24, DPR: 1, CellWPx: 8, CellHPx: 16},
+			`{"t":"init","v":1,"cols":80,"rows":24,"dpr":1,"cell_w_px":8,"cell_h_px":16}`},
+		{"init viewer declares no grid", Init{T: MsgInit, V: 1, DPR: 3, Viewer: true},
+			`{"t":"init","v":1,"cols":0,"rows":0,"dpr":3,"cell_w_px":0,"cell_h_px":0,"viewer":true}`},
+		{"clients", NewClients(2, 1, 200, 60),
+			`{"t":"clients","total":2,"sizers":1,"cols":200,"rows":60}`},
 		{"pane_diff omits defaults and scroll", PaneDiff{T: MsgPaneDiff, Pane: 7,
 			Cur:   &Cursor{X: 1, Y: 2, Vis: true, Shape: 2},
 			Cells: []DiffCell{{I: 3, Cell: Cell{S: "x"}}}},
@@ -154,6 +176,29 @@ func TestWireShapes(t *testing.T) {
 				t.Fatalf("wire shape drift:\n got  %s\n want %s", data, tc.want)
 			}
 		})
+	}
+}
+
+// A client reads Caps to tell "the server honoured my field" from "the server
+// dropped it", so the list has to be present on the welcome that opens a
+// session and absent from the one that refuses it — a rejected client is about
+// to be closed and the only thing it needs is the reason.
+func TestWelcomeCaps(t *testing.T) {
+	ok := NewWelcome("")
+	for _, want := range []string{CapViewer, CapKeyPane, CapClients} {
+		if !slices.Contains(ok.Caps, want) {
+			t.Errorf("welcome does not advertise %q: %v", want, ok.Caps)
+		}
+	}
+	if got := NewWelcome("protocol version 0 unsupported"); got.Caps != nil {
+		t.Errorf("a rejection carries caps: %v", got.Caps)
+	}
+	// The advertised set is package state; a caller must not be able to reach in
+	// and edit what the next connection is told.
+	ok.Caps = append(ok.Caps[:0:0], ok.Caps...)
+	ok.Caps[0] = "tampered"
+	if NewWelcome("").Caps[0] == "tampered" {
+		t.Error("the advertised capability set is shared mutable state")
 	}
 }
 

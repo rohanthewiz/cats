@@ -4,18 +4,73 @@ import "encoding/json"
 
 // --- Session (§2) -------------------------------------------------------------
 
+// Optional server capabilities, advertised in Welcome.Caps. These name
+// behaviours added within a protocol version — additive changes that an older
+// server silently ignores rather than rejects.
+//
+// A capability is only listed once the server actually honours it, because the
+// whole point is to let a client tell "the server obeyed my field" from "the
+// server dropped it on the floor". Guessing wrong about CapKeyPane in
+// particular means keystrokes going to the wrong pane, which is worse than
+// keystrokes going nowhere.
+const (
+	// CapViewer: Init.Viewer is honoured — a viewer neither sizes the session
+	// grid nor resizes it later.
+	CapViewer = "viewer"
+	// CapKeyPane: Key.Pane and Paste.Pane are honoured — input can be addressed
+	// to a pane instead of riding the shared focus.
+	CapKeyPane = "key.pane"
+	// CapClients: the server pushes the Clients census on connect/disconnect.
+	CapClients = "clients"
+)
+
+// serverCaps is what this server advertises. Unexported so a caller cannot
+// mutate the advertised set through the shared backing array.
+var serverCaps = []string{CapViewer, CapKeyPane, CapClients}
+
 // Welcome is the server's reply to Init. A version mismatch or rejection sets
 // Error and the server closes the socket; otherwise the server immediately
 // pushes initial full state (layout, per-visible-pane full frame + chrome,
 // agents rollup, app title).
+//
+// Caps names the optional behaviours this server honours (Cap* above). It is
+// absent on a rejection: that socket is about to close, and the only thing the
+// client needs from it is the reason.
 type Welcome struct {
-	T     Type   `json:"t"`
-	V     int    `json:"v"`
-	Error string `json:"error,omitempty"`
+	T     Type     `json:"t"`
+	V     int      `json:"v"`
+	Error string   `json:"error,omitempty"`
+	Caps  []string `json:"caps,omitempty"`
 }
 
 func NewWelcome(errMsg string) Welcome {
-	return Welcome{T: MsgWelcome, V: ProtocolVersion, Error: errMsg}
+	w := Welcome{T: MsgWelcome, V: ProtocolVersion, Error: errMsg}
+	if errMsg == "" {
+		w.Caps = serverCaps
+	}
+	return w
+}
+
+// Clients is the connected-client census, pushed on every connect and
+// disconnect. Two questions it answers for a client that is not the only one
+// looking:
+//
+//   - "Is anyone else here?" — Total. A phone can say "desktop connected —
+//     viewing only" rather than pretending it is alone with the session.
+//   - "Whose grid am I rendering?" — Sizers is how many connections declared a
+//     grid (non-viewers), and Cols/Rows is the grid they settled on. Sizers == 0
+//     means nobody is driving it and the layout is whatever the last sizer left
+//     behind, which is worth rendering differently from a live desktop's.
+type Clients struct {
+	T      Type   `json:"t"`
+	Total  int    `json:"total"`
+	Sizers int    `json:"sizers"`
+	Cols   uint16 `json:"cols"`
+	Rows   uint16 `json:"rows"`
+}
+
+func NewClients(total, sizers int, cols, rows uint16) Clients {
+	return Clients{T: MsgClients, Total: total, Sizers: sizers, Cols: cols, Rows: rows}
 }
 
 // --- Layout & chrome (§3) -----------------------------------------------------

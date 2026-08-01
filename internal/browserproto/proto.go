@@ -47,6 +47,7 @@ const (
 	MsgUpdateReady Type = "update_ready"
 	MsgTheme       Type = "theme"
 	MsgUsage       Type = "usage"
+	MsgClients     Type = "clients"
 	MsgCmdResult   Type = "cmd_result"
 
 	// Up (browser → server).
@@ -161,6 +162,8 @@ func DecodeDown(data []byte) (any, error) {
 		return decodeAs[Theme](data)
 	case MsgUsage:
 		return decodeAs[Usage](data)
+	case MsgClients:
+		return decodeAs[Clients](data)
 	case MsgCmdResult:
 		return decodeAs[CmdResult](data)
 	}

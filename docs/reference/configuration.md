@@ -64,6 +64,7 @@ server:
     enabled: false
     cert: ""
     key: ""
+    sans: []
 ```
 
 | Key | Flag | Notes |
@@ -77,6 +78,7 @@ server:
 | `allowed_origins` | `--allowed-origins` | extra WebSocket origins beyond same-origin. Full origins or bare `host[:port]`. Empty means strict same-origin |
 | `tls.enabled` | `--tls` | HTTPS. Auto self-signed unless cert/key are given |
 | `tls.cert` / `tls.key` | `--tls-cert` / `--tls-key` | operator PEMs. Both must be set together; either implies `--tls` |
+| `tls.sans` | `--tls-san` | extra names/IPs for the auto-generated cert (a LAN DNS name, a relay hostname). Implies `--tls`; ignored when operator PEMs are given. Adding one re-mints the certificate |
 
 !!! warning "The password is not in this file"
     There is no `server.password`. Set `CATS_PASSWORD` or pass `--password`, so

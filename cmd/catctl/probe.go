@@ -13,7 +13,13 @@
 //	focus:PANE              cmd pane.focus
 //	focusdir:left|right|up|down  cmd pane.focus_direction (nearest neighbour)
 //	type:TEXT               structured key events per rune (\n = Enter)
+//	typeat:PANE:TEXT        same, addressed at PANE (Key.Pane) instead of focus
 //	key:CODE[:MODS]         one named key, MODS letters c/s/a/m (e.g. key:F10, key:KeyC:c)
+//	paste:TEXT              paste (server applies bracketed-paste per pane mode)
+//	pasteat:PANE:TEXT       same, addressed at PANE (Paste.Pane)
+//	resize:COLS:ROWS        report a new window grid (ignored when --viewer)
+//	caps:NAME               assert the welcome advertised capability NAME
+//	clients:TOTAL[:SIZERS]  poll until the clients census matches
 //	mouse:PANE:X:Y[:BTN]    click (down+up) at cell x,y (btn default 0 = left)
 //	click_text:PANE:TEXT    poll until TEXT appears, then click its first cell
 //	wheel:PANE:X:Y:DY       wheel event (negative DY = up)
@@ -48,6 +54,10 @@
 // Auth: pass --token to send Authorization: Bearer for a WS10-gated catway;
 // use a wss:// URL for TLS (the probe skips cert verification).
 //
+// Pass --viewer to connect as a second client that declares no grid: the server
+// ignores its size and its resizes, so a probe can drive a live session without
+// reshaping the desktop's panes underneath it.
+//
 // Example:
 //
 //	catctl probe --url ws://localhost:8421/ws --script 'wait:800; type:echo hi\n; expect:1:hi; dump:1'
@@ -65,6 +75,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -87,11 +98,12 @@ func runProbe(args []string) int {
 	timeout := fs.Duration("timeout", 8*time.Second, "expect/modes poll timeout")
 	life := fs.Duration("life", 120*time.Second, "connection lifetime limit")
 	token := fs.String("token", "", "shared access token sent as Authorization: Bearer (WS10 auth)")
+	viewer := fs.Bool("viewer", false, "connect as a viewer: declare no grid, never resize the session")
 	if err := fs.Parse(args); err != nil {
 		return 2 // flag already reported the problem (and prints defaults on -h)
 	}
 
-	if err := probeRun(*rawURL, *cols, *rows, *script, *timeout, *life, *token); err != nil {
+	if err := probeRun(*rawURL, *cols, *rows, *script, *timeout, *life, *token, *viewer); err != nil {
 		fmt.Fprintf(os.Stderr, "catctl probe: FAIL: %v\n", err)
 		return 1
 	}
@@ -136,11 +148,16 @@ type probe struct {
 	lastRead    string
 	lastCapture string
 	seq         int
+	// caps is the welcome's advertised capability set and clients the last
+	// census — the two additive protocol features a client is supposed to read
+	// before deciding what it may send (see the caps/clients ops).
+	caps    []string
+	clients *browserproto.Clients
 }
 
 // probeRun dials the catway, performs the WS upgrade + init handshake, starts
 // the frame-folding reader, then executes the op script sequentially.
-func probeRun(rawURL string, cols, rows int, script string, timeout, life time.Duration, token string) error {
+func probeRun(rawURL string, cols, rows int, script string, timeout, life time.Duration, token string, viewer bool) error {
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		return err
@@ -168,11 +185,22 @@ func probeRun(rawURL string, cols, rows int, script string, timeout, life time.D
 		reads: map[string]*browserproto.CmdResult{}}
 
 	init := browserproto.Init{T: browserproto.MsgInit, V: browserproto.ProtocolVersion,
-		Cols: uint16(cols), Rows: uint16(rows), DPR: 1, CellWPx: 8, CellHPx: 16}
+		Cols: uint16(cols), Rows: uint16(rows), DPR: 1, CellWPx: 8, CellHPx: 16, Viewer: viewer}
+	if viewer {
+		// Send zeros as well as the flag. The server ignores a viewer's geometry
+		// either way, so declaring nothing is what an honest viewer looks like on
+		// the wire — and it keeps this probe useful for catching a server that
+		// honours the flag but forgets one of the two fields behind it.
+		init.Cols, init.Rows, init.CellWPx, init.CellHPx = 0, 0, 0, 0
+	}
 	if err := p.send(init); err != nil {
 		return err
 	}
-	fmt.Printf("→ init v%d %dx%d\n", browserproto.ProtocolVersion, cols, rows)
+	if viewer {
+		fmt.Printf("→ init v%d viewer (no grid declared)\n", browserproto.ProtocolVersion)
+	} else {
+		fmt.Printf("→ init v%d %dx%d\n", browserproto.ProtocolVersion, cols, rows)
+	}
 
 	go p.reader()
 
@@ -258,6 +286,14 @@ func (p *probe) apply(msg any) {
 		if m.Error != "" {
 			p.dead = fmt.Errorf("welcome rejected: %s", m.Error)
 		}
+		p.caps = m.Caps
+		if len(m.Caps) > 0 {
+			fmt.Printf("← welcome caps=%v\n", m.Caps)
+		}
+	case *browserproto.Clients:
+		p.tally["clients"]++
+		p.clients = m
+		fmt.Printf("← clients total=%d sizers=%d grid=%dx%d\n", m.Total, m.Sizers, m.Cols, m.Rows)
 	case *browserproto.Layout:
 		p.tally["layout"]++
 		p.layout = m
@@ -411,22 +447,102 @@ func (p *probe) exec(op string, timeout time.Duration) error {
 		fmt.Printf("→ cmd pane.focus_direction %s\n", arg)
 		return p.send(cmd)
 
-	case "type":
-		text := strings.ReplaceAll(arg, `\n`, "\n")
-		fmt.Printf("→ type %q\n", text)
+	case "type", "typeat":
+		// typeat:PANE:TEXT addresses the keys at a pane (Key.Pane) rather than
+		// letting them ride the session's shared focus — what a second client
+		// does so it cannot steal the desktop's cursor. Pane 0 is exactly `type`.
+		pane, text, err := paneArg(name == "typeat", name, arg)
+		if err != nil {
+			return err
+		}
+		text = strings.ReplaceAll(text, `\n`, "\n")
+		if pane == 0 {
+			fmt.Printf("→ type %q\n", text)
+		} else {
+			fmt.Printf("→ type %q → pane %d\n", text, pane)
+		}
 		for _, r := range text {
 			code, key, mods, ok := keyFor(r)
 			if !ok {
 				return fmt.Errorf("no key mapping for %q", r)
 			}
 			for _, kind := range []string{browserproto.KeyDown, browserproto.KeyUp} {
-				if err := p.send(browserproto.Key{T: browserproto.MsgKey, Code: code, Key: key, Mods: mods, Kind: kind}); err != nil {
+				if err := p.send(browserproto.Key{T: browserproto.MsgKey, Pane: pane,
+					Code: code, Key: key, Mods: mods, Kind: kind}); err != nil {
 					return err
 				}
 			}
 			time.Sleep(15 * time.Millisecond)
 		}
 		return nil
+
+	case "paste", "pasteat":
+		// The server wraps this in bracketed-paste per the target pane's mode —
+		// which is the half a client cannot do for itself, and the reason paste
+		// is its own message rather than a run of key events.
+		pane, text, err := paneArg(name == "pasteat", name, arg)
+		if err != nil {
+			return err
+		}
+		text = strings.ReplaceAll(text, `\n`, "\n")
+		fmt.Printf("→ paste %q pane=%d\n", text, pane)
+		return p.send(browserproto.Paste{T: browserproto.MsgPaste, Pane: pane, Data: text})
+
+	case "resize":
+		// resize:COLS:ROWS — what a browser sends when its window changes, and
+		// what a phone would send on every rotation. Paired with --viewer this is
+		// the live proof that a viewer's resize reshapes nothing.
+		colsStr, rowsStr, ok := strings.Cut(arg, ":")
+		if !ok {
+			return fmt.Errorf("resize needs COLS:ROWS")
+		}
+		cols, err := strconv.ParseUint(colsStr, 10, 16)
+		if err != nil {
+			return fmt.Errorf("bad resize cols %q: %w", colsStr, err)
+		}
+		rows, err := strconv.ParseUint(rowsStr, 10, 16)
+		if err != nil {
+			return fmt.Errorf("bad resize rows %q: %w", rowsStr, err)
+		}
+		fmt.Printf("→ resize %sx%s\n", colsStr, rowsStr)
+		return p.send(browserproto.Resize{T: browserproto.MsgResize,
+			Cols: uint16(cols), Rows: uint16(rows)})
+
+	case "caps":
+		// The welcome's capability list is what tells a client the server will
+		// honour Key.Pane rather than quietly routing to focus — assert it before
+		// trusting an addressed op below.
+		p.mu.Lock()
+		caps := append([]string(nil), p.caps...)
+		p.mu.Unlock()
+		if !slices.Contains(caps, arg) {
+			return fmt.Errorf("welcome caps %v does not advertise %q", caps, arg)
+		}
+		fmt.Printf("✓ caps has %q\n", arg)
+		return nil
+
+	case "clients":
+		// clients:TOTAL[:SIZERS] — poll the census. Polled, not asserted once:
+		// it arrives on another client's connect, which this script does not get
+		// to observe the timing of.
+		wantTotal, wantSizers, err := clientsArg(arg)
+		if err != nil {
+			return err
+		}
+		deadline := time.Now().Add(timeout)
+		for {
+			p.mu.Lock()
+			got := p.clients
+			p.mu.Unlock()
+			if got != nil && got.Total == wantTotal && (wantSizers < 0 || got.Sizers == wantSizers) {
+				fmt.Printf("✓ clients total=%d sizers=%d\n", got.Total, got.Sizers)
+				return nil
+			}
+			if time.Now().After(deadline) {
+				return fmt.Errorf("timeout: want total=%d sizers=%d, have %v", wantTotal, wantSizers, got)
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
 
 	case "key":
 		code, modStr, _ := strings.Cut(arg, ":")
@@ -1221,6 +1337,45 @@ func optPane(id string) (*uint32, error) {
 	}
 	pp := uint32(n)
 	return &pp, nil
+}
+
+// paneArg splits an op's argument into a target pane and the rest, for the op
+// pairs that come in a focus-routed and a pane-addressed flavour (type/typeat,
+// paste/pasteat). addressed false yields pane 0 and the argument untouched,
+// which is what the protocol calls "send it wherever focus is".
+//
+// Pane "f" is deliberately not accepted here: the addressed form exists to name
+// a pane that is *not* the focused one, and resolving "f" would hand back the
+// focus routing the caller was trying to leave behind.
+func paneArg(addressed bool, op, arg string) (uint32, string, error) {
+	if !addressed {
+		return 0, arg, nil
+	}
+	idStr, rest, ok := strings.Cut(arg, ":")
+	if !ok {
+		return 0, "", fmt.Errorf("%s needs PANE:TEXT", op)
+	}
+	n, err := strconv.ParseUint(idStr, 10, 32)
+	if err != nil || n == 0 {
+		return 0, "", fmt.Errorf("%s needs a real pane id, got %q", op, idStr)
+	}
+	return uint32(n), rest, nil
+}
+
+// clientsArg parses the clients op's TOTAL[:SIZERS]. A missing SIZERS yields
+// -1, meaning "don't care" — most scripts only care how many are connected.
+func clientsArg(arg string) (total, sizers int, err error) {
+	totalStr, sizersStr, hasSizers := strings.Cut(arg, ":")
+	if total, err = strconv.Atoi(totalStr); err != nil {
+		return 0, 0, fmt.Errorf("clients needs TOTAL[:SIZERS], got %q", arg)
+	}
+	if !hasSizers {
+		return total, -1, nil
+	}
+	if sizers, err = strconv.Atoi(sizersStr); err != nil {
+		return 0, 0, fmt.Errorf("bad clients sizers %q: %w", sizersStr, err)
+	}
+	return total, sizers, nil
 }
 
 // paneText parses PANE:TEXT. PANE may be "f" for the currently-focused pane

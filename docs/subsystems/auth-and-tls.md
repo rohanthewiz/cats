@@ -135,12 +135,13 @@ long an *already-open* session lasts.
 
 ```mermaid
 flowchart TD
-  START["--tls, or --tls-cert/--tls-key, or tls.enabled"]
+  START["--tls, --tls-cert/--tls-key, --tls-san, or tls.enabled"]
   BYO{"operator PEMs given?"}
   USE["use them — cert and key must both be set"]
   CACHE{"cached cert in ~/.config/cats?"}
   EXP{"within 30 days of expiry?"}
-  MINT["mint a self-signed ECDSA cert<br/>825-day validity<br/>SANs: hostname + every non-loopback interface IP"]
+  SAN{"covers every --tls-san?"}
+  MINT["mint a self-signed ECDSA cert<br/>825-day validity<br/>SANs: hostname + every non-loopback<br/>interface IP + every --tls-san"]
   REUSE["reuse it"]
   SERVE["rweb serves HTTPS"]
 
@@ -150,7 +151,9 @@ flowchart TD
   CACHE -->|"no"| MINT
   CACHE -->|"yes"| EXP
   EXP -->|"yes"| MINT
-  EXP -->|"no"| REUSE
+  EXP -->|"no"| SAN
+  SAN -->|"no"| MINT
+  SAN -->|"yes"| REUSE
   MINT --> SERVE
   REUSE --> SERVE
 ```
@@ -167,7 +170,28 @@ address validates against the auto-generated cert. Browsers still warn on first
 connect: there is no CA for a self-hosted tool. Supply your own PEMs to avoid the
 warning entirely.
 
-`--tls-cert` or `--tls-key` alone implies `--tls`, and both must be set together.
+`--tls-san` adds names the host cannot work out for itself — a LAN DNS name, or
+the hostname a relay will front:
+
+```
+catway --tls-san cats.lan,10.0.0.7        # or server.tls.sans in the config
+```
+
+Each entry is an IP literal or a bare DNS name, validated at startup so a typo
+fails loudly instead of surfacing months later as an unexplained trust warning.
+They are ignored (with a log line) when operator PEMs are supplied — those are
+whatever they are.
+
+**Adding a SAN re-mints the certificate.** It has to: a cached cert is good for
+825 days, so a name that did not invalidate the cache would do nothing until the
+next expiry. The check runs only against the *requested* names, never the
+auto-discovered ones — those follow the machine, and re-minting whenever a laptop
+changed Wi-Fi networks would churn the fingerprint a client pinned. Removing a
+SAN or reordering the list changes nothing, and neither does case or a trailing
+dot.
+
+`--tls-cert`, `--tls-key`, or `--tls-san` alone implies `--tls`; cert and key must
+be set together.
 
 ## The local sockets
 

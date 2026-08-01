@@ -49,17 +49,34 @@ Source protocols consolidated here (anchors mapped 2026-07-03):
 ## 2. Session lifecycle
 
 **Up `init`** — first message on the socket, required:
-`{t:"init", v:1, cols, rows, dpr, cell_w_px, cell_h_px}`
+`{t:"init", v:1, cols, rows, dpr, cell_w_px, cell_h_px, viewer?}`
 Grid size of the browser's pane-rendering area in cells (browser measures its font), device
 pixel ratio, and cell pixel metrics (forwarded to β `create_pane`/`resize` for pixel-aware
 apps).
 
+`viewer:true` declares a client that watches without owning the geometry. **The session has
+one grid, shared by every connection**, so an unqualified second client reshapes the first —
+a phone announcing 40x30 resizes the desktop's panes to fit a phone. A viewer's `cols`/`rows`
+and `cell_w_px`/`cell_h_px` are ignored and its `resize` (§6) is dropped; it renders whatever
+grid the sizers established. Absent ⇒ false, so browsers need no change.
+
 **Down `welcome`** — server reply:
-`{t:"welcome", v:1, error?}`
-Version mismatch or rejection ⇒ `error` set, socket closed. Otherwise the server immediately
-pushes initial full state: `layout` (§3), then for each **visible** pane (§8) a full
-`pane_frame` + current `pane_title`/`pane_cwd`/`pane_modes`, plus the `agents` rollup and
-app `title`.
+`{t:"welcome", v:1, error?, caps?}`
+Version mismatch or rejection ⇒ `error` set, socket closed (and no `caps` — that socket is
+about to go). Otherwise the server immediately pushes initial full state: `layout` (§3), then
+for each **visible** pane (§8) a full `pane_frame` + current
+`pane_title`/`pane_cwd`/`pane_modes`, plus the `agents` rollup and app `title`.
+
+`caps` names optional behaviours added **within** `v:1` — additive fields an older server
+ignores rather than rejects. A client reads it to tell "the server honoured my field" from
+"the server dropped it on the floor"; guessing wrong about `key.pane` means keystrokes in the
+wrong pane. A capability appears only once the server actually honours it.
+
+| cap | meaning |
+|---|---|
+| `viewer` | `init.viewer` is honoured (above) |
+| `key.pane` | `key.pane` / `paste.pane` are honoured (§6) |
+| `clients` | the `clients` census is pushed (§5) |
 
 **Reconnect** is just a fresh session: state is server-side (and pane content is
 daemon-side, surviving even server restarts — β `welcome.panes` + `request_resync`).
@@ -149,6 +166,13 @@ just applies what arrives in order.
   (α's shape kept).
 - `{t:"title", title}` — browser-tab title (app-level; replaces α's titleHub POST path —
   the hub survives as a server feature, same message).
+- `{t:"clients", total, sizers, cols, rows}` — the connected-client census, pushed on every
+  connect and disconnect (and whenever the grid changes). `total` is how many are here;
+  `sizers` how many of them declared a grid (`init` without `viewer`), and `cols`/`rows` the
+  grid those sizers settled on. `sizers:0` means nobody is driving the geometry and the
+  layout is whatever the last sizer left behind — worth rendering differently from a live
+  desktop's. Lets a phone say "desktop connected — viewing only" instead of pretending it is
+  alone with the session.
 - `{t:"error", msg, pane?}` — non-fatal, render as toast.
 - `{t:"shutdown"}` — server going away cleanly; browser shows "disconnected" chrome.
 - `{t:"update_ready", version, command}` — optional, from the Rust `AppEvent::UpdateReady`
@@ -163,9 +187,9 @@ server-side (the port of `prepare_terminal_key_forward`, Rust `input/terminal.rs
 direct chords → commands, prefix key → prefix state, PageUp/PageDown scrollback intercept).
 The browser never pre-encodes (α's JS `SPECIAL` table dies).
 
-- `{t:"key", code, key, mods, kind}` — W3C `KeyboardEvent.code` + `.key`, `mods` bitmask
-  (1 shift, 2 alt, 4 ctrl, 8 meta), `kind` ∈ `d`(down)|`r`(repeat)|`u`(up). Up events are
-  sent only while the focused pane's kitty flags request release reporting (server tells
+- `{t:"key", pane?, code, key, mods, kind}` — W3C `KeyboardEvent.code` + `.key`, `mods`
+  bitmask (1 shift, 2 alt, 4 ctrl, 8 meta), `kind` ∈ `d`(down)|`r`(repeat)|`u`(up). Up events
+  are sent only while the focused pane's kitty flags request release reporting (server tells
   the browser via a `pane_modes` extension if ever needed client-side; v1: browser always
   sends d/r, sends u too — cheap — and the server drops what the encoding doesn't want).
 - `{t:"mouse", pane, x, y, btn, kind, mods, dx?, dy?}` — cell coords within the pane
@@ -174,10 +198,32 @@ The browser never pre-encodes (α's JS `SPECIAL` table dies).
   the browser sends `cmd pane.focus` first, then (if the pane captures mouse) the event.
   When the pane doesn't capture (`pane_modes.mouse=false`), wheel = `cmd scroll`, drag =
   browser-local selection (§7 `read`).
-- `{t:"paste", data}` — plain text; server applies bracketed-paste wrapping per pane mode.
+- `{t:"paste", pane?, data}` — plain text; server applies bracketed-paste wrapping per pane
+  mode. `pane` addresses it exactly as `key.pane` does.
 - `{t:"image", data, ext}` — base64 clipboard image (α behavior kept).
 - `{t:"resize", cols, rows}` — browser window grid changed; server relayouts (→ new
-  `layout`) and resizes panes over β.
+  `layout`) and resizes panes over β. **Ignored from a `viewer`** (§2).
+
+**Addressed input** (`key`/`paste` with `pane` ≠ 0, cap `key.pane`). Absent or `0` routes to
+the focused pane — the historical behaviour, byte for byte, and what a browser sends. Pane
+ids start at 1, so 0 is never a real pane. A non-zero `pane` is how a second client types
+somewhere **without stealing the desktop's cursor** — and without the race that follows it,
+where the desktop user clicks elsewhere and the phone's next keystroke lands there.
+
+Addressed input clears two gates that focus-routed input does not:
+
+- **Visible** (§8), the same rule `mouse` takes. Frames stream only for visible panes, so
+  visibility is the client's freshness proof: type where the server recently said it was
+  streaming, not into a pane you last saw three workspace switches ago.
+- **`workspace.lock`**, the same rule `pane.send_input` (§7) takes. Otherwise a client
+  wanting past a stated guardrail would just send `key{pane:N}` instead — a real bypass of a
+  real safety feature. Focus-routed input is unaffected: the lock closes a workspace to
+  automation, not to the person whose keyboard owns the focused pane.
+
+A refusal is **silent**, as `mouse`'s is — an error toast per keystroke helps nobody. Nothing
+is left to guess at: `layout.workspaces[].locked` names every locked workspace and the
+viewport's pane set is what visibility means, so a client can render the refusal before it
+types.
 - `{t:"raw", data}` — **deprecated escape hatch** (α's `input`): pre-encoded bytes to the
   focused pane. Exists only for the transition; removed before WS11.
 

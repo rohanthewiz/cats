@@ -100,11 +100,15 @@ type orch struct {
 	session *app.Session
 	panes   map[uint32]*paneRuntime
 	conns   map[*client]struct{}
-	daemon  *daemon
-	area    layout.Rect
-	cellW   uint32
-	cellH   uint32
-	cwd     string
+	// connsDirty says the Clients census is stale — a connection arrived or
+	// left, or the grid it reports changed. Set anywhere; cleared only by
+	// flushClients between mailbox closures (see dropConn for why).
+	connsDirty bool
+	daemon     *daemon
+	area       layout.Rect
+	cellW      uint32
+	cellH      uint32
+	cwd        string
 	// visible is the current viewport's pane set (active workspace's active
 	// tab) — the panes whose frames stream to browsers (§8). Recomputed by
 	// refreshViewport whenever the viewport changes.
@@ -326,6 +330,10 @@ func newOrchWith(socket, cwd string, sess *app.Session) *orch {
 func (o *orch) run() {
 	for fn := range o.mailbox {
 		fn()
+		// The one place the connection set is provably settled: no broadcast is
+		// in progress and no map is being ranged. Coalescing here also means a
+		// closure that drops three connections sends one census, not three.
+		o.flushClients()
 	}
 }
 
@@ -1282,6 +1290,42 @@ func (o *orch) dropConn(c *client) {
 	}
 	delete(o.conns, c)
 	close(c.out)
+	// Only flag it. Broadcasting the census from here would re-enter: dropConn's
+	// hottest caller is enqueue, which is itself running inside a broadcast loop
+	// over o.conns — so the census would iterate a map the outer range is still
+	// walking, and could drop a second connection mid-flight. flushClients runs
+	// it once the stack has unwound.
+	o.connsDirty = true
+}
+
+// clientsMsg is the current census. Sizers counts the connections that declared
+// a grid (Init without viewer): those are the ones o.area actually reflects, so
+// "2 clients, 1 sizer" reads as one desktop and one phone along for the ride.
+func (o *orch) clientsMsg() browserproto.Clients {
+	sizers := 0
+	for c := range o.conns {
+		if !c.viewer {
+			sizers++
+		}
+	}
+	return browserproto.NewClients(len(o.conns), sizers, o.area.Width, o.area.Height)
+}
+
+// flushClients broadcasts the census if the connection set (or the grid it
+// reports) changed during the mailbox closure that just ran. Called from the
+// loop between closures, which is the only place guaranteed not to be inside a
+// broadcast.
+//
+// The loop is deliberate rather than a single send: the broadcast can itself
+// drop a wedged connection (enqueue → dropConn), re-flagging mid-flush and
+// leaving a census on the wire that is already wrong. Each extra pass follows a
+// strict decrease in len(o.conns), so it terminates — at worst when the last
+// connection is gone.
+func (o *orch) flushClients() {
+	for o.connsDirty {
+		o.connsDirty = false
+		o.broadcast(o.clientsMsg())
+	}
 }
 
 // --- Browser connections -----------------------------------------------------
@@ -1313,12 +1357,18 @@ const (
 
 // client is one connected browser. The writer goroutine is the only WSConn
 // writer; trans (per-pane frame translators) is touched only in the loop.
+//
+// viewer mirrors Init.Viewer: this connection watches the session without
+// owning its geometry. Written once in serve before the client is published to
+// the loop, then read-only — so no synchronisation, and the writer goroutine
+// never sees a half-built client.
 type client struct {
-	o     *orch
-	ws    *rweb.WSConn
-	out   chan []byte
-	pong  chan []byte // ping payloads to echo back; see serve's ping handler
-	trans map[uint32]*browserproto.FrameTranslator
+	o      *orch
+	ws     *rweb.WSConn
+	out    chan []byte
+	pong   chan []byte // ping payloads to echo back; see serve's ping handler
+	viewer bool
+	trans  map[uint32]*browserproto.FrameTranslator
 }
 
 func (c *client) translator(pid uint32) *browserproto.FrameTranslator {
@@ -1440,8 +1490,9 @@ func (o *orch) serve(ws *rweb.WSConn) error {
 	}
 
 	c := &client{o: o, ws: ws, out: make(chan []byte, 512),
-		pong:  make(chan []byte, 4),
-		trans: make(map[uint32]*browserproto.FrameTranslator)}
+		pong:   make(chan []byte, 4),
+		viewer: init.Viewer,
+		trans:  make(map[uint32]*browserproto.FrameTranslator)}
 
 	c.installKeepalive()
 	go c.writer()
@@ -1476,11 +1527,18 @@ func (o *orch) serve(ws *rweb.WSConn) error {
 // frame per visible pane. Loop-goroutine only.
 func (o *orch) registerConn(c *client, init *browserproto.Init) {
 	o.conns[c] = struct{}{}
-	if init.Cols > 0 && init.Rows > 0 {
-		o.area = layout.Rect{Width: init.Cols, Height: init.Rows}
-	}
-	if init.CellWPx > 0 && init.CellHPx > 0 {
-		o.cellW, o.cellH = init.CellWPx, init.CellHPx
+	o.connsDirty = true
+	// A viewer declares no geometry: neither the cell grid nor the cell pixel
+	// metrics. Skipping the metrics matters as much as skipping the grid — they
+	// ride β create_pane/resize (see syncDaemon and the split path), so a phone's
+	// cell size would reach every pane's TERM even though its grid did not.
+	if !c.viewer {
+		if init.Cols > 0 && init.Rows > 0 {
+			o.area = layout.Rect{Width: init.Cols, Height: init.Rows}
+		}
+		if init.CellWPx > 0 && init.CellHPx > 0 {
+			o.cellW, o.cellH = init.CellWPx, init.CellHPx
+		}
 	}
 	o.syncDaemon() // the new grid may resize panes
 	o.refreshViewport()
@@ -1524,12 +1582,55 @@ func (o *orch) registerConn(c *client, init *browserproto.Init) {
 
 // --- Up-message handling (loop goroutine) ------------------------------------
 
+// inputTarget resolves the pane a key or paste should reach, or nil to drop it.
+//
+// pane == 0 is the historical path, byte for byte: route to the session's
+// focused pane. That is what every browser sends, so the desktop is untouched
+// by this field existing.
+//
+// A non-zero pane addresses one directly — the pattern Mouse has always used —
+// and clears two gates that focus-routed input has no need of:
+//
+//   - Visible, the same rule Mouse takes. Frames stream only for visible panes,
+//     so visibility is the client's freshness proof: you may type where the
+//     server recently told you it was streaming, not into a pane you last saw
+//     three workspace switches ago.
+//   - workspace.lock, the same rule pane.send_input takes (internal/app/
+//     commands.go). Without it, a client wanting past a stated guardrail would
+//     simply send key{pane:N} instead of pane.send_input — a real bypass of a
+//     real safety feature, and one we would have introduced ourselves.
+//
+// A refusal is silent, as Mouse's is; the alternative is an error toast per
+// keystroke. Nothing is left to guess at: layout.workspaces[].locked already
+// names every locked workspace, and the viewport's pane set is what visibility
+// means, so a client can render the refusal before it types.
+func (o *orch) inputTarget(pane uint32) *paneRuntime {
+	if pane == 0 {
+		id, ok := o.session.FocusedPane()
+		if !ok {
+			return nil
+		}
+		pane = uint32(id)
+	} else {
+		if !o.visible[pane] {
+			return nil
+		}
+		if ws := o.session.PaneWorkspace(layout.PaneID(pane)); ws != nil && ws.Locked {
+			return nil
+		}
+	}
+	rt := o.panes[pane]
+	if rt == nil || rt.exited != nil {
+		return nil
+	}
+	return rt
+}
+
 func (o *orch) handleUp(c *client, up any) {
 	switch m := up.(type) {
 	case *browserproto.Key:
-		id, ok := o.session.FocusedPane()
-		rt := o.panes[uint32(id)]
-		if !ok || rt == nil || rt.exited != nil {
+		rt := o.inputTarget(m.Pane)
+		if rt == nil {
 			return
 		}
 		if b, err := rt.enc.Key(*m); err != nil {
@@ -1556,9 +1657,8 @@ func (o *orch) handleUp(c *client, up any) {
 		}
 
 	case *browserproto.Paste:
-		id, ok := o.session.FocusedPane()
-		rt := o.panes[uint32(id)]
-		if !ok || rt == nil || rt.exited != nil {
+		rt := o.inputTarget(m.Pane)
+		if rt == nil {
 			return
 		}
 		if b, err := rt.enc.Paste(m.Data); err != nil {
@@ -1574,10 +1674,14 @@ func (o *orch) handleUp(c *client, up any) {
 		}
 
 	case *browserproto.Resize:
-		if m.Cols == 0 || m.Rows == 0 {
+		// A viewer that rotates its phone must not reflow the desktop's panes.
+		// Gating here as well as at init is the point: the declaration is made
+		// once, but resize is the message that would arrive forever after.
+		if c.viewer || m.Cols == 0 || m.Rows == 0 {
 			return
 		}
 		o.area = layout.Rect{Width: m.Cols, Height: m.Rows}
+		o.connsDirty = true // Clients carries the grid; it just changed
 		o.applyModel()
 
 	case *browserproto.Image:
