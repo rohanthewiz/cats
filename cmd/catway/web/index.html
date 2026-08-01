@@ -128,7 +128,11 @@
   #ws-list { position:relative; }
   #ws-list li.ws { cursor:pointer; }
   #ws-list li.ws:hover { background:var(--panel2); }
-  #ws-list li.active { color:var(--fg-strong); }
+  /* The focused workspace takes the theme's accent rather than the white-ish
+     --fg-strong the active tab uses: the tab already has an accent underline to
+     mark it, but a list row has no such edge, so the color itself has to carry
+     the "you are here" signal — and every theme's accent is its saturated hue. */
+  #ws-list li.active { color:var(--accent); }
   #ws-list li .sum { color:var(--muted); font-size:calc(10px * var(--sb-scale)); margin-left:auto; }
   #ws-list li .sum span { margin-left:4px; }
   /* The finger-with-a-string a workspace wears while its cats-todo backlog has
