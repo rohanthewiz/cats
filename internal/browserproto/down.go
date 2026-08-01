@@ -40,6 +40,9 @@ type WorkspaceInfo struct {
 	Name         string `json:"name"`
 	Active       bool   `json:"active"`
 	AgentSummary string `json:"agent_summary,omitempty"`
+	// Locked: closed to automation (workspace.lock). The sidebar draws the row
+	// dimmed with a lock beside the name; the refusal itself is the server's.
+	Locked bool `json:"locked,omitempty"`
 }
 
 // TabInfo is one tab of the active workspace.

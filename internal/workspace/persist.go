@@ -38,6 +38,7 @@ type Snapshot struct {
 	ID             string                `json:"id"`
 	CustomName     string                `json:"custom_name,omitempty"`
 	IdentityCwd    string                `json:"identity_cwd,omitempty"`
+	Locked         bool                  `json:"locked,omitempty"`
 	ActiveTab      int                   `json:"active_tab"`
 	PaneNumbers    map[layout.PaneID]int `json:"pane_numbers"`
 	NextPaneNumber int                   `json:"next_pane_number"`
@@ -73,6 +74,7 @@ func (w *Workspace) Snapshot() Snapshot {
 		ID:             w.ID,
 		CustomName:     w.CustomName,
 		IdentityCwd:    w.IdentityCwd,
+		Locked:         w.Locked,
 		ActiveTab:      w.activeTab,
 		PaneNumbers:    numbers,
 		NextPaneNumber: w.nextPublicPaneNumber,
@@ -99,6 +101,7 @@ func Restore(s PaneSpawner, snap Snapshot) (*Workspace, error) {
 		ID:                snap.ID,
 		CustomName:        snap.CustomName,
 		IdentityCwd:       snap.IdentityCwd,
+		Locked:            snap.Locked,
 		PublicPaneNumbers: make(map[layout.PaneID]int, len(snap.PaneNumbers)),
 		activeTab:         snap.ActiveTab,
 		spawner:           s,

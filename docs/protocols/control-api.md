@@ -165,6 +165,19 @@ to `pane.send_input` — the difference is one flag.
 | `workspace.focus` | `ws <id>` |
 | `workspace.rename` | `rename-ws <id> <name...>` |
 | `workspace.move` | — |
+| `workspace.lock` | `lock-ws [id]` / `unlock-ws [id]` |
+
+`workspace.lock` sets a workspace aside for hand work: while it is locked, two
+commands refuse it — `tab.create` **carrying a `command`** (the path a plugin
+action and an agent launch both arrive on) and `pane.send_input` into any of its
+panes. Everything else goes through, so a bare `tab.create`, a split, or typing
+in the browser still works exactly as before; the point is to keep plugins and
+agents out, not to freeze the workspace. `lock-ws`/`unlock-ws` are two verbs over
+the one command, the same way `send`/`run` both reach `pane.send_input`; with no
+id they act on the active workspace. The lock is durable (it survives a catway
+restart) and reported by `workspace.list` as `locked`, but it is a guardrail
+rather than a permission boundary — `workspace.lock` is itself an ordinary
+command, so anything holding the control API can lift it.
 
 ### Queries (read-only, no effects)
 

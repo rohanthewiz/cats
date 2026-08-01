@@ -37,6 +37,7 @@ func (s *Session) ListWorkspaces() []WorkspaceInfo {
 			Name:   ws.DisplayName(),
 			Active: i == s.active,
 			Tabs:   len(ws.Tabs),
+			Locked: ws.Locked,
 		})
 	}
 	return out

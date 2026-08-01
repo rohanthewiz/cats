@@ -526,6 +526,28 @@ func (s *Session) RenameWorkspace(id, name string) error {
 	return nil
 }
 
+// SetWorkspaceLock opens or closes a workspace to automation ("" = the active
+// workspace). A locked workspace refuses the two control-API paths that put
+// something new in motion inside it — spawning a process from a supplied
+// command line, and typing into its panes — so a plugin action or an agent
+// launch cannot land in a workspace the user has set aside for hand work.
+// Reports whether the flag actually changed, so a no-op toggle can skip the
+// broadcast.
+func (s *Session) SetWorkspaceLock(id string, locked bool) (bool, error) {
+	i := s.active
+	if id != "" {
+		var ok bool
+		if i, ok = s.workspaceIndexByID(id); !ok {
+			return false, fmt.Errorf("unknown workspace %s", id)
+		}
+	}
+	if s.workspaces[i].Locked == locked {
+		return false, nil
+	}
+	s.workspaces[i].SetLocked(locked)
+	return true, nil
+}
+
 // MoveWorkspace moves the workspace with the given public id to the insertion
 // point idx (a gap position, 0..=len: len means "to the end"). The active
 // workspace keeps its identity across the move. Reports whether the order

@@ -46,6 +46,7 @@ const (
 	CmdWorkspaceFocus     = "workspace.focus"
 	CmdWorkspaceRename    = "workspace.rename"
 	CmdWorkspaceMove      = "workspace.move"
+	CmdWorkspaceLock      = "workspace.lock"
 	CmdAgentFocus         = "agent.focus"
 	CmdServerReloadConfig = "server.reload_config"
 	CmdServerStop         = "server.stop"
@@ -106,7 +107,7 @@ func CommandNames() []string {
 		CmdPaneSendInput,
 		CmdTabCreate, CmdTabClose, CmdTabFocus, CmdTabRename, CmdTabMove,
 		CmdWorkspaceCreate, CmdWorkspaceClose, CmdWorkspaceFocus, CmdWorkspaceRename,
-		CmdWorkspaceMove,
+		CmdWorkspaceMove, CmdWorkspaceLock,
 		CmdAgentFocus, CmdServerReloadConfig, CmdServerStop,
 		CmdWorktreeList, CmdWorktreeCreate, CmdWorktreeOpen, CmdWorktreeRemove,
 		CmdConfigGet, CmdConfigSet,
@@ -450,6 +451,21 @@ type RenameWorkspaceParams struct {
 	Name string `json:"name"`
 }
 
+// LockWorkspaceParams: workspace.lock — set (or clear, with Locked false) a
+// workspace's automation lock. ID "" means the active workspace, the same
+// default workspace.close takes, so a key binding or `catctl lock-ws` can send
+// no id at all.
+//
+// A locked workspace refuses tab.create with a command and pane.send_input
+// (see Session.SetWorkspaceLock). The lock is a guardrail, not a permission
+// boundary: workspace.lock is an ordinary command, so anything holding the
+// control API can lift it — what it stops is a plugin action or an agent launch
+// landing somewhere by accident.
+type LockWorkspaceParams struct {
+	ID     string `json:"id,omitempty"`
+	Locked bool   `json:"locked"`
+}
+
 // --- Query params & results (§7 read-only commands) --------------------------
 
 // TabListParams: tab.list. Workspace "" = the active workspace.
@@ -473,7 +489,8 @@ type WorkspaceInfo struct {
 	ID     string `json:"id"`   // stable public handle, e.g. "w1"
 	Name   string `json:"name"` // display name (custom or auto)
 	Active bool   `json:"active"`
-	Tabs   int    `json:"tabs"` // tab count
+	Tabs   int    `json:"tabs"`             // tab count
+	Locked bool   `json:"locked,omitempty"` // closed to automation (workspace.lock)
 }
 
 // WorkspaceListResult is CmdResult.Data for workspace.list.

@@ -81,6 +81,7 @@ func BuildLayout(workspaces []*workspace.Workspace, active int, area layout.Rect
 			ID:     ws.ID,
 			Name:   ws.DisplayName(),
 			Active: i == active,
+			Locked: ws.Locked,
 		})
 	}
 	if active < 0 || active >= len(workspaces) {

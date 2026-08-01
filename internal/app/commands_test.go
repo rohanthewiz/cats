@@ -933,6 +933,176 @@ func TestDispatchWorkspaceCreate(t *testing.T) {
 	})
 }
 
+// workspace.lock closes a workspace to the two paths that put something new in
+// motion inside it — a supplied command line, and typed input — while leaving
+// everything a user does by hand alone. The flag rides the layout broadcast (it
+// is durable, sidebar-visible state) and shows up in workspace.list.
+func TestDispatchWorkspaceLock(t *testing.T) {
+	// locked reports the active workspace's lock state as workspace.list sees it.
+	locked := func(t *testing.T, h cmdHarness) bool {
+		t.Helper()
+		for _, ws := range okDataFor[WorkspaceListResult](t, h, CmdWorkspaceList).Workspaces {
+			if ws.Active {
+				return ws.Locked
+			}
+		}
+		t.Fatal("no active workspace in workspace.list")
+		return false
+	}
+
+	t.Run("toggles and broadcasts", func(t *testing.T) {
+		h := newCmdHarness(t)
+		id := h.s.ActiveWorkspace().ID
+		r := h.resp()
+
+		h.d.Dispatch(CmdWorkspaceLock, params(t, LockWorkspaceParams{ID: id, Locked: true}), r)
+
+		if !r.okCall || r.failCall {
+			t.Fatalf("workspace.lock: ok=%v fail=%v (%q)", r.okCall, r.failCall, r.errMsg)
+		}
+		if lg := *h.log; len(lg) != 2 || lg[0] != "broadcastLayout" || lg[1] != "ok" {
+			t.Fatalf("workspace.lock effects = %v, want [broadcastLayout ok]", lg)
+		}
+		if !locked(t, h) {
+			t.Fatal("workspace.list does not report the workspace as locked")
+		}
+
+		// Re-locking an already-locked workspace acks without a broadcast: the
+		// sidebar has nothing new to draw.
+		*h.log = nil
+		r = h.resp()
+		h.d.Dispatch(CmdWorkspaceLock, params(t, LockWorkspaceParams{ID: id, Locked: true}), r)
+		if lg := *h.log; len(lg) != 1 || lg[0] != "ok" {
+			t.Fatalf("no-op lock effects = %v, want [ok]", lg)
+		}
+
+		// Unlocking reopens it.
+		r = h.resp()
+		h.d.Dispatch(CmdWorkspaceLock, params(t, LockWorkspaceParams{ID: id, Locked: false}), r)
+		if !r.okCall || locked(t, h) {
+			t.Fatalf("unlock: ok=%v still locked=%v", r.okCall, locked(t, h))
+		}
+	})
+
+	t.Run("no id locks the active workspace", func(t *testing.T) {
+		h := newCmdHarness(t)
+		r := h.resp()
+
+		h.d.Dispatch(CmdWorkspaceLock, params(t, LockWorkspaceParams{Locked: true}), r)
+
+		if !r.okCall || !locked(t, h) {
+			t.Fatalf("bare lock: ok=%v locked=%v (%q)", r.okCall, locked(t, h), r.errMsg)
+		}
+	})
+
+	t.Run("unknown workspace fails", func(t *testing.T) {
+		h := newCmdHarness(t)
+		r := h.resp()
+
+		h.d.Dispatch(CmdWorkspaceLock, params(t, LockWorkspaceParams{ID: "w404", Locked: true}), r)
+
+		if !r.failCall || !strings.Contains(r.errMsg, "unknown workspace") {
+			t.Fatalf("unknown workspace: fail=%v msg=%q", r.failCall, r.errMsg)
+		}
+	})
+
+	t.Run("refuses a supplied command line", func(t *testing.T) {
+		h := newCmdHarness(t)
+		lock(t, h)
+		r := h.resp()
+
+		// The shape a plugin action arrives in (pluginRunAction / catctl plugin run).
+		h.d.Dispatch(CmdTabCreate, params(t, TabCreateParams{
+			Command: []string{"/opt/plug/bin/tool", "--ui"},
+			Env:     map[string]string{"CATS_PLUGIN_ID": "x.tool"},
+		}), r)
+
+		if !r.failCall || !strings.Contains(r.errMsg, "is locked") {
+			t.Fatalf("plugin launch into a locked workspace: fail=%v msg=%q", r.failCall, r.errMsg)
+		}
+		if lg := *h.log; len(lg) != 1 || lg[0] != "fail" {
+			t.Fatalf("a refused launch must run no effects, log=%v", lg)
+		}
+		if len(h.s.ActiveWorkspace().Tabs) != 1 {
+			t.Fatalf("a refused launch must not create a tab, tabs=%d", len(h.s.ActiveWorkspace().Tabs))
+		}
+	})
+
+	t.Run("still opens a plain tab", func(t *testing.T) {
+		h := newCmdHarness(t)
+		lock(t, h)
+		r := h.resp()
+
+		// A bare tab.create is the user asking for a shell — the lock keeps
+		// automation out, it does not put the workspace behind glass.
+		h.d.Dispatch(CmdTabCreate, noParams(), r)
+
+		if !r.okCall {
+			t.Fatalf("plain tab.create in a locked workspace: fail=%v msg=%q", r.failCall, r.errMsg)
+		}
+	})
+
+	t.Run("refuses input into its panes", func(t *testing.T) {
+		h := newCmdHarness(t)
+		lock(t, h)
+		pane, _ := h.s.FocusedPane()
+		r := h.resp()
+
+		h.d.Dispatch(CmdPaneSendInput, params(t, SendInputParams{Pane: uint32(pane), Text: "make test", Submit: true}), r)
+
+		if !r.failCall || !strings.Contains(r.errMsg, "is locked") {
+			t.Fatalf("send_input into a locked workspace: fail=%v msg=%q", r.failCall, r.errMsg)
+		}
+		if lg := *h.log; len(lg) != 1 || lg[0] != "fail" {
+			t.Fatalf("a refused send must not reach the backend, log=%v", lg)
+		}
+
+		// Unlocking lets the same send through — the lock is the only thing that
+		// was stopping it.
+		r = h.resp()
+		h.d.Dispatch(CmdWorkspaceLock, params(t, LockWorkspaceParams{Locked: false}), r)
+		r = h.resp()
+		h.d.Dispatch(CmdPaneSendInput, params(t, SendInputParams{Pane: uint32(pane), Text: "make test", Submit: true}), r)
+		if !r.okCall {
+			t.Fatalf("send_input after unlock: fail=%v msg=%q", r.failCall, r.errMsg)
+		}
+	})
+
+	t.Run("leaves other workspaces open", func(t *testing.T) {
+		h := newCmdHarness(t)
+		lockedID := h.s.ActiveWorkspace().ID
+		lock(t, h)
+		// A second workspace, which becomes the active one; the lock is per
+		// workspace, so its own tab.create must go through.
+		if _, err := h.s.CreateWorkspace(); err != nil {
+			t.Fatalf("CreateWorkspace: %v", err)
+		}
+		if h.s.ActiveWorkspace().ID == lockedID {
+			t.Fatal("CreateWorkspace did not switch to the new workspace")
+		}
+		r := h.resp()
+
+		h.d.Dispatch(CmdTabCreate, params(t, TabCreateParams{Command: []string{"/bin/echo", "hi"}}), r)
+
+		if !r.okCall {
+			t.Fatalf("launch in an unlocked workspace: fail=%v msg=%q", r.failCall, r.errMsg)
+		}
+	})
+}
+
+// lock closes the harness's active workspace to automation, failing the test if
+// the command itself does not ack, and clears the effect log so the caller
+// asserts only on what it dispatches next.
+func lock(t *testing.T, h cmdHarness) {
+	t.Helper()
+	r := h.resp()
+	h.d.Dispatch(CmdWorkspaceLock, params(t, LockWorkspaceParams{Locked: true}), r)
+	if !r.okCall {
+		t.Fatalf("workspace.lock: fail=%v msg=%q", r.failCall, r.errMsg)
+	}
+	*h.log = nil
+}
+
 // workspace.create's optional path decides where the new workspace's panes
 // spawn: absent inherits the session cwd, present-but-empty means the user's
 // home, and a typed path is expanded — or, when it does not exist, refused

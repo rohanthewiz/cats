@@ -446,6 +446,13 @@ func (d *Dispatcher) Dispatch(name string, dec ParamDecoder, r Responder) {
 			r.Fail("cathost daemon not connected")
 			return
 		}
+		// Typing into a pane is the other half of what a workspace lock keeps
+		// out (tab.create's command being the first): it is how an automation
+		// client drives an agent that already lives there.
+		if ws := d.session.PaneWorkspace(layout.PaneID(p.Pane)); ws != nil && ws.Locked {
+			r.Fail(workspaceLockedErr(ws.ID, "send input to a pane in"))
+			return
+		}
 		if err := d.backend.SendInput(p.Pane, p.Text, p.Submit); err != nil {
 			r.Fail(err.Error())
 			return
@@ -461,6 +468,17 @@ func (d *Dispatcher) Dispatch(name string, dec ParamDecoder, r Responder) {
 		if err := p.Validate(); err != nil {
 			bad(err)
 			return
+		}
+		// A locked workspace takes no supplied command line — this is the path a
+		// plugin action and an agent launch both come in on (the browser's
+		// pluginRunAction, `catctl plugin run`). A bare tab.create is a shell the
+		// user asked for by hand, so it goes through: the lock keeps automation
+		// out, it does not put the workspace behind glass.
+		if len(p.Command) > 0 {
+			if ws := d.session.ActiveWorkspace(); ws != nil && ws.Locked {
+				r.Fail(workspaceLockedErr(ws.ID, "run a command in"))
+				return
+			}
 		}
 		// Resolve the left-hand neighbor before the create, while it is still the
 		// workspace's last tab.
@@ -631,6 +649,24 @@ func (d *Dispatcher) Dispatch(name string, dec ParamDecoder, r Responder) {
 		}
 		if moved {
 			d.backend.BroadcastLayout() // order changed; pane set unchanged
+		}
+		r.OK(nil)
+
+	case CmdWorkspaceLock:
+		var p LockWorkspaceParams
+		if err := dec.Decode(&p); err != nil {
+			bad(err)
+			return
+		}
+		changed, err := d.session.SetWorkspaceLock(p.ID, p.Locked)
+		if err != nil {
+			r.Fail(err.Error())
+			return
+		}
+		if changed {
+			// Durable state the sidebar draws; the pane set is untouched, so
+			// this is the rename/move path (which also arms the save).
+			d.backend.BroadcastLayout()
 		}
 		r.OK(nil)
 
@@ -859,6 +895,14 @@ func (d *Dispatcher) inheritedSplitCwd(target *layout.PaneID) string {
 		return ""
 	}
 	return d.backend.PaneMeta(uint32(src)).Cwd
+}
+
+// workspaceLockedErr phrases a refusal from a workspace lock. verb names what
+// was being attempted ("run a command in"), so the message says which door is
+// shut and how to open it rather than a bare "locked" — the caller may well be
+// a script that never saw the sidebar's lock mark.
+func workspaceLockedErr(id, verb string) string {
+	return fmt.Sprintf("workspace %s is locked: cannot %s it (unlock it first)", id, verb)
 }
 
 // workspaceStartDir resolves workspace.create's optional Path against the

@@ -99,6 +99,8 @@ var subcommands = []subcommand{
 	{"new-ws", app.CmdWorkspaceCreate, "new-ws [name...]", nil, "create a workspace (auto-named when no name is given)", buildNewWorkspace},
 	{"close-ws", app.CmdWorkspaceClose, "close-ws [id]", []argKind{argWorkspace}, "close a workspace (active by default)", buildOptWorkspace},
 	{"rename-ws", app.CmdWorkspaceRename, "rename-ws <id> <name...>", []argKind{argWorkspace}, "rename a workspace (empty name clears)", buildRenameWorkspace},
+	{"lock-ws", app.CmdWorkspaceLock, "lock-ws [id]", []argKind{argWorkspace}, "close a workspace to plugins and agents (active by default)", buildLockWorkspace},
+	{"unlock-ws", app.CmdWorkspaceLock, "unlock-ws [id]", []argKind{argWorkspace}, "reopen a locked workspace (active by default)", buildUnlockWorkspace},
 
 	// Misc.
 	{"agent", app.CmdAgentFocus, "agent <pane>", []argKind{argPane}, "reveal an agent's pane", buildPane},
@@ -462,6 +464,30 @@ func buildRenameWorkspace(args []string) (json.RawMessage, error) {
 		return nil, usageErr{"rename-ws <id> <name...>"}
 	}
 	return marshal(app.RenameWorkspaceParams{ID: args[0], Name: strings.Join(args[1:], " ")})
+}
+
+// buildLockWorkspace / buildUnlockWorkspace: lock-ws [id] / unlock-ws [id]. Two
+// verbs over one command, the way send/run both reach pane.send_input — the
+// difference is the flag, and "unlock-ws w2" is what a user would go looking for
+// rather than a --locked=false on a lock verb. No id locks the active
+// workspace (the close-ws default).
+func buildLockWorkspace(args []string) (json.RawMessage, error) {
+	return buildWorkspaceLock(args, true, "lock-ws [id]")
+}
+
+func buildUnlockWorkspace(args []string) (json.RawMessage, error) {
+	return buildWorkspaceLock(args, false, "unlock-ws [id]")
+}
+
+func buildWorkspaceLock(args []string, locked bool, synopsis string) (json.RawMessage, error) {
+	if len(args) > 1 {
+		return nil, usageErr{synopsis}
+	}
+	p := app.LockWorkspaceParams{Locked: locked}
+	if len(args) == 1 {
+		p.ID = args[0]
+	}
+	return marshal(p)
 }
 
 // --- helpers -----------------------------------------------------------------

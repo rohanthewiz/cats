@@ -149,7 +149,14 @@ catctl tab <num>                catctl new-tab
 catctl close-tab [num]          catctl rename-tab <num> <name...>
 catctl ws <id>                  catctl new-ws [name...]
 catctl close-ws [id]            catctl rename-ws <id> <name...>
+catctl lock-ws [id]             catctl unlock-ws [id]
 ```
+
+`lock-ws` sets a workspace aside for hand work: no launching a plugin or an agent
+into it (`tab.create` with a command is refused) and no typing into its panes
+from the control API (`send` / `run` are refused). Splits, plain tabs, and
+anything you do in the browser are untouched, and the lock survives a restart.
+The sidebar draws a locked workspace dimmed, with a padlock beside its name.
 
 Misc:
 

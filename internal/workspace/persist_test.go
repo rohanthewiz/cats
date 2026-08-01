@@ -8,8 +8,8 @@ import (
 )
 
 // buildWorkspace makes a workspace with two tabs — tab 1 split twice with a
-// custom ratio, tab 2 single-pane — plus custom names, zoom off, and a closed
-// pane so the numbering counter is ahead of the live numbers.
+// custom ratio, tab 2 single-pane — plus custom names, an automation lock, zoom
+// off, and a closed pane so the numbering counter is ahead of the live numbers.
 func buildWorkspace(t *testing.T) *Workspace {
 	t.Helper()
 	ws, err := New(recordingSpawner(), "/tmp/wsroot", SpawnSpec{})
@@ -29,6 +29,7 @@ func buildWorkspace(t *testing.T) *Workspace {
 		t.Fatalf("CreateTab: %v", err)
 	}
 	ws.SetCustomName("myws")
+	ws.SetLocked(true)
 	ws.Tabs[0].SetCustomName("build")
 	return ws
 }
@@ -62,6 +63,12 @@ func TestWorkspaceSnapshotRoundTrip(t *testing.T) {
 
 	if restored.ID != ws.ID || restored.CustomName != "myws" || restored.IdentityCwd != "/tmp/wsroot" {
 		t.Fatalf("identity: got %s/%s/%s", restored.ID, restored.CustomName, restored.IdentityCwd)
+	}
+	// The lock is durable: a workspace set aside from plugins and agents must
+	// still be set aside after a catway restart, or the guard silently lapses at
+	// the one moment nobody is watching for it.
+	if !restored.Locked {
+		t.Fatal("locked workspace restored unlocked")
 	}
 	if restored.ActiveTabIndex() != ws.ActiveTabIndex() {
 		t.Fatalf("active tab: got %d want %d", restored.ActiveTabIndex(), ws.ActiveTabIndex())

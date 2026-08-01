@@ -35,6 +35,11 @@ type Workspace struct {
 	// IdentityCwd is the fallback workspace identity source for tests, old
 	// snapshots, or missing runtimes.
 	IdentityCwd string
+	// Locked marks a workspace as off-limits to automation: no spawning a
+	// process from a supplied command line in it, and no typing into its panes
+	// from the control API. Working in it by hand is untouched — the point is
+	// to keep plugins and agents out of a workspace, not to freeze it.
+	Locked bool
 	// CachedGitBranch / CachedGitAheadBehind are plain optionals fed by the
 	// deferred GitProvider seam (WS1 Stage 4); nil until wired.
 	CachedGitBranch      *string
@@ -333,6 +338,11 @@ func (w *Workspace) PublicTabNumber(tabIdx int) (int, bool) {
 // SetCustomName pins the workspace's display name.
 func (w *Workspace) SetCustomName(name string) {
 	w.CustomName = name
+}
+
+// SetLocked opens or closes the workspace to automation (see Locked).
+func (w *Workspace) SetLocked(locked bool) {
+	w.Locked = locked
 }
 
 // ResolvedIdentityCwd returns the workspace identity directory.

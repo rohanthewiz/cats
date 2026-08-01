@@ -145,6 +145,15 @@
     margin-left:-2px; }
   #ws-list li .todo-n { font-size:calc(8px * var(--sb-scale)); line-height:1; font-weight:600;
     margin-left:-1px; }
+  /* A locked workspace — one no plugin or agent may be launched into — reads as
+     set aside: the row steps back, and a padlock next to the name says why it
+     did. The lock itself is exempt from the dimming, being the one thing in the
+     row that just became more true; it stays at --muted, the same gray the
+     chrome uses for "present, not the point". */
+  #ws-list li.ws.locked > :not(.lock-mark) { opacity:.5; }
+  #ws-list li .lock-mark { flex:0 0 auto; align-self:center; color:var(--muted);
+    display:inline-flex; margin-left:-1px; }
+  #ws-list li .lock { width:calc(12px * var(--sb-scale)); height:calc(12px * var(--sb-scale)); }
   #ws-list li.add { color:var(--muted); font-style:italic; cursor:pointer; }
   #ws-list li.add:hover { color:var(--accent); background:none; }
   #pane-list li, #agent-list li { cursor:pointer; }
@@ -1011,6 +1020,35 @@
     return wrap;
   }
 
+  // lockMark: the padlock a workspace wears while it is closed to plugins and
+  // agents (workspace.lock). Two strokes — the shackle above, the body below —
+  // which is all a padlock is at 12px; the body is filled so the mark still
+  // reads as *shut* in a row that is otherwise dimmed out.
+  function lockMark() {
+    const svg = document.createElementNS(SVGNS, "svg");
+    svg.setAttribute("class", "lock");
+    svg.setAttribute("viewBox", "0 0 16 16");
+    svg.setAttribute("fill", "none");
+    svg.setAttribute("stroke", "currentColor");
+    svg.setAttribute("stroke-width", "1.6");
+    svg.setAttribute("stroke-linecap", "round");
+    svg.setAttribute("stroke-linejoin", "round");
+    const shackle = document.createElementNS(SVGNS, "path");
+    shackle.setAttribute("d", "M5 7V4.8a3 3 0 0 1 6 0V7");
+    svg.appendChild(shackle);
+    const body = document.createElementNS(SVGNS, "rect");
+    body.setAttribute("x", "3.2"); body.setAttribute("y", "7");
+    body.setAttribute("width", "9.6"); body.setAttribute("height", "6.4");
+    body.setAttribute("rx", "1.4");
+    body.setAttribute("fill", "currentColor");
+    svg.appendChild(body);
+    const wrap = document.createElement("span");
+    wrap.className = "lock-mark";
+    wrap.title = "locked — plugins and agents cannot be launched here";
+    wrap.appendChild(svg);
+    return wrap;
+  }
+
   // tabMarker: the highest-attention agent state among a tab's panes, as a
   // colored dot on the tab (cats's bell/activity markers; the rollup's tab
   // field keys the grouping — tab bar rows are the active workspace's tabs).
@@ -1043,10 +1081,14 @@
     const { states, todos } = workspaceRollups();
     for (const w of msg.workspaces) {
       const li = document.createElement("li");
-      li.className = "ws" + (w.active ? " active" : "");
+      li.className = "ws" + (w.active ? " active" : "") + (w.locked ? " locked" : "");
       const name = document.createElement("span");
       name.textContent = (w.active ? "● " : "○ ") + w.name;
       li.appendChild(name);
+      // The lock rides closest to the name, ahead of the todo mark: it qualifies
+      // the workspace itself — what may be started in it — where the todo mark
+      // reports on the project inside.
+      if (w.locked) li.appendChild(lockMark());
       // The todo mark sits with the name — it says something about the project,
       // not about a pane — while the agent counts stay pinned to the right edge.
       const todo = todoMark(todos.get(w.id) || 0);
@@ -2591,6 +2633,18 @@
       onSubmit: (name) => sendCmd("workspace.rename", { id: w.id, name }),
     });
   }
+  // toggleWorkspaceLock flips a workspace between open and closed to plugins and
+  // agents. No confirm either way: nothing is destroyed, the sidebar row shows
+  // the result immediately (the server rebroadcasts the layout), and the toast
+  // says which state was just entered — locking is a thing you do *to be able to
+  // work*, so it should cost one click.
+  function toggleWorkspaceLock(w) {
+    const locked = !w.locked;
+    sendCmdAwait("workspace.lock", { id: w.id, locked }, (res) => {
+      if (!res.ok) { toast("workspace lock: " + (res.error || "unknown")); return; }
+      toast((w.name || w.id) + (locked ? " locked — no plugins or agents" : " unlocked"));
+    });
+  }
   function confirmCloseWorkspace(w) {
     dialogConfirm({
       title: "close workspace",
@@ -2673,6 +2727,7 @@
     return [
       { label: "new workspace…", fn: newWorkspace },
       { label: "rename workspace…", fn: () => renameWorkspace(w) },
+      { label: w.locked ? "unlock workspace" : "lock workspace", fn: () => toggleWorkspaceLock(w) },
       "-",
       { label: "new worktree…", fn: openNewWorktreeDialog },
       { label: "open worktree…", fn: openWorktreeOpenDialog },
@@ -3130,6 +3185,7 @@
     if (aw) {
       items.push(
         { label: "rename workspace…", fn: () => renameWorkspace(aw) },
+        { label: aw.locked ? "unlock workspace" : "lock workspace (no plugins or agents)", fn: () => toggleWorkspaceLock(aw) },
         { label: "close workspace…", fn: () => confirmCloseWorkspace(aw) },
       );
     }
