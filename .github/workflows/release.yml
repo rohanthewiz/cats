@@ -16,7 +16,15 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest]
+        # One runner per shipped GOOS/GOARCH. macos-latest is Apple Silicon, so
+        # Intel Macs need their own entry or they get no tarball at all.
+        # macos-13 was the last free Intel image and has since been retired;
+        # macos-15-intel replaces it and is still a standard runner, which means
+        # free and unlimited here because this repository is public. It is also
+        # deliberately a version behind macos-latest: the binaries link against
+        # the SDK of whatever built them, and building on the older macOS keeps
+        # the deployment floor lower for the people actually running Intel Macs.
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, macos-15-intel]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
