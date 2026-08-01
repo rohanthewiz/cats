@@ -43,6 +43,33 @@ persistence:
 worktrees:
   directory: "~/.cats/worktrees"
 
+# Push notifications: when an agent needs attention (or finishes), also POST to
+# a webhook so a phone with its screen off gets a real system push — not just a
+# toast in a browser nobody is looking at. Any ntfy-shaped endpoint works; the
+# quickest setup is to pick an unguessable ntfy.sh topic, subscribe to it in the
+# ntfy app, and point this at it.
+#
+# This is an ordinary outbound request from the machine catway runs on, so it
+# needs no inbound reachability and keeps working when no client is connected.
+push:
+  enabled: false
+  # url: "https://ntfy.sh/cats-CHANGE-ME-TO-SOMETHING-UNGUESSABLE"
+  # The topic path is itself a capability — anyone who learns it can read your
+  # notifications — so treat it like a secret. If your endpoint also wants a
+  # bearer credential, set CATS_PUSH_TOKEN; like CATS_PASSWORD it is deliberately
+  # NOT read from this file (the settings modal rewrites this file, and would
+  # otherwise copy your token into it).
+  kinds: ["attention"]                 # "attention" and/or "finished". Default is
+                                       # attention only: every agent completion is
+                                       # how you learn to ignore the channel.
+  priority:                            # ntfy priority per kind. Deliberately not
+    attention: "high"                  # "urgent" — that bypasses Do Not Disturb,
+    finished: "low"                    # and a blocked agent is not an emergency.
+  min_interval: "60s"                  # debounce per (pane, kind), so an agent
+                                       # flapping working↔blocked buzzes once
+  # click_url: "cats://pane/"          # deep-link base; the pane handle ("w1:p3")
+                                       # is appended for tap-to-open
+
 # Front-end appearance: a named theme plus optional per-color overrides.
 # Built-ins: cats-green (default), darcula, tokyo-night, solarized-dark,
 # solarized-light, super-warm, cool-blue, dark-game, dark-city, corporate.

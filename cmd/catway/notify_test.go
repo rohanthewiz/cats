@@ -3,6 +3,7 @@
 package main
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"github.com/rohanthewiz/cats/internal/app"
 	"github.com/rohanthewiz/cats/internal/browserproto"
 	"github.com/rohanthewiz/cats/internal/orchestration"
+	"github.com/rohanthewiz/cats/internal/push"
 )
 
 // notifyKind ports cats's toast classification: attention on any change into
@@ -99,6 +101,93 @@ func TestOnPaneAgentEmitsNotify(t *testing.T) {
 	ev := rec.datas[0].(app.PaneNotifyEvent)
 	if ev.Kind != "attention" || ev.Pane != pid || ev.Agent != "claude" {
 		t.Fatalf("pane_notify payload: %+v", ev)
+	}
+}
+
+// recPush records push deliveries in place of a real *push.Bridge, so the
+// notify→push wiring is testable without an HTTP server (internal/push covers
+// the delivery itself).
+type recPush struct{ evs []push.Event }
+
+func (r *recPush) Send(ev push.Event) { r.evs = append(r.evs, ev) }
+
+// The push bridge hangs off the same choke point as the browser broadcast: one
+// notification, one push, carrying the context a lock screen needs (which agent,
+// which pane, where). The transition dedupe upstream applies to it too — a
+// resync replay must not re-push.
+func TestOnPaneAgentPushesNotification(t *testing.T) {
+	o, err := newOrch(filepath.Join(t.TempDir(), "s.sock"), t.TempDir())
+	if err != nil {
+		t.Fatalf("newOrch: %v", err)
+	}
+	c := &client{o: o, out: make(chan []byte, 32), trans: map[uint32]*browserproto.FrameTranslator{}}
+	o.conns[c] = struct{}{}
+	rec := &recPush{}
+	o.push = rec
+	pid := uint32(o.session.AllPaneIDs()[0])
+	o.panes[pid].cwd = "/tmp/somewhere"
+
+	o.onPaneAgent(orchestration.PaneAgent{PaneID: pid, Agent: "claude", State: "working"})
+	o.onPaneAgent(orchestration.PaneAgent{PaneID: pid, Agent: "claude", State: "blocked"})
+	o.onPaneAgent(orchestration.PaneAgent{PaneID: pid, Agent: "claude", State: "blocked"}) // resync replay
+
+	if len(rec.evs) != 1 {
+		t.Fatalf("push count: got %d want 1", len(rec.evs))
+	}
+	ev := rec.evs[0]
+	pub, _ := o.session.PublicPaneID(o.session.AllPaneIDs()[0])
+	if ev.Kind != push.KindAttention || ev.Title != "claude needs attention" {
+		t.Errorf("push kind/title: %+v", ev)
+	}
+	if ev.Pane != pid || ev.Pub != pub || ev.Agent != "claude" {
+		t.Errorf("push addressing: %+v (want pane %d pub %q)", ev, pid, pub)
+	}
+	if ev.Body == "" || ev.Cwd != "/tmp/somewhere" {
+		t.Errorf("push context: body=%q cwd=%q", ev.Body, ev.Cwd)
+	}
+
+	// The browser still gets its toast — the bridge is additive, never a
+	// replacement.
+	var notifies int
+	for _, m := range drainDown(t, c) {
+		if _, ok := m.(*browserproto.Notify); ok {
+			notifies++
+		}
+	}
+	if notifies != 1 {
+		t.Fatalf("browser notify count: got %d want 1", notifies)
+	}
+}
+
+// An orch with no bridge configured — the default — must not panic on the
+// unconditional Send in notifyAll. This is the case every existing test and
+// every unconfigured deployment takes.
+func TestNotifyWithoutPushBridge(t *testing.T) {
+	o, err := newOrch(filepath.Join(t.TempDir(), "s.sock"), t.TempDir())
+	if err != nil {
+		t.Fatalf("newOrch: %v", err)
+	}
+	pid := uint32(o.session.AllPaneIDs()[0])
+	o.onPaneAgent(orchestration.PaneAgent{PaneID: pid, Agent: "claude", State: "blocked"})
+}
+
+func TestShortenHome(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		t.Skip("no home dir")
+	}
+	if got := shortenHome(home); got != "~" {
+		t.Errorf("shortenHome(home) = %q, want ~", got)
+	}
+	if got := shortenHome(filepath.Join(home, "projs")); got != filepath.Join("~", "projs") {
+		t.Errorf("shortenHome under home = %q", got)
+	}
+	// A path that merely shares a prefix with home is not under it.
+	if got := shortenHome(home + "-backup"); got != home+"-backup" {
+		t.Errorf("shortenHome(sibling) = %q, want unchanged", got)
+	}
+	if got := shortenHome(""); got != "" {
+		t.Errorf("shortenHome(\"\") = %q", got)
 	}
 }
 

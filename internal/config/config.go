@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"io/fs"
 	"maps"
+	"net/url"
 	"os"
 	"path/filepath"
 	"time"
@@ -41,6 +42,65 @@ type Config struct {
 	Theme       Theme       `yaml:"theme"`
 	Keybindings Keybindings `yaml:"keybindings"`
 	Worktrees   Worktrees   `yaml:"worktrees"`
+	Push        Push        `yaml:"push"`
+}
+
+// Push is the outbound push-notification bridge (internal/push): when catway
+// emits a notify — an agent needs attention, or finished — it also POSTs to
+// this webhook, so a phone with its screen off gets a real system push instead
+// of a toast on a screen nobody is looking at. Any ntfy-shaped endpoint works
+// (ntfy.sh or a self-hosted instance).
+//
+// The credential is deliberately absent, for a sharper reason than the one
+// behind Server.Password. config.set marshals this whole struct back to disk,
+// so a token *field* would mean the settings modal silently writes the user's
+// secret into a file they may well commit — even for a user who carefully
+// supplied it in the environment. Set CATS_PUSH_TOKEN instead. (An ntfy topic
+// URL is itself a capability, so someone who wants file-only config can embed
+// credentials there — their choice, not our default.)
+type Push struct {
+	Enabled bool   `yaml:"enabled"`
+	URL     string `yaml:"url,omitempty"` // e.g. https://ntfy.sh/cats-7f3a91
+	// Kinds are the notify kinds forwarded to the phone. The default is
+	// "attention" only: "finished" fires on every completion of every agent,
+	// and a bridge that pushes those is how its owner learns to ignore it.
+	Kinds []string `yaml:"kinds,omitempty"`
+	// Priority maps a notify kind onto the endpoint's priority value. Note the
+	// default tops out at "high", never ntfy's "urgent"/5 — that bypasses Do Not
+	// Disturb on Android, and a blocked agent is not a 3am emergency.
+	Priority map[string]string `yaml:"priority,omitempty"`
+	// ClickURL is the deep-link base a notification tap opens; the pane's public
+	// handle is appended ("cats://pane/" + "w1:p3"). Empty ⇒ no click action.
+	ClickURL string `yaml:"click_url,omitempty"`
+	// MinInterval debounces per (pane, kind) as a Go duration: an agent flapping
+	// between working and blocked while a tool retries must not vibrate the
+	// phone every few seconds.
+	MinInterval string `yaml:"min_interval,omitempty"`
+}
+
+// Interval is the parsed MinInterval; an empty value means no debounce.
+func (p Push) Interval() (time.Duration, error) {
+	if p.MinInterval == "" {
+		return 0, nil
+	}
+	d, err := time.ParseDuration(p.MinInterval)
+	if err != nil {
+		return 0, fmt.Errorf("min_interval %q: %w", p.MinInterval, err)
+	}
+	if d < 0 {
+		return 0, fmt.Errorf("min_interval %q: must not be negative", p.MinInterval)
+	}
+	return d, nil
+}
+
+// KindSet is MinInterval's companion: the forwarded kinds as a set, ready for
+// internal/push. Validate has already rejected unknown names.
+func (p Push) KindSet() map[string]bool {
+	out := make(map[string]bool, len(p.Kinds))
+	for _, k := range p.Kinds {
+		out[k] = true
+	}
+	return out
 }
 
 // Server mirrors the network/auth flags. Password is deliberately absent — a
@@ -170,6 +230,14 @@ func Default() Config {
 		Theme:       Theme{Colors: map[string]string{}},
 		Keybindings: Keybindings{CopyMode: cloneKeyMap(defaultCopyMode)},
 		Worktrees:   Worktrees{Directory: "~/.cats/worktrees"},
+		// Off by default, but with the shape filled in: a saved config then shows
+		// the operator the feature exists and what its knobs are, and the values
+		// round-trip equal to this default.
+		Push: Push{
+			Kinds:       []string{PushKindAttention},
+			Priority:    map[string]string{PushKindAttention: "high", PushKindFinished: "low"},
+			MinInterval: "60s",
+		},
 	}
 }
 
@@ -272,6 +340,67 @@ func (c Config) Validate() error {
 		if len(keys) == 0 {
 			return fmt.Errorf("keybindings.copy_mode.%s: needs at least one key", action)
 		}
+	}
+	if err := c.Push.Validate(); err != nil {
+		return fmt.Errorf("push.%w", err)
+	}
+	return nil
+}
+
+// Notify kinds, mirroring browserproto's. Duplicated as plain strings so this
+// package stays free of the wire types (config is imported by catctl, which
+// links neither).
+const (
+	PushKindAttention = "attention"
+	PushKindFinished  = "finished"
+)
+
+// pushPriorities are the values ntfy accepts. Checked eagerly so a typo fails at
+// startup rather than silently downgrading every notification.
+var pushPriorities = map[string]bool{
+	"min": true, "low": true, "default": true, "high": true, "urgent": true,
+	"1": true, "2": true, "3": true, "4": true, "5": true,
+}
+
+// Validate checks the push section. The URL is only required when the bridge is
+// enabled — a disabled section with a half-filled URL is a work in progress, not
+// an error.
+//
+// Exported (unlike the other sections' checks) because main re-validates after
+// the flag layer: --push-url can turn the bridge on over a config that left it
+// off, so the file-time check is not the last word.
+func (p Push) Validate() error {
+	if _, err := p.Interval(); err != nil {
+		return err
+	}
+	for _, k := range p.Kinds {
+		if k != PushKindAttention && k != PushKindFinished {
+			return fmt.Errorf("kinds: unknown notify kind %q", k)
+		}
+	}
+	for k, v := range p.Priority {
+		if k != PushKindAttention && k != PushKindFinished {
+			return fmt.Errorf("priority: unknown notify kind %q", k)
+		}
+		if !pushPriorities[v] {
+			return fmt.Errorf("priority.%s %q: not an ntfy priority", k, v)
+		}
+	}
+	if !p.Enabled {
+		return nil
+	}
+	if p.URL == "" {
+		return errors.New("url: required when push is enabled")
+	}
+	u, err := url.Parse(p.URL)
+	if err != nil {
+		return fmt.Errorf("url %q: %w", p.URL, err)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return fmt.Errorf("url %q: want an http or https URL", p.URL)
+	}
+	if u.Host == "" {
+		return fmt.Errorf("url %q: missing host", p.URL)
 	}
 	return nil
 }

@@ -3,13 +3,16 @@
 package main
 
 import (
+	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/rohanthewiz/cats/internal/app"
 	"github.com/rohanthewiz/cats/internal/browserproto"
 	"github.com/rohanthewiz/cats/internal/layout"
 	"github.com/rohanthewiz/cats/internal/orchestration"
+	"github.com/rohanthewiz/cats/internal/push"
 )
 
 // Agent notifications (WS6) — the port of cats's agent-notification decisions
@@ -100,9 +103,74 @@ func (o *orch) publishAgent(rt *paneRuntime) {
 	n := browserproto.NewNotify(kind, msg, o.notifyContext(rt.id))
 	n.Pane = rt.id
 	n.Pub, _ = o.session.PublicPaneID(layout.PaneID(rt.id))
+	o.notifyAll(n, agent, msg)
+}
+
+// pushSink is the outbound notification bridge as the orchestrator sees it: a
+// *push.Bridge in production, a recorder in tests. An interface rather than the
+// concrete type so cmd/catway's tests can assert on deliveries without standing
+// up an HTTP server.
+type pushSink interface{ Send(push.Event) }
+
+// notifyAll is the single fan-out for a notification: every connected browser,
+// the control-API event stream, and — when configured — the push bridge that
+// reaches a phone whose screen is off.
+//
+// It exists as a named choke point rather than three calls at the one current
+// emit site because the bridge is only ever as complete as its narrowest path:
+// a second notification source added later must be unable to reach browsers
+// without also reaching the phone.
+//
+// Ordering is deliberate. The browser broadcast goes first and
+// unconditionally, so a misconfigured or wedged webhook can never delay or
+// suppress the toast on a screen somebody is actually looking at. Send itself
+// is non-blocking (internal/push hands the request to a goroutine), so the
+// orchestrator loop pays a map lookup and nothing else.
+func (o *orch) notifyAll(n browserproto.Notify, agent, msg string) {
 	o.broadcast(n)
-	o.emitEvent(app.EventPaneNotify, rt.id,
-		app.PaneNotifyEvent{Pane: rt.id, Agent: agent, Kind: kind, Message: msg})
+	o.emitEvent(app.EventPaneNotify, n.Pane,
+		app.PaneNotifyEvent{Pane: n.Pane, Agent: agent, Kind: n.Kind, Message: msg})
+	o.push.Send(o.pushEvent(n, agent))
+}
+
+// pushEvent renders a notification's push payload from the pane's live runtime
+// context. A lock-screen notification is one or two lines the user has to be
+// able to act on without unlocking, and "claude needs attention" alone does not
+// say which of five claudes — so the workspace/tab context (already on the
+// notify as Body) and the pane's cwd ride along.
+func (o *orch) pushEvent(n browserproto.Notify, agent string) push.Event {
+	ev := push.Event{
+		Kind:  n.Kind,
+		Title: n.Message,
+		Body:  n.Body,
+		Pane:  n.Pane,
+		Pub:   n.Pub,
+		Agent: agent,
+	}
+	if rt := o.panes[n.Pane]; rt != nil {
+		ev.Cwd = shortenHome(rt.cwd)
+	}
+	return ev
+}
+
+// shortenHome renders a path the way a terminal prompt would. A notification
+// body is a couple of lines wide, and "/Users/someone/projs/go/cats" spends a
+// third of that saying something the reader already knows.
+func shortenHome(path string) string {
+	if path == "" {
+		return ""
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return path
+	}
+	if path == home {
+		return "~"
+	}
+	if rest, ok := strings.CutPrefix(path, home+string(os.PathSeparator)); ok {
+		return "~" + string(os.PathSeparator) + rest
+	}
+	return path
 }
 
 // notifyKind classifies an agent state transition (cats's

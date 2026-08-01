@@ -28,6 +28,15 @@ func resolveSecret(flagVal string) (secret string, generated bool, err error) {
 	return secret, true, err
 }
 
+// resolvePushToken returns the push webhook's bearer credential, from the
+// environment only. Like CATS_PASSWORD it is deliberately unreadable from
+// config.yaml — and here the reason is sharper: config.set marshals the whole
+// config struct back to disk, so a token field would write a secret the
+// operator carefully kept in their environment into a file the first time they
+// changed a theme colour. An empty result simply sends no Authorization header,
+// which is correct for a plain ntfy topic.
+func resolvePushToken() string { return os.Getenv("CATS_PUSH_TOKEN") }
+
 // authGuard enforces WS10 access control for the catway: an unauthenticated
 // browser is bounced to /login, where it exchanges the shared secret for an
 // HMAC-signed session cookie; a headless client presents the secret as a

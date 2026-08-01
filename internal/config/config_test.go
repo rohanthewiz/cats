@@ -98,6 +98,15 @@ func TestValidateRejects(t *testing.T) {
 		"unknown action": "keybindings:\n  copy_mode:\n    teleport: [\"t\"]\n",
 		"empty key list": "keybindings:\n  copy_mode:\n    yank: []\n",
 		"lone tls cert":  "server:\n  tls:\n    cert: /x.pem\n",
+
+		"push enabled without url": "push:\n  enabled: true\n",
+		"push non-http url":        "push:\n  enabled: true\n  url: ftp://ntfy.sh/t\n",
+		"push hostless url":        "push:\n  enabled: true\n  url: \"https://\"\n",
+		"push unknown kind":        "push:\n  kinds: [\"attention\", \"exploded\"]\n",
+		"push unknown prio kind":   "push:\n  priority:\n    exploded: high\n",
+		"push bad priority":        "push:\n  priority:\n    attention: LOUD\n",
+		"push bad interval":        "push:\n  min_interval: \"soonish\"\n",
+		"push negative interval":   "push:\n  min_interval: \"-30s\"\n",
 	}
 	for name, yaml := range cases {
 		if _, err := parse([]byte(yaml)); err == nil {
@@ -163,6 +172,59 @@ func TestSaveRoundtrip(t *testing.T) {
 
 	if err := Save("", cfg); err == nil {
 		t.Fatal("Save with an empty path should error")
+	}
+}
+
+// The push bridge is off by default but arrives shaped, and a config that names
+// kinds replaces the default list rather than merging into it (slices are
+// unmarshalled wholesale — so "kinds: [finished]" means finished ONLY, which is
+// what an operator writing that line intends).
+func TestParsePush(t *testing.T) {
+	def := Default().Push
+	if def.Enabled {
+		t.Fatal("push must default to disabled")
+	}
+	if !reflect.DeepEqual(def.Kinds, []string{PushKindAttention}) {
+		t.Fatalf("default push.kinds = %v, want just attention", def.Kinds)
+	}
+	if d, err := def.Interval(); err != nil || d != time.Minute {
+		t.Fatalf("default push.min_interval = %v (err %v), want 1m", d, err)
+	}
+
+	cfg, err := parse([]byte("push:\n" +
+		"  enabled: true\n" +
+		"  url: https://ntfy.sh/cats-7f3a91\n" +
+		"  kinds: [\"attention\", \"finished\"]\n" +
+		"  click_url: \"cats://pane/\"\n" +
+		"  min_interval: 15s\n"))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	got := cfg.Push
+	if !got.Enabled || got.URL != "https://ntfy.sh/cats-7f3a91" || got.ClickURL != "cats://pane/" {
+		t.Fatalf("push = %+v", got)
+	}
+	if d, _ := got.Interval(); d != 15*time.Second {
+		t.Fatalf("push.min_interval = %v, want 15s", d)
+	}
+	set := got.KindSet()
+	if !set[PushKindAttention] || !set[PushKindFinished] {
+		t.Fatalf("push.KindSet() = %v", set)
+	}
+
+	// A narrowing override replaces, and the priority map keeps its defaults for
+	// the kind the operator didn't mention.
+	cfg, err = parse([]byte("push:\n  kinds: [\"finished\"]\n"))
+	if err != nil {
+		t.Fatalf("parse narrowing: %v", err)
+	}
+	if set := cfg.Push.KindSet(); set[PushKindAttention] || !set[PushKindFinished] {
+		t.Fatalf("narrowed push.KindSet() = %v, want finished only", set)
+	}
+
+	// An empty interval means no debounce, and must not be an error.
+	if d, err := (Push{}).Interval(); err != nil || d != 0 {
+		t.Fatalf("empty min_interval = %v (err %v), want 0", d, err)
 	}
 }
 

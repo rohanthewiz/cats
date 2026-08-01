@@ -35,7 +35,13 @@
 //	         [--hook-socket /tmp/cats-hooks.sock] \
 //	         [--auth password|none] [--password SECRET] [--session-ttl 24h] \
 //	         [--tls] [--tls-cert cert.pem] [--tls-key key.pem] \
-//	         [--persist=false] [--state-dir DIR]
+//	         [--persist=false] [--state-dir DIR] [--push-url URL]
+//
+// Push notifications (--push-url, or the config's push section) POST every
+// agent notification to an ntfy-shaped webhook, so a phone reachable nowhere
+// near this machine still learns that an agent is blocked. It is outbound-only
+// and independent of every client-facing path — it keeps working when no
+// browser is connected at all.
 //
 // Session persistence (WS3) is on by default: the workspace/tab/pane model is
 // saved to $XDG_STATE_HOME/cats (default ~/.local/state/cats) on every
@@ -52,6 +58,7 @@ import (
 	"io/fs"
 	"log"
 	"maps"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -67,6 +74,7 @@ import (
 	"github.com/rohanthewiz/cats/internal/gwauth"
 	"github.com/rohanthewiz/cats/internal/gwtls"
 	"github.com/rohanthewiz/cats/internal/persist"
+	"github.com/rohanthewiz/cats/internal/push"
 	"github.com/rohanthewiz/cats/internal/startdir"
 	"github.com/rohanthewiz/cats/internal/worktree"
 )
@@ -93,6 +101,8 @@ func main() {
 	tlsKey := flag.String("tls-key", "", "TLS private key PEM (implies --tls)")
 	persistOn := flag.Bool("persist", true, "persist and restore session state (WS3)")
 	stateDir := flag.String("state-dir", "", "session state directory (default $XDG_STATE_HOME/cats)")
+	pushURL := flag.String("push-url", "",
+		"push-notification webhook (ntfy topic URL); enables the push bridge (token: env CATS_PUSH_TOKEN)")
 	flag.Parse()
 
 	// Config precedence for server settings is flag > config file > default.
@@ -150,6 +160,16 @@ func main() {
 	if set["state-dir"] {
 		effPersist.StateDir = *stateDir
 	}
+	// Passing --push-url is itself the opt-in, so the operator does not have to
+	// set both a URL and an enable flag; an empty value explicitly turns the
+	// bridge off, overriding a config that enabled it.
+	effPush := cfg.Push
+	if set["push-url"] {
+		effPush.URL, effPush.Enabled = *pushURL, *pushURL != ""
+	}
+	if err := effPush.Validate(); err != nil {
+		log.Fatalf("catway: push.%v", err)
+	}
 
 	indexHTML, err := webFS.ReadFile("web/index.html")
 	if err != nil {
@@ -167,6 +187,22 @@ func main() {
 	o.cfgPath = cfgPath
 	o.cfg = cfg
 	o.worktreeDir = worktree.ExpandTilde(cfg.Worktrees.Directory)
+	// Outbound push bridge: an agent that blocks while nobody is watching still
+	// reaches a phone. Deliberately independent of every client-facing path — it
+	// is an ordinary outbound POST, so it keeps working when no client is
+	// connected at all. push.New returns nil when unconfigured, and Send is
+	// nil-safe, so this assignment is unconditional.
+	if effPush.Enabled {
+		o.push = push.New(push.Config{
+			URL:         effPush.URL,
+			Token:       resolvePushToken(),
+			Kinds:       effPush.KindSet(),
+			Priority:    effPush.Priority,
+			ClickURL:    effPush.ClickURL,
+			MinInterval: mustPushInterval(effPush),
+		})
+		log.Printf("catway: push notifications enabled (%s)", pushHostOf(effPush.URL))
+	}
 	initialPage := renderPage(indexHTML, cfg)
 	o.page.Store(&initialPage)
 	if cfgPath != "" {
@@ -420,6 +456,31 @@ func buildGuard(mode, password string, ttl time.Duration, tlsOn bool, allowedOri
 
 // splitCSV parses a comma-separated flag value into a trimmed, non-empty slice.
 // Returns nil for an empty/whitespace-only value so it matches an unset config.
+// mustPushInterval is the parsed debounce window. Both config.Load and the
+// explicit Validate above have already rejected an unparseable value, so a
+// failure here is impossible; falling back to no debounce (rather than
+// panicking) keeps a future refactor that skips a validation step from taking
+// the server down over a notification setting.
+func mustPushInterval(p config.Push) time.Duration {
+	d, err := p.Interval()
+	if err != nil {
+		return 0
+	}
+	return d
+}
+
+// pushHostOf is the webhook's host for the startup log. Deliberately not the
+// full URL: an ntfy topic path is a capability (anyone who reads it can publish
+// to and subscribe to your notifications), and catway's log is routinely pasted
+// into issues.
+func pushHostOf(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return "configured"
+	}
+	return u.Host
+}
+
 func splitCSV(s string) []string {
 	var out []string
 	for _, part := range strings.Split(s, ",") {

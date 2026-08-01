@@ -20,6 +20,7 @@ import (
 	"github.com/rohanthewiz/cats/internal/layout"
 	"github.com/rohanthewiz/cats/internal/orchestration"
 	"github.com/rohanthewiz/cats/internal/persist"
+	"github.com/rohanthewiz/cats/internal/push"
 	"github.com/rohanthewiz/cats/internal/terminal"
 	"github.com/rohanthewiz/cats/internal/workspace"
 )
@@ -140,6 +141,12 @@ type orch struct {
 	// sent the current numbers rather than an empty section for up to two
 	// minutes; setUsage dedupes against it.
 	usage *browserproto.Usage
+	// push is the outbound notification bridge (internal/push), nil when no
+	// webhook is configured — which is the default, and why every use goes
+	// through the nil-safe Send. It reaches a phone whose screen is off, so it
+	// deliberately does not care whether any client is connected. Wired by main
+	// after construction; nil in tests unless a recorder is installed.
+	push pushSink
 	// lastTitle is the app-level browser-tab title last broadcast (WS8):
 	// broadcastTitle dedupes against it so focus/title churn doesn't spam every
 	// connection with identical title messages.
@@ -280,9 +287,14 @@ func newOrch(socket, cwd string) (*orch, error) {
 // there is nothing to restore).
 func newOrchWith(socket, cwd string, sess *app.Session) *orch {
 	o := &orch{
-		session:        sess,
-		panes:          make(map[uint32]*paneRuntime),
-		conns:          make(map[*client]struct{}),
+		session: sess,
+		panes:   make(map[uint32]*paneRuntime),
+		conns:   make(map[*client]struct{}),
+		// A typed nil, not a nil interface: (*push.Bridge).Send is nil-safe, so
+		// this makes notifyAll's unconditional Send correct for every orch —
+		// including the ones tests build and main's, before the bridge is wired.
+		// Leaving the field zero would make that same call panic.
+		push:           (*push.Bridge)(nil),
 		area:           defaultArea,
 		cellW:          8,
 		cellH:          16,

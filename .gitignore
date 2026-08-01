@@ -15,8 +15,10 @@
 /cmd/cathost/cathost
 
 # cats-todo's own backlog for this repo — personal working state that churns on
-# every add/drop, not source. Each checkout keeps its own.
-.cats-todo/todos.json
+# every add/drop, not source. Each checkout keeps its own. The whole directory,
+# not just todos.json: attachments land in .cats-todo/images/ and are the same
+# category of local state.
+.cats-todo/
 
 # Editor / OS
 .DS_Store
