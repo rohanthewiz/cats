@@ -260,14 +260,26 @@
   .pane canvas { position:absolute; display:block; }
   .pane.focused canvas { outline:1px solid var(--accent-dim); outline-offset:-1px; }
 
-  /* ---- Status affordances ----
-     Only the app-global pair lives here now — the ⌘K palette hint and the ⚙
-     menu — pinned at the right end of the tab row so the panes keep the full
-     height below the tabs. The pane-scoped indicators that used to share the
-     row (ZOOM chip, copy-mode bar) ride the header of the pane they describe
-     instead: a global bar naming one pane's mode read as the app's. */
-  #statusbar { flex:none; display:flex; align-items:center; gap:14px; padding:0 12px;
+  /* ---- Workspace toolbar ----
+     The app-global affordances — palette, plugins, and the ⚙ menu — pinned at
+     the right end of the tab row so the panes keep the full height below the
+     tabs. The pane-scoped indicators that used to share the row (ZOOM chip,
+     copy-mode bar) ride the header of the pane they describe instead: a global
+     bar naming one pane's mode read as the app's.
+
+     Every item is the same full-height hit target divided from its neighbour by
+     a hairline rule, so the row reads as a row of controls rather than one run
+     of small grey text. The gear keeps the far-right slot it has always had. */
+  #statusbar { flex:none; display:flex; align-items:stretch;
     font-size:12px; color:var(--muted); border-left:1px solid var(--line); }
+  #statusbar .tbtn { display:flex; align-items:center; gap:6px; padding:0 12px;
+    cursor:pointer; white-space:nowrap; border-left:1px solid var(--line); }
+  #statusbar .tbtn:first-child { border-left:none; }
+  #statusbar .tbtn:hover { background:var(--hover); color:var(--fg-bright); }
+  /* The leading glyph of a labelled item (⌘K, the plugin mark) carries the
+     accent so the eye lands on it before reading the word beside it. */
+  #statusbar .tbtn .tmk { color:var(--accent); }
+  #statusbar .tbtn:hover .tmk { color:var(--fg-bright); }
 
   /* ---- Toasts ---- */
   #toasts { position:fixed; right:10px; top:38px; display:flex; flex-direction:column; gap:6px; z-index:6; }
@@ -387,12 +399,14 @@
      away — red border/text so a dropped socket still announces itself. */
   #banner.linkerr { background:var(--err-bg); border-bottom-color:var(--err); color:var(--err-fg); }
 
-  /* ---- Status bar extras (WS8) ---- */
-  #palhint { color:var(--muted); cursor:pointer; white-space:nowrap; }
-  #palhint:hover { color:var(--accent); }
-  #gear { cursor:pointer; font-size:16px; position:relative; }
-  #gear:hover { color:var(--accent); }
-  #gear.badge::after { content:""; position:absolute; top:-1px; right:-4px; width:6px; height:6px;
+  /* ---- Toolbar item extras (WS8) ----
+     The gear is the one icon-only item, so it sizes its glyph up and drops the
+     label gap; its pending-update dot hangs off the glyph itself (the .g span)
+     rather than off the padded hit target, which would float it out in the
+     whitespace between the gear and the panel edge. */
+  #gear { font-size:16px; padding:0 11px; }
+  #gear .g { position:relative; display:inline-block; line-height:1; }
+  #gear.badge .g::after { content:""; position:absolute; top:-1px; right:-4px; width:6px; height:6px;
     border-radius:50%; background:var(--accent); }
 
   /* ---- Drag-reorder (tabs + workspaces) ---- */
@@ -456,8 +470,9 @@
     <div id="topbar">
       <div id="tabbar"></div>
       <div id="statusbar">
-        <span id="palhint" title="command palette (⌘K / Ctrl+Alt+K)">⌘K palette</span>
-        <span id="gear" title="menu">⚙</span>
+        <span class="tbtn" id="palhint" title="command palette (⌘K / Ctrl+Alt+K)"><span class="tmk">⌘K</span>palette</span>
+        <span class="tbtn" id="pluginsbtn" title="plugins — install, run, update"><span class="tmk">⧉</span>plugins</span>
+        <span class="tbtn" id="gear" title="menu"><span class="g">⚙</span></span>
       </div>
     </div>
     <div id="panes"></div>
@@ -486,6 +501,7 @@
   const tabbarEl = document.getElementById("tabbar");
   const toastsEl = document.getElementById("toasts");
   const palHintEl = document.getElementById("palhint");
+  const pluginsBtnEl = document.getElementById("pluginsbtn");
   const gearEl = document.getElementById("gear");
   const bannerEl = document.getElementById("banner");
   const splitterEl = document.getElementById("splitter");
@@ -3724,17 +3740,19 @@
     sidebarResized(true);
   });
 
-  // Status-bar affordances: the palette hint opens it, the gear opens the
-  // global launcher menu (cats's bottom-corner menu: settings / keybinds /
-  // plugins / reload config / update line when one is pending / stop server
-  // standing in for detach — the web has no client to detach). The zoom chip
-  // moved into the zoomed pane's own header (renderChrome).
+  // Toolbar affordances: the palette hint opens it, plugins opens its manager
+  // directly (it earns the top-level slot — installing and running plugins is
+  // routine work, not a settings excursion), and the gear opens the global
+  // launcher menu (cats's bottom-corner menu: settings / keybinds / reload
+  // config / update line when one is pending / stop server standing in for
+  // detach — the web has no client to detach). The zoom chip moved into the
+  // zoomed pane's own header (renderChrome).
   palHintEl.addEventListener("click", () => openPalette());
+  pluginsBtnEl.addEventListener("click", () => openPluginsDialog());
   gearEl.addEventListener("click", (e) => {
     const items = [
       { label: "settings", fn: openSettings },
       { label: "keybinds", fn: openHelp },
-      { label: "plugins…", fn: openPluginsDialog },
       { label: "reload config", fn: () => sendCmd("server.reload_config", {}) },
     ];
     if (updateInfo) items.push({ label: "update ready" + (updateInfo.version ? " — " + updateInfo.version : ""), fn: showUpdateBanner });

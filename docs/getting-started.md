@@ -126,7 +126,7 @@ catctl plugin run rohanthewiz.cats-todo       # launch in a new tab
 ```
 
 Install is offline; only `run` needs a live `catway`. The web UI has the same
-surface under gear menu → **plugins**. See [Plugins](subsystems/plugins.md) for
+surface under the toolbar's **⧉ plugins**. See [Plugins](subsystems/plugins.md) for
 the manifest format and for writing your own.
 
 ## Where state lives

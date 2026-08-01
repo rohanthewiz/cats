@@ -306,7 +306,7 @@ catctl plugin run rohanthewiz.cats-todo         # launch in a new tab
 catctl plugin uninstall rohanthewiz.cats-todo
 ```
 
-The web UI has the same surface: gear menu → **plugins** (also in the ⌘K
+The web UI has the same surface: the toolbar's **⧉ plugins** (also in the ⌘K
 palette) lists installed plugins with run / update / uninstall per row and an
 **add…** prompt. Uninstall resolves over the §7 `plugin.list`/`plugin.uninstall`
 commands; install, link and rebuild spawn `catctl plugin …` in a fresh tab so

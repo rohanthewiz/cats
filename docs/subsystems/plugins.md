@@ -347,7 +347,7 @@ their titles (see [Shell completion](#shell-completion)).
 
 ## The UI surface
 
-Gear menu → **plugins**, also reachable from the ⌘K palette. Each row offers run /
+The workspace toolbar's **⧉ plugins**, also reachable from the ⌘K palette. Each row offers run /
 update / uninstall, plus an **add…** prompt.
 
 ```mermaid
