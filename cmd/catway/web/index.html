@@ -1395,6 +1395,13 @@
   let dragConsumedClick = false;
   function beginReorderDrag(ev, cfg) {
     if (ev.button !== 0) return;
+    // A press that may become a drag must not also start a text selection: the
+    // browser would paint its selection highlight across the tab name (or the
+    // workspace row) the whole way, on top of the .dragging + drop-bar cues
+    // that are the actual feedback. Nothing in this chrome is prose worth
+    // selecting, and the terminal draws its own selection on the canvas, so
+    // the default gains nothing here. beginBorderDrag does the same.
+    ev.preventDefault();
     const sx = ev.clientX, sy = ev.clientY;
     let dragging = false, bar = null, gap = -1;
     const items = () => Array.from(cfg.container.querySelectorAll(cfg.itemSel));
@@ -1449,6 +1456,7 @@
   // live pane rects and the listeners live on window.
   function beginPaneSwapDrag(ev, srcId) {
     if (ev.button !== 0) return;
+    ev.preventDefault(); // no text selection under the drag (see beginReorderDrag)
     const sx = ev.clientX, sy = ev.clientY;
     let dragging = false, target = null;
     const clearTarget = () => { if (target) { target.el.classList.remove("droptarget"); target = null; } };
