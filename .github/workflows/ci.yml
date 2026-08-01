@@ -35,7 +35,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        # macos-15-intel mirrors the release matrix so the Intel build gets
+        # signal on every push. Without it the only thing exercising that
+        # platform is a tag push, and a release is a bad place to discover a
+        # platform-specific failure — that is exactly how v0.2.0 shipped with
+        # no macOS tarball at all.
+        os: [ubuntu-latest, macos-latest, macos-15-intel]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
