@@ -34,6 +34,21 @@ jobs:
       - run: make vt
       - run: make test-ghostty
       - run: make dist
+      # An annotated tag's message does not become the release body — the API
+      # takes the two from different places, so releases cut before this went
+      # out with an empty body while the changelog sat in the tag object where
+      # only `git show` would find it. Asking GitHub to generate notes from the
+      # commits since the previous tag makes the release self-describing on its
+      # own, and a hand-written changelog can still be layered on afterwards
+      # with `gh release edit --notes-file`.
+      #
+      # Safe against the matrix: all three jobs run this step for the same tag,
+      # so whichever finishes first creates the release and generates the notes,
+      # and the other two take the update path. That path preserves the existing
+      # body when the step passes no `body` input (the action resolves
+      # `body = workflowBody || existingReleaseBody`), so the later two jobs
+      # attach their tarballs without blanking what the first one wrote.
       - uses: softprops/action-gh-release@v2
         with:
           files: dist/*.tar.gz
+          generate_release_notes: true
