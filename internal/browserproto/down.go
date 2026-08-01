@@ -316,12 +316,22 @@ func NewTheme(name string, colors map[string]string, font string) Theme {
 //
 // Err is a short reason the account read failed, shown beside whatever the
 // fallback managed. It never carries the credential or the raw response.
+//
+// WeeklyModel is the weekly window of whichever model has its own allowance on
+// top of the all-models week — Fable on a Max plan, for instance. It is the
+// window that actually bites first on a heavy week, so it earns a row of its
+// own rather than being folded into Weekly. WeeklyModelName is what to call it
+// ("Fable"), taken from the account rather than guessed: the set of separately
+// metered models is the plan's business and changes without us. An empty name
+// means the account reports no such window and the sidebar shows no row.
 type Usage struct {
-	T        Type        `json:"t"`
-	Source   string      `json:"source"` // "account" | "local"
-	FiveHour UsageWindow `json:"five_hour"`
-	Weekly   UsageWindow `json:"weekly"`
-	Err      string      `json:"err,omitempty"`
+	T               Type        `json:"t"`
+	Source          string      `json:"source"` // "account" | "local"
+	FiveHour        UsageWindow `json:"five_hour"`
+	Weekly          UsageWindow `json:"weekly"`
+	WeeklyModel     UsageWindow `json:"weekly_model"`
+	WeeklyModelName string      `json:"weekly_model_name,omitempty"`
+	Err             string      `json:"err,omitempty"`
 }
 
 // UsageWindow is one rate-limit window. Pct is the share of the window's
@@ -339,7 +349,20 @@ type UsageWindow struct {
 const UsagePctUnknown = -1
 
 func NewUsage(source string, fiveHour, weekly UsageWindow, errMsg string) Usage {
-	return Usage{T: MsgUsage, Source: source, FiveHour: fiveHour, Weekly: weekly, Err: errMsg}
+	return Usage{T: MsgUsage, Source: source, FiveHour: fiveHour, Weekly: weekly,
+		WeeklyModel: UsageWindow{Pct: UsagePctUnknown}, Err: errMsg}
+}
+
+// WithWeeklyModel attaches the per-model weekly window. It is a separate step
+// rather than another NewUsage parameter because only the account read has one:
+// the local estimate counts tokens without knowing which model spent them, so
+// it leaves this alone and the row stays hidden.
+func (u Usage) WithWeeklyModel(name string, w UsageWindow) Usage {
+	if name == "" {
+		return u
+	}
+	u.WeeklyModelName, u.WeeklyModel = name, w
+	return u
 }
 
 // UpdateReady announces an available self-update; chrome shows a banner.

@@ -110,7 +110,8 @@ func (o *orch) setUsage(m browserproto.Usage) {
 func readUsage(est *usageEstimator) browserproto.Usage {
 	report, err := readAccountUsage()
 	if err == nil {
-		return browserproto.NewUsage("account", report.fiveHour, report.weekly, "")
+		return browserproto.NewUsage("account", report.fiveHour, report.weekly, "").
+			WithWeeklyModel(report.weeklyModelName, report.weeklyModel)
 	}
 	logUsageOnce(err.Error())
 	fiveHour, weekly := est.windows(time.Now())
@@ -122,6 +123,10 @@ func readUsage(est *usageEstimator) browserproto.Usage {
 type accountUsage struct {
 	fiveHour browserproto.UsageWindow
 	weekly   browserproto.UsageWindow
+	// The weekly window of a separately metered model, and its display name.
+	// Empty name = the account reports no such window (see usageAPILimit).
+	weeklyModel     browserproto.UsageWindow
+	weeklyModelName string
 }
 
 func readAccountUsage() (accountUsage, error) {
@@ -142,11 +147,36 @@ type usageAPIWindow struct {
 }
 
 // usageAPIResponse is the slice of the endpoint's reply this cares about. It
-// also reports per-model weekly windows and extra-usage credits; the sidebar
-// shows the two windows that apply to every plan.
+// also reports extra-usage credits and a spend summary, which the sidebar has
+// no room for.
 type usageAPIResponse struct {
 	FiveHour *usageAPIWindow `json:"five_hour"`
 	SevenDay *usageAPIWindow `json:"seven_day"`
+	Limits   []usageAPILimit `json:"limits"`
+}
+
+// usageAPILimit is one entry of the endpoint's limits array — the newer,
+// self-describing view of the same windows the top two fields carry, plus the
+// scoped ones they do not.
+//
+// The array is where a per-model week now lives. The reply still has
+// seven_day_opus / seven_day_sonnet / seven_day_fable-shaped fields, but they
+// come back null on accounts that plainly do have a per-model limit; the live
+// number arrives as a limits entry of kind "weekly_scoped" carrying
+// scope.model.display_name. Reading the array rather than the named fields
+// means a model added or renamed on the plan shows up without a code change —
+// the name is the account's to choose, not ours to enumerate. Note that
+// scope.model.id can be null while display_name is set, so the name is the only
+// dependable identifier here.
+type usageAPILimit struct {
+	Kind     string  `json:"kind"` // "session" | "weekly_all" | "weekly_scoped" | …
+	Percent  float64 `json:"percent"`
+	ResetsAt string  `json:"resets_at"`
+	Scope    *struct {
+		Model *struct {
+			DisplayName string `json:"display_name"`
+		} `json:"model"`
+	} `json:"scope"`
 }
 
 // fetchAccountUsage performs one authenticated read. Errors are deliberately
@@ -181,10 +211,39 @@ func fetchAccountUsage(ctx context.Context, hc *http.Client, endpoint, token str
 		// usage — zeroed windows are still objects.
 		return accountUsage{}, fmt.Errorf("usage endpoint: no windows in reply")
 	}
+	name, modelWeek := weeklyModelLimit(out.Limits)
 	return accountUsage{
-		fiveHour: apiWindow(out.FiveHour),
-		weekly:   apiWindow(out.SevenDay),
+		fiveHour:        apiWindow(out.FiveHour),
+		weekly:          apiWindow(out.SevenDay),
+		weeklyModel:     modelWeek,
+		weeklyModelName: name,
 	}, nil
+}
+
+// weeklyModelLimit picks the per-model weekly window to show, if there is one.
+//
+// An account can carry more than one scoped weekly limit, and the sidebar has
+// room for a single extra row, so this takes the one nearest its ceiling — the
+// one that will stop the work first, which is the only reason to look at the
+// section at all. Entries without a model scope (a surface-scoped limit, say)
+// are skipped: the row is labelled with a model name and cannot describe them.
+func weeklyModelLimit(limits []usageAPILimit) (string, browserproto.UsageWindow) {
+	var name string
+	window := browserproto.UsageWindow{Pct: browserproto.UsagePctUnknown}
+	for _, l := range limits {
+		if l.Kind != "weekly_scoped" || l.Scope == nil || l.Scope.Model == nil {
+			continue
+		}
+		if l.Scope.Model.DisplayName == "" {
+			continue // nothing to label the row with
+		}
+		if name != "" && l.Percent <= window.Pct {
+			continue
+		}
+		name = l.Scope.Model.DisplayName
+		window = browserproto.UsageWindow{Pct: clampPct(l.Percent), ResetsAt: l.ResetsAt}
+	}
+	return name, window
 }
 
 func apiWindow(w *usageAPIWindow) browserproto.UsageWindow {

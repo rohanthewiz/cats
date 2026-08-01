@@ -89,6 +89,76 @@ func TestFetchAccountUsageErrorsStaySilentAboutTheCredential(t *testing.T) {
 	}
 }
 
+// The per-model week comes out of the limits array, not the named
+// seven_day_<model> fields — those come back null on accounts that do have one.
+func TestFetchAccountUsageReadsScopedWeeklyLimit(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{
+			"five_hour": {"utilization": 1, "resets_at": "2026-08-01T18:00:00Z"},
+			"seven_day": {"utilization": 24, "resets_at": "2026-08-05T21:00:00Z"},
+			"seven_day_fable": null,
+			"limits": [
+				{"kind": "session",     "percent": 1,  "resets_at": "2026-08-01T18:00:00Z"},
+				{"kind": "weekly_all",  "percent": 24, "resets_at": "2026-08-05T21:00:00Z"},
+				{"kind": "weekly_scoped", "percent": 12, "resets_at": "2026-08-05T21:00:00Z",
+					"scope": {"model": {"id": null, "display_name": "Opus"}}},
+				{"kind": "weekly_scoped", "percent": 29, "resets_at": "2026-08-05T21:00:01Z",
+					"scope": {"model": {"id": null, "display_name": "Fable"}}},
+				{"kind": "weekly_scoped", "percent": 99, "resets_at": "2026-08-05T21:00:00Z",
+					"scope": {"surface": "cowork"}}
+			]
+		}`)
+	}))
+	defer srv.Close()
+
+	got, err := fetchAccountUsage(context.Background(), srv.Client(), srv.URL, "tok")
+	if err != nil {
+		t.Fatalf("fetchAccountUsage: %v", err)
+	}
+	// Fable over Opus because it is nearer its ceiling, and over the
+	// surface-scoped 99% because that one has no model to label a row with.
+	if got.weeklyModelName != "Fable" {
+		t.Errorf("weekly model name = %q, want Fable", got.weeklyModelName)
+	}
+	if got.weeklyModel.Pct != 29 || got.weeklyModel.ResetsAt != "2026-08-05T21:00:01Z" {
+		t.Errorf("weekly model window = %+v", got.weeklyModel)
+	}
+	// The plan-wide windows still come from the top-level fields.
+	if got.weekly.Pct != 24 {
+		t.Errorf("weekly = %+v", got.weekly)
+	}
+}
+
+// A plan with no separately metered model reports no scoped limit, and the
+// sidebar must be able to tell that from a window that read as zero.
+func TestFetchAccountUsageWithoutScopedWeeklyLimit(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{
+			"five_hour": {"utilization": 1},
+			"seven_day": {"utilization": 2},
+			"limits": [{"kind": "weekly_all", "percent": 2}]
+		}`)
+	}))
+	defer srv.Close()
+
+	got, err := fetchAccountUsage(context.Background(), srv.Client(), srv.URL, "tok")
+	if err != nil {
+		t.Fatalf("fetchAccountUsage: %v", err)
+	}
+	if got.weeklyModelName != "" {
+		t.Errorf("weekly model name = %q, want empty", got.weeklyModelName)
+	}
+	if got.weeklyModel.Pct != browserproto.UsagePctUnknown {
+		t.Errorf("weekly model pct = %v, want unknown", got.weeklyModel.Pct)
+	}
+	// And it must not reach the browser as a row at all.
+	msg := browserproto.NewUsage("account", got.fiveHour, got.weekly, "").
+		WithWeeklyModel(got.weeklyModelName, got.weeklyModel)
+	if msg.WeeklyModelName != "" {
+		t.Errorf("published a nameless per-model row: %+v", msg)
+	}
+}
+
 // A 200 whose windows are all zero is an account that has spent nothing, not a
 // broken read — it must not fall through to the estimate.
 func TestFetchAccountUsageAcceptsZeroedWindows(t *testing.T) {

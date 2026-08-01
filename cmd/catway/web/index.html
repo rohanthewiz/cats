@@ -1572,6 +1572,15 @@
     }
     usageListEl.appendChild(usageRow("5 hr", usageMsg.five_hour));
     usageListEl.appendChild(usageRow("Week", usageMsg.weekly));
+    // A model with its own weekly allowance on top of the all-models week —
+    // Fable, say. Only the account read knows about it, and only on plans that
+    // meter one, so the row appears when a name came back and not otherwise:
+    // an empty "Week ·" row would read as a broken window rather than an
+    // absent one. The name is the account's own label, printed as given.
+    if (usageMsg.weekly_model_name) {
+      usageListEl.appendChild(
+        usageRow("Week · " + usageMsg.weekly_model_name, usageMsg.weekly_model));
+    }
     // Only the fallback explains itself. An account reading is the expected
     // case and needs no caption; an estimate has to say that it is one, and
     // why the real numbers were not available.
