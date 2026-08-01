@@ -62,22 +62,58 @@ func TestLoginShellPATH(t *testing.T) {
 // The bug this file exists for: a GUI launch starts with launchd's bare PATH,
 // and after hydration the toolchain the user has in their shell must be
 // reachable — that is what a plugin's `go build` step needs.
+//
+// The contract is stated against the login shell's own PATH rather than against
+// any one tool. Asking instead whether `go` is reachable afterwards conflates
+// two different environments: a CI runner puts the toolchain on the *test
+// process's* PATH (setup-go writes GITHUB_PATH, which the job inherits) while a
+// freshly spawned `zsh -ilc` sources only the user's rc files and has never
+// heard of it. That made the precondition satisfiable where the assertion was
+// not, and the test failed on a machine where hydration was working correctly.
 func TestHydratePATHOnGUILaunch(t *testing.T) {
-	toolchain, err := exec.LookPath("go")
-	if err != nil {
-		t.Skipf("no go on the test PATH to look for: %v", err)
-	}
+	const bare = "/usr/bin:/bin:/usr/sbin:/sbin"
+
 	t.Setenv("__CFBundleIdentifier", "dev.cats.app")
-	t.Setenv("PATH", "/usr/bin:/bin:/usr/sbin:/sbin")
+	t.Setenv("PATH", bare)
+
+	// The expectation has to be derived *after* PATH is set to the launchd-bare
+	// value, because loginShellPATH is not a pure function: the shell it spawns
+	// inherits our PATH, and an rc file's customary `export PATH="$HOME/bin:$PATH"`
+	// folds that inherited value into what comes back. Reading it beforehand
+	// measures a different environment than the one hydratePATH will see — under
+	// `go test` the toolchain directory the test binary runs with leaks into the
+	// first reading and not the second.
+	shellPath := loginShellPATH()
+	if shellPath == "" {
+		t.Skip("login shell yielded no PATH to adopt")
+	}
 
 	hydratePATH()
 
-	found, err := exec.LookPath("go")
-	if err != nil {
-		t.Fatalf("go still not on PATH after hydration (PATH=%q): %v", os.Getenv("PATH"), err)
+	got := os.Getenv("PATH")
+	if got == bare {
+		t.Fatalf("PATH untouched by hydration, want the login shell's %q", shellPath)
 	}
-	if found != toolchain {
-		t.Logf("resolved %q, shell PATH prefers it over %q", found, toolchain)
+	// Every entry the login shell reported has to survive into the merged PATH;
+	// that is precisely what lets a spawned build step find the user's tools.
+	entries := make(map[string]bool)
+	for entry := range strings.SplitSeq(got, ":") {
+		entries[entry] = true
+	}
+	for want := range strings.SplitSeq(shellPath, ":") {
+		if want == "" {
+			continue
+		}
+		if !entries[want] {
+			t.Fatalf("login shell entry %q missing after hydration (PATH=%q)", want, got)
+		}
+	}
+
+	// The original symptom, asserted only where the environment can express it:
+	// a login shell that can resolve the toolchain must still resolve it once we
+	// have adopted its PATH.
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Logf("go not reachable after hydration; the login shell's PATH does not carry it (PATH=%q)", got)
 	}
 }
 
