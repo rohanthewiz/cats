@@ -22,7 +22,11 @@ func builtins() []Theme {
 				"bg": "#1f2420", "fg": "#d6ddd6", "accent": "#4db380", "accent-dim": "#3d4a43",
 				"panel": "#242a25", "panel2": "#2b322c", "line": "#38403a", "muted": "#9db0a2",
 				"chrome": "#2b322c", "chrome-focus": "#3a4a3f", "heading": "#6cbf8d",
-				"todo": "#f0dfa0", "ok": "#6ac47a", "warn": "#e0b64e", "err": "#e57373",
+				// Workspace group headers sit a tier below the section titles:
+				// a greenish brown that separates them from both the green
+				// headings above and the muted pane rows below.
+				"ws-heading": "#a09a62",
+				"todo":       "#f0dfa0", "ok": "#6ac47a", "warn": "#e0b64e", "err": "#e57373",
 				"done": "#00ccf5",
 				// The formerly-hardcoded stylesheet colors, preserved exactly.
 				"fg-strong": "#e8e8e8", "fg-soft": "#dddddd", "fg-bright": "#ffffff",

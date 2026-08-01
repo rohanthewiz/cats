@@ -16,6 +16,10 @@
     /* Sidebar section titles pull out of --muted into a medium green so the
        three groups read as dividers rather than as more secondary label text. */
     --heading:#6cbf8d;
+    /* The workspace group headers inside PANES: a tier below --heading, in a
+       greenish brown so they read as group dividers without competing with the
+       green section titles. Themes that don't set it get plain --muted. */
+    --ws-heading:#a09a62;
     /* The todo reminder mark keeps the old warm yellow: it has to stay clear of
        the green agent-state dots so it reads as a reminder, not as a state. */
     --todo:#f0dfa0;
@@ -158,7 +162,7 @@
      boundary: the same visual break, but it now names the group and can fold it.
      Groups after the first keep the hairline above them, on the header row rather
      than on the first pane, so a focused pane never paints across the divider. */
-  #pane-list li.wsgrp { color:var(--muted); font-size:calc(10px * var(--sb-scale)); text-transform:uppercase;
+  #pane-list li.wsgrp { color:var(--ws-heading); font-size:calc(10px * var(--sb-scale)); text-transform:uppercase;
     letter-spacing:.5px; cursor:pointer; }
   #pane-list li.wsgrp.sep { border-top:1px solid var(--line); margin-top:5px; padding-top:7px; }
   #pane-list li.wsgrp:hover { background:var(--panel2); color:var(--fg-soft); }

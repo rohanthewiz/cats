@@ -68,6 +68,7 @@ var requiredKeys = []string{"bg", "fg", "muted", "line", "accent", "ok", "warn",
 //	    └─ accent-fg                            ├─ chrome-fg-dim
 //	 line ── chrome-focus                       ├─ term-fg
 //	                                            └─ hover/scroll-thumb-idle (α)
+//	muted ── ws-heading
 //	 accent ─ heading · accent-dim(α) · done · sel-fill(α) · cm-cursor(α) · scroll-thumb(α)
 var derivations = []struct {
 	key   string
@@ -81,6 +82,10 @@ var derivations = []struct {
 	{"term-bg", "bg", 0},
 	{"term-fg", "fg", 0},
 	{"heading", "accent", 0},
+	// The workspace group headers inside the Panes list: a second tier of
+	// heading, so a theme that doesn't author one falls back to plain muted
+	// label text — which is what those rows were before they were themeable.
+	{"ws-heading", "muted", 0},
 	{"accent-dim", "accent", 0.45},
 	{"accent-fg", "bg", 0},
 	{"todo", "warn", 0},

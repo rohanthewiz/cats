@@ -155,6 +155,7 @@ required in a custom theme — every other key is derived from them when absent
 | `chrome` / `chrome-focus` | the per-pane header strip, unfocused and focused |
 | `chrome-fg` / `chrome-fg-dim` | the focused header's text and buttons |
 | `heading` | sidebar section titles |
+| `ws-heading` | the per-workspace group headers inside the sidebar's Panes list (defaults to `muted`) |
 | `fg-strong` / `fg-soft` / `fg-bright` | the text-emphasis ladder (active labels / hover lift / loudest hover) |
 | `todo` | the workspace to-do reminder mark |
 | `done` | the unseen-completion marker on a pane whose agent finished while you were elsewhere |
