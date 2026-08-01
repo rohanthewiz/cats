@@ -46,7 +46,8 @@ func builtins() []Theme {
 				"bg": "#2b2b2b", "fg": "#a9b7c6", "accent": "#cc7832", "accent-dim": "#5a4a38",
 				"panel": "#313335", "panel2": "#3c3f41", "line": "#45494b", "muted": "#8c8c8c",
 				"chrome": "#3c3f41", "chrome-focus": "#4e5254", "heading": "#ffc66b",
-				"todo": "#bbb529", "ok": "#629755", "warn": "#ffc66b", "err": "#ff6b68",
+				"ws-heading": "#a89a68", // the editor's olive annotation color, dimmed
+				"todo":       "#bbb529", "ok": "#629755", "warn": "#ffc66b", "err": "#ff6b68",
 				"done": "#6897bb", "accent-fg": "#2b1d0e",
 			},
 		},
@@ -56,7 +57,8 @@ func builtins() []Theme {
 				"bg": "#1a1b26", "fg": "#c0caf5", "accent": "#7aa2f7", "accent-dim": "#3b4261",
 				"panel": "#16161e", "panel2": "#1f2335", "line": "#292e42", "muted": "#565f89",
 				"chrome": "#1f2335", "chrome-focus": "#33467c", "heading": "#bb9af7",
-				"todo": "#ff9e64", "ok": "#9ece6a", "warn": "#e0af68", "err": "#f7768e",
+				"ws-heading": "#a89372", // the palette's one warm tone, taken down to a sign-lit tan
+				"todo":       "#ff9e64", "ok": "#9ece6a", "warn": "#e0af68", "err": "#f7768e",
 				"done": "#7dcfff", "accent-fg": "#15161e", "fg-soft": "#a9b1d6",
 			},
 		},
@@ -66,7 +68,8 @@ func builtins() []Theme {
 				"bg": "#002b36", "fg": "#93a1a1", "accent": "#268bd2", "accent-dim": "#1a4a5e",
 				"panel": "#073642", "panel2": "#0a4652", "line": "#12454f", "muted": "#586e75",
 				"chrome": "#0a4652", "chrome-focus": "#0f5666", "heading": "#2aa198",
-				"todo": "#cb4b16", "ok": "#859900", "warn": "#b58900", "err": "#dc322f",
+				"ws-heading": "#b09a55", // solarized yellow, softened toward the base tones
+				"todo":       "#cb4b16", "ok": "#859900", "warn": "#b58900", "err": "#dc322f",
 				"done": "#6c71c4", "accent-fg": "#fdf6e3", "fg-strong": "#eee8d5",
 			},
 		},
@@ -76,7 +79,10 @@ func builtins() []Theme {
 				"bg": "#fdf6e3", "fg": "#657b83", "accent": "#268bd2", "accent-dim": "#9cc3dd",
 				"panel": "#eee8d5", "panel2": "#e4ddc8", "line": "#d3cbb7", "muted": "#93a1a1",
 				"chrome": "#e4ddc8", "chrome-focus": "#d9d2bc", "heading": "#cb4b16",
-				"todo": "#b58900", "ok": "#859900", "warn": "#b58900", "err": "#dc322f",
+				// Light theme: the earth tone has to go dark, not dim, to stay a
+				// heading on paper — solarized yellow driven down to olive brown.
+				"ws-heading": "#6f5f2a",
+				"todo":       "#b58900", "ok": "#859900", "warn": "#b58900", "err": "#dc322f",
 				"done": "#6c71c4", "accent-fg": "#fdf6e3",
 				"fg-strong": "#073642", "fg-bright": "#002b36",
 				"err-bg": "#f6d7cd", "err-fg": "#a4321f",
@@ -90,7 +96,8 @@ func builtins() []Theme {
 				"bg": "#201a14", "fg": "#e8dcc8", "accent": "#e0a458", "accent-dim": "#4a3d2c",
 				"panel": "#262019", "panel2": "#2e2620", "line": "#3e342a", "muted": "#a89a80",
 				"chrome": "#2e2620", "chrome-focus": "#4a3d30", "heading": "#d4915e",
-				"todo": "#f0d090", "ok": "#a8c080", "warn": "#e8b04e", "err": "#e57360",
+				"ws-heading": "#a8845c", // the ember heading, one step back from the fire
+				"todo":       "#f0d090", "ok": "#a8c080", "warn": "#e8b04e", "err": "#e57360",
 				"done": "#7ec8c0", "accent-fg": "#201505",
 			},
 		},
@@ -101,7 +108,8 @@ func builtins() []Theme {
 				"bg": "#262b36", "fg": "#d8dee9", "accent": "#88c0d0", "accent-dim": "#3f4d59",
 				"panel": "#2e3440", "panel2": "#3b4252", "line": "#434c5e", "muted": "#7b88a1",
 				"chrome": "#3b4252", "chrome-focus": "#4c566a", "heading": "#81a1c1",
-				"todo": "#d08770", "ok": "#a3be8c", "warn": "#ebcb8b", "err": "#bf616a",
+				"ws-heading": "#ab9683", // driftwood: the aurora orange pulled most of the way to gray
+				"todo":       "#d08770", "ok": "#a3be8c", "warn": "#ebcb8b", "err": "#bf616a",
 				"done": "#b48ead", "accent-fg": "#16242a",
 			},
 		},
@@ -113,7 +121,8 @@ func builtins() []Theme {
 				"bg": "#0e0e14", "fg": "#d0d0e0", "accent": "#39ff14", "accent-dim": "#1d4a1d",
 				"panel": "#14141c", "panel2": "#1b1b26", "line": "#2c2c3c", "muted": "#7a7a95",
 				"chrome": "#1b1b26", "chrome-focus": "#2a2a44", "heading": "#ff2d95",
-				"todo": "#ffe14d", "ok": "#5fe86a", "warn": "#ffb020", "err": "#ff3860",
+				"ws-heading": "#b39a4e", // the other CRT phosphor: amber, at rest
+				"todo":       "#ffe14d", "ok": "#5fe86a", "warn": "#ffb020", "err": "#ff3860",
 				"done": "#00e5ff", "accent-fg": "#041008",
 			},
 		},
@@ -125,7 +134,8 @@ func builtins() []Theme {
 				"bg": "#12101c", "fg": "#d8d4ee", "accent": "#a277ff", "accent-dim": "#3d3260",
 				"panel": "#171526", "panel2": "#1e1b30", "line": "#302b48", "muted": "#8580a8",
 				"chrome": "#1e1b30", "chrome-focus": "#35305a", "heading": "#f694ff",
-				"todo": "#ffe073", "ok": "#5df0a6", "warn": "#ffb454", "err": "#ff6767",
+				"ws-heading": "#a8936f", // sodium streetlight under the neon
+				"todo":       "#ffe073", "ok": "#5df0a6", "warn": "#ffb454", "err": "#ff6767",
 				"done": "#82e2ff", "accent-fg": "#140a24",
 			},
 		},
@@ -137,7 +147,10 @@ func builtins() []Theme {
 				"bg": "#f7f8fa", "fg": "#333a45", "accent": "#2f6fd0", "accent-dim": "#a8c4ea",
 				"panel": "#eef0f4", "panel2": "#e4e7ed", "line": "#d0d5de", "muted": "#6b7684",
 				"chrome": "#e4e7ed", "chrome-focus": "#d3dae6", "heading": "#3b5bab",
-				"todo": "#9a6700", "ok": "#1e8e5a", "warn": "#b07800", "err": "#cc3d3d",
+				// Light theme: dark olive brown, the ledger amber taken down far
+				// enough to hold a heading against the near-white panel.
+				"ws-heading": "#6f6a4e",
+				"todo":       "#9a6700", "ok": "#1e8e5a", "warn": "#b07800", "err": "#cc3d3d",
 				"done": "#0e8a9e", "accent-fg": "#ffffff",
 				"fg-strong": "#14181f", "fg-bright": "#000000",
 				"err-bg": "#f5dada", "err-fg": "#a02c2c",
