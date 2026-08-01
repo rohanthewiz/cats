@@ -39,6 +39,12 @@ Source protocols consolidated here (anchors mapped 2026-07-03):
 - `PV = 1` (`internal/browserproto.ProtocolVersion`, independent of β's version).
 - Per-pane messages carry `pane` (uint32). Commands may carry a client-chosen `id` (a
   string) echoed in the reply (§7).
+- **Keepalive is at the WS layer, not in the envelope.** The server pings every 30 s and
+  closes any connection that produces nothing — no pong, no up-message — for 90 s. Clients
+  MUST answer pings with a pong; browsers do this in the network stack for free, native
+  clients must not disable it. This is what reaps the connection a phone leaves behind when
+  it walks out of signal, and it is why an idle client needs no application-level heartbeat.
+  A reaped client simply reconnects (see §2 *Reconnect*) — nothing is lost.
 
 ## 2. Session lifecycle
 

@@ -225,7 +225,7 @@ func handshake(conn net.Conn, br *bufio.Reader, u *url.URL, token string) error 
 
 func (p *probe) reader() {
 	for {
-		payload, err := readFrame(p.br)
+		payload, err := readFrame(p.br, p.pong)
 		if err != nil {
 			p.mu.Lock()
 			p.dead = err
@@ -1378,10 +1378,33 @@ func (p *probe) send(m any) error {
 	return writeText(p.conn, b)
 }
 
+// pong answers a server ping. catway reaps connections that go quiet
+// (wsReadTimeout in cmd/catway/catway.go), and a pong is the only traffic a
+// probe sitting in a long `wait:` op produces — without this, any script that
+// idles past the reap window loses its connection mid-run.
+//
+// Called from the reader goroutine, so it takes the same mutex send does: the
+// two goroutines share one socket.
+func (p *probe) pong(payload []byte) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.dead != nil {
+		return p.dead
+	}
+	return writeFrame(p.conn, 0x8a, payload) // FIN + pong
+}
+
 // writeText writes a masked client text frame (RFC6455 §5).
 func writeText(w io.Writer, payload []byte) error {
+	return writeFrame(w, 0x81, payload) // FIN + text
+}
+
+// writeFrame writes one masked client frame with the given first byte
+// (FIN|opcode). Clients must mask; the key is fixed because the probe is a test
+// tool talking to a server that only unmasks.
+func writeFrame(w io.Writer, b0 byte, payload []byte) error {
 	var hdr []byte
-	hdr = append(hdr, 0x81) // FIN + text
+	hdr = append(hdr, b0)
 	n := len(payload)
 	switch {
 	case n < 126:
@@ -1410,8 +1433,10 @@ func writeText(w io.Writer, payload []byte) error {
 	return err
 }
 
-// readFrame reads one server frame payload (control frames skipped).
-func readFrame(r *bufio.Reader) ([]byte, error) {
+// readFrame reads one server data-frame payload. Control frames are consumed
+// here: a close ends the stream, a pong is ignored (the probe never pings), and
+// a ping is hoisted to onPing so the caller can answer it.
+func readFrame(r *bufio.Reader, onPing func([]byte) error) ([]byte, error) {
 	for {
 		b0, err := r.ReadByte()
 		if err != nil {
@@ -1456,7 +1481,14 @@ func readFrame(r *bufio.Reader) ([]byte, error) {
 		switch opcode {
 		case 0x8: // close
 			return nil, io.EOF
-		case 0x9, 0xa: // ping/pong: ignore
+		case 0x9: // ping
+			if onPing != nil {
+				if err := onPing(buf); err != nil {
+					return nil, err
+				}
+			}
+			continue
+		case 0xa: // pong: unsolicited, nothing to do
 			continue
 		}
 		return buf, nil

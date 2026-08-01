@@ -1286,12 +1286,38 @@ func (o *orch) dropConn(c *client) {
 
 // --- Browser connections -----------------------------------------------------
 
+// WebSocket keepalive. Nothing below the application protocol notices a peer
+// that stops existing without closing its socket — a phone that walks out of
+// signal, a laptop that suspends, a NAT that forgets the mapping — so without
+// this a dead connection stays in o.conns forever, holding its writer goroutine
+// and its per-pane translators.
+//
+// The server pings on an interval and requires the peer to produce *something*
+// within wsReadTimeout: a pong, or any up-message. Both refresh the deadline.
+//
+//	t= 0s  ─ping──►  ◄──pong──   read deadline pushed to t=90s
+//	t=30s  ─ping──►  ◄──pong──   read deadline pushed to t=120s
+//	t=60s  ─ping──►      ✗       (peer gone; nothing refreshes the deadline)
+//	t=90s  ─ping──►      ✗
+//	t=120s               ✗       ReadMessage fails ─► serve returns ─► dropConn
+//
+// Three unanswered pings before the reap, so a brief cellular stall or a tab
+// that resumes quickly is not punished. wsWriteTimeout is the other half: a
+// half-open socket accepts writes into the kernel buffer until it fills, then
+// blocks forever, which would park the writer goroutine past any read deadline.
+const (
+	wsPingInterval = 30 * time.Second
+	wsReadTimeout  = 90 * time.Second
+	wsWriteTimeout = 10 * time.Second
+)
+
 // client is one connected browser. The writer goroutine is the only WSConn
 // writer; trans (per-pane frame translators) is touched only in the loop.
 type client struct {
 	o     *orch
 	ws    *rweb.WSConn
 	out   chan []byte
+	pong  chan []byte // ping payloads to echo back; see serve's ping handler
 	trans map[uint32]*browserproto.FrameTranslator
 }
 
@@ -1304,20 +1330,96 @@ func (c *client) translator(pid uint32) *browserproto.FrameTranslator {
 	return t
 }
 
-func (c *client) writer() {
-	for b := range c.out {
-		if err := c.ws.WriteMessage(rweb.TextMessage, b); err != nil {
-			c.o.post(func() { c.o.dropConn(c) })
-			return
+// installKeepalive wires the read half of the keepalive onto the connection.
+// Both handlers run on whichever goroutine is inside ReadMessage, so they must
+// never touch the write side directly — hence the hop through c.pong.
+//
+// Call before starting the writer, and only from the reading goroutine.
+func (c *client) installKeepalive() {
+	// A pong never surfaces from ReadMessage — rweb dispatches control frames
+	// inside its own frame loop — so an otherwise silent peer's only proof of
+	// life has to refresh the deadline from here.
+	c.ws.SetPongHandler(func([]byte) error {
+		return c.ws.SetReadDeadline(time.Now().Add(wsReadTimeout))
+	})
+	// Answer the peer's pings from the writer goroutine rather than rweb's
+	// default handler, which would reply inline and make the reader a second
+	// writer of the socket. Browsers never ping, but a native client keeping
+	// its own liveness clock will.
+	c.ws.SetPingHandler(func(data []byte) error {
+		// RFC 6455 §5.5.3: the pong echoes the ping's payload. Copy it — the
+		// buffer belongs to rweb's reader and is reused past this call.
+		select {
+		case c.pong <- append([]byte(nil), data...):
+		default: // pinging faster than we can answer needs no help from us
+		}
+		return nil
+	})
+}
+
+// writer is the sole writer of this connection's socket: down-messages,
+// keepalive pings, and the pongs owed for the peer's pings all funnel through
+// here. Keeping them on one goroutine is what makes the per-write deadline
+// safe to set — rweb applies ws.writeDeadline inside the write path without
+// holding its write mutex, so setting it from a second goroutine would race.
+func (c *client) writer() { c.writeLoop(wsPingInterval) }
+
+// writeLoop is writer with the ping cadence injected, so tests need not wait
+// out the production interval.
+func (c *client) writeLoop(pingEvery time.Duration) {
+	ping := time.NewTicker(pingEvery)
+	defer ping.Stop()
+
+	for {
+		select {
+		case b, ok := <-c.out:
+			if !ok { // dropConn closed the queue: a clean, deliberate goodbye
+				_ = c.ws.Close(1000, "bye")
+				return
+			}
+			if !c.write(rweb.TextMessage, b) {
+				return
+			}
+		case data := <-c.pong:
+			if !c.write(rweb.PongMessage, data) {
+				return
+			}
+		case <-ping.C:
+			// A nil payload: RFC 6455 §5.5.2 allows it, and we correlate
+			// nothing — any pong at all is the liveness signal.
+			if !c.write(rweb.PingMessage, nil) {
+				return
+			}
 		}
 	}
-	_ = c.ws.Close(1000, "bye")
+}
+
+// write sends one frame under a fresh deadline, asking the loop to drop this
+// connection if it fails. Reports whether the writer should keep running.
+//
+// The connection is *not* closed here. A write failure means the read side is
+// doomed too, and it will notice on its own — either immediately (a real socket
+// error) or at wsReadTimeout — whereupon serve's deferred Close runs on the
+// goroutine that owns the read half.
+func (c *client) write(mt rweb.MessageType, b []byte) bool {
+	_ = c.ws.SetWriteDeadline(time.Now().Add(wsWriteTimeout))
+	if err := c.ws.WriteMessage(mt, b); err != nil {
+		c.o.post(func() { c.o.dropConn(c) })
+		return false
+	}
+	return true
 }
 
 // serve runs one browser session: the init handshake (synchronous), then the
 // up-message read loop that posts each message onto the orchestrator loop.
 func (o *orch) serve(ws *rweb.WSConn) error {
 	defer ws.Close(1000, "bye")
+
+	// The handshake gets a deadline of its own: a peer that completes the HTTP
+	// upgrade and then says nothing owns this goroutine until the process dies.
+	// Reusing wsReadTimeout rather than a tighter bound leaves room for a first
+	// message crossing a slow link.
+	_ = ws.SetReadDeadline(time.Now().Add(wsReadTimeout))
 
 	first, err := ws.ReadMessage()
 	if err != nil {
@@ -1338,11 +1440,17 @@ func (o *orch) serve(ws *rweb.WSConn) error {
 	}
 
 	c := &client{o: o, ws: ws, out: make(chan []byte, 512),
+		pong:  make(chan []byte, 4),
 		trans: make(map[uint32]*browserproto.FrameTranslator)}
+
+	c.installKeepalive()
 	go c.writer()
 	o.post(func() { o.registerConn(c, init) })
 
 	for {
+		// Refreshed per read, not just per pong, so a peer that talks but whose
+		// pongs are lost stays connected.
+		_ = ws.SetReadDeadline(time.Now().Add(wsReadTimeout))
 		m, err := ws.ReadMessage()
 		if err != nil {
 			break
