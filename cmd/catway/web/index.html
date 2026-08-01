@@ -797,6 +797,31 @@
     window.addEventListener("mouseup", up);
   }
 
+  // modelLabel condenses a pane's resolved model (agentmodel.go builds it —
+  // "claude-opus-5 · high", "claude-sonnet-4-5-20250929[1m]") down to the family
+  // word the pane header and the sidebar rows have room for: "opus", "sonnet
+  // [1M]". Those two places name the agent, and for a claude pane "claude" is
+  // the one thing already obvious from the pane itself; which model it is
+  // running is not, and is what changes between panes.
+  //
+  // The 1M-context marker survives the trim because it changes how much the
+  // pane can hold; the effort suffix does not, since the hover card still shows
+  // the whole string untouched. The family is the first alphabetic token that
+  // isn't the "claude" vendor prefix, which finds it in both id orderings
+  // ("claude-opus-4-8" and the older "claude-3-5-sonnet-20241022"). "" when
+  // nothing qualifies, so callers fall back to the agent's own name rather than
+  // printing a mangled id.
+  function modelLabel(model) {
+    if (!model) return "";
+    let id = model.split("·")[0].trim().toLowerCase();
+    let wide = "";
+    if (id.endsWith("[1m]")) { wide = " [1M]"; id = id.slice(0, -4); }
+    for (const tok of id.split("-")) {
+      if (tok !== "claude" && /^[a-z]+$/.test(tok)) return tok + wide;
+    }
+    return "";
+  }
+
   // ---- Chrome: per-pane header (styled HTML, WS8) ----
   // The identity line (pub · title · cwd · agent · exited) plus the pane-scoped
   // mode chips: keyboard copy-mode replaces the identity while active — its
@@ -818,7 +843,7 @@
     } else {
       if (p.title) add("", "  " + p.title);
       if (p.cwd) add("", "  " + p.cwd);
-      if (p.agent) add("agent", "  " + p.agent + ":" + p.agentState);
+      if (p.agent) add("agent", "  " + (modelLabel(p.agentModel) || p.agent) + ":" + p.agentState);
       if (p.exited !== null) add("exited", "  exited (" + p.exited + ")");
     }
     const zoom = p.chrome.querySelector(".zoom");
@@ -1125,7 +1150,7 @@
     li.appendChild(pub);
     if (row.title) { const t = document.createElement("span"); t.className = "ttl"; t.textContent = row.title; li.appendChild(t); }
     if (row.agent) {
-      const ag = document.createElement("span"); ag.className = "ag " + stClass(row.state); ag.textContent = row.agent;
+      const ag = document.createElement("span"); ag.className = "ag " + stClass(row.state); ag.textContent = modelLabel(row.model) || row.agent;
       li.appendChild(ag);
     }
     // A row can name a pane in another workspace or tab, which pane.focus cannot
