@@ -52,6 +52,12 @@ const (
 	CmdServerReloadConfig = "server.reload_config"
 	CmdServerStop         = "server.stop"
 
+	// CmdUsageRefresh re-reads the account's rate-limit windows now instead of
+	// at the poller's next tick. The reading is pushed as a `usage` message
+	// rather than returned, so every client sees the fresh numbers, not just
+	// the one that asked.
+	CmdUsageRefresh = "usage.refresh"
+
 	// Git-worktree commands (WS8 dialogs): list/create/open/remove checkouts
 	// anchored on a pane's repo. The git work runs off-loop (Backend Start*).
 	CmdWorktreeList   = "worktree.list"
@@ -188,6 +194,10 @@ var commandSpecs = []CommandSpec{
 	{Name: CmdAgentFocus, Params: PaneParams{}, ParamsRequired: true},
 	{Name: CmdServerReloadConfig},
 	{Name: CmdServerStop},
+
+	// Usage. Not reply-gated: the refresh is worth performing for a caller that
+	// never listens, because its product is the broadcast, not the reply.
+	{Name: CmdUsageRefresh},
 
 	// Git worktrees. Only the listing is reply-gated: the other three have
 	// effects worth performing even when the caller stops listening.

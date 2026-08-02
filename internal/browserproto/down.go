@@ -1,6 +1,9 @@
 package browserproto
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"time"
+)
 
 // --- Session (§2) -------------------------------------------------------------
 
@@ -379,6 +382,13 @@ func NewTheme(name string, colors map[string]string, font string) Theme {
 // ("Fable"), taken from the account rather than guessed: the set of separately
 // metered models is the plan's business and changes without us. An empty name
 // means the account reports no such window and the sidebar shows no row.
+//
+// ReadAt is when the server took the reading (RFC 3339). It is the message's
+// own age, and it is on the wire because the receiver cannot infer it: the
+// stored reading is replayed to a browser that connects between polls, so
+// "when did this arrive?" and "when was this true?" are different questions.
+// A front-end shows it as "n ago" — a percentage with no date beside it looks
+// equally current whether it was read a minute or an hour ago.
 type Usage struct {
 	T               Type        `json:"t"`
 	Source          string      `json:"source"` // "account" | "local"
@@ -386,6 +396,7 @@ type Usage struct {
 	Weekly          UsageWindow `json:"weekly"`
 	WeeklyModel     UsageWindow `json:"weekly_model"`
 	WeeklyModelName string      `json:"weekly_model_name,omitempty"`
+	ReadAt          string      `json:"read_at,omitempty"`
 	Err             string      `json:"err,omitempty"`
 }
 
@@ -417,6 +428,15 @@ func (u Usage) WithWeeklyModel(name string, w UsageWindow) Usage {
 		return u
 	}
 	u.WeeklyModelName, u.WeeklyModel = name, w
+	return u
+}
+
+// WithReadAt stamps the reading with the instant it was taken. Chained by the
+// poller rather than folded into NewUsage so that building a Usage stays
+// clock-free: the readers are pure functions over an endpoint reply or a pile
+// of transcripts, and only the caller that owns the poll knows what "now" is.
+func (u Usage) WithReadAt(t time.Time) Usage {
+	u.ReadAt = t.UTC().Format(time.RFC3339)
 	return u
 }
 

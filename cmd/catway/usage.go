@@ -82,23 +82,50 @@ const (
 // the whole read happens here and only the finished message is posted back onto
 // the loop. The first poll is immediate: a section that says nothing until two
 // minutes after launch reads as broken rather than as pending.
+//
+// A nudge (usage.refresh) is a second way to reach the same read, and it
+// re-bases the interval rather than adding to it: the timer is recreated after
+// every poll, so a manual refresh is followed by a full quiet period instead of
+// a tick that may be seconds away. Nothing here reads from the loop's state, so
+// a nudge costs one goroutine wake-up and no synchronization.
 func (o *orch) runUsage() {
 	est := newUsageEstimator(o.claudeProjects)
 	for {
-		msg := readUsage(est)
+		msg := readUsage(est).WithReadAt(time.Now())
 		o.post(func() { o.setUsage(msg) })
-		time.Sleep(usageInterval)
+
+		tick := time.NewTimer(usageInterval)
+		select {
+		case <-tick.C:
+		case <-o.usageNudge:
+			tick.Stop()
+		}
 	}
 }
 
-// setUsage stores the latest reading and pushes it when it changed. The store
+// RefreshUsage asks the poller for a reading now (the usage.refresh command,
+// app.Backend). Loop-goroutine only, and deliberately non-blocking: the send is
+// dropped when a nudge is already pending, because two asks arriving before the
+// poller wakes want the same single fresh reading.
+func (o *orch) RefreshUsage() {
+	select {
+	case o.usageNudge <- struct{}{}:
+	default:
+	}
+}
+
+// setUsage stores the latest reading and pushes it to every client. The store
 // is what a browser connecting mid-interval is sent (serveInit), so a fresh
 // page gets the current numbers rather than a blank section until the next
 // tick.
+//
+// Every reading is pushed, including one whose numbers did not move, because
+// the message carries the instant it was read (Usage.ReadAt) and the sidebar
+// prints that as "n ago". Suppressing an unchanged reading would freeze that
+// label, and a section reporting an hour-old age while the server polls every
+// two minutes is a worse lie than the redundant push is a cost — the message is
+// a few hundred bytes, twice an hour per client.
 func (o *orch) setUsage(m browserproto.Usage) {
-	if o.usage != nil && *o.usage == m {
-		return
-	}
 	o.usage = &m
 	o.broadcast(m)
 }

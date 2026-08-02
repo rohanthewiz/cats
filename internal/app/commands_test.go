@@ -69,6 +69,7 @@ func (b *fakeBackend) BroadcastPaneTitle(p uint32) { b.rec("title"); b.lastTitle
 func (b *fakeBackend) PaneExists(uint32) bool      { return b.paneExists }
 func (b *fakeBackend) DaemonConnected() bool       { return b.daemonUp }
 func (b *fakeBackend) PaneMeta(p uint32) PaneMeta  { return b.paneMeta[p] }
+func (b *fakeBackend) RefreshUsage()               { b.rec("refreshUsage") }
 func (b *fakeBackend) ReloadConfig() error         { b.rec("reload"); return b.reloadErr }
 func (b *fakeBackend) Shutdown()                   { b.rec("shutdown") }
 
@@ -464,6 +465,22 @@ func TestDispatchReloadConfig(t *testing.T) {
 
 	if got := *h.log; len(got) != 2 || got[0] != "reload" || got[1] != "ok" {
 		t.Fatalf("reload_config effects = %v, want [reload ok]", got)
+	}
+}
+
+// usage.refresh nudges the poller and acks the ask — the reading itself lands
+// later as a broadcast, so the command has nothing to return.
+func TestDispatchUsageRefresh(t *testing.T) {
+	h := newCmdHarness(t)
+	r := h.resp()
+
+	h.d.Dispatch(CmdUsageRefresh, noParams(), r)
+
+	if got := *h.log; len(got) != 2 || got[0] != "refreshUsage" || got[1] != "ok" {
+		t.Fatalf("usage.refresh effects = %v, want [refreshUsage ok]", got)
+	}
+	if r.data != nil {
+		t.Errorf("usage.refresh returned data %v, want none", r.data)
 	}
 }
 

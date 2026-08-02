@@ -420,19 +420,28 @@ func TestFormatTokens(t *testing.T) {
 // --- Publication --------------------------------------------------------------
 
 // The reading is stored so a browser connecting between polls is sent the
-// current numbers, and re-pushed only when it actually moves.
-func TestSetUsageDedupes(t *testing.T) {
+// current numbers (serveInit), and the store always holds the latest one —
+// including a reading whose numbers are unchanged but whose timestamp moved,
+// which is what keeps the sidebar's "n ago" honest.
+func TestSetUsageStoresLatest(t *testing.T) {
 	o := &orch{}
+	at := time.Date(2026, 8, 2, 10, 0, 0, 0, time.UTC)
 	m := browserproto.NewUsage("account",
-		browserproto.UsageWindow{Pct: 10}, browserproto.UsageWindow{Pct: 20}, "")
+		browserproto.UsageWindow{Pct: 10}, browserproto.UsageWindow{Pct: 20}, "").WithReadAt(at)
 
 	o.setUsage(m)
 	if o.usage == nil || o.usage.FiveHour.Pct != 10 {
 		t.Fatalf("usage not stored: %+v", o.usage)
 	}
-	o.setUsage(m) // identical — must not re-broadcast
-	if o.usage.FiveHour.Pct != 10 {
-		t.Errorf("stored reading changed: %+v", o.usage)
+	if o.usage.ReadAt != "2026-08-02T10:00:00Z" {
+		t.Errorf("read_at = %q, want the stamped instant", o.usage.ReadAt)
+	}
+
+	// Same numbers, later poll: the store must take the newer stamp.
+	again := m.WithReadAt(at.Add(2 * time.Minute))
+	o.setUsage(again)
+	if o.usage.ReadAt != "2026-08-02T10:02:00Z" {
+		t.Errorf("read_at = %q, want the re-read instant", o.usage.ReadAt)
 	}
 
 	moved := browserproto.NewUsage("account",
@@ -440,5 +449,23 @@ func TestSetUsageDedupes(t *testing.T) {
 	o.setUsage(moved)
 	if o.usage.FiveHour.Pct != 11 {
 		t.Errorf("moved reading not stored: %+v", o.usage)
+	}
+}
+
+// A nudge is a signal, not a queue: RefreshUsage never blocks the loop
+// goroutine, and repeated asks before the poller wakes collapse into one.
+func TestRefreshUsageNudgeCoalesces(t *testing.T) {
+	o := &orch{usageNudge: make(chan struct{}, 1)}
+	o.RefreshUsage()
+	o.RefreshUsage() // the buffer is full — must be dropped, not block
+
+	if len(o.usageNudge) != 1 {
+		t.Fatalf("pending nudges = %d, want 1", len(o.usageNudge))
+	}
+	<-o.usageNudge
+	select {
+	case <-o.usageNudge:
+		t.Error("a second nudge was queued behind the first")
+	default:
 	}
 }

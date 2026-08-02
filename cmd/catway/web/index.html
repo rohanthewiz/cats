@@ -122,8 +122,26 @@
   #usage-list li.unknown .umeter { display:none; }
   #usage-list .unote { color:var(--muted); font-size:calc(9px * var(--sb-scale));
                        font-style:italic; padding:1px 8px 3px; }
+  /* How old the numbers below are, in the heading beside the control that
+     refreshes them. It rides .hctl's right edge but opts out of the heading's
+     uppercase and tracking: it is a reading, not a label. */
+  #sidebar h2 .hage { color:var(--muted); font-weight:400; text-transform:none;
+    letter-spacing:0; font-variant-numeric:tabular-nums; margin-right:3px; }
+  /* The refresh control carries a drawn mark (see refreshMark), so it is sized
+     in pixels and centered on the heading's text rather than stretching to it. */
+  #usage-hctl { align-items:center; }
+  #usage-hctl .refresh { display:block; width:calc(12px * var(--sb-scale));
+    height:calc(12px * var(--sb-scale)); }
+  /* The mark turns while a reading is in flight. The server acks the ask
+     immediately and pushes the numbers only when the read lands, so the spin is
+     the only thing saying the click was heard. */
+  #usage-hctl button.busy { color:var(--accent); }
+  #usage-hctl button.busy .refresh { animation:uspin .9s linear infinite; }
+  @keyframes uspin { to { transform:rotate(360deg); } }
   @media (prefers-reduced-motion: reduce) {
     #usage-list .umeter > i { transition:none; }
+    /* The color alone carries "busy" for anyone who asked not to be spun. */
+    #usage-hctl button.busy .refresh { animation:none; }
   }
   #ws-list { position:relative; }
   #ws-list li.ws { cursor:pointer; }
@@ -473,7 +491,7 @@
 <div id="app">
   <aside id="sidebar">
     <div id="brand">cats</div>
-    <section><h2>Usage</h2><ul id="usage-list"><li class="empty">…</li></ul></section>
+    <section><h2>Usage<span class="hctl" id="usage-hctl"></span></h2><ul id="usage-list"><li class="empty">…</li></ul></section>
     <section><h2>Workspaces</h2><ul id="ws-list"></ul></section>
     <section><h2>Panes<span class="hctl" id="pane-hctl"></span></h2><ul id="pane-list"></ul></section>
     <section><h2>Agents</h2><ul id="agent-list"><li class="empty">none</li></ul></section>
@@ -1545,11 +1563,83 @@
 
   // ---- Usage: the account's standing against Claude's rate-limit windows ----
 
-  // The server polls every couple of minutes and pushes only on a change, so
-  // the reset countdowns it stamped would sit frozen in between — same problem
-  // the agent-age labels have, and the same fix: keep the absolute instant on
-  // the element and re-render the label on a tick of our own.
+  // The server polls every couple of minutes, so the reset countdowns it
+  // stamped would sit frozen in between — same problem the agent-age labels
+  // have, and the same fix: keep the absolute instant on the element and
+  // re-render the label on a tick of our own.
   let usageMsg = null;
+
+  // The section's heading controls: how old the reading is, and a way to take a
+  // new one. Built here rather than in the markup so the age label lives beside
+  // the code that maintains it — and beside the button whose whole purpose is
+  // to reset it.
+  let usageAgeEl = null, usageBtnEl = null, usageBusyTimer = null;
+  (function initUsageHeadingCtl() {
+    const el = document.getElementById("usage-hctl");
+    usageAgeEl = document.createElement("span");
+    usageAgeEl.className = "hage";
+    el.appendChild(usageAgeEl);
+    usageBtnEl = mkBtn("", "read the account's usage now", "", refreshUsage);
+    usageBtnEl.appendChild(refreshMark());
+    el.appendChild(usageBtnEl);
+  })();
+
+  // refreshMark: the circular arrow on the refresh control — an arc most of the
+  // way round with a head on the loose end, the two strokes that survive at
+  // 12px. Drawn rather than typed because the ⟳ glyph is rendered small for its
+  // point size in a monospace face, which no font-size that also fits the
+  // heading can fix.
+  function refreshMark() {
+    const svg = document.createElementNS(SVGNS, "svg");
+    svg.setAttribute("class", "refresh");
+    svg.setAttribute("viewBox", "0 0 16 16");
+    svg.setAttribute("fill", "none");
+    svg.setAttribute("stroke", "currentColor");
+    svg.setAttribute("stroke-width", "1.6");
+    svg.setAttribute("stroke-linecap", "round");
+    svg.setAttribute("stroke-linejoin", "round");
+    for (const d of ["M13.7 10A6 6 0 1 1 12.3 3.8L15.3 6.7", // the arc, opening at the top right
+                     "M15.3 2.7V6.7H11.3"]) {                 // the head it opens into
+      const path = document.createElementNS(SVGNS, "path");
+      path.setAttribute("d", d);
+      svg.appendChild(path);
+    }
+    return svg;
+  }
+
+  // refreshUsage asks the server to poll now. The reading is NOT the command's
+  // reply — the server acks the ask and broadcasts the numbers to every client
+  // when the read lands — so the button stays busy until a usage message
+  // arrives. Two backstops clear it otherwise: an explicit failure (a server
+  // too old to know the command answers with one), and a timer, for a read that
+  // hangs long enough that a spinning icon would be a lie.
+  function refreshUsage() {
+    if (usageBtnEl.classList.contains("busy")) return; // a read is already out
+    usageBtnEl.classList.add("busy");
+    clearTimeout(usageBusyTimer);
+    usageBusyTimer = setTimeout(usageIdle, 20000);
+    sendCmdAwait("usage.refresh", null, (res) => {
+      if (res.ok) return;
+      usageIdle();
+      toast("usage: " + (res.error || "refresh failed"));
+    });
+  }
+
+  function usageIdle() {
+    clearTimeout(usageBusyTimer); usageBusyTimer = null;
+    usageBtnEl.classList.remove("busy");
+  }
+
+  // The heading's age label: how old the numbers in the section are. It reads
+  // the message's own stamp rather than when this browser received it, because
+  // a page that connects mid-interval is handed the server's STORED reading —
+  // fresh to arrive, minutes old to be true.
+  function renderUsageAge() {
+    const at = usageMsg && usageMsg.read_at ? Date.parse(usageMsg.read_at) : NaN;
+    if (Number.isNaN(at)) { usageAgeEl.textContent = ""; usageAgeEl.title = ""; return; }
+    usageAgeEl.textContent = fmtAge(Date.now() - at);
+    usageAgeEl.title = "read at " + new Date(at).toLocaleTimeString();
+  }
 
   // Coarse time-to-reset, one unit deep, in the same register as fmtAge.
   function fmtUntil(ms) {
@@ -1564,6 +1654,10 @@
 
   function renderUsage(msg) {
     usageMsg = msg || null;
+    // Any reading answers a pending refresh: the poller pushes every reading it
+    // takes, so the next one to arrive IS the one the click asked for.
+    usageIdle();
+    renderUsageAge();
     usageListEl.innerHTML = "";
     if (!usageMsg) {
       const li = document.createElement("li");
@@ -1633,13 +1727,17 @@
     return li;
   }
 
-  // The countdown is the only part that moves between pushes, so the tick
-  // rewrites those labels alone rather than re-rendering the rows.
+  // The two labels that move on their own between pushes — the reset countdowns
+  // and the age of the reading — share one tick, which rewrites them rather than
+  // re-rendering the rows. Ten seconds rather than the countdown's old thirty:
+  // the age starts at zero after every push, and a "0s ago" that lingers half a
+  // minute is the one stale number this section exists to prevent.
   setInterval(() => {
+    renderUsageAge();
     for (const el of usageListEl.querySelectorAll(".ureset")) {
       el.textContent = fmtUntil(Number(el.dataset.at) - Date.now());
     }
-  }, 30000);
+  }, 10000);
 
   // ---- Agents rollup (WS8): the `agents` message, previously dropped ----
 

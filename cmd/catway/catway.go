@@ -143,8 +143,14 @@ type orch struct {
 	// usage is the account's last-read rate-limit standing (usage.go), nil
 	// until the first poll lands. Held so a browser connecting between polls is
 	// sent the current numbers rather than an empty section for up to two
-	// minutes; setUsage dedupes against it.
+	// minutes.
 	usage *browserproto.Usage
+	// usageNudge asks the poller for an off-schedule reading (usage.refresh —
+	// the sidebar's refresh control). Buffered by one and written to without
+	// blocking: several clicks while a read is in flight collapse into the one
+	// poll that follows it, which is what a caller asking for "now" wants
+	// anyway. Read only by runUsage, written from the loop goroutine.
+	usageNudge chan struct{}
 	// push is the outbound notification bridge (internal/push), nil when no
 	// webhook is configured — which is the default, and why every use goes
 	// through the nil-safe Send. It reaches a phone whose screen is off, so it
@@ -322,6 +328,7 @@ func newOrchWith(socket, cwd string, sess *app.Session) *orch {
 		spawnPlans:     make(map[uint32]app.SpawnOverride),
 		capturedHist:   make(map[uint32]string),
 		claudeProjects: claudeProjectsDir(),
+		usageNudge:     make(chan struct{}, 1),
 		mailbox:        make(chan func(), 256),
 	}
 	o.daemon = &daemon{o: o, socket: socket}

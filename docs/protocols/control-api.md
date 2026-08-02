@@ -285,8 +285,14 @@ than only the ones on screen. Every field is omitted when empty.
 | `plugin.list` / `plugin.uninstall` | — |
 | `path.list` | — |
 | `agent.focus` | `agent <pane>` |
+| `usage.refresh` | — |
 | `server.reload_config` | `reload` |
 | `server.stop` | `stop` |
+
+`usage.refresh` takes a rate-limit reading now instead of at the poller's next
+tick (the sidebar's refresh control). It acks the *ask*, not the answer: the
+reading is one network round trip away and arrives as a `usage` broadcast, so
+every client sees the fresh numbers rather than only the caller.
 
 Only the *instant* plugin verbs are commands. `install` and `update` shell out to
 git and a build, whose output you want to **watch**, so the UI launches those as

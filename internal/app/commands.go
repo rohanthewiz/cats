@@ -112,6 +112,13 @@ type Backend interface {
 	// path resolves against (the addressed pane's live cwd).
 	StartPathList(r Responder, p PathListParams)
 
+	// RefreshUsage asks the backend's rate-limit poller to take a reading now
+	// (usage.refresh). It returns immediately: the read is one network round
+	// trip on the poller's own goroutine, and its result reaches clients as a
+	// pushed `usage` message, so there is nothing for the command to wait for
+	// and nothing to hand back.
+	RefreshUsage()
+
 	// ReloadConfig acknowledges a config reload (a no-op today).
 	ReloadConfig() error
 	// Shutdown notifies observers the server is going away and triggers the quit.
@@ -800,6 +807,12 @@ func (d *Dispatcher) Dispatch(name string, dec ParamDecoder, r Responder) {
 			return
 		}
 		d.backend.ThemeDelete(r, p)
+
+	case CmdUsageRefresh:
+		// Ack the ask, not the answer: the reading lands later, on every client
+		// at once, as a `usage` push.
+		d.backend.RefreshUsage()
+		r.OK(nil)
 
 	case CmdServerReloadConfig:
 		if err := d.backend.ReloadConfig(); err != nil {

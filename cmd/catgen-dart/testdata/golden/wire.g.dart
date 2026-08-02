@@ -1426,6 +1426,13 @@ class UpdateReady {
 /// metered models is the plan's business and changes without us. An empty name
 /// means the account reports no such window and the sidebar shows no row.
 ///
+/// ReadAt is when the server took the reading (RFC 3339). It is the message's
+/// own age, and it is on the wire because the receiver cannot infer it: the
+/// stored reading is replayed to a browser that connects between polls, so
+/// "when did this arrive?" and "when was this true?" are different questions.
+/// A front-end shows it as "n ago" — a percentage with no date beside it looks
+/// equally current whether it was read a minute or an hour ago.
+///
 /// Wire type: `usage`.
 class Usage {
   const Usage({
@@ -1434,6 +1441,7 @@ class Usage {
     required this.weekly,
     required this.weeklyModel,
     this.weeklyModelName = '',
+    this.readAt = '',
     this.err = '',
   });
 
@@ -1447,6 +1455,7 @@ class Usage {
   final UsageWindow weekly;
   final UsageWindow weeklyModel;
   final String weeklyModelName;
+  final String readAt;
   final String err;
 
   factory Usage.fromJson(Map<String, Object?> j) => Usage(
@@ -1455,6 +1464,7 @@ class Usage {
         weekly: UsageWindow.fromJson(asObj(j['weekly'])),
         weeklyModel: UsageWindow.fromJson(asObj(j['weekly_model'])),
         weeklyModelName: asString(j['weekly_model_name']),
+        readAt: asString(j['read_at']),
         err: asString(j['err']),
       );
 
@@ -1465,6 +1475,7 @@ class Usage {
         'weekly': weekly.toJson(),
         'weekly_model': weeklyModel.toJson(),
         if (weeklyModelName.isNotEmpty) 'weekly_model_name': weeklyModelName,
+        if (readAt.isNotEmpty) 'read_at': readAt,
         if (err.isNotEmpty) 'err': err,
       };
 }

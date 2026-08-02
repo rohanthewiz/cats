@@ -107,6 +107,8 @@ abstract final class CmdName {
 
   static const String serverStop = 'server.stop';
 
+  static const String usageRefresh = 'usage.refresh';
+
   static const String worktreeList = 'worktree.list';
 
   static const String worktreeCreate = 'worktree.create';
@@ -1941,6 +1943,7 @@ const List<CommandSpec> kCommandSpecs = <CommandSpec>[
   CommandSpec('agent.focus', paramsRequired: true),
   CommandSpec('server.reload_config'),
   CommandSpec('server.stop'),
+  CommandSpec('usage.refresh'),
   CommandSpec('worktree.list', replyRequired: true),
   CommandSpec('worktree.create'),
   CommandSpec('worktree.open'),
@@ -2141,6 +2144,11 @@ mixin CatsCommands implements CatsCommandTransport {
   /// `server.stop`
   Future<void> serverStop() async {
     await invoke(CmdName.serverStop, null);
+  }
+
+  /// `usage.refresh`
+  Future<void> usageRefresh() async {
+    await invoke(CmdName.usageRefresh, null);
   }
 
   /// `worktree.list`
