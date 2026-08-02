@@ -67,14 +67,40 @@ flowchart LR
   DISP --> RES
 ```
 
-Adding a command means adding it to `app.CommandNames()` and the dispatch
-switch. Both front ends get it for free — the browser via the `cmd` message, the
-CLI via its raw `<method> --params '<json>'` escape hatch, plus an optional
-ergonomic verb. A test (`TestCommandNamesAllRouted`) guards against the two
-lists drifting apart.
+Adding a command means three edits that must agree: the `app.Cmd*` constant, an
+entry in `app.CommandSpecs()`, and the dispatch case. Both front ends then get it
+for free — the browser via the `cmd` message, the CLI via its raw
+`<method> --params '<json>'` escape hatch, plus an optional ergonomic verb.
 
-`app.CommandNames()` is the enumerable vocabulary: `catctl commands` prints it,
-so a client can validate a method name before sending it.
+### The command table as data
+
+`app.CommandSpecs()` describes each command as a `CommandSpec`, so the mapping is
+walkable by a program rather than only readable in the switch:
+
+| Field | Meaning |
+|-------|---------|
+| `Name` | the wire method name |
+| `Params` | zero value of the params struct; `nil` when parameterless |
+| `Result` | zero value of the `CmdResult.Data` struct; `nil` when nothing is returned |
+| `ReplyRequired` | the dispatcher **silently drops** this command when the caller cannot receive a result (a browser `cmd` with no `id`) |
+| `ParamsRequired` | absent params fail with `bad params` rather than decoding to the zero value |
+
+`ReplyRequired` is the rule most likely to bite a client author, because the
+failure is silence: `capture`, `read`, `pane.wait_for_output`, `worktree.list`,
+`plugin.list`, `path.list`, `config.get` and `theme.list` exist only to produce
+data, so one sent with nowhere to reply does nothing at all.
+
+The table is what a generated client is emitted from — a command added here
+arrives in the mobile app as a typed method instead of a hand-written string.
+`app.CommandNames()` is derived from it (so names and shapes cannot disagree) and
+remains the enumerable vocabulary: `catctl commands` prints it, so a client can
+validate a method name before sending it.
+
+Two tests guard the drift, in opposite directions. `TestCommandNamesAllRouted`
+dispatches every enumerated name and rejects the unknown-command fall-through;
+`TestCommandSpecsRouted` reads the dispatch switch's own AST, which is the only
+way to catch the other side — a command routed but never listed, invisible to
+`catctl commands` and absent from every generated client.
 
 ## What is deliberately *not* a protocol
 

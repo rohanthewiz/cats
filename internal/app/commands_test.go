@@ -472,6 +472,12 @@ func TestDispatchReloadConfig(t *testing.T) {
 // enumeration (which CLI/control-API clients trust) against drifting from the
 // switch. A command may still fail for a domain/params reason on empty input;
 // we only reject the "not supported yet" fall-through.
+//
+// This is the runtime half of the drift guard; TestCommandSpecsRouted reads the
+// switch's AST for the direction a dispatch cannot show — a command routed but
+// never enumerated. The unrouted case below keeps this half honest: without it,
+// a default clause that stopped saying "not supported yet" would make the whole
+// sweep vacuous.
 func TestCommandNamesAllRouted(t *testing.T) {
 	const unknown = "not supported yet"
 	for _, name := range CommandNames() {
@@ -481,6 +487,13 @@ func TestCommandNamesAllRouted(t *testing.T) {
 		if r.failCall && strings.Contains(r.errMsg, unknown) {
 			t.Errorf("command %q is enumerated but not routed by Dispatch (%q)", name, r.errMsg)
 		}
+	}
+
+	h := newCmdHarness(t)
+	r := h.resp()
+	h.d.Dispatch("pane.definitely_not_a_command", noParams(), r)
+	if !r.failCall || !strings.Contains(r.errMsg, unknown) {
+		t.Fatalf("an unknown command must fail with %q, got fail=%v %q", unknown, r.failCall, r.errMsg)
 	}
 }
 

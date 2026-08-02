@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -95,27 +96,150 @@ const (
 	CmdPaneGet       = "pane.get"
 )
 
+// CommandSpec describes one §7 command as data: its name, the zero value of its
+// params and result structs, and the two dispatch properties a caller cannot
+// infer from the name.
+//
+// It exists because the name ↔ params ↔ result mapping otherwise lives only in
+// the Dispatch switch and the doc comments below — readable, but not walkable by
+// a program. As data it can generate a client: cmd/catgen-dart emits the mobile
+// app's typed call sites from this table, so a command added here arrives on the
+// phone as a typed method rather than a hand-written string and a map literal.
+//
+// Params and Result hold a ZERO VALUE of the struct (SplitParams{}), not a
+// reflect.Type — the table stays readable at the call site and a generator takes
+// reflect.TypeOf itself. nil is meaningful in both: "takes no params" and
+// "returns no data" are distinct from "takes an empty struct", because a
+// generator emits different signatures for them.
+type CommandSpec struct {
+	Name   string
+	Params any // zero value of the params struct; nil when parameterless
+	Result any // zero value of the CmdResult.Data struct; nil when nothing is returned
+
+	// ReplyRequired marks the commands Dispatch SILENTLY DROPS when the caller
+	// cannot receive a result — a browser `cmd` sent with no `id`, whose
+	// Responder reports WantsReply false. They exist only to produce data, so
+	// an answer with nowhere to go is no answer, and for the async ones
+	// (read/capture/wait) registering a pending round-trip that can never
+	// resolve would simply leak it.
+	//
+	// This is the rule most likely to bite a client author, because the failure
+	// is silence rather than an error: it makes "I sent capture and nothing
+	// happened" a stated property of the call instead of a bug hunt.
+	ReplyRequired bool
+
+	// ParamsRequired marks the commands that fail with "bad params" when the
+	// caller supplies none. The rest decode optionally — absent params mean the
+	// zero value, which is a meaningful call (pane.close closes the focused
+	// pane; tab.create opens a default-shell tab).
+	//
+	// It is a property of the COMMAND, not of the params type: WorkspaceParams
+	// is required by workspace.focus, which cannot guess an id, and optional for
+	// workspace.close, where an empty id means the active workspace.
+	ParamsRequired bool
+}
+
+// commandSpecs is the §7 command table: the single list both CommandSpecs and
+// CommandNames derive from, in the order `catctl commands` prints. Grouped like
+// the constants above.
+//
+// Adding a command means three edits that must agree — the constant, this entry,
+// and the Dispatch case. TestCommandSpecsRouted checks all three against the
+// dispatcher's own source, in both directions, so a command routed but not
+// listed (invisible to `catctl commands`, and missing from every generated
+// client) fails the build the same way a listed-but-unrouted one does.
+var commandSpecs = []CommandSpec{
+	// Panes. Only read/capture/wait return data — the rest are effects, whose
+	// outcome a client sees in the layout/frame stream rather than in a reply.
+	{Name: CmdPaneSplit, Params: SplitParams{}, ParamsRequired: true},
+	{Name: CmdPaneClose, Params: OptPaneParams{}},
+	{Name: CmdPaneFocus, Params: PaneParams{}, ParamsRequired: true},
+	{Name: CmdPaneFocusDirection, Params: DirParams{}, ParamsRequired: true},
+	{Name: CmdPaneCycle, Params: CycleParams{}, ParamsRequired: true},
+	{Name: CmdPaneLast},
+	{Name: CmdPaneSwap, Params: DirParams{}, ParamsRequired: true},
+	{Name: CmdPaneSwapWith, Params: SwapWithParams{}, ParamsRequired: true},
+	{Name: CmdPaneZoom, Params: OptPaneParams{}},
+	{Name: CmdPaneRename, Params: RenamePaneParams{}, ParamsRequired: true},
+	{Name: CmdPaneResizeBorder, Params: ResizeBorderParams{}, ParamsRequired: true},
+	{Name: CmdScroll, Params: ScrollParams{}, ParamsRequired: true},
+	{Name: CmdRead, Params: ReadParams{}, Result: ReadResult{}, ReplyRequired: true, ParamsRequired: true},
+	{Name: CmdCapture, Params: CaptureParams{}, Result: CaptureResult{}, ReplyRequired: true, ParamsRequired: true},
+	{Name: CmdWaitForOutput, Params: WaitForOutputParams{}, Result: WaitForOutputResult{}, ReplyRequired: true, ParamsRequired: true},
+	{Name: CmdPaneSendInput, Params: SendInputParams{}, ParamsRequired: true},
+
+	// Tabs. tab.create returns its new tab/pane so an automation client can
+	// drive the fresh pane without diffing pane.list.
+	{Name: CmdTabCreate, Params: TabCreateParams{}, Result: TabCreateResult{}},
+	{Name: CmdTabClose, Params: OptTabParams{}},
+	{Name: CmdTabFocus, Params: TabParams{}, ParamsRequired: true},
+	{Name: CmdTabRename, Params: RenameTabParams{}, ParamsRequired: true},
+	{Name: CmdTabMove, Params: MoveTabParams{}, ParamsRequired: true},
+
+	// Workspaces.
+	{Name: CmdWorkspaceCreate, Params: WorkspaceCreateParams{}, Result: WorkspaceCreateResult{}},
+	{Name: CmdWorkspaceClose, Params: WorkspaceParams{}},
+	{Name: CmdWorkspaceFocus, Params: WorkspaceParams{}, ParamsRequired: true},
+	{Name: CmdWorkspaceRename, Params: RenameWorkspaceParams{}, ParamsRequired: true},
+	{Name: CmdWorkspaceMove, Params: MoveWorkspaceParams{}, ParamsRequired: true},
+	{Name: CmdWorkspaceLock, Params: LockWorkspaceParams{}, ParamsRequired: true},
+
+	// Global focus + server lifecycle.
+	{Name: CmdAgentFocus, Params: PaneParams{}, ParamsRequired: true},
+	{Name: CmdServerReloadConfig},
+	{Name: CmdServerStop},
+
+	// Git worktrees. Only the listing is reply-gated: the other three have
+	// effects worth performing even when the caller stops listening.
+	{Name: CmdWorktreeList, Params: WorktreeListParams{}, Result: WorktreeListResult{}, ReplyRequired: true},
+	{Name: CmdWorktreeCreate, Params: WorktreeCreateParams{}, Result: WorktreeCreateResult{}},
+	{Name: CmdWorktreeOpen, Params: WorktreeOpenParams{}, Result: WorktreeOpenResult{}},
+	{Name: CmdWorktreeRemove, Params: WorktreeRemoveParams{}},
+
+	// Config + themes. Every writer echoes the same ConfigGetResult snapshot a
+	// read would return, so a client refreshes from the reply it already has.
+	{Name: CmdConfigGet, Result: ConfigGetResult{}, ReplyRequired: true},
+	{Name: CmdConfigSet, Params: ConfigSetParams{}, Result: ConfigGetResult{}},
+	{Name: CmdThemeList, Result: ThemeListResult{}, ReplyRequired: true},
+	{Name: CmdThemeSave, Params: ThemeSaveParams{}, Result: ConfigGetResult{}, ParamsRequired: true},
+	{Name: CmdThemeDelete, Params: ThemeDeleteParams{}, Result: ConfigGetResult{}, ParamsRequired: true},
+
+	// Plugins.
+	{Name: CmdPluginList, Result: PluginListResult{}, ReplyRequired: true},
+	{Name: CmdPluginUninstall, Params: PluginUninstallParams{}, Result: PluginUninstallResult{}, ParamsRequired: true},
+
+	// Path listing.
+	{Name: CmdPathList, Params: PathListParams{}, Result: PathListResult{}, ReplyRequired: true},
+
+	// Read-only queries. They answer straight from the Session, so they are not
+	// reply-gated — a query with no reply channel is a cheap no-op rather than a
+	// leaked round-trip.
+	{Name: CmdSessionGet, Result: SessionInfoResult{}},
+	{Name: CmdWorkspaceList, Result: WorkspaceListResult{}},
+	{Name: CmdTabList, Params: TabListParams{}, Result: TabListResult{}},
+	{Name: CmdPaneList, Result: PaneListResult{}},
+	{Name: CmdPaneGet, Params: OptPaneParams{}, Result: PaneInfo{}},
+}
+
+// CommandSpecs returns the §7 command table, in a stable order. The returned
+// slice is a copy — a caller that sorts or filters it in place would otherwise
+// be rewriting the vocabulary for everyone else in the process. A shallow clone
+// suffices: each spec's Params/Result is a struct value, so the only way to
+// reach it is a type assertion, which hands back another copy.
+func CommandSpecs() []CommandSpec {
+	return slices.Clone(commandSpecs)
+}
+
 // CommandNames returns every §7 command name Dispatcher.Dispatch accepts, in a
 // stable order. Front-ends enumerate/validate the vocabulary against it — a CLI's
-// help text, a control-API client — without re-listing the commands. Keep it in
-// sync with the Dispatch switch; TestCommandNamesAllRouted guards against drift.
+// help text, a control-API client — without re-listing the commands. Derived
+// from commandSpecs, so the names and their shapes cannot disagree.
 func CommandNames() []string {
-	return []string{
-		CmdPaneSplit, CmdPaneClose, CmdPaneFocus, CmdPaneFocusDirection,
-		CmdPaneCycle, CmdPaneLast, CmdPaneSwap, CmdPaneSwapWith, CmdPaneZoom, CmdPaneRename,
-		CmdPaneResizeBorder, CmdScroll, CmdRead, CmdCapture, CmdWaitForOutput,
-		CmdPaneSendInput,
-		CmdTabCreate, CmdTabClose, CmdTabFocus, CmdTabRename, CmdTabMove,
-		CmdWorkspaceCreate, CmdWorkspaceClose, CmdWorkspaceFocus, CmdWorkspaceRename,
-		CmdWorkspaceMove, CmdWorkspaceLock,
-		CmdAgentFocus, CmdServerReloadConfig, CmdServerStop,
-		CmdWorktreeList, CmdWorktreeCreate, CmdWorktreeOpen, CmdWorktreeRemove,
-		CmdConfigGet, CmdConfigSet,
-		CmdThemeList, CmdThemeSave, CmdThemeDelete,
-		CmdPluginList, CmdPluginUninstall,
-		CmdPathList,
-		CmdSessionGet, CmdWorkspaceList, CmdTabList, CmdPaneList, CmdPaneGet,
+	names := make([]string, len(commandSpecs))
+	for i, spec := range commandSpecs {
+		names[i] = spec.Name
 	}
+	return names
 }
 
 // Split direction wire values (pane.split).

@@ -127,6 +127,15 @@ catctl events.subscribe --params '{"events":["pane_notify","pane_exited"]}'
 Every command below is available identically from the browser (`cmd` message) and
 `catctl`. `catctl commands` prints the live list.
 
+Each command's params struct, result struct, and its two dispatch properties are
+also available as data — `app.CommandSpecs()`, described in
+[Protocols](index.md#the-command-table-as-data) — which is what a generated
+client is emitted from. The one worth knowing before writing a client: the
+commands marked `ReplyRequired` there (`read`, `capture`,
+`pane.wait_for_output`, `worktree.list`, `plugin.list`, `path.list`,
+`config.get`, `theme.list`) are **silently dropped** when sent without a reply
+channel, since a result with nowhere to go is not worth producing.
+
 ### Panes
 
 | Method | Ergonomic verb |
