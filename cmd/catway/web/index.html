@@ -173,6 +173,10 @@
      row that just became more true; it stays at --muted, the same gray the
      chrome uses for "present, not the point". */
   #ws-list li.ws.locked > :not(.lock-mark) { opacity:.5; }
+  /* No switch-on-click here, so the row drops the pointer — but not to
+     "not-allowed": the row still renames, reorders and opens its menu, and only
+     the one gesture is off. The plain arrow says "not a button", which is true. */
+  #ws-list li.ws.locked { cursor:default; }
   #ws-list li .lock-mark { flex:0 0 auto; align-self:center; color:var(--muted);
     display:inline-flex; margin-left:-1px; }
   #ws-list li .lock { width:calc(12px * var(--sb-scale)); height:calc(12px * var(--sb-scale)); }
@@ -227,6 +231,15 @@
   /* Time since the last state change, dimmer than the state it precedes: the
      state is the fact, the age only qualifies how stale that fact is. */
   #agent-list .aage { opacity:.75; }
+  /* An agent whose workspace is locked steps back the same way its workspace row
+     does, and by the same amount: the two sections then agree at a glance about
+     which work is set aside. Clicking it reveals nothing either — the row loses
+     the pointer for the same reason the workspace row does, since revealing a
+     pane *is* a workspace switch. */
+  #agent-list li.agent.wslocked { opacity:.5; cursor:default; }
+  /* Hovering restores it: whatever the row is dimmed for, the user is reading it
+     now, and the state text is the smallest type in the sidebar. */
+  #agent-list li.agent.wslocked:hover { opacity:1; }
   #agent-list li.empty { color:var(--muted); font-style:italic; cursor:default; }
   #agent-list li.empty:hover { background:none; }
 
@@ -754,6 +767,7 @@
     // included), then re-query the inventory behind them.
     refreshPaneList();
     markFocusedAgent();
+    markLockedAgents(); // a lock flip rebroadcasts the layout, not the rollup
     renderTabbar(msg);
     renderBorders(msg);
   }
@@ -940,6 +954,16 @@
     return (w && w.name) || id;
   }
 
+  // Is this workspace closed to plugins and agents? The lock lives on the layout,
+  // while the agents rollup is its own message keyed by workspace id, so a row in
+  // AGENTS has to look the flag up rather than carry it. Unknown workspace (no
+  // layout yet) reads as unlocked — the layout that answers the question also
+  // re-marks the rows, so the honest "don't know" costs nothing.
+  function wsLocked(id) {
+    const w = layoutMsg && layoutMsg.workspaces.find((x) => x.id === id);
+    return !!(w && w.locked);
+  }
+
   // attentionRank orders marker states for aggregation (cats's
   // workspace_attention_priority): blocked > done(unseen) > working > idle.
   function attentionRank(st) {
@@ -1066,7 +1090,7 @@
     svg.appendChild(body);
     const wrap = document.createElement("span");
     wrap.className = "lock-mark";
-    wrap.title = "locked — plugins and agents cannot be launched here";
+    wrap.title = "locked — no plugins or agents here, and clicking will not switch to it";
     wrap.appendChild(svg);
     return wrap;
   }
@@ -1120,7 +1144,18 @@
         const s = document.createElement("span"); s.className = "sum"; s.appendChild(sum);
         li.appendChild(s);
       }
-      li.addEventListener("click", () => { if (!dragConsumedClick && !w.active) sendCmd("workspace.focus", { id: w.id }); });
+      // A locked workspace does not take a click-to-switch: the lock says "leave
+      // this one alone", and the sidebar is the one place a switch happens by
+      // accident (a click meant for the row's name or its lock). The toast is not
+      // optional — a click that silently does nothing reads as a broken row — and
+      // it names the way out, since the row's own context menu holds the unlock.
+      // Deliberate ways in are left alone: the context menu, the palette and the
+      // keyboard still switch, so this narrows the accident, not the workspace.
+      li.addEventListener("click", () => {
+        if (dragConsumedClick || w.active) return;
+        if (w.locked) { toast((w.name || w.id) + " is locked — unlock it to switch"); return; }
+        sendCmd("workspace.focus", { id: w.id });
+      });
       li.addEventListener("dblclick", () => renameWorkspace(w));
       li.addEventListener("contextmenu", (e) => { e.preventDefault(); openCtx(e.clientX, e.clientY, wsMenuItems(w)); });
       li.addEventListener("mousedown", (e) => beginReorderDrag(e, {
@@ -1773,7 +1808,9 @@
     for (const it of items) {
       const li = document.createElement("li"); li.className = "agent";
       li.dataset.pane = it.pane; // markFocusedAgent re-marks rows without a re-render
+      li.dataset.ws = it.workspace; // ditto markLockedAgents, when a lock flips
       if (it.pane === foc) li.classList.add("focused");
+      setAgentLocked(li, wsLocked(it.workspace));
       const dot = document.createElement("span"); dot.className = "adot " + stClass(markerState(it)); dot.textContent = "●";
       const name = document.createElement("span"); name.className = "aname"; name.textContent = it.agent;
       const meta = document.createElement("span"); meta.className = "ameta";
@@ -1793,7 +1830,19 @@
       // agent.focus, not pane.focus: the agents list is global, so the target
       // may sit in another workspace/tab and has to be revealed into the
       // viewport (pane.focus only moves the focus flag within the current one).
-      li.addEventListener("click", () => sendCmd("agent.focus", { pane: it.pane }));
+      //
+      // Which is exactly why a locked workspace refuses this click as well: the
+      // reveal *is* a workspace switch, so leaving it open would have made the
+      // dimmed row the way around the refusal in WORKSPACES. Asked at click time
+      // rather than read off the row's class, so a lock lifted a moment ago is
+      // honoured without waiting for the row to be rebuilt.
+      li.addEventListener("click", () => {
+        if (wsLocked(it.workspace)) {
+          toast(wsName(it.workspace) + " is locked — unlock it to reach this agent");
+          return;
+        }
+        sendCmd("agent.focus", { pane: it.pane });
+      });
       agentListEl.appendChild(li);
     }
     refreshPaneList(); // pane rows take agent identity + state from the rollup
@@ -1806,6 +1855,26 @@
     const foc = focusedPaneId();
     for (const li of agentListEl.children) {
       if (li.dataset.pane) li.classList.toggle("focused", li.dataset.pane === foc);
+    }
+  }
+
+  // setAgentLocked dims one AGENTS row for its workspace's lock, and says why in
+  // the row's tooltip — dimming alone is ambiguous (an idle agent looks much the
+  // same), and the padlock that explains it in WORKSPACES is a section away. The
+  // tooltip leads with the consequence the user is about to meet (the click does
+  // nothing) rather than with the lock's own definition.
+  function setAgentLocked(li, locked) {
+    li.classList.toggle("wslocked", locked);
+    if (locked) li.title = "workspace locked — clicking will not reveal this agent";
+    else li.removeAttribute("title");
+  }
+
+  // A lock flip arrives as a layout, not as an agents rollup — the same split
+  // that makes markFocusedAgent necessary — so the rows are re-marked in place
+  // rather than rebuilt. Each row remembers its workspace id for exactly this.
+  function markLockedAgents() {
+    for (const li of agentListEl.children) {
+      if (li.dataset.ws) setAgentLocked(li, wsLocked(li.dataset.ws));
     }
   }
 

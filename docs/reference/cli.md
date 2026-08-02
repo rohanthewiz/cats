@@ -157,9 +157,15 @@ catctl lock-ws [id]             catctl unlock-ws [id]
 
 `lock-ws` sets a workspace aside for hand work: no launching a plugin or an agent
 into it (`tab.create` with a command is refused) and no typing into its panes
-from the control API (`send` / `run` are refused). Splits, plain tabs, and
-anything you do in the browser are untouched, and the lock survives a restart.
-The sidebar draws a locked workspace dimmed, with a padlock beside its name.
+from the control API (`send` / `run` are refused). Splits and plain tabs are
+untouched, and the lock survives a restart.
+
+The sidebar draws a locked workspace dimmed, with a padlock beside its name, and
+dims its agents in the AGENTS section too, so the set-aside work reads as one
+group. Neither dimmed row takes a click: the workspace row will not switch to it,
+and an agent row inside it will not reveal its pane — revealing a pane *is* a
+switch, so the two refusals are the same one. Every deliberate route in still
+works: the row's context menu, the command palette, and the keyboard.
 
 Misc:
 

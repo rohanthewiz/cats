@@ -251,7 +251,14 @@ commands refuse it — `tab.create` **carrying a `command`** (the path a plugin
 action and an agent launch both arrive on) and `pane.send_input` into any of its
 panes. Everything else goes through, so a bare `tab.create`, a split, or typing
 in the browser still works exactly as before; the point is to keep plugins and
-agents out, not to freeze the workspace. `lock-ws`/`unlock-ws` are two verbs over
+agents out, not to freeze the workspace. The browser front end adds one courtesy
+of its own on top of those two refusals: it dims a locked workspace's agents in
+the AGENTS section, and declines the click that would land you in it — on the
+workspace's own sidebar row and on any of those dimmed agent rows, whose
+`agent.focus` reveals a pane by switching workspace. That is presentation only:
+`workspace.focus` and `agent.focus` on a locked workspace are still ordinary
+commands and still succeed, which is what the palette and the keyboard use.
+`lock-ws`/`unlock-ws` are two verbs over
 the one command, the same way `send`/`run` both reach `pane.send_input`; with no
 id they act on the active workspace. The lock is durable (it survives a catway
 restart) and reported by `workspace.list` as `locked`, but it is a guardrail
