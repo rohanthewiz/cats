@@ -10,6 +10,7 @@
 //	catctl [flags] <method> [--params '<json>']  raw §7 command (escape hatch)
 //	catctl help [verb]                        the verb table, or one verb's page
 //	catctl commands                           list the raw §7 method names
+//	catctl pair                               mint a device-pairing code (QR)
 //	catctl completion <bash|zsh|fish>         shell completion script
 //	catctl integration <install|uninstall|status|help> ...  agent hook installers
 //	catctl plugin <install|link|uninstall|list|run|help> ...  plugin host
@@ -38,6 +39,10 @@
 //	catctl panes          → pane.list
 //	catctl new-tab        → tab.create
 //	catctl stop           → server.stop
+//
+// `catctl pair` is how a phone gets in. It mints a single-use grant that expires
+// in minutes and prints it as a QR code; the device redeems it for a session
+// credential. The shared password never appears — see internal/gwauth/pair.go.
 //
 // Two verbs block/stream instead of returning at once: `wait <pane> <pattern>`
 // resolves when the pane's output contains the pattern (or times out), and
@@ -172,10 +177,11 @@ func run() int {
 		params = built
 	} else {
 		// Validate the method locally so a typo lists the vocabulary instead of a
-		// round trip to the server's "not supported yet" default. ping and the
-		// streaming events.subscribe are transport methods outside the §7 table.
+		// round trip to the server's "not supported yet" default. ping, the
+		// streaming events.subscribe and pair are transport methods outside the
+		// §7 table.
 		if method != ctlproto.MethodPing && method != ctlproto.MethodEventsSubscribe &&
-			!slices.Contains(app.CommandNames(), method) {
+			method != ctlproto.MethodPair && !slices.Contains(app.CommandNames(), method) {
 			fmt.Fprintf(os.Stderr, "catctl: unknown command %q (try `catctl help`)\n", method)
 			return 2
 		}
@@ -198,6 +204,12 @@ func run() int {
 	// than the unary Call below.
 	if method == ctlproto.MethodEventsSubscribe {
 		return runEvents(socketPath, *id, params)
+	}
+
+	// pair renders a scannable code rather than a JSON payload, so it owns its
+	// output. --json still reaches the raw response, which is the scripting path.
+	if method == ctlproto.MethodPair {
+		return runPair(socketPath, *id, *timeout, *rawJSON)
 	}
 
 	// wait_for_output blocks until its pattern appears; size the round-trip deadline
@@ -279,6 +291,7 @@ Usage:
   catctl [flags] <method> [--params '<json>']   raw §7 command (escape hatch)
   catctl help [verb]                         this table, or one verb's page
   catctl commands                            list the raw §7 method names
+  catctl pair                                pair a phone: a scannable one-time code
   catctl completion <bash|zsh|fish>          shell completion script (see help completion)
   catctl integration install|uninstall <target>   install/remove agent hooks (offline)
   catctl integration status [--outdated-only]     integration install states (offline)

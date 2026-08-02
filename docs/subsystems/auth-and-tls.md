@@ -52,7 +52,7 @@ land in a committed file. Comparison is constant-time (`subtle.ConstantTimeCompa
 The generated fallback is fine for a quick local run and useless for a service —
 if you are running `catway` under systemd or launchd, set the secret explicitly.
 
-## Two credential forms
+## Three credential forms
 
 ```mermaid
 flowchart LR
@@ -66,7 +66,14 @@ flowchart LR
     H["Authorization: Bearer SECRET<br/>on every request"]
   end
 
+  subgraph paired["Paired devices (a phone)"]
+    P["catctl pair mints a grant"]
+    Q["POST /login with the grant<br/>Accept: application/json"]
+    R["Authorization: Bearer SESSION"]
+  end
+
   B --> C --> D
+  P --> Q --> R
 ```
 
 ### The `hsess` cookie
@@ -91,6 +98,46 @@ Cookie attributes: `Path=/`, `MaxAge` from `session_ttl` (default 24 h),
 
 `Authorization: Bearer <secret>` — the secret directly, no cookie exchange. This
 is how `catctl probe` and any script drive `/ws` headlessly.
+
+A **session value** is also accepted in that header, which is what a paired
+device presents: it has no cookie jar, and the session is the credential it
+holds. This grants nothing new — the same value is already accepted from the
+cookie, and `ValidSession` still bounds it by signature and expiry.
+
+### Device pairing
+
+`catctl pair` puts a **single-use, five-minute grant** on screen as a QR code so a
+phone can join without anyone typing the password into it.
+
+```
+catctl pair ──socket──▶ IssuePairToken ──▶ token (5 min, single use)
+                                            │
+              QR / cats:// URI ──▶ phone ───┘
+                                     │
+                                     ▼
+          POST /login password=<token> ──▶ RedeemPairToken ──▶ session
+```
+
+The grant is minted over the **control socket only** (`ctlproto.MethodPair`,
+answered before `app.Dispatcher` — see [Control API](../protocols/control-api.md#pair)),
+never over the browser protocol. What the device ends up holding is an ordinary
+session: signed with the per-process key, bounded by `session_ttl`, and killed by
+a restart. That revocability is the entire reason pairing is not a method that
+returns the password — a leaked password has none.
+
+The payload also carries the served certificate's **SHA-256 fingerprint** (over
+the DER, not the SPKI — `gwtls` mints a fresh key on every regeneration, so SPKI
+pinning would survive nothing DER pinning does not), so a device learns the pin
+out of band at the moment it first learns the address rather than trusting
+whatever it is handed on a later connection.
+
+Two honest limits. Sessions carry no identity, so paired devices are **not
+individually revocable** — the granularity is the TTL and the process. And the
+grant is printed into a terminal whose scrollback may reach disk; that is
+acceptable precisely because it is worth minutes and one use, which the password
+would not be.
+
+Under `--auth none` there is nothing to pair with, and `catctl pair` says so.
 
 ## WebSocket origin checking
 
@@ -228,5 +275,7 @@ routable bind address.
 
 Named to be explicit about the boundaries: no multi-user accounts, no per-user
 permissions, no OAuth or SSO, no rate limiting on `/login`, no audit log, no
-mid-session revocation. If you need any of those, put cats behind something that
-provides them and use `allowed_origins` to let the WebSocket through.
+mid-session revocation, and no per-device revocation (a paired phone holds an
+anonymous session like everyone else). If you need any of those, put cats behind
+something that provides them and use `allowed_origins` to let the WebSocket
+through.

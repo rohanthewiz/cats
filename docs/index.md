@@ -110,8 +110,9 @@ internal/persist/     on-disk session + history state
 internal/ctlproto/    control-API protocol + server
 internal/integration/ agent hook installers (claude, codex, kimi, ...)
 internal/plugin/      plugin host (~/.config/cats/plugins)
-internal/gwauth/      login/cookie auth
+internal/gwauth/      login/cookie auth + device-pairing grants
 internal/gwtls/       TLS certificate handling
+internal/qr/          byte-mode QR encoder (the pairing code)
 internal/worktree/    git-worktree creation
 internal/startdir/    "where does a new shell start" policy
 third_party/libghostty-vt/  vendored VT engine source (Zig)

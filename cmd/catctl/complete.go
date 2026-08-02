@@ -106,6 +106,7 @@ var families = []candidate{
 	{"probe", "browser-protocol WebSocket probe"},
 	{"completion", "print a shell completion script"},
 	{"commands", "list the raw §7 method names"},
+	{"pair", "mint a device-pairing code (QR)"},
 	{"help", "show help for catctl or one verb"},
 }
 
@@ -191,8 +192,8 @@ func completeCatctl(words []string) ([]candidate, string) {
 			return filter(topLevel(cur), cur), dirNoFiles
 		}
 		return nil, dirNoFiles
-	case "commands":
-		return nil, dirNoFiles
+	case "commands", "pair":
+		return nil, dirNoFiles // neither takes an operand
 	}
 
 	if strings.HasPrefix(cur, "-") {

@@ -183,6 +183,12 @@ type orch struct {
 	baseHTML []byte
 	cfgPath  string
 	page     atomic.Pointer[[]byte]
+	// pairing is the device-pairing context (pair.go): the authenticator that
+	// mints grants plus the URL and certificate pin a new device needs. Wired by
+	// main after the auth guard and TLS are resolved, which is *after* the
+	// control socket is already accepting — hence the atomic, like page above.
+	// nil means pairing is unavailable (auth disabled, or startup incomplete).
+	pairing atomic.Pointer[pairing]
 	// cfg is the loaded config-file state (defaults + file, not flag overrides —
 	// config.set marshals it back to disk, so flag values must never leak in).
 	// worktreeDir is the tilde-expanded worktrees root new checkouts land under.

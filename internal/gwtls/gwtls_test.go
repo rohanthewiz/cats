@@ -1,8 +1,10 @@
 package gwtls
 
 import (
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/hex"
 	"encoding/pem"
 	"net"
 	"os"
@@ -278,5 +280,57 @@ func TestEnsureSelfSignedRejectsBadSAN(t *testing.T) {
 	}
 	if fileExists(filepath.Join(dir, certFile)) {
 		t.Error("a rejected SAN still minted a certificate")
+	}
+}
+
+// Fingerprint is what a paired device pins, so it has to be the value every
+// other tool reports for the same certificate — openssl, a browser's cert
+// viewer, `catctl pair`. Deriving it independently here from the parsed
+// certificate's Raw DER is the check that it hashes the right bytes.
+func TestFingerprintMatchesTheCertificateDER(t *testing.T) {
+	dir := t.TempDir()
+	certPath, _, err := EnsureSelfSigned(dir, nil)
+	if err != nil {
+		t.Fatalf("EnsureSelfSigned: %v", err)
+	}
+	got, err := Fingerprint(certPath)
+	if err != nil {
+		t.Fatalf("Fingerprint: %v", err)
+	}
+	want := sha256.Sum256(parseCert(t, certPath).Raw)
+	if got != hex.EncodeToString(want[:]) {
+		t.Fatalf("Fingerprint = %s, want %s", got, hex.EncodeToString(want[:]))
+	}
+	if len(got) != 64 {
+		t.Fatalf("fingerprint is %d hex characters, want 64", len(got))
+	}
+	// Regenerating mints a fresh key and so a fresh certificate — which is
+	// precisely why the pin is over the DER and not the public key.
+	if err := generate(certPath, filepath.Join(dir, keyFile), nil, nil); err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	again, err := Fingerprint(certPath)
+	if err != nil {
+		t.Fatalf("Fingerprint after regeneration: %v", err)
+	}
+	if again == got {
+		t.Fatal("a regenerated certificate kept the same fingerprint")
+	}
+}
+
+// A missing or non-certificate file must return an error, not a hash of
+// whatever bytes happened to be there — buildPairing drops the pin on error, and
+// a bogus pin would be worse than none.
+func TestFingerprintRejectsNonCertificates(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := Fingerprint(filepath.Join(dir, "absent.pem")); err == nil {
+		t.Error("Fingerprint of a missing file returned no error")
+	}
+	junk := filepath.Join(dir, "junk.pem")
+	if err := os.WriteFile(junk, []byte("not a pem file at all\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Fingerprint(junk); err == nil {
+		t.Error("Fingerprint of a non-PEM file returned no error")
 	}
 }

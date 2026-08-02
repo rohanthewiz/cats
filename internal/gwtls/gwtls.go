@@ -18,8 +18,10 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/hex"
 	"encoding/pem"
 	"errors"
 	"fmt"
@@ -72,6 +74,27 @@ func EnsureSelfSigned(dir string, extraSANs []string) (certPath, keyPath string,
 		return "", "", err
 	}
 	return certPath, keyPath, nil
+}
+
+// Fingerprint returns the hex SHA-256 of the leaf certificate's DER encoding at
+// path — the value a client pins to trust a self-signed catway on first use.
+//
+// It hashes the certificate, not the public key. SPKI pinning is the usual
+// advice because it survives a re-issue with the same key, but generate mints a
+// fresh ECDSA key on every regeneration, so here it would survive nothing DER
+// pinning does not — and the DER hash is the value openssl and every browser's
+// certificate viewer show, which makes it checkable by eye.
+func Fingerprint(path string) (string, error) {
+	pemBytes, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("gwtls: read certificate: %w", err)
+	}
+	block, _ := pem.Decode(pemBytes)
+	if block == nil || block.Type != "CERTIFICATE" {
+		return "", fmt.Errorf("gwtls: %s holds no PEM certificate", path)
+	}
+	sum := sha256.Sum256(block.Bytes)
+	return hex.EncodeToString(sum[:]), nil
 }
 
 // usableCert reports whether path holds a PEM certificate that parses, is not

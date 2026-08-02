@@ -44,17 +44,87 @@ rather than pointing panes at a socket nobody serves.
 structs the browser's params decode into, so the wire shape cannot drift between
 the two front ends.
 
-`method` is an `app.Cmd*` name, or `ping`.
+`method` is an `app.Cmd*` name, or one of the three **transport-level** methods
+below — `ping`, `pair` and `events.subscribe`. Those three are answered before
+`app.Dispatcher` ever sees the name, so they are deliberately absent from
+`app.CommandNames()`; a §7 command taking one of their names would be silently
+unreachable from this socket, which `TestTransportMethodsDoNotShadowCommands`
+exists to prevent.
 
 ### `ping`
 
-The one method answered directly by the control server, with no session
-mutation. Its `data` is the server's protocol version and service name, so a
-client can confirm what it is talking to before issuing commands.
+Answered directly by the control server, with no session mutation. Its `data` is
+the server's protocol version and service name, so a client can confirm what it
+is talking to before issuing commands.
 
 ```bash
 catctl ping
 ```
+
+### `pair`
+
+Mints a **single-use device-pairing grant** for a phone or another client. Its
+`data` is a `ctlproto.PairInfo`: the URL a device should dial, a token, its
+expiry, and — when serving HTTPS — the certificate fingerprint the device pins.
+
+```bash
+catctl pair            # renders a scannable QR plus the cats:// link
+catctl --json pair     # the raw PairInfo, for scripting
+```
+
+```json
+{
+  "url": "https://192.168.1.24:8421",
+  "token": "9zs1rGrrHxpb5ADqBWBVAG-9",
+  "expires_at": 1785761652,
+  "fingerprint": "eb69218fd414bb5b…ca1514a8"
+}
+```
+
+**Why this is not a §7 command.** The §7 table is shared with the browser front
+end by construction. A browser that could mint pairing grants would turn a
+stolen session cookie — which expires, and dies with the process — into a
+permanent second credential. Keeping `pair` off that table is what confines
+credential minting to the owner-only socket, and it is answered in
+`orch.controlDispatch` before the dispatch is posted onto the loop.
+
+**Why a grant and not the password.** A method that returned the shared secret
+would be an escalation: any local process can reach this socket — a plugin, a
+`curl | sh` postinstall, one of the coding agents this machine exists to run —
+and the password reaches catway from anywhere on the network, forever, with no
+revocation short of a restart. Worse, `catctl pair` run *inside a cats pane* has
+its output swept into `~/.local/state/cats/history.json`, writing to disk the one
+secret `internal/gwauth` promises never touches it.
+
+The grant instead:
+
+| | Grant | Shared password |
+|---|---|---|
+| Lifetime | `gwauth.PairTTL`, 5 minutes | forever |
+| Uses | exactly one | unlimited |
+| What it buys | a session credential | full access |
+| Revoked by | redemption, expiry, restart | changing it and restarting |
+
+Redemption is `POST /login` with the grant where the password would go — no new
+endpoint, just one `||` in `handleLoginPost`. A native client sends
+`Accept: application/json` and gets the session in the body rather than a cookie
+and a 303:
+
+```bash
+curl -sk -H 'Accept: application/json' -d "password=$TOKEN" https://host:8421/login
+# {"session":"1785761652.87439135…","expires_at":1785761652}
+```
+
+That session then rides `Authorization: Bearer <session>` on `/ws` — a native
+client has no cookie jar, so `authed()` accepts a session value in that header as
+well as in the cookie. It grants nothing new: the same value is already accepted
+from the cookie, and `ValidSession` still bounds it by signature and expiry.
+
+Sessions carry no identity (see `gwauth.IssueSession`), so paired devices are not
+individually revocable — the revocation granularity is the session TTL and the
+process. Set `--session-ttl` to choose how often a phone re-pairs.
+
+Under `--auth none` there is nothing to pair with and the method fails saying so.
 
 ## Two methods that do not return immediately
 
@@ -278,3 +348,9 @@ own and is never exposed over the network — including in
 [Mode 2](../architecture/mac-client-linux-server.md), where it stays on the Linux
 host. Anything that can open the socket can run any command, so treat it exactly
 as you treat write access to your home directory.
+
+That is also the boundary `pair` is drawn against. "Anything that can open the
+socket can run any command" is already true, and pairing does not widen it — but
+a command that *returned the password* would, because a command's blast radius
+ends when the process does, while a leaked password's does not. Hence a grant
+that expires in five minutes and works once.

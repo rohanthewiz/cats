@@ -102,6 +102,9 @@ func runHelp(args []string) int {
 	case "commands":
 		fmt.Fprintln(os.Stderr, "catctl commands — print the raw §7 method names, one per line")
 		return 0
+	case ctlproto.MethodPair:
+		printPairHelp()
+		return 0
 	case "help":
 		fmt.Fprintln(os.Stderr, "catctl help [verb] — the verb table, or one verb's page")
 		return 0
@@ -122,6 +125,32 @@ func runHelp(args []string) int {
 
 	fmt.Fprintf(os.Stderr, "catctl: no help for %q (try `catctl help`)\n", topic)
 	return 2
+}
+
+// printPairHelp documents the pairing verb. It gets a page of its own rather
+// than a one-liner because the thing a reader most needs to know is what the
+// code is *not*: it is not the password, and it stops working almost at once.
+func printPairHelp() {
+	fmt.Fprint(os.Stderr, `catctl pair
+
+  Mint a one-time device-pairing code and print it as a scannable QR.
+
+Scan it with the cats mobile app (or open the printed cats:// link on the
+device) to pair a phone with this server. The code carries the server's URL,
+a single-use token, and — when serving HTTPS — the certificate fingerprint the
+app pins.
+
+The token is not the access password. It expires in a few minutes, works once,
+and what it buys is an ordinary session credential: bounded by the session TTL
+and revoked by restarting the server. That is the whole reason pairing exists
+rather than a command that prints the password.
+
+Requires auth to be enabled; under --auth none there is nothing to pair with.
+
+  catctl pair            print the code
+  catctl --json pair     the raw response, for scripting
+
+`)
 }
 
 // printVerbHelp renders one ergonomic verb's page.

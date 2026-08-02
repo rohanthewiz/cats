@@ -276,11 +276,15 @@ func main() {
 	// so requiring --tls alongside would only be a way to get it wrong.
 	tlsOn := eff.TLS.Enabled || eff.TLS.Cert != "" || eff.TLS.Key != "" || len(eff.TLS.SANs) > 0
 	var tlsCfg rweb.TLSCfg
+	// certPath outlives the block: the pairing payload carries its fingerprint so
+	// a phone can pin the self-signed certificate on first use.
+	var certPath string
 	if tlsOn {
-		certPath, keyPath, err := resolveTLS(eff.TLS.Cert, eff.TLS.Key, eff.TLS.SANs)
+		cert, keyPath, err := resolveTLS(eff.TLS.Cert, eff.TLS.Key, eff.TLS.SANs)
 		if err != nil {
 			log.Fatalf("catway: tls: %v", err)
 		}
+		certPath = cert
 		tlsCfg = rweb.TLSCfg{UseTLS: true, TLSAddr: eff.Addr, CertFile: certPath, KeyFile: keyPath}
 	}
 
@@ -289,6 +293,12 @@ func main() {
 	if err != nil {
 		log.Fatalf("catway: auth: %v", err)
 	}
+	// Device pairing (catctl pair) needs the guard's authenticator plus the URL
+	// and certificate pin a phone will dial, so it can only be assembled once
+	// both are resolved — after the control socket is already listening, which is
+	// why orch holds it atomically. nil under --auth none: there is nothing to
+	// pair with, and catctl pair says so.
+	o.pairing.Store(buildPairing(guard, eff.Addr, certPath))
 
 	s := rweb.NewServer(rweb.ServerOptions{Address: eff.Addr, TLS: tlsCfg, Verbose: true})
 	if guard != nil {

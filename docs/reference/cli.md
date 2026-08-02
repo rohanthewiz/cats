@@ -86,6 +86,7 @@ catctl [flags] <verb> [args...]                 ergonomic subcommand
 catctl [flags] <method> [--params '<json>']     raw command
 catctl help [verb]                              the verb table, or one verb's page
 catctl commands                                 list the raw method names
+catctl pair                                     pair a phone with a scannable code
 catctl completion <bash|zsh|fish>               shell completion script
 catctl integration <install|uninstall|status|help> ...
 catctl plugin <install|link|uninstall|list|run|update|help> ...
@@ -243,6 +244,29 @@ flags       = ["--force"]
 Because the plugin list is read when the script is *generated*, the `eval` form
 is what keeps it current: a plugin installed today is completable in the next
 shell you open. See [Plugins](../subsystems/plugins.md#shell-completion).
+
+### `catctl pair`
+
+Mints a **single-use, five-minute** device-pairing grant and prints it as a QR
+code plus a `cats://pair?…` link. Scan it to join a phone without typing the
+access password into it.
+
+```bash
+catctl pair            # the scannable code
+catctl --json pair     # the raw payload, for scripting
+```
+
+The code carries the server URL, the grant, and — under HTTPS — the certificate
+fingerprint the device pins. The grant is **not** the password: redeeming it
+buys an ordinary session, bounded by `--session-ttl` and revoked by restarting
+`catway`. See [Auth and TLS](../subsystems/auth-and-tls.md#device-pairing).
+
+The QR is rendered by `internal/qr`, an in-repo byte-mode encoder — no new
+dependency. Piped output and `NO_COLOR` drop the ANSI colours; the code is only
+guaranteed to have the right polarity for a scanner in the coloured form, so the
+link below it is always printed too.
+
+Requires auth to be enabled; under `--auth none` there is nothing to pair with.
 
 ### `catctl integration`
 

@@ -39,6 +39,7 @@ type Authenticator struct {
 	secret  []byte        // shared login password / bearer token
 	signKey []byte        // per-process key signing session cookies
 	ttl     time.Duration // session lifetime
+	pairs   pairStore     // outstanding device-pairing grants (pair.go)
 }
 
 // New builds an Authenticator around a shared secret with the given session
@@ -55,7 +56,12 @@ func New(secret string, ttl time.Duration) (*Authenticator, error) {
 	if _, err := rand.Read(key); err != nil {
 		return nil, fmt.Errorf("gwauth: generate signing key: %w", err)
 	}
-	return &Authenticator{secret: []byte(secret), signKey: key, ttl: ttl}, nil
+	return &Authenticator{
+		secret:  []byte(secret),
+		signKey: key,
+		ttl:     ttl,
+		pairs:   pairStore{grants: map[string]time.Time{}},
+	}, nil
 }
 
 // TTL is the configured session lifetime (used to set the cookie's MaxAge).
@@ -71,11 +77,23 @@ func (a *Authenticator) CheckSecret(provided string) bool {
 // reports whether the token matches the shared secret. Empty or malformed
 // values return false.
 func (a *Authenticator) CheckBearer(authorization string) bool {
+	token, ok := BearerToken(authorization)
+	return ok && a.CheckSecret(token)
+}
+
+// BearerToken extracts the credential from an "Authorization: Bearer <token>"
+// header value, reporting whether the header was well-formed.
+//
+// It is exported because the shared secret is no longer the only thing that can
+// arrive in that header: a paired device holds a session token (see pair.go) and
+// has no cookie jar to put it in, so the caller needs the raw credential to try
+// against ValidSession as well as CheckSecret.
+func BearerToken(authorization string) (string, bool) {
 	if len(authorization) <= len(bearerPrefix) ||
 		!strings.EqualFold(authorization[:len(bearerPrefix)], bearerPrefix) {
-		return false
+		return "", false
 	}
-	return a.CheckSecret(strings.TrimSpace(authorization[len(bearerPrefix):]))
+	return strings.TrimSpace(authorization[len(bearerPrefix):]), true
 }
 
 // IssueSession returns a cookie value binding an expiry (now+TTL) to an HMAC

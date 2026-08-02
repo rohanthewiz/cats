@@ -38,6 +38,41 @@ const MethodPing = "ping"
 // it is not an app §7 command name and is absent from app.CommandNames().
 const MethodEventsSubscribe = "events.subscribe"
 
+// MethodPair mints a single-use device-pairing grant; its Response.Data is a
+// PairInfo. Like MethodPing it is deliberately *not* an app §7 command: the §7
+// table is shared with the browser front end, and a browser that could mint
+// pairing grants would be an escalation path from a stolen session cookie to a
+// permanent second credential. Keeping it off that table is what confines it to
+// the owner-only control socket. The server answers it before app.Dispatcher
+// ever sees the method name.
+const MethodPair = "pair"
+
+// PairInfo is the Response.Data for MethodPair: everything a new device needs to
+// reach this catway, and nothing it does not.
+//
+// Token is short-lived and single-use (internal/gwauth), redeemed by POSTing it
+// to /login in place of the password; what the device ends up holding is an
+// ordinary session credential, which a restart or the session TTL revokes. The
+// shared secret is never part of this payload — that is the entire point of the
+// pairing flow.
+type PairInfo struct {
+	// URL is the catway's base URL as a client on another device should reach
+	// it — a routable address, never localhost.
+	URL string `json:"url"`
+	// Token is the pairing grant. Treat it as a secret for its short life.
+	Token string `json:"token"`
+	// ExpiresAt is when the token stops being redeemable, in Unix seconds.
+	ExpiresAt int64 `json:"expires_at"`
+	// Fingerprint is the hex SHA-256 of the server certificate's DER, for a
+	// client pinning a self-signed cert on first use. Empty when the catway is
+	// serving plain HTTP, or when the certificate could not be read.
+	//
+	// It pins the certificate rather than the public key because gwtls mints a
+	// fresh key on every regeneration — SPKI pinning would survive nothing that
+	// DER pinning does not.
+	Fingerprint string `json:"fingerprint,omitempty"`
+}
+
 // Request is one control command. Method is an app §7 command name (app.Cmd*) or
 // MethodPing. Params is the command's params object, decoded by the dispatcher
 // via app.JSONParamDecoder. ID is a client-chosen correlation string echoed back

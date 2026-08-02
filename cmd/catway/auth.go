@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/rohanthewiz/rweb"
@@ -73,10 +74,22 @@ func (g *authGuard) middleware(ctx rweb.Context) error {
 	return ctx.Redirect(http.StatusFound, "/login")
 }
 
-// authed reports whether the request carries valid credentials: a bearer token
-// matching the shared secret, or a valid session cookie.
+// authed reports whether the request carries valid credentials: the shared
+// secret as a bearer token, a session token as a bearer token, or a session
+// cookie.
+//
+// The middle case is the paired device (pair.go). A native client has no cookie
+// jar, and the session value it redeemed a pairing token for is the credential
+// it holds — so it presents that in the Authorization header. Accepting it there
+// grants nothing new: the same value is already accepted from the cookie, and
+// ValidSession still bounds it by signature and expiry. What it avoids is the
+// alternative, which would be handing phones the shared secret.
 func (g *authGuard) authed(ctx rweb.Context) bool {
-	if g.a.CheckBearer(ctx.Request().Header("Authorization")) {
+	authorization := ctx.Request().Header("Authorization")
+	if g.a.CheckBearer(authorization) {
+		return true
+	}
+	if token, ok := gwauth.BearerToken(authorization); ok && g.a.ValidSession(token, time.Now()) {
 		return true
 	}
 	if cookie, err := ctx.GetCookie(gwauth.CookieName); err == nil {
@@ -94,17 +107,41 @@ func (g *authGuard) handleLoginGet(ctx rweb.Context) error {
 	return ctx.WriteHTML(loginPage(""))
 }
 
-// handleLoginPost checks the submitted password, and on success issues the
-// session cookie and redirects to the app. Failures re-render the form with a
-// 401 so a probe can distinguish them.
+// handleLoginPost checks the submitted credential and, on success, issues a
+// session. Failures re-render the form with a 401 so a probe can distinguish
+// them.
+//
+// The credential is either the shared password or a device-pairing token
+// (`catctl pair`), which is why this is the redemption point: pairing needed no
+// new endpoint, only permission to spend a grant where a password would do. The
+// order matters — the short circuit means submitting the real password never
+// consumes somebody's outstanding pairing token.
+//
+// A browser gets the session as a cookie and a redirect into the app. A native
+// client asking for JSON gets the session value in the body instead: it has no
+// cookie jar, and scraping Set-Cookie out of a 303 to rebuild it as a bearer
+// header is a needless dance.
 func (g *authGuard) handleLoginPost(ctx rweb.Context) error {
 	form, _ := url.ParseQuery(string(ctx.Request().Body()))
-	if !g.a.CheckSecret(form.Get("password")) {
+	asJSON := wantsJSON(ctx.Request().Header("Accept"))
+
+	out := g.authorizeLogin(form.Get("password"), time.Now())
+	if !out.ok {
+		if asJSON {
+			return ctx.Status(http.StatusUnauthorized).
+				WriteJSON(map[string]string{"error": "invalid password or pairing token"})
+		}
 		return ctx.Status(http.StatusUnauthorized).WriteHTML(loginPage("Incorrect password."))
+	}
+	if asJSON {
+		return ctx.WriteJSON(map[string]any{
+			"session":    out.session,
+			"expires_at": out.expires.Unix(),
+		})
 	}
 	cookie := &rweb.Cookie{
 		Name:     gwauth.CookieName,
-		Value:    g.a.IssueSession(time.Now()),
+		Value:    out.session,
 		Path:     "/",
 		MaxAge:   int(g.a.TTL() / time.Second),
 		HttpOnly: true,
@@ -115,6 +152,36 @@ func (g *authGuard) handleLoginPost(ctx rweb.Context) error {
 		return ctx.Status(http.StatusInternalServerError).WriteText("failed to set session")
 	}
 	return ctx.Redirect(http.StatusSeeOther, "/")
+}
+
+// loginOutcome is what a submitted credential bought. session is empty unless ok.
+type loginOutcome struct {
+	ok      bool
+	session string
+	expires time.Time
+}
+
+// authorizeLogin decides whether a submitted credential grants a session, and
+// mints it if so. It is separated from handleLoginPost because this is the whole
+// of the security decision — the caller above it only chooses between a cookie
+// and a JSON body — and because rweb's synthetic-request helper cannot carry a
+// POST body, so a test cannot reach it through the handler.
+//
+// The short circuit is load-bearing: submitting the real password must never
+// consume somebody's outstanding pairing grant.
+func (g *authGuard) authorizeLogin(credential string, now time.Time) loginOutcome {
+	if !g.a.CheckSecret(credential) && !g.a.RedeemPairToken(credential, now) {
+		return loginOutcome{}
+	}
+	return loginOutcome{ok: true, session: g.a.IssueSession(now), expires: now.Add(g.a.TTL())}
+}
+
+// wantsJSON reports whether the caller asked for a JSON response body. Matching
+// on a substring rather than parsing the Accept header's q-values is deliberate:
+// a browser's Accept always leads with text/html, and the only caller that names
+// application/json here is one that constructed the header itself.
+func wantsJSON(accept string) bool {
+	return strings.Contains(accept, "application/json")
 }
 
 // loginPage renders the login form, optionally with an error banner. The page
