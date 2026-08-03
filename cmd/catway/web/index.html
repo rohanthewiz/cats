@@ -1857,10 +1857,12 @@
       const meta = document.createElement("span"); meta.className = "ameta";
       const st = it.seen ? it.state : "done";
       meta.textContent = paneRef(it.pub, it.pane) + " · ";
-      // A working agent is mid-change, so "how long since it changed" says
-      // nothing there (and its dot already pulses). Every settled state carries
-      // its age instead — the answer to "is this still true?".
-      if (st !== "working" && it.since_ms >= 0) {
+      // Every state carries its age, working included. For a settled state it
+      // answers "is this still true?"; for a working one it reads as "how long
+      // has it been at this?" — the same instant (when the state last moved)
+      // means run-time there, and a long-running "5m ago · working" is the row
+      // most worth a glance. since_ms < 0 is the rollup's "no instant known".
+      if (it.since_ms >= 0) {
         const age = document.createElement("span"); age.className = "aage";
         age.dataset.at = String(Date.now() - it.since_ms); // absolute: the rollup won't come again until the state moves
         age.textContent = fmtAge(it.since_ms) + " · ";
