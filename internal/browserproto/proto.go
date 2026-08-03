@@ -49,6 +49,14 @@ const (
 	MsgUsage       Type = "usage"
 	MsgClients     Type = "clients"
 	MsgCmdResult   Type = "cmd_result"
+	// Chat surface (the ACP side panel). Added within protocol v1: an old
+	// client ignores unknown types, and a new client learns the server serves
+	// chat from CapChat rather than by probing.
+	MsgChatState    Type = "chat_state"
+	MsgChatSnapshot Type = "chat_snapshot"
+	MsgChatRow      Type = "chat_row"
+	MsgChatDelta    Type = "chat_delta"
+	MsgChatPerm     Type = "chat_perm"
 
 	// Up (browser → server).
 	MsgInit   Type = "init"
@@ -166,6 +174,16 @@ func DecodeDown(data []byte) (any, error) {
 		return decodeAs[Clients](data)
 	case MsgCmdResult:
 		return decodeAs[CmdResult](data)
+	case MsgChatState:
+		return decodeAs[ChatState](data)
+	case MsgChatSnapshot:
+		return decodeAs[ChatSnapshot](data)
+	case MsgChatRow:
+		return decodeAs[ChatRowMsg](data)
+	case MsgChatDelta:
+		return decodeAs[ChatDelta](data)
+	case MsgChatPerm:
+		return decodeAs[ChatPerm](data)
 	}
 	return nil, fmt.Errorf("%w: %q", ErrUnknownType, t)
 }

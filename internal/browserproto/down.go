@@ -25,11 +25,15 @@ const (
 	CapKeyPane = "key.pane"
 	// CapClients: the server pushes the Clients census on connect/disconnect.
 	CapClients = "clients"
+	// CapChat: the server serves the ACP chat surface — chat.* commands are
+	// routed and chat_* messages flow. Without it a client should hide its
+	// chat UI rather than let chat.send vanish into an unknown-command error.
+	CapChat = "chat"
 )
 
 // serverCaps is what this server advertises. Unexported so a caller cannot
 // mutate the advertised set through the shared backing array.
-var serverCaps = []string{CapViewer, CapKeyPane, CapClients}
+var serverCaps = []string{CapViewer, CapKeyPane, CapClients, CapChat}
 
 // Welcome is the server's reply to Init. A version mismatch or rejection sets
 // Error and the server closes the socket; otherwise the server immediately
@@ -498,4 +502,124 @@ func NewCmdResult(id string, ok bool, errMsg string, data any) (CmdResult, error
 		r.Data = raw
 	}
 	return r, nil
+}
+
+// --- Chat (the ACP side panel) ------------------------------------------------
+//
+// The chat surface streams an external ACP agent's conversation to every
+// connected client. Its message design mirrors the agents rollup: broadcasts
+// keep all clients converged, and a full snapshot on connect (or clear)
+// replaces everything, so a client can join mid-conversation without any
+// request/reply choreography.
+
+// ChatStateInfo describes the chat engine, shared by ChatState and
+// ChatSnapshot. Status is a small closed set (idle, starting, ready, turn,
+// dead) — closed because clients gate the composer and stop button on it.
+type ChatStateInfo struct {
+	Status  string `json:"status"`
+	Backend string `json:"backend"`          // display name of the agent ("Copilot")
+	Model   string `json:"model,omitempty"`  // agent-reported model id, when known
+	Cwd     string `json:"cwd,omitempty"`    // the session's working directory
+	Detail  string `json:"detail,omitempty"` // last error or note, for the status line
+}
+
+// ChatState announces a state transition.
+type ChatState struct {
+	T Type `json:"t"`
+	ChatStateInfo
+}
+
+func NewChatState(info ChatStateInfo) ChatState {
+	return ChatState{T: MsgChatState, ChatStateInfo: info}
+}
+
+// ChatAction is an optional button on an info row: an argv the client runs in
+// a fresh tab via tab.create (e.g. `copilot login`). Carrying the argv rather
+// than a semantic verb keeps the client dumb — the server decides what the
+// remedy is, the client only offers it.
+type ChatAction struct {
+	Label string   `json:"label"`
+	Argv  []string `json:"argv"`
+}
+
+// ChatRow is one transcript entry. Role is an open enum — user, agent, tool,
+// info today — and clients must render unknown roles as plain rows, which is
+// what lets new row kinds (collapsed thoughts, say) ship without a protocol
+// change.
+type ChatRow struct {
+	ID     int64       `json:"id"`
+	Role   string      `json:"role"`
+	Text   string      `json:"text"`
+	Kind   string      `json:"kind,omitempty"`   // tool rows: the ACP tool kind (execute, edit, …)
+	Status string      `json:"status,omitempty"` // tool rows: pending|in_progress|completed|failed
+	Action *ChatAction `json:"action,omitempty"`
+}
+
+// ChatRowMsg appends a row to the transcript — or replaces it when the client
+// already has the ID (tool rows update status in place this way).
+type ChatRowMsg struct {
+	T   Type    `json:"t"`
+	Row ChatRow `json:"row"`
+}
+
+func NewChatRow(row ChatRow) ChatRowMsg {
+	return ChatRowMsg{T: MsgChatRow, Row: row}
+}
+
+// ChatDelta appends streamed text to the row with ID. Deltas are coalesced
+// server-side (time- and size-bounded) so a fast token stream cannot flood
+// the per-connection send buffer.
+type ChatDelta struct {
+	T    Type   `json:"t"`
+	ID   int64  `json:"id"`
+	Text string `json:"text"`
+}
+
+func NewChatDelta(id int64, text string) ChatDelta {
+	return ChatDelta{T: MsgChatDelta, ID: id, Text: text}
+}
+
+// ChatPermOption is one choice of a permission request; Kind is the ACP
+// option kind (allow_once, allow_always, reject_once, reject_always), which
+// clients may use for styling but must not gate on.
+type ChatPermOption struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Kind string `json:"kind"`
+}
+
+// ChatPerm is a permission request's lifecycle, both halves: options open the
+// prompt, Resolved closes it everywhere. Broadcasting the resolution matters
+// because any client may answer — the others must see their buttons collapse
+// into the outcome rather than sit on a stale prompt.
+type ChatPerm struct {
+	T        Type             `json:"t"`
+	ReqID    string           `json:"req_id"`
+	Title    string           `json:"title,omitempty"` // the tool call being authorised
+	Kind     string           `json:"kind,omitempty"`  // the ACP tool kind
+	Options  []ChatPermOption `json:"options,omitempty"`
+	Resolved bool             `json:"resolved,omitempty"`
+	Outcome  string           `json:"outcome,omitempty"` // display verdict: allowed|rejected|cancelled
+}
+
+func NewChatPerm(reqID, title, kind string, options []ChatPermOption) ChatPerm {
+	return ChatPerm{T: MsgChatPerm, ReqID: reqID, Title: title, Kind: kind, Options: options}
+}
+
+func NewChatPermResolved(reqID, outcome string) ChatPerm {
+	return ChatPerm{T: MsgChatPerm, ReqID: reqID, Resolved: true, Outcome: outcome}
+}
+
+// ChatSnapshot replaces a client's entire chat model: sent to each client on
+// connect, and broadcast (empty) on chat.clear. Perms carries the still-open
+// permission prompts so a client that joins mid-question can answer it.
+type ChatSnapshot struct {
+	T     Type          `json:"t"`
+	State ChatStateInfo `json:"state"`
+	Rows  []ChatRow     `json:"rows"`
+	Perms []ChatPerm    `json:"perms,omitempty"`
+}
+
+func NewChatSnapshot(state ChatStateInfo, rows []ChatRow, perms []ChatPerm) ChatSnapshot {
+	return ChatSnapshot{T: MsgChatSnapshot, State: state, Rows: rows, Perms: perms}
 }

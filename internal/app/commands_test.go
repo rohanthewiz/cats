@@ -73,6 +73,14 @@ func (b *fakeBackend) RefreshUsage()               { b.rec("refreshUsage") }
 func (b *fakeBackend) ReloadConfig() error         { b.rec("reload"); return b.reloadErr }
 func (b *fakeBackend) Shutdown()                   { b.rec("shutdown") }
 
+func (b *fakeBackend) ChatSend(r Responder, p ChatSendParams) { b.rec("chatSend"); r.OK(nil) }
+func (b *fakeBackend) ChatCancel(r Responder)                 { b.rec("chatCancel"); r.OK(nil) }
+func (b *fakeBackend) ChatPermission(r Responder, p ChatPermissionParams) {
+	b.rec("chatPerm")
+	r.OK(nil)
+}
+func (b *fakeBackend) ChatClear(r Responder) { b.rec("chatClear"); r.OK(nil) }
+
 func (b *fakeBackend) ScrollPane(pane uint32, delta int) error {
 	b.rec("scroll")
 	b.lastScroll = [2]int{int(pane), delta}

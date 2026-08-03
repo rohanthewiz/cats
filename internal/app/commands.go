@@ -119,6 +119,17 @@ type Backend interface {
 	// and nothing to hand back.
 	RefreshUsage()
 
+	// Chat commands (the ACP side panel). All resolve r synchronously: the
+	// chat manager is loop-owned state, and the slow work (the agent
+	// subprocess) runs on the manager's own goroutines, reaching clients as
+	// pushed chat_* messages — same contract as RefreshUsage. ChatPermission
+	// alone can fail meaningfully (an already-answered prompt), which is why
+	// it takes the Responder rather than acking unconditionally.
+	ChatSend(r Responder, p ChatSendParams)
+	ChatCancel(r Responder)
+	ChatPermission(r Responder, p ChatPermissionParams)
+	ChatClear(r Responder)
+
 	// ReloadConfig acknowledges a config reload (a no-op today).
 	ReloadConfig() error
 	// Shutdown notifies observers the server is going away and triggers the quit.
@@ -813,6 +824,36 @@ func (d *Dispatcher) Dispatch(name string, dec ParamDecoder, r Responder) {
 		// at once, as a `usage` push.
 		d.backend.RefreshUsage()
 		r.OK(nil)
+
+	case CmdChatSend:
+		var p ChatSendParams
+		if err := dec.Decode(&p); err != nil {
+			bad(err)
+			return
+		}
+		if err := p.Validate(); err != nil {
+			bad(err)
+			return
+		}
+		d.backend.ChatSend(r, p)
+
+	case CmdChatCancel:
+		d.backend.ChatCancel(r)
+
+	case CmdChatPermission:
+		var p ChatPermissionParams
+		if err := dec.Decode(&p); err != nil {
+			bad(err)
+			return
+		}
+		if err := p.Validate(); err != nil {
+			bad(err)
+			return
+		}
+		d.backend.ChatPermission(r, p)
+
+	case CmdChatClear:
+		d.backend.ChatClear(r)
 
 	case CmdServerReloadConfig:
 		if err := d.backend.ReloadConfig(); err != nil {

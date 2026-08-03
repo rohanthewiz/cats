@@ -109,6 +109,14 @@ abstract final class CmdName {
 
   static const String usageRefresh = 'usage.refresh';
 
+  static const String chatSend = 'chat.send';
+
+  static const String chatCancel = 'chat.cancel';
+
+  static const String chatPermission = 'chat.permission';
+
+  static const String chatClear = 'chat.clear';
+
   static const String worktreeList = 'worktree.list';
 
   static const String worktreeCreate = 'worktree.create';
@@ -222,6 +230,51 @@ class CaptureResult {
   final String text;
 
   factory CaptureResult.fromJson(Map<String, Object?> j) => CaptureResult(
+        text: asString(j['text']),
+      );
+
+  Map<String, Object?> toJson() => {
+        'text': text,
+      };
+}
+
+/// ChatPermissionParams answers a pending permission prompt. Exactly one of
+/// OptionID (the chosen option) or Cancel should be set; ReqID names the
+/// prompt, because several can be open at once.
+class ChatPermissionParams {
+  const ChatPermissionParams({
+    required this.reqId,
+    this.optionId = '',
+    this.cancel = false,
+  });
+
+  final String reqId;
+  final String optionId;
+  final bool cancel;
+
+  factory ChatPermissionParams.fromJson(Map<String, Object?> j) => ChatPermissionParams(
+        reqId: asString(j['req_id']),
+        optionId: asString(j['option_id']),
+        cancel: asBool(j['cancel']),
+      );
+
+  Map<String, Object?> toJson() => {
+        'req_id': reqId,
+        if (optionId.isNotEmpty) 'option_id': optionId,
+        if (cancel) 'cancel': cancel,
+      };
+}
+
+/// ChatSendParams is one user turn for the chat panel. Text is required — a
+/// blank prompt has no meaning to send to an agent.
+class ChatSendParams {
+  const ChatSendParams({
+    required this.text,
+  });
+
+  final String text;
+
+  factory ChatSendParams.fromJson(Map<String, Object?> j) => ChatSendParams(
         text: asString(j['text']),
       );
 
@@ -1944,6 +1997,10 @@ const List<CommandSpec> kCommandSpecs = <CommandSpec>[
   CommandSpec('server.reload_config'),
   CommandSpec('server.stop'),
   CommandSpec('usage.refresh'),
+  CommandSpec('chat.send', paramsRequired: true),
+  CommandSpec('chat.cancel'),
+  CommandSpec('chat.permission', paramsRequired: true),
+  CommandSpec('chat.clear'),
   CommandSpec('worktree.list', replyRequired: true),
   CommandSpec('worktree.create'),
   CommandSpec('worktree.open'),
@@ -2149,6 +2206,26 @@ mixin CatsCommands implements CatsCommandTransport {
   /// `usage.refresh`
   Future<void> usageRefresh() async {
     await invoke(CmdName.usageRefresh, null);
+  }
+
+  /// `chat.send`
+  Future<void> chatSend(ChatSendParams params) async {
+    await invoke(CmdName.chatSend, params.toJson());
+  }
+
+  /// `chat.cancel`
+  Future<void> chatCancel() async {
+    await invoke(CmdName.chatCancel, null);
+  }
+
+  /// `chat.permission`
+  Future<void> chatPermission(ChatPermissionParams params) async {
+    await invoke(CmdName.chatPermission, params.toJson());
+  }
+
+  /// `chat.clear`
+  Future<void> chatClear() async {
+    await invoke(CmdName.chatClear, null);
   }
 
   /// `worktree.list`

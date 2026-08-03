@@ -71,6 +71,15 @@ abstract final class MsgType {
   static const String clients = 'clients';
   static const String cmdResult = 'cmd_result';
 
+  /// Chat surface (the ACP side panel). Added within protocol v1: an old
+  /// client ignores unknown types, and a new client learns the server serves
+  /// chat from CapChat rather than by probing.
+  static const String chatState = 'chat_state';
+  static const String chatSnapshot = 'chat_snapshot';
+  static const String chatRow = 'chat_row';
+  static const String chatDelta = 'chat_delta';
+  static const String chatPerm = 'chat_perm';
+
   /// Up (browser → server).
   static const String init = 'init';
   static const String key = 'key';
@@ -138,6 +147,11 @@ abstract final class Caps {
 
   /// CapClients: the server pushes the Clients census on connect/disconnect.
   static const String clients = 'clients';
+
+  /// CapChat: the server serves the ACP chat surface — chat.* commands are
+  /// routed and chat_* messages flow. Without it a client should hide its
+  /// chat UI rather than let chat.send vanish into an unknown-command error.
+  static const String chat = 'chat';
 }
 
 /// A cell rectangle. On the wire it is the bare array [x, y, w, h];
@@ -332,6 +346,344 @@ class Cell {
         if (b != 0) 'b': b,
         if (m != 0) 'm': m,
         if (h != 0) 'h': h,
+      };
+}
+
+/// ChatAction is an optional button on an info row: an argv the client runs in
+/// a fresh tab via tab.create (e.g. `copilot login`). Carrying the argv rather
+/// than a semantic verb keeps the client dumb — the server decides what the
+/// remedy is, the client only offers it.
+class ChatAction {
+  const ChatAction({
+    required this.label,
+    required this.argv,
+  });
+
+  final String label;
+  final List<String> argv;
+
+  factory ChatAction.fromJson(Map<String, Object?> j) => ChatAction(
+        label: asString(j['label']),
+        argv: asList(j['argv'], asString),
+      );
+
+  Map<String, Object?> toJson() => {
+        'label': label,
+        'argv': argv,
+      };
+}
+
+/// ChatDelta appends streamed text to the row with ID. Deltas are coalesced
+/// server-side (time- and size-bounded) so a fast token stream cannot flood
+/// the per-connection send buffer.
+///
+/// Wire type: `chat_delta`.
+class ChatDelta {
+  const ChatDelta({
+    required this.id,
+    required this.text,
+  });
+
+  /// The `t` discriminator this class always carries. It is a property of
+  /// the type, not a field: a caller who could set it could set it wrong.
+  static const String type = 'chat_delta';
+
+  final int id;
+  final String text;
+
+  factory ChatDelta.fromJson(Map<String, Object?> j) => ChatDelta(
+        id: asInt(j['id']),
+        text: asString(j['text']),
+      );
+
+  Map<String, Object?> toJson() => {
+        't': type,
+        'id': id,
+        'text': text,
+      };
+}
+
+/// ChatPerm is a permission request's lifecycle, both halves: options open the
+/// prompt, Resolved closes it everywhere. Broadcasting the resolution matters
+/// because any client may answer — the others must see their buttons collapse
+/// into the outcome rather than sit on a stale prompt.
+///
+/// Wire type: `chat_perm`.
+class ChatPerm {
+  const ChatPerm({
+    required this.reqId,
+    this.title = '',
+    this.kind = '',
+    this.options = const <ChatPermOption>[],
+    this.resolved = false,
+    this.outcome = '',
+  });
+
+  /// The `t` discriminator this class always carries. It is a property of
+  /// the type, not a field: a caller who could set it could set it wrong.
+  static const String type = 'chat_perm';
+
+  final String reqId;
+
+  /// the tool call being authorised
+  final String title;
+
+  /// the ACP tool kind
+  final String kind;
+  final List<ChatPermOption> options;
+  final bool resolved;
+
+  /// display verdict: allowed|rejected|cancelled
+  final String outcome;
+
+  factory ChatPerm.fromJson(Map<String, Object?> j) => ChatPerm(
+        reqId: asString(j['req_id']),
+        title: asString(j['title']),
+        kind: asString(j['kind']),
+        options: asList(j['options'], (e) => ChatPermOption.fromJson(asObj(e))),
+        resolved: asBool(j['resolved']),
+        outcome: asString(j['outcome']),
+      );
+
+  Map<String, Object?> toJson() => {
+        't': type,
+        'req_id': reqId,
+        if (title.isNotEmpty) 'title': title,
+        if (kind.isNotEmpty) 'kind': kind,
+        if (options.isNotEmpty) 'options': [for (final e in options) e.toJson()],
+        if (resolved) 'resolved': resolved,
+        if (outcome.isNotEmpty) 'outcome': outcome,
+      };
+}
+
+/// ChatPermOption is one choice of a permission request; Kind is the ACP
+/// option kind (allow_once, allow_always, reject_once, reject_always), which
+/// clients may use for styling but must not gate on.
+class ChatPermOption {
+  const ChatPermOption({
+    required this.id,
+    required this.name,
+    required this.kind,
+  });
+
+  final String id;
+  final String name;
+  final String kind;
+
+  factory ChatPermOption.fromJson(Map<String, Object?> j) => ChatPermOption(
+        id: asString(j['id']),
+        name: asString(j['name']),
+        kind: asString(j['kind']),
+      );
+
+  Map<String, Object?> toJson() => {
+        'id': id,
+        'name': name,
+        'kind': kind,
+      };
+}
+
+/// ChatRow is one transcript entry. Role is an open enum — user, agent, tool,
+/// info today — and clients must render unknown roles as plain rows, which is
+/// what lets new row kinds (collapsed thoughts, say) ship without a protocol
+/// change.
+class ChatRow {
+  const ChatRow({
+    required this.id,
+    required this.role,
+    required this.text,
+    this.kind = '',
+    this.status = '',
+    this.action,
+  });
+
+  final int id;
+  final String role;
+  final String text;
+
+  /// tool rows: the ACP tool kind (execute, edit, …)
+  final String kind;
+
+  /// tool rows: pending|in_progress|completed|failed
+  final String status;
+  final ChatAction? action;
+
+  factory ChatRow.fromJson(Map<String, Object?> j) => ChatRow(
+        id: asInt(j['id']),
+        role: asString(j['role']),
+        text: asString(j['text']),
+        kind: asString(j['kind']),
+        status: asString(j['status']),
+        action: j['action'] == null ? null : ChatAction.fromJson(asObj(j['action'])),
+      );
+
+  Map<String, Object?> toJson() => {
+        'id': id,
+        'role': role,
+        'text': text,
+        if (kind.isNotEmpty) 'kind': kind,
+        if (status.isNotEmpty) 'status': status,
+        if (action != null) 'action': action?.toJson(),
+      };
+}
+
+/// ChatRowMsg appends a row to the transcript — or replaces it when the client
+/// already has the ID (tool rows update status in place this way).
+///
+/// Wire type: `chat_row`.
+class ChatRowMsg {
+  const ChatRowMsg({
+    required this.row,
+  });
+
+  /// The `t` discriminator this class always carries. It is a property of
+  /// the type, not a field: a caller who could set it could set it wrong.
+  static const String type = 'chat_row';
+
+  final ChatRow row;
+
+  factory ChatRowMsg.fromJson(Map<String, Object?> j) => ChatRowMsg(
+        row: ChatRow.fromJson(asObj(j['row'])),
+      );
+
+  Map<String, Object?> toJson() => {
+        't': type,
+        'row': row.toJson(),
+      };
+}
+
+/// ChatSnapshot replaces a client's entire chat model: sent to each client on
+/// connect, and broadcast (empty) on chat.clear. Perms carries the still-open
+/// permission prompts so a client that joins mid-question can answer it.
+///
+/// Wire type: `chat_snapshot`.
+class ChatSnapshot {
+  const ChatSnapshot({
+    required this.state,
+    required this.rows,
+    this.perms = const <ChatPerm>[],
+  });
+
+  /// The `t` discriminator this class always carries. It is a property of
+  /// the type, not a field: a caller who could set it could set it wrong.
+  static const String type = 'chat_snapshot';
+
+  final ChatStateInfo state;
+  final List<ChatRow> rows;
+  final List<ChatPerm> perms;
+
+  factory ChatSnapshot.fromJson(Map<String, Object?> j) => ChatSnapshot(
+        state: ChatStateInfo.fromJson(asObj(j['state'])),
+        rows: asList(j['rows'], (e) => ChatRow.fromJson(asObj(e))),
+        perms: asList(j['perms'], (e) => ChatPerm.fromJson(asObj(e))),
+      );
+
+  Map<String, Object?> toJson() => {
+        't': type,
+        'state': state.toJson(),
+        'rows': [for (final e in rows) e.toJson()],
+        if (perms.isNotEmpty) 'perms': [for (final e in perms) e.toJson()],
+      };
+}
+
+/// ChatState announces a state transition.
+///
+/// Wire type: `chat_state`.
+class ChatState {
+  const ChatState({
+    required this.status,
+    required this.backend,
+    this.model = '',
+    this.cwd = '',
+    this.detail = '',
+  });
+
+  /// The `t` discriminator this class always carries. It is a property of
+  /// the type, not a field: a caller who could set it could set it wrong.
+  static const String type = 'chat_state';
+
+  final String status;
+
+  /// display name of the agent ("Copilot")
+  final String backend;
+
+  /// agent-reported model id, when known
+  final String model;
+
+  /// the session's working directory
+  final String cwd;
+
+  /// last error or note, for the status line
+  final String detail;
+
+  /// The embedded `ChatStateInfo` block, regrouped. Go's embedding flattens these
+  /// onto the wire; this hands them back as the unit they were declared as.
+  ChatStateInfo get chatStateInfo => ChatStateInfo(
+        status: status,
+        backend: backend,
+        model: model,
+        cwd: cwd,
+        detail: detail,
+      );
+
+  factory ChatState.fromJson(Map<String, Object?> j) => ChatState(
+        status: asString(j['status']),
+        backend: asString(j['backend']),
+        model: asString(j['model']),
+        cwd: asString(j['cwd']),
+        detail: asString(j['detail']),
+      );
+
+  Map<String, Object?> toJson() => {
+        't': type,
+        'status': status,
+        'backend': backend,
+        if (model.isNotEmpty) 'model': model,
+        if (cwd.isNotEmpty) 'cwd': cwd,
+        if (detail.isNotEmpty) 'detail': detail,
+      };
+}
+
+/// ChatStateInfo describes the chat engine, shared by ChatState and
+/// ChatSnapshot. Status is a small closed set (idle, starting, ready, turn,
+/// dead) — closed because clients gate the composer and stop button on it.
+class ChatStateInfo {
+  const ChatStateInfo({
+    required this.status,
+    required this.backend,
+    this.model = '',
+    this.cwd = '',
+    this.detail = '',
+  });
+
+  final String status;
+
+  /// display name of the agent ("Copilot")
+  final String backend;
+
+  /// agent-reported model id, when known
+  final String model;
+
+  /// the session's working directory
+  final String cwd;
+
+  /// last error or note, for the status line
+  final String detail;
+
+  factory ChatStateInfo.fromJson(Map<String, Object?> j) => ChatStateInfo(
+        status: asString(j['status']),
+        backend: asString(j['backend']),
+        model: asString(j['model']),
+        cwd: asString(j['cwd']),
+        detail: asString(j['detail']),
+      );
+
+  Map<String, Object?> toJson() => {
+        'status': status,
+        'backend': backend,
+        if (model.isNotEmpty) 'model': model,
+        if (cwd.isNotEmpty) 'cwd': cwd,
+        if (detail.isNotEmpty) 'detail': detail,
       };
 }
 
@@ -1654,6 +2006,16 @@ Object? decodeDown(Map<String, Object?> j) {
       return Clients.fromJson(j);
     case CmdResult.type:
       return CmdResult.fromJson(j);
+    case ChatState.type:
+      return ChatState.fromJson(j);
+    case ChatSnapshot.type:
+      return ChatSnapshot.fromJson(j);
+    case ChatRowMsg.type:
+      return ChatRowMsg.fromJson(j);
+    case ChatDelta.type:
+      return ChatDelta.fromJson(j);
+    case ChatPerm.type:
+      return ChatPerm.fromJson(j);
   }
   return null;
 }

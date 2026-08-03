@@ -58,6 +58,14 @@ const (
 	// the one that asked.
 	CmdUsageRefresh = "usage.refresh"
 
+	// Chat commands (the ACP side panel). Like usage.refresh, their product is
+	// the chat_* broadcast stream, not the reply — every client renders the
+	// conversation, so answering only the sender would desynchronise the rest.
+	CmdChatSend       = "chat.send"
+	CmdChatCancel     = "chat.cancel"
+	CmdChatPermission = "chat.permission"
+	CmdChatClear      = "chat.clear"
+
 	// Git-worktree commands (WS8 dialogs): list/create/open/remove checkouts
 	// anchored on a pane's repo. The git work runs off-loop (Backend Start*).
 	CmdWorktreeList   = "worktree.list"
@@ -198,6 +206,13 @@ var commandSpecs = []CommandSpec{
 	// Usage. Not reply-gated: the refresh is worth performing for a caller that
 	// never listens, because its product is the broadcast, not the reply.
 	{Name: CmdUsageRefresh},
+
+	// Chat. None reply-gated for the same reason as usage.refresh: the effects
+	// land as chat_* broadcasts on every client.
+	{Name: CmdChatSend, Params: ChatSendParams{}, ParamsRequired: true},
+	{Name: CmdChatCancel},
+	{Name: CmdChatPermission, Params: ChatPermissionParams{}, ParamsRequired: true},
+	{Name: CmdChatClear},
 
 	// Git worktrees. Only the listing is reply-gated: the other three have
 	// effects worth performing even when the caller stops listening.
@@ -710,6 +725,40 @@ type TabCreateParams struct {
 func (p TabCreateParams) Validate() error {
 	if len(p.Command) > 0 && strings.TrimSpace(p.Command[0]) == "" {
 		return errors.New("command[0] must be a program name")
+	}
+	return nil
+}
+
+// ChatSendParams is one user turn for the chat panel. Text is required — a
+// blank prompt has no meaning to send to an agent.
+type ChatSendParams struct {
+	Text string `json:"text"`
+}
+
+// Validate rejects a whitespace-only prompt.
+func (p ChatSendParams) Validate() error {
+	if strings.TrimSpace(p.Text) == "" {
+		return errors.New("text is required")
+	}
+	return nil
+}
+
+// ChatPermissionParams answers a pending permission prompt. Exactly one of
+// OptionID (the chosen option) or Cancel should be set; ReqID names the
+// prompt, because several can be open at once.
+type ChatPermissionParams struct {
+	ReqID    string `json:"req_id"`
+	OptionID string `json:"option_id,omitempty"`
+	Cancel   bool   `json:"cancel,omitempty"`
+}
+
+// Validate requires the prompt id and an answer of some kind.
+func (p ChatPermissionParams) Validate() error {
+	if p.ReqID == "" {
+		return errors.New("req_id is required")
+	}
+	if p.OptionID == "" && !p.Cancel {
+		return errors.New("option_id or cancel is required")
 	}
 	return nil
 }
