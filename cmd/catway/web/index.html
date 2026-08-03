@@ -197,15 +197,19 @@
      boundary: the same visual break, but it now names the group and can fold it.
      Groups after the first keep the hairline above them, on the header row rather
      than on the first pane, so a focused pane never paints across the divider. */
+  /* Bold, so the header reads as a heading over its rows rather than as one more
+     muted row among them — at this size weight separates the two tiers better than
+     the colour alone did. */
   #pane-list li.wsgrp { color:var(--ws-heading); font-size:calc(10px * var(--sb-scale)); text-transform:uppercase;
-    letter-spacing:.5px; cursor:pointer; }
+    letter-spacing:.5px; cursor:pointer; font-weight:600; }
   #pane-list li.wsgrp.sep { border-top:1px solid var(--line); margin-top:5px; padding-top:7px; }
   #pane-list li.wsgrp:hover { background:var(--panel2); color:var(--fg-soft); }
-  /* Whichever marker comes first is pushed to the right edge; a collapsed group
-     shows its rollup ahead of the caret. */
+  /* The rollup sits ahead of the caret and the pair is pushed to the right edge. */
   #pane-list li.wsgrp .gsum, #pane-list li.wsgrp .car { margin-left:auto; }
   #pane-list li.wsgrp .gsum + .car { margin-left:0; }
-  #pane-list li.wsgrp .gsum { text-transform:none; letter-spacing:0; }
+  /* The count is the header's secondary half, so it stays at normal weight — only
+     the workspace name carries the bold. */
+  #pane-list li.wsgrp .gsum { text-transform:none; letter-spacing:0; font-weight:400; }
   #pane-list li.wsgrp .car { font-size:calc(9px * var(--sb-scale)); }
   #pane-list .pub { color:var(--accent); }
   #pane-list .ttl { color:var(--muted); overflow:hidden; text-overflow:ellipsis; }
@@ -1230,9 +1234,11 @@
     });
   }
 
-  // paneGroupEl builds one workspace's header row. Collapsed, it stands in for the
-  // rows it hides, so it reports what they would have said in aggregate: how many
-  // of the group's panes are running an agent, out of how many panes.
+  // paneGroupEl builds one workspace's header row: how many of the group's panes
+  // are running an agent, out of how many panes. The rollup rides the header in
+  // both states — collapsed it stands in for the rows it hides, and expanded it
+  // saves counting them by eye, since the agent count is a property of the group
+  // that no single row reports.
   function paneGroupEl(g, sep) {
     const collapsed = paneCollapsed.has(g.ws);
     const li = document.createElement("li");
@@ -1240,14 +1246,12 @@
     const name = document.createElement("span");
     name.textContent = wsName(g.ws) || "—";
     li.appendChild(name);
-    if (collapsed) {
-      const agents = g.rows.filter((r) => r.agent).length;
-      const s = document.createElement("span");
-      s.className = "gsum";
-      const n = (c, w) => c + " " + w + (c === 1 ? "" : "s");
-      s.textContent = n(agents, "agent") + " / " + n(g.rows.length, "pane");
-      li.appendChild(s);
-    }
+    const agents = g.rows.filter((r) => r.agent).length;
+    const s = document.createElement("span");
+    s.className = "gsum";
+    const n = (c, w) => c + " " + w + (c === 1 ? "" : "s");
+    s.textContent = n(agents, "agent") + " / " + n(g.rows.length, "pane");
+    li.appendChild(s);
     const car = document.createElement("span");
     car.className = "car"; car.textContent = collapsed ? "▶" : "▼";
     li.appendChild(car);
