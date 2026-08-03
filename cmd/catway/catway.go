@@ -12,6 +12,7 @@ import (
 
 	"github.com/rohanthewiz/rweb"
 
+	"github.com/rohanthewiz/cats/internal/acpchat"
 	"github.com/rohanthewiz/cats/internal/app"
 	"github.com/rohanthewiz/cats/internal/browserproto"
 	"github.com/rohanthewiz/cats/internal/config"
@@ -145,6 +146,10 @@ type orch struct {
 	// missing here has no readable home on this machine and shows no model, which
 	// is also how tests point one entry at a fixture tree.
 	modelRoots map[string]string
+	// chat is the ACP side panel's engine (chat.go), nil until the first
+	// chat.send — the agent subprocess should not exist before anyone has
+	// spoken to it.
+	chat *acpchat.Manager
 	// usage is the account's last-read rate-limit standing (usage.go), nil
 	// until the first poll lands. Held so a browser connecting between polls is
 	// sent the current numbers rather than an empty section for up to two
@@ -1198,6 +1203,9 @@ func (o *orch) ReloadConfig() error {
 // process and deliberately survives.
 func (o *orch) Shutdown() {
 	o.broadcast(browserproto.NewShutdown())
+	if o.chat != nil {
+		o.chat.Shutdown() // the ACP agent is ours alone; it must not outlive us
+	}
 	o.saveNow()
 	o.beginFinalCapture(func() {
 		if o.stop != nil {
@@ -1593,6 +1601,11 @@ func (o *orch) registerConn(c *client, init *browserproto.Init) {
 	o.send(c, o.agentsMsg())
 	if o.usage != nil {
 		o.send(c, *o.usage)
+	}
+	if o.chat != nil {
+		// The whole chat model in one message — a client joining
+		// mid-conversation (or mid-permission-prompt) starts converged.
+		o.send(c, o.chat.Snapshot())
 	}
 	o.send(c, browserproto.NewTitle(o.appTitle()))
 	if !o.daemon.connected() {
