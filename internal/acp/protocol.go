@@ -27,10 +27,12 @@ type ClientCapabilities struct {
 	Terminal bool `json:"terminal"`
 }
 
-// ClientInfo names the client in the agent's logs/telemetry.
+// ClientInfo names the client in the agent's logs/telemetry. Version is not
+// omitempty because copilot validates it as a required string — an absent
+// version fails the whole initialize with -32602.
 type ClientInfo struct {
 	Name    string `json:"name"`
-	Version string `json:"version,omitempty"`
+	Version string `json:"version"`
 }
 
 // InitializeParams is the first request on a new connection.

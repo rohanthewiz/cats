@@ -281,7 +281,7 @@ func (m *Manager) startAgent(cwd string) {
 			err = client.CallWithTimeout("initialize", acp.InitializeParams{
 				ProtocolVersion:    acp.ProtocolVersion,
 				ClientCapabilities: caps,
-				ClientInfo:         acp.ClientInfo{Name: "cats"},
+				ClientInfo:         acp.ClientInfo{Name: "cats", Version: "1"},
 			}, nil, initTimeout)
 		}
 		var sess acp.NewSessionResult
@@ -383,19 +383,20 @@ func (m *Manager) turnDone(res acp.PromptResult, err error) {
 	// or errored) must not leave the clients staring at dead buttons.
 	m.flushPerms(acp.CancelledOutcome(), "cancelled")
 	m.turnActive = false
+	m.setStatus("ready", "")
 	switch {
-	case err != nil:
-		m.setStatus("ready", "")
-		m.appendRow(browserproto.ChatRow{Role: "info", Text: "turn failed: " + err.Error()})
-	case res.StopReason == acp.StopCancelled:
-		m.setStatus("ready", "")
+	case m.cancelSent || res.StopReason == acp.StopCancelled:
+		// cancelSent counts even when the stopReason disagrees: the spec says
+		// a cancelled turn must answer stopReason "cancelled", but copilot
+		// (1.0.77, verified live) answers end_turn — and the truth the user
+		// cares about is that the turn stopped because they asked.
 		m.appendRow(browserproto.ChatRow{Role: "info", Text: "— stopped"})
+	case err != nil:
+		m.appendRow(browserproto.ChatRow{Role: "info", Text: "turn failed: " + err.Error()})
 	case res.StopReason == acp.StopEndTurn, res.StopReason == "":
-		m.setStatus("ready", "")
 	default:
 		// refusal, max_tokens, max_turn_requests — the turn ended early for a
 		// reason worth reading.
-		m.setStatus("ready", "")
 		m.appendRow(browserproto.ChatRow{Role: "info", Text: "turn ended: " + res.StopReason})
 	}
 	if q := m.queued; q != "" && m.status == "ready" {

@@ -408,6 +408,31 @@ func TestCancelFlushesPermsAndStops(t *testing.T) {
 	}
 }
 
+// TestCancelWithNonCompliantAgent pins the copilot 1.0.77 quirk: the spec
+// says a cancelled turn answers stopReason "cancelled", but copilot answers
+// end_turn. The user still gets "— stopped" — cancelSent is the truth.
+func TestCancelWithNonCompliantAgent(t *testing.T) {
+	h := newHarness(t)
+	h.onPrompt = func(a *fakeAgent, id int64, text string) {
+		<-a.cancelled
+		a.respond(id, `{"stopReason":"end_turn"}`)
+	}
+	h.run(func() { h.m.Send("/w", "long job") })
+	h.waitFor("turn", func() bool { return h.m.status == "turn" })
+	h.run(func() { h.m.Cancel() })
+	h.waitFor("turn end", func() bool { return h.m.status == "ready" })
+
+	stopped := false
+	for _, r := range h.rowsByRole("info") {
+		if r.Text == "— stopped" {
+			stopped = true
+		}
+	}
+	if !stopped {
+		t.Fatal("cancelSent must yield '— stopped' even on stopReason end_turn")
+	}
+}
+
 func TestAgentDeathAndRestart(t *testing.T) {
 	h := newHarness(t)
 	h.onPrompt = func(a *fakeAgent, id int64, text string) {
