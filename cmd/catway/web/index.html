@@ -55,10 +55,14 @@
     /* Sidebar column width. Anything else that has to clear the sidebar (the
        banner) reads it from here so the two can't drift apart. */
     --sidebar-w:calc(253px * var(--sb-scale));
+    /* Chat column width. 0 keeps the grid math identical to the pre-chat
+       layout when the panel is closed; body.chat-open widens it. */
+    --chat-w:0px;
   }
+  body.chat-open { --chat-w:340px; }
   html,body { margin:0; height:100%; background:var(--bg); color:var(--fg);
     font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; overflow:hidden; }
-  #app { position:fixed; inset:0; display:grid; grid-template-columns:var(--sidebar-w) 5px 1fr; }
+  #app { position:fixed; inset:0; display:grid; grid-template-columns:var(--sidebar-w) 5px 1fr var(--chat-w); }
 
   /* ---- Splitter ----
      A five-pixel gutter between the sidebar and the terminals. It sits in its
@@ -329,6 +333,53 @@
   #statusbar .tbtn .tmk { color:var(--accent); }
   #statusbar .tbtn:hover .tmk { color:var(--fg-bright); }
 
+  /* ---- Chat panel (the ACP side panel) ----
+     A fourth grid column, not a pane: chat lives beside the terminal grid the
+     way the sidebar does, so it stays visible while the agent works and never
+     participates in the BSP layout. Closed = display:none + a 0px column, so
+     the pane grid math is untouched until the panel actually opens. */
+  #chat { background:var(--panel); border-left:1px solid var(--line);
+    display:flex; flex-direction:column; min-width:0; overflow:hidden; }
+  body:not(.chat-open) #chat { display:none; }
+  #chat-head { flex:none; display:flex; align-items:baseline; gap:8px; padding:9px 10px;
+    border-bottom:1px solid var(--line); color:var(--fg-strong); font-size:12px; font-weight:600; }
+  #chat-status { margin-left:auto; color:var(--muted); font-weight:400; font-size:10px;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  #chat-log { flex:1; overflow-y:auto; padding:10px; display:flex; flex-direction:column;
+    gap:7px; font-size:12px; line-height:1.45; }
+  .crow { white-space:pre-wrap; overflow-wrap:anywhere; }
+  .crow.user { color:var(--fg-strong); }
+  .crow.user::before { content:"❯ "; color:var(--accent); }
+  .crow.tool { color:var(--muted); font-size:11px; }
+  .crow.info { color:var(--muted); font-style:italic; }
+  .crow .cstat { color:var(--muted); }
+  .cbtn { font:inherit; font-size:11px; background:var(--panel2); color:var(--fg-soft);
+    border:1px solid var(--line); border-radius:4px; padding:2px 9px; cursor:pointer; }
+  .cbtn:hover { color:var(--fg-bright); border-color:var(--accent); }
+  .cbtn.allow { border-color:var(--accent); color:var(--accent); }
+  .cbtn.allow:hover { background:var(--accent); color:var(--accent-fg); }
+  /* Permission prompts are transcript entries, not modals: several can be
+     open at once and any connected client may answer. */
+  .cperm { border:1px solid var(--line); border-left:3px solid var(--accent);
+    border-radius:5px; padding:6px 9px; }
+  .cperm .ctitle { color:var(--fg-strong); margin-bottom:6px; }
+  .cperm .copts { display:flex; gap:6px; flex-wrap:wrap; }
+  .cperm .verdict { color:var(--muted); font-style:italic; }
+  #chat-compose { flex:none; display:flex; gap:6px; padding:9px 10px;
+    border-top:1px solid var(--line); align-items:stretch; }
+  #chat-input { flex:1; resize:none; background:var(--panel2); color:var(--fg);
+    border:1px solid var(--line); border-radius:5px; padding:6px 8px; font:inherit;
+    font-size:12px; min-height:36px; }
+  #chat-input:focus { outline:none; border-color:var(--accent); }
+  #chat-ctl { display:flex; flex-direction:column; gap:4px; justify-content:flex-end; }
+  #chat-ctl .cbtn:disabled { opacity:.35; cursor:default; }
+  #chat-ctl .cbtn:disabled:hover { color:var(--fg-soft); border-color:var(--line); }
+  /* Attention dot, same idea as the gear's update badge: something happened
+     (a permission prompt, a dead agent) while the panel was closed. */
+  #chatbtn { position:relative; }
+  #chatbtn.badge::after { content:""; position:absolute; top:6px; right:5px; width:6px;
+    height:6px; border-radius:50%; background:var(--accent); }
+
   /* ---- Toasts ---- */
   #toasts { position:fixed; right:10px; top:38px; display:flex; flex-direction:column; gap:6px; z-index:6; }
   .toast { background:var(--panel2); color:var(--fg-strong); border:1px solid var(--line); border-left:3px solid var(--accent);
@@ -520,11 +571,23 @@
       <div id="statusbar">
         <span class="tbtn" id="palhint" title="command palette (⌘K / Ctrl+Alt+K)"><span class="tmk">⌘K</span>palette</span>
         <span class="tbtn" id="pluginsbtn" title="plugins — install, run, update"><span class="tmk">⧉</span>plugins</span>
+        <span class="tbtn" id="chatbtn" title="chat — AI agent side panel"><span class="tmk">✦</span>chat</span>
         <span class="tbtn" id="gear" title="menu"><span class="g">⚙</span></span>
       </div>
     </div>
     <div id="panes"></div>
   </div>
+  <aside id="chat">
+    <div id="chat-head"><span id="chat-title">Chat</span><span id="chat-status"></span></div>
+    <div id="chat-log"></div>
+    <div id="chat-compose">
+      <textarea id="chat-input" rows="2" placeholder="Ask… (Enter sends, Shift+Enter for a new line)"></textarea>
+      <div id="chat-ctl">
+        <button class="cbtn" id="chat-stop" title="stop the current turn" disabled>⏹</button>
+        <button class="cbtn" id="chat-clear" title="clear the conversation">⌫</button>
+      </div>
+    </div>
+  </aside>
 </div>
 <div id="banner"></div>
 <div id="toasts"></div>
@@ -553,6 +616,14 @@
   const gearEl = document.getElementById("gear");
   const bannerEl = document.getElementById("banner");
   const splitterEl = document.getElementById("splitter");
+  const chatEl = document.getElementById("chat");
+  const chatLogEl = document.getElementById("chat-log");
+  const chatTitleEl = document.getElementById("chat-title");
+  const chatStatusEl = document.getElementById("chat-status");
+  const chatInputEl = document.getElementById("chat-input");
+  const chatBtnEl = document.getElementById("chatbtn");
+  const chatStopEl = document.getElementById("chat-stop");
+  const chatClearEl = document.getElementById("chat-clear");
   const dpr = window.devicePixelRatio || 1;
   const measureCtx = document.createElement("canvas").getContext("2d");
 
@@ -2045,7 +2116,12 @@
     switch (msg.t) {
       case "welcome":
         if (msg.error) setStatus("rejected: " + msg.error, true);
-        else setStatus("connected");
+        else {
+          setStatus("connected");
+          // The chip only exists when the server serves chat — without the
+          // cap, chat.send would vanish into an unknown-command error.
+          chatBtnEl.style.display = (msg.caps || []).includes("chat") ? "" : "none";
+        }
         break;
       case "layout": applyLayout(msg); break;
       case "pane_frame": {
@@ -2102,6 +2178,11 @@
         else if (!msg.ok) toast("cmd failed: " + (msg.error || "unknown"));
         break;
       }
+      case "chat_state": chatApplyState(msg); break;
+      case "chat_snapshot": chatApplySnapshot(msg); break;
+      case "chat_row": chatUpsertRow(msg.row); break;
+      case "chat_delta": chatAppendDelta(msg.id, msg.text); break;
+      case "chat_perm": chatPermUpdate(msg); break;
     }
   }
 
@@ -2129,6 +2210,10 @@
   }
 
   function onKey(e) {
+    // The chat panel owns the keyboard while focus is inside it: composed
+    // text must never reach a PTY, and terminal shortcuts (⌘V paste-to-pane,
+    // font sizing) must not fire mid-composition.
+    if (chatEl.contains(document.activeElement)) return;
     // An open dialog/menu/palette owns the keyboard: its own listeners handle
     // Enter/arrows, Escape falls through to here, and nothing reaches the PTY.
     if (uiOpen()) {
@@ -2202,6 +2287,7 @@
       .catch((err) => toast("paste blocked: " + ((err && err.name) || err)));
   }
   document.addEventListener("paste", (e) => {
+    if (chatEl.contains(e.target)) return; // a paste into the composer stays local
     const text = (e.clipboardData || window.clipboardData).getData("text");
     if (text) { e.preventDefault(); sendMsg({ t: "paste", data: text }); }
   });
@@ -4045,6 +4131,178 @@
     try { localStorage.removeItem(SBW_KEY); } catch (e) { /* nothing to clear */ }
     sidebarResized(true);
   });
+
+  // ---- Chat panel (the ACP side panel) ----
+  // The server broadcasts the whole conversation to every client (chat_row /
+  // chat_delta appends, chat_snapshot replaces), so this code only renders —
+  // it never owns conversation state beyond what is on screen. Open/closed is
+  // a per-browser display preference like the sidebar width.
+  const CHAT_KEY = "cats.chat_open";
+  function chatIsOpen() { return document.body.classList.contains("chat-open"); }
+  function setChatOpen(open) {
+    document.body.classList.toggle("chat-open", open);
+    try {
+      if (open) localStorage.setItem(CHAT_KEY, "1"); else localStorage.removeItem(CHAT_KEY);
+    } catch (e) { /* not persisted */ }
+    // The chat column changes #main's width exactly like a sidebar drag does:
+    // the pane grid must re-derive cols/rows and tell the server.
+    sidebarResized(true);
+    if (open) {
+      chatBtnEl.classList.remove("badge");
+      chatLogEl.scrollTop = chatLogEl.scrollHeight;
+      chatInputEl.focus();
+    }
+  }
+  chatBtnEl.addEventListener("click", () => setChatOpen(!chatIsOpen()));
+  try { if (localStorage.getItem(CHAT_KEY)) document.body.classList.add("chat-open"); } catch (e) { /* closed */ }
+
+  // chatNudge marks the chip when something worth seeing (a permission
+  // prompt, a dead agent) happens while the panel is closed.
+  function chatNudge() { if (!chatIsOpen()) chatBtnEl.classList.add("badge"); }
+
+  // chatMutate keeps the transcript pinned to the bottom across a mutation —
+  // but only when it already was: a user scrolled up reading history must not
+  // be yanked down by every streamed token.
+  function chatMutate(f) {
+    const pinned = chatLogEl.scrollTop + chatLogEl.clientHeight >= chatLogEl.scrollHeight - 8;
+    f();
+    if (pinned) chatLogEl.scrollTop = chatLogEl.scrollHeight;
+  }
+
+  function chatFillRow(el, row) {
+    el.textContent = "";
+    if (row.role === "tool") {
+      el.appendChild(document.createTextNode("⚙ " + (row.text || "")));
+      if (row.status) {
+        const st = document.createElement("span");
+        st.className = "cstat";
+        st.textContent = " — " + (row.status === "failed" ? "✗ failed" : row.status);
+        el.appendChild(st);
+      }
+      return;
+    }
+    const t = document.createElement("span");
+    t.className = "ctext";
+    t.textContent = row.text || "";
+    el.appendChild(t);
+    if (row.action && row.action.argv && row.action.argv.length) {
+      el.appendChild(document.createTextNode(" "));
+      const b = document.createElement("button");
+      b.className = "cbtn allow";
+      b.textContent = row.action.label || "run";
+      // The remedy opens as a real pane: the server named an argv (e.g.
+      // `copilot login`), and tab.create's Command is the existing seam for
+      // running one in a fresh tab.
+      b.addEventListener("click", () => sendCmd("tab.create", { command: row.action.argv }));
+      el.appendChild(b);
+    }
+  }
+
+  function chatRowEl(row) {
+    const el = document.createElement("div");
+    el.className = "crow " + (row.role || "info");
+    el.id = "chat-row-" + row.id;
+    chatFillRow(el, row);
+    return el;
+  }
+
+  // chat_row is an upsert: a known id re-renders in place (tool rows change
+  // status this way), an unknown one appends.
+  function chatUpsertRow(row) {
+    if (!row) return;
+    chatMutate(() => {
+      const el = document.getElementById("chat-row-" + row.id);
+      if (el) chatFillRow(el, row);
+      else chatLogEl.appendChild(chatRowEl(row));
+    });
+  }
+
+  // chat_delta appends streamed text to an existing row — a text-node append,
+  // not a re-render, so a long answer costs O(1) per flush.
+  function chatAppendDelta(id, text) {
+    const el = document.getElementById("chat-row-" + id);
+    const t = el && el.querySelector(".ctext");
+    if (!t) return;
+    chatMutate(() => t.appendChild(document.createTextNode(text)));
+  }
+
+  function chatPermEl(msg) {
+    const el = document.createElement("div");
+    el.className = "cperm";
+    el.id = "chat-perm-" + msg.req_id;
+    const title = document.createElement("div");
+    title.className = "ctitle";
+    title.textContent = msg.title || "permission request";
+    el.appendChild(title);
+    const opts = document.createElement("div");
+    opts.className = "copts";
+    for (const o of (msg.options || [])) {
+      const b = document.createElement("button");
+      b.className = "cbtn" + (String(o.kind || "").startsWith("allow") ? " allow" : "");
+      b.textContent = o.name || o.id;
+      b.addEventListener("click", () => sendCmd("chat.permission", { req_id: msg.req_id, option_id: o.id }));
+      opts.appendChild(b);
+    }
+    el.appendChild(opts);
+    return el;
+  }
+
+  // chat_perm opens a prompt or, with resolved, collapses it into its verdict
+  // everywhere — any client may have answered, so buttons must not outlive
+  // the question.
+  function chatPermUpdate(msg) {
+    if (msg.resolved) {
+      const el = document.getElementById("chat-perm-" + msg.req_id);
+      if (el) chatMutate(() => {
+        el.textContent = "";
+        const v = document.createElement("span");
+        v.className = "verdict";
+        v.textContent = msg.outcome === "allowed" ? "✓ allowed"
+          : msg.outcome === "rejected" ? "⊘ rejected" : "— cancelled";
+        el.appendChild(v);
+      });
+      return;
+    }
+    chatMutate(() => chatLogEl.appendChild(chatPermEl(msg)));
+    chatNudge();
+  }
+
+  function chatApplyState(st) {
+    chatTitleEl.textContent = st.backend || "Chat";
+    const model = st.model ? modelLabel(st.model) : "";
+    let s = st.status || "idle";
+    if (st.detail) s += " · " + st.detail;
+    chatStatusEl.textContent = (model ? model + " · " : "") + s;
+    chatStatusEl.title = (st.cwd ? "cwd: " + st.cwd : "") + (st.detail ? "\n" + st.detail : "");
+    chatStopEl.disabled = st.status !== "turn";
+    if (st.status === "dead") chatNudge();
+  }
+
+  // chat_snapshot replaces the whole panel: sent on connect (joining
+  // mid-conversation) and on chat.clear (empty).
+  function chatApplySnapshot(msg) {
+    chatApplyState(msg.state || {});
+    chatLogEl.textContent = "";
+    for (const r of (msg.rows || [])) chatLogEl.appendChild(chatRowEl(r));
+    for (const p of (msg.perms || [])) chatLogEl.appendChild(chatPermEl(p));
+    chatLogEl.scrollTop = chatLogEl.scrollHeight;
+    if ((msg.perms || []).length) chatNudge();
+  }
+
+  function chatSend() {
+    const text = chatInputEl.value.trim();
+    if (!text) return;
+    chatInputEl.value = "";
+    sendCmd("chat.send", { text });
+  }
+  chatInputEl.addEventListener("keydown", (e) => {
+    e.stopPropagation(); // belt to onKey's braces: nothing composed reaches a PTY
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); chatSend(); }
+    else if (e.key === "Escape") { e.preventDefault(); chatInputEl.blur(); }
+  });
+  chatInputEl.addEventListener("keyup", (e) => e.stopPropagation());
+  chatStopEl.addEventListener("click", () => sendCmd("chat.cancel"));
+  chatClearEl.addEventListener("click", () => sendCmd("chat.clear"));
 
   // Toolbar affordances: the palette hint opens it, plugins opens its manager
   // directly (it earns the top-level slot — installing and running plugins is
