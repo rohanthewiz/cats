@@ -867,8 +867,9 @@ class Notify {
 /// PaneAgent reports one pane's agent identity + state change (also patches the
 /// Agents rollup client-side). Agent is "" for a plain shell. Model is the LLM
 /// the agent is currently running under — display text, so it may carry the
-/// reasoning effort alongside it ("claude-opus-5 · high") — omitted when unknown
-/// (only claude is resolvable today — see catway's agentmodel.go).
+/// reasoning effort alongside it ("claude-opus-5 · high") — omitted when unknown,
+/// which covers both an agent whose history catway cannot read and one that has
+/// not answered yet (see catway's agentmodel.go for which agents are readable).
 ///
 /// Wire type: `pane_agent`.
 class PaneAgent {

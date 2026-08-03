@@ -880,13 +880,27 @@
   // ("claude-opus-4-8" and the older "claude-3-5-sonnet-20241022"). "" when
   // nothing qualifies, so callers fall back to the agent's own name rather than
   // printing a mangled id.
+  //
+  // A size qualifier is kept alongside the family ("gpt-5.4-mini" -> "gpt mini")
+  // because for the OpenAI-shaped ids a copilot pane reports it is the whole
+  // distinction: the family alone collapses gpt-5.4 and gpt-5.4-mini onto the
+  // same word, in a list whose entire job is telling rows apart. Anthropic ids
+  // are unaffected — their family token already carries the tier.
+  const MODEL_SIZES = ["mini", "nano", "micro", "flash", "lite"];
   function modelLabel(model) {
     if (!model) return "";
     let id = model.split("·")[0].trim().toLowerCase();
     let wide = "";
     if (id.endsWith("[1m]")) { wide = " [1M]"; id = id.slice(0, -4); }
-    for (const tok of id.split("-")) {
-      if (tok !== "claude" && /^[a-z]+$/.test(tok)) return tok + wide;
+    const toks = id.split("-");
+    for (let i = 0; i < toks.length; i++) {
+      const tok = toks[i];
+      if (tok === "claude" || !/^[a-z]+$/.test(tok)) continue;
+      // Look past the family for a qualifier, but never back at it: the scan
+      // starts after the family so a family that is itself in the list (were one
+      // ever added) cannot be appended to itself.
+      const size = toks.slice(i + 1).find((t) => MODEL_SIZES.includes(t));
+      return tok + (size ? " " + size : "") + wide;
     }
     return "";
   }

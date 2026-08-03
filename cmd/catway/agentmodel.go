@@ -18,33 +18,76 @@ import (
 // beside the agent's identity and state in the sidebar's pane hover card.
 //
 // Neither of the two agent-identity channels carries it: detection only ever
-// yields (agent, state) from the screen, and the hook seam (hooks.go) fires for
-// claude once per session, so a model reported there would go stale the moment
-// the user switches with /model. What is live is the agent's own transcript —
-// claude appends one JSONL record per message under
-// ~/.claude/projects/<slugified cwd>/<session id>.jsonl, and every assistant
-// record names the model that produced it. So the model is read from that tail:
-// exact when the pane's claude hook has reported its resumable session id,
-// best-effort from the pane's cwd otherwise (a pane whose integration is not
-// installed still gets an answer, which is the common case).
+// yields (agent, state) from the screen, and the hook seam (hooks.go) fires once
+// per session, so a model reported there would go stale the moment the user
+// switches with /model. What is live is the agent's own on-disk history, which it
+// appends to as it answers and which names the model that produced each message.
+// So the model is read from that history's tail: exact when the pane's hook has
+// reported its resumable session id, best-effort from the pane's cwd otherwise (a
+// pane whose integration is not installed still gets an answer, which is the
+// common case).
 //
-// The same record names the reasoning effort the turn ran at (a top-level
-// "effort", sibling to the message), which /effort switches between turns just as
-// /model switches the model. It rides along in the one model string rather than a
-// field of its own: the hover card shows the pair as one line, so nothing between
-// here and there — pane state, the wire protocol, the pane.list snapshot — has to
-// learn about it.
+// Which agents can be read is a table — modelResolvers — rather than a chain of
+// comparisons, because the two entries have the same shape: a root directory
+// resolved once at startup, plus a read that turns (root, cwd, session) into a
+// model string. A third agent is then an entry, not another branch. Agents absent
+// from the table keep their history somewhere else in its own shape, so their
+// panes simply show no model.
 //
-// Only claude is wired up; every other agent keeps its history somewhere else in
-// its own shape, so their panes simply show no model.
+//	claude   ~/.claude/projects/<slugified cwd>/<session id>.jsonl
+//	         one JSON record per message; assistant records name the model, and a
+//	         top-level "effort" names the reasoning effort the turn ran at.
+//	copilot  ~/.copilot/session-state/<session id>/events.jsonl
+//	         one typed event per line; assistant.message events name the model,
+//	         and the effort comes from whichever of session.model_change or
+//	         session.auto_mode_resolved spoke most recently (see copilotModel).
 //
-// The transcript read runs off the loop goroutine (refreshAgentModel spawns it
-// and posts the result back); everything else here is loop-goroutine only. It
-// also assumes the agent's files are on this machine, which the hook seam
-// already assumes — panes reach catway over a unix socket.
+// The effort rides along inside the one model string ("claude-opus-5 · high")
+// rather than in a field of its own: the hover card shows the pair as one line, so
+// nothing between here and there — pane state, the wire protocol, the pane.list
+// snapshot — has to learn about it.
+//
+// The history read runs off the loop goroutine (refreshAgentModel spawns it and
+// posts the result back); everything else here is loop-goroutine only. It also
+// assumes the agent's files are on this machine, which the hook seam already
+// assumes — panes reach catway over a unix socket.
 
-// claudeAgent is the agent label whose transcripts this file knows how to read.
-const claudeAgent = "claude"
+// modelResolver reads one agent's on-disk history.
+//
+// root is resolved once at startup (modelRootsFor, called from newOrch) rather
+// than per read: it is a fixed function of the environment, while a pane's model
+// is re-read every 20 seconds. "" means the agent's home could not be located,
+// which disables that agent — and it is also the seam tests use to point an entry
+// at a fixture tree.
+//
+// read runs off the loop goroutine with that root, the pane's cwd, and the
+// hook-reported session id ("" when no integration is installed). It returns ""
+// for "no answer" and never an error: a missing or half-written history is the
+// ordinary state of a pane whose agent has not answered yet, not a fault.
+type modelResolver struct {
+	root func() string
+	read func(root, cwd, session string) string
+}
+
+// modelResolvers is the set of agents whose model can be named, keyed by the
+// agent label detect.IdentifyAgent yields (and that the hook seam reports).
+var modelResolvers = map[string]modelResolver{
+	"claude":  {root: claudeProjectsDir, read: claudeModel},
+	"copilot": {root: copilotStateDir, read: copilotModel},
+}
+
+// modelRootsFor resolves every entry's root once, dropping the agents whose home
+// is not on this machine. The result is what orch carries; a missing key and an
+// empty root mean the same thing to refreshAgentModel.
+func modelRootsFor() map[string]string {
+	roots := make(map[string]string, len(modelResolvers))
+	for agent, r := range modelResolvers {
+		if root := r.root(); root != "" {
+			roots[agent] = root
+		}
+	}
+	return roots
+}
 
 const (
 	// modelRefreshInterval is the minimum gap between transcript reads for one
@@ -68,10 +111,12 @@ const (
 
 // refreshAgentModel resolves rt's model in the background when one is due,
 // posting the result back onto the loop. agent is the pane's arbitrated agent
-// label: a pane not running claude drops any model it was carrying (the agent
-// exited, or another one took the pane over).
+// label: a pane running an agent this cannot read drops any model it was carrying
+// (the agent exited, or another one took the pane over).
 func (o *orch) refreshAgentModel(rt *paneRuntime, agent string) {
-	if agent != claudeAgent || o.claudeProjects == "" {
+	resolver, known := modelResolvers[agent]
+	root := o.modelRoots[agent]
+	if !known || root == "" {
 		rt.agentModel = ""
 		rt.modelAt = time.Time{}
 		return
@@ -80,21 +125,26 @@ func (o *orch) refreshAgentModel(rt *paneRuntime, agent string) {
 		return
 	}
 	rt.modelBusy = true
-	pid, cwd, projects := rt.id, rt.cwd, o.claudeProjects
+	pid, cwd := rt.id, rt.cwd
 	session := ""
-	if s := rt.agentSession; s != nil && s.agent == claudeAgent && s.kind == "id" {
+	// The session ref only names a history belonging to the agent that reported
+	// it. A pane that ran claude and then copilot still carries the older agent's
+	// ref until the new one's hook fires, and handing claude's id to copilot's
+	// reader would at best miss and at worst name someone else's directory.
+	if s := rt.agentSession; s != nil && s.agent == agent && s.kind == "id" {
 		session = s.value
 	}
+	read := resolver.read
 	go func() {
-		model := claudeModel(projects, cwd, session)
+		model := read(root, cwd, session)
 		o.post(func() { o.setAgentModel(pid, model) })
 	}()
 }
 
 // setAgentModel records a resolved model and republishes the pane's agent chrome
-// when it actually changed. The pane may have gone — or claude may have left it —
-// while the read was in flight, and a read that raced the agent out must not put
-// a model back on a pane that no longer has one.
+// when it actually changed. The pane may have gone — or the agent may have left
+// it — while the read was in flight, and a read that raced the agent out must not
+// put a model back on a pane that no longer has one.
 func (o *orch) setAgentModel(pid uint32, model string) {
 	rt := o.panes[pid]
 	if rt == nil {
@@ -103,7 +153,7 @@ func (o *orch) setAgentModel(pid uint32, model string) {
 	rt.modelBusy = false
 	rt.modelAt = time.Now()
 	agent, state := rt.effectiveAgent()
-	if agent != claudeAgent {
+	if _, known := modelResolvers[agent]; !known {
 		model = ""
 	}
 	if model == rt.agentModel {
@@ -277,27 +327,7 @@ type transcriptRecord struct {
 // names the model a sub-agent ran under, and claude stamps "<synthetic>" on
 // messages it fabricated (an API error, an interrupt) rather than sampled.
 func lastAssistantModel(path string) string {
-	f, err := os.Open(path)
-	if err != nil {
-		return ""
-	}
-	defer f.Close()
-	fi, err := f.Stat()
-	if err != nil || fi.Size() == 0 {
-		return ""
-	}
-	off := int64(0)
-	if fi.Size() > modelTailBytes {
-		off = fi.Size() - modelTailBytes
-	}
-	buf := make([]byte, fi.Size()-off)
-	if _, err := io.ReadFull(io.NewSectionReader(f, off, int64(len(buf))), buf); err != nil {
-		return ""
-	}
-	lines := bytes.Split(buf, []byte("\n"))
-	if off > 0 && len(lines) > 0 {
-		lines = lines[1:] // a truncated read lands mid-record
-	}
+	lines := tailLines(path)
 	for i := len(lines) - 1; i >= 0; i-- {
 		// Cheap gate: user turns, snapshots and summaries have no model field,
 		// and they are most of the file.
@@ -319,4 +349,236 @@ func lastAssistantModel(path string) string {
 		}
 	}
 	return ""
+}
+
+// tailLines is the last modelTailBytes of a line-oriented history file, split
+// into lines, with a leading partial record dropped when the read was truncated.
+// Both agents' histories are append-only and run to megabytes while the records
+// worth reading sit within a few KB of the end, so neither is ever read whole.
+// nil for anything unreadable or empty — callers treat that as "no answer".
+func tailLines(path string) [][]byte {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+	fi, err := f.Stat()
+	if err != nil || fi.Size() == 0 {
+		return nil
+	}
+	off := int64(0)
+	if fi.Size() > modelTailBytes {
+		off = fi.Size() - modelTailBytes
+	}
+	buf := make([]byte, fi.Size()-off)
+	if _, err := io.ReadFull(io.NewSectionReader(f, off, int64(len(buf))), buf); err != nil {
+		return nil
+	}
+	lines := bytes.Split(buf, []byte("\n"))
+	if off > 0 && len(lines) > 0 {
+		lines = lines[1:] // a truncated read lands mid-record
+	}
+	return lines
+}
+
+// --- copilot (no orch state; runs off the loop goroutine) ---------------------
+
+const (
+	// copilotEventsFile is the session's append-only event log, and
+	// copilotWorkspaceFile the small header naming the directory it started in.
+	copilotEventsFile    = "events.jsonl"
+	copilotWorkspaceFile = "workspace.yaml"
+
+	// The events.jsonl types that name a model or the effort behind one.
+	copilotAssistantEvent    = "assistant.message"
+	copilotModelChangeEvent  = "session.model_change"
+	copilotAutoResolvedEvent = "session.auto_mode_resolved"
+
+	// copilotWorkspaceMaxBytes bounds the workspace.yaml read. The file is a
+	// handful of scalar keys; anything larger is not one, and this runs over every
+	// session directory on the machine when a pane has no session id.
+	copilotWorkspaceMaxBytes = 64 << 10
+)
+
+// copilotStateDir is where copilot keeps one directory per session. COPILOT_HOME
+// overrides the ~/.copilot default, as copilot itself honours and as
+// internal/integration does when it installs the hook. "" (no resolvable home)
+// disables model resolution for copilot.
+//
+// The CLI and the copilot language server share this tree — both drive the same
+// embedded agent — so a session started from an editor is readable here too.
+func copilotStateDir() string {
+	root := os.Getenv("COPILOT_HOME")
+	if root == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return ""
+		}
+		root = filepath.Join(home, ".copilot")
+	}
+	return filepath.Join(root, "session-state")
+}
+
+// copilotModel is the model behind the pane's most recent answer, "" when no
+// session can be pinned down or it holds no usable record.
+func copilotModel(root, cwd, session string) string {
+	dir := copilotSession(root, cwd, session)
+	if dir == "" {
+		return ""
+	}
+	return lastCopilotModel(filepath.Join(dir, copilotEventsFile))
+}
+
+// copilotSession locates the pane's session directory. A hook-reported id names
+// it outright — it is the directory name — and is gated by isBareToken first, so
+// a corrupted or hostile ref cannot walk out of the tree with "..".
+//
+// Without one the pane's cwd picks it: every session records the directory it
+// started in, so they are scanned and the most recently active match wins. That
+// is right for one copilot per directory and a coin flip between two panes
+// sharing one, the same tradeoff claudeTranscript already makes.
+func copilotSession(root, cwd, session string) string {
+	if root == "" {
+		return ""
+	}
+	if isBareToken(session) {
+		dir := filepath.Join(root, session)
+		if fi, err := os.Stat(filepath.Join(dir, copilotEventsFile)); err == nil && !fi.IsDir() {
+			return dir
+		}
+	}
+	if cwd == "" {
+		return ""
+	}
+	ents, err := os.ReadDir(root)
+	if err != nil {
+		return ""
+	}
+	var newest string
+	var newestAt time.Time
+	for _, e := range ents {
+		if !e.IsDir() {
+			continue
+		}
+		dir := filepath.Join(root, e.Name())
+		if copilotWorkspaceCwd(filepath.Join(dir, copilotWorkspaceFile)) != cwd {
+			continue
+		}
+		// The events file's mtime, not the directory's: copilot also writes
+		// checkpoints/, files/ and research/ under the session, so the directory
+		// is touched for reasons that have nothing to do with a new answer.
+		fi, err := os.Stat(filepath.Join(dir, copilotEventsFile))
+		if err != nil {
+			continue
+		}
+		if newest == "" || fi.ModTime().After(newestAt) {
+			newest, newestAt = dir, fi.ModTime()
+		}
+	}
+	return newest
+}
+
+// copilotWorkspaceCwd reads the working directory a session started in out of its
+// workspace.yaml. The file is a flat map of scalars written by copilot itself, so
+// it is scanned line by line rather than through a YAML dependency: only one key
+// is needed, and matching at column 0 means a nested key spelled "cwd" under some
+// future block cannot be mistaken for the top-level one.
+func copilotWorkspaceCwd(path string) string {
+	b, err := os.ReadFile(path)
+	if err != nil || len(b) > copilotWorkspaceMaxBytes {
+		return ""
+	}
+	for _, line := range strings.Split(string(b), "\n") {
+		rest, ok := strings.CutPrefix(line, "cwd:")
+		if !ok {
+			continue
+		}
+		v := strings.TrimSpace(strings.TrimSuffix(rest, "\r"))
+		// copilot quotes the value only when it has to — a path holding ": " or
+		// leading with an indicator character provokes it — so both spellings turn
+		// up. Within single quotes YAML escapes a quote by doubling it.
+		if len(v) >= 2 && v[0] == '\'' && v[len(v)-1] == '\'' {
+			return strings.ReplaceAll(v[1:len(v)-1], "''", "'")
+		}
+		if len(v) >= 2 && v[0] == '"' && v[len(v)-1] == '"' {
+			return v[1 : len(v)-1]
+		}
+		return v
+	}
+	return ""
+}
+
+// copilotEvent is the slice of an events.jsonl line this cares about. One struct
+// covers all three event types: their payloads are disjoint, so the fields that
+// do not apply simply stay zero.
+type copilotEvent struct {
+	Type string `json:"type"`
+	Data struct {
+		Model string `json:"model"` // assistant.message
+		// session.model_change carries the effort of an explicitly chosen model;
+		// session.auto_mode_resolved carries the router's for an auto one.
+		ReasoningEffort string `json:"reasoningEffort"`
+		ReasoningBucket string `json:"reasoningBucket"`
+	} `json:"data"`
+}
+
+// lastCopilotModel is the model named by the session's last assistant.message,
+// suffixed with the effort it ran at when one is known ("gpt-5.4 · medium").
+//
+// The model comes from the message rather than from the session's configured
+// model because the configured model is very often the literal "auto": copilot's
+// router picks per turn, and what a row should name is what actually answered.
+//
+// The effort comes from whichever of the two events spoke most recently, because
+// which one carries it depends on the mode the session is in — an explicitly
+// chosen model reports reasoningEffort on session.model_change and leaves auto
+// mode's field null, while auto mode reports the router's pick as
+// session.auto_mode_resolved's reasoningBucket.
+//
+// The two are searched for independently rather than in one pass that stops at
+// the answer, because an effort event sits on either side of the message it
+// applies to: the change that configured the turn precedes it, while a switch
+// made after it has not been used yet but is what the next turn will run under —
+// and that is what a row read between turns should say. So the walk runs
+// backwards, keeps the first of each kind it meets, and stops as soon as it holds
+// both.
+func lastCopilotModel(path string) string {
+	lines := tailLines(path)
+	model, effort := "", ""
+	for i := len(lines) - 1; i >= 0 && (model == "" || effort == ""); i-- {
+		// Cheap gate: tool traffic and user turns are most of the file, and none
+		// of the three events of interest can match without one of these keys.
+		// "chosenModel" deliberately does not satisfy the first — the quote is
+		// part of the needle — so an auto-resolved line is admitted by the second.
+		if !bytes.Contains(lines[i], []byte(`"model"`)) &&
+			!bytes.Contains(lines[i], []byte(`"reasoning`)) {
+			continue
+		}
+		var ev copilotEvent
+		if err := json.Unmarshal(lines[i], &ev); err != nil {
+			continue
+		}
+		switch ev.Type {
+		case copilotModelChangeEvent, copilotAutoResolvedEvent:
+			if effort != "" {
+				continue // an older event must not overwrite the newest
+			}
+			if e := ev.Data.ReasoningEffort; isEffortLabel(e) {
+				effort = e
+			} else if b := ev.Data.ReasoningBucket; isEffortLabel(b) {
+				effort = b
+			}
+		case copilotAssistantEvent:
+			if model == "" {
+				model = ev.Data.Model
+			}
+		}
+	}
+	if model == "" {
+		return ""
+	}
+	if effort != "" {
+		return model + modelEffortSep + effort
+	}
+	return model
 }

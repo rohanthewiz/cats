@@ -135,11 +135,16 @@ type orch struct {
 	// focus_changed. Seeded in newOrch so pre-existing panes never emit retroactively.
 	structPanes map[uint32]string
 	structFocus uint32
-	// claudeProjects is the root claude keeps its transcripts under, which is
-	// where a pane's current model is read from (agentmodel.go). Resolved once at
-	// construction; "" disables model resolution (and lets tests point it at a
-	// fixture tree).
+	// claudeProjects is the root claude keeps its transcripts under. It is what
+	// the usage estimator sums over when no account credential is readable
+	// (usage.go); "" disables that fallback.
 	claudeProjects string
+	// modelRoots is where each readable agent keeps its history, keyed by agent
+	// label — the root half of modelResolvers, resolved once at construction
+	// (agentmodel.go). A pane's current model is read from under it. An agent
+	// missing here has no readable home on this machine and shows no model, which
+	// is also how tests point one entry at a fixture tree.
+	modelRoots map[string]string
 	// usage is the account's last-read rate-limit standing (usage.go), nil
 	// until the first poll lands. Held so a browser connecting between polls is
 	// sent the current numbers rather than an empty section for up to two
@@ -328,6 +333,7 @@ func newOrchWith(socket, cwd string, sess *app.Session) *orch {
 		spawnPlans:     make(map[uint32]app.SpawnOverride),
 		capturedHist:   make(map[uint32]string),
 		claudeProjects: claudeProjectsDir(),
+		modelRoots:     modelRootsFor(),
 		usageNudge:     make(chan struct{}, 1),
 		mailbox:        make(chan func(), 256),
 	}
