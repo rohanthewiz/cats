@@ -577,3 +577,145 @@ func TestSnapshotMidTurn(t *testing.T) {
 	close(release)
 	h.waitFor("turn to finish", func() bool { return h.m.status == "ready" })
 }
+
+// --- Model resolution ---------------------------------------------------------
+
+// fastModelPolls compresses the retry schedule so a test that has to watch two
+// or three attempts go by does not have to wait seconds for them. The number of
+// attempts is unchanged — that is part of what these tests pin.
+func fastModelPolls(t *testing.T) {
+	t.Helper()
+	prev := modelPollDelays
+	modelPollDelays = []time.Duration{0, 5 * time.Millisecond, 10 * time.Millisecond, 20 * time.Millisecond}
+	t.Cleanup(func() { modelPollDelays = prev })
+}
+
+// modelReader is a scripted stand-in for catway's on-disk history reader. It
+// runs off the loop (like the real one), so its bookkeeping is locked.
+type modelReader struct {
+	mu      sync.Mutex
+	answers []string // one per call; the last answer repeats once exhausted
+	calls   int
+	ids     []string
+}
+
+func (r *modelReader) read(sessionID string) string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.calls++
+	r.ids = append(r.ids, sessionID)
+	if len(r.answers) == 0 {
+		return ""
+	}
+	if r.calls > len(r.answers) {
+		return r.answers[len(r.answers)-1]
+	}
+	return r.answers[r.calls-1]
+}
+
+func (r *modelReader) stats() (int, []string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.calls, append([]string(nil), r.ids...)
+}
+
+// The model an ACP agent will not name is read off its history instead, and
+// re-read every turn: copilot's auto mode routes per turn, so turn two may have
+// been answered by a different model than turn one. The retries matter because
+// the history is written on the agent's own clock — the event naming the model
+// lands after the prompt call returns.
+func TestModelResolvedFromHistory(t *testing.T) {
+	fastModelPolls(t)
+	h := newHarness(t)
+	// Empty twice (the history has not caught up), then an answer.
+	r := &modelReader{answers: []string{"", "", "gpt-5.4 · high"}}
+	h.run(func() { h.m.SetModelResolver(r.read) })
+	h.onPrompt = func(a *fakeAgent, id int64, text string) {
+		a.respond(id, `{"stopReason":"end_turn"}`)
+	}
+
+	h.run(func() { h.m.Send("/w", "hi") })
+	h.waitFor("model resolved from history", func() bool { return h.m.modelID == "gpt-5.4 · high" })
+
+	// It reached the clients, not just the field.
+	state := false
+	for _, msg := range h.emitted() {
+		if st, ok := msg.(browserproto.ChatState); ok && st.Model == "gpt-5.4 · high" {
+			state = true
+		}
+	}
+	if !state {
+		t.Fatal("no chat_state carried the resolved model")
+	}
+	// The session id is the whole key — the reader must never be asked to guess.
+	_, ids := r.stats()
+	for _, id := range ids {
+		if id != "s1" {
+			t.Fatalf("reader called with session %q, want s1", id)
+		}
+	}
+
+	// Turn two is answered by a different model.
+	r.mu.Lock()
+	r.answers, r.calls = []string{"claude-haiku-4.5 · low"}, 0
+	r.mu.Unlock()
+	h.run(func() { h.m.Send("/w", "again") })
+	h.waitFor("model re-read after the second turn",
+		func() bool { return h.m.modelID == "claude-haiku-4.5 · low" })
+}
+
+// A history that never names a model must not blank out what ACP did report,
+// and must not poll forever.
+func TestModelResolverSilenceKeepsACPModel(t *testing.T) {
+	fastModelPolls(t)
+	h := newHarness(t)
+	r := &modelReader{} // always ""
+	h.run(func() { h.m.SetModelResolver(r.read) })
+	h.onPrompt = func(a *fakeAgent, id int64, text string) {
+		a.respond(id, `{"stopReason":"end_turn"}`)
+	}
+
+	h.run(func() { h.m.Send("/w", "hi") })
+	h.waitFor("turn", func() bool { return h.m.status == "ready" })
+	// Long enough for both chains (handshake + turn) to exhaust their schedule.
+	time.Sleep(150 * time.Millisecond)
+
+	h.run(func() {
+		if h.m.modelID != "gpt-5-mini" {
+			t.Errorf("model %q, want the ACP-reported gpt-5-mini left alone", h.m.modelID)
+		}
+	})
+	if calls, _ := r.stats(); calls > 2*len(modelPollDelays) {
+		t.Fatalf("%d reads: the poll must give up after %d per chain", calls, len(modelPollDelays))
+	}
+}
+
+// A model belongs to the agent that reported it: a read still in flight when the
+// agent is torn down must not put a model back on its successor.
+func TestModelResolverDroppedAcrossTeardown(t *testing.T) {
+	fastModelPolls(t)
+	h := newHarness(t)
+	release := make(chan struct{})
+	var once sync.Once
+	h.run(func() {
+		h.m.SetModelResolver(func(string) string {
+			once.Do(func() { <-release }) // the first read outlives the session
+			return "gpt-5.4 · high"
+		})
+	})
+	h.onPrompt = func(a *fakeAgent, id int64, text string) {
+		a.respond(id, `{"stopReason":"end_turn"}`)
+	}
+
+	h.run(func() { h.m.Send("/w", "hi") })
+	h.waitFor("turn", func() bool { return h.m.status == "ready" })
+	h.run(func() { h.m.Clear() })
+	close(release)
+
+	time.Sleep(50 * time.Millisecond)
+	h.run(func() {
+		if h.m.modelID != "" {
+			t.Fatalf("model %q survived the teardown that killed its session", h.m.modelID)
+		}
+	})
+}

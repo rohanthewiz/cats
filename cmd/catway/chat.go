@@ -19,10 +19,34 @@ import (
 // entry) until a picker exists.
 func (o *orch) ensureChat() *acpchat.Manager {
 	if o.chat == nil {
-		o.chat = acpchat.New(acpchat.Backends()[0], o.post,
-			func(msg any) { o.broadcast(msg) })
+		def := acpchat.Backends()[0]
+		o.chat = acpchat.New(def, o.post, func(msg any) { o.broadcast(msg) })
+		o.chat.SetModelResolver(o.chatModelResolver(def))
 	}
 	return o.chat
+}
+
+// chatModelResolver names the model behind the chat's own answers, or nil when
+// this backend's history cannot be read here.
+//
+// The panel would otherwise never show one: ACP's model roster is optional and
+// copilot's session/new omits it (verified live against 1.0.77). But the chat's
+// session is an ordinary session of that agent on disk — copilot's ACP session
+// id *is* its ~/.copilot/session-state directory name, created at session/new —
+// so the reader the sidebar's hover card already uses (agentmodel.go) answers
+// for chat too, effort suffix and all.
+//
+// The cwd argument is deliberately empty. Those readers fall back to "newest
+// session started in this directory" when the id does not resolve, which for
+// chat would name some *pane's* agent running in the same project. An exact id
+// or no answer.
+func (o *orch) chatModelResolver(def acpchat.BackendDef) func(string) string {
+	resolver, known := modelResolvers[def.ModelAgent]
+	root := o.modelRoots[def.ModelAgent]
+	if !known || root == "" {
+		return nil
+	}
+	return func(sessionID string) string { return resolver.read(root, "", sessionID) }
 }
 
 // ChatSend implements chat.send. The cwd is resolved here, at send time, not

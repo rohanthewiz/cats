@@ -48,6 +48,17 @@ type Manager struct {
 	cwd       string
 	connSeq   int
 
+	// resolveModel is the backend's on-disk fallback for the model name (see
+	// BackendDef.ModelAgent), injected by the owner because reading an agent's
+	// history is catway's job, not the protocol's. nil disables it, which is
+	// what every backend that reports a real ACP model roster wants.
+	//
+	// modelSeq is to model polls what connSeq is to the connection: each new
+	// poll supersedes the one before, so a slow read started after an earlier
+	// turn can never overwrite a newer turn's answer.
+	resolveModel func(sessionID string) string
+	modelSeq     int
+
 	// queued holds prompts typed before the agent is ready (mid-handshake or
 	// mid-turn). The first Enter must never vanish: it is flushed as one
 	// prompt the moment the session can take it.
@@ -108,6 +119,18 @@ const (
 	transcriptMax = 500
 )
 
+// modelPollDelays paces the on-disk model read that follows a turn, and gives
+// up after the last one. A retry schedule rather than a single read because
+// the agent's history is written on its own clock: copilot appends the
+// assistant.message event that names the model *after* it answers
+// session/prompt (verified live — a read taken the instant the turn ended
+// found the model_change and auto_mode_resolved events but not the message).
+// A var so tests can compress it; the tail is deliberately generous because a
+// miss here just means the panel's model line stays as it was.
+var modelPollDelays = []time.Duration{
+	0, 400 * time.Millisecond, 1500 * time.Millisecond, 4 * time.Second,
+}
+
 // New builds a manager for one backend. post and emit bind it to the owner's
 // loop and broadcast fan-out; the zero-value start seam is the real
 // subprocess launcher.
@@ -121,6 +144,14 @@ func New(def BackendDef, post func(func()), emit func(msg any)) *Manager {
 		toolRows: map[string]int64{},
 		perms:    map[string]*pendingPerm{},
 	}
+}
+
+// SetModelResolver installs the backend's on-disk model reader. Called once,
+// on the loop, right after New; the function it takes runs off the loop (it
+// touches the filesystem) and is handed only the ACP session id, which is the
+// key into that agent's history.
+func (m *Manager) SetModelResolver(read func(sessionID string) string) {
+	m.resolveModel = read
 }
 
 // --- Queries ------------------------------------------------------------------
@@ -311,6 +342,10 @@ func (m *Manager) startAgent(cwd string) {
 			m.sessionID = sess.SessionID
 			m.modelID = sess.Models.CurrentModelID
 			m.setStatus("ready", "")
+			// A fresh session has not answered yet, so this usually finds
+			// nothing; it is here for the session that has (a reconnect to an
+			// agent that keeps its history, and session/load when that ships).
+			m.refreshModel()
 			if q := m.queued; q != "" {
 				m.queued = ""
 				m.prompt(q)
@@ -345,6 +380,9 @@ func (m *Manager) teardown() {
 		m.client = nil
 	}
 	m.sessionID = ""
+	// A dead agent runs no model, and the next one may run a different one —
+	// leaving the old name on the status line would read as live.
+	m.modelID = ""
 	m.turnActive, m.cancelSent = false, false
 	m.queued = ""
 	m.openRow, m.deltaBuf = 0, ""
@@ -384,6 +422,10 @@ func (m *Manager) turnDone(res acp.PromptResult, err error) {
 	m.flushPerms(acp.CancelledOutcome(), "cancelled")
 	m.turnActive = false
 	m.setStatus("ready", "")
+	// The model is re-read every turn, not just once: copilot's auto mode
+	// routes per turn, so the model that answered this turn is not necessarily
+	// the one that answered the last.
+	m.refreshModel()
 	switch {
 	case m.cancelSent || res.StopReason == acp.StopCancelled:
 		// cancelSent counts even when the stopReason disagrees: the spec says
@@ -479,6 +521,62 @@ func (m *Manager) flushDelta() {
 func (m *Manager) closeOpenRow() {
 	m.flushDelta()
 	m.openRow = 0
+}
+
+// --- Model resolution ---------------------------------------------------------
+
+// refreshModel starts a fresh look for the model behind the session's answers,
+// superseding any poll still in flight. Called after the handshake and after
+// every turn — the two moments the answer can have changed.
+func (m *Manager) refreshModel() {
+	if m.resolveModel == nil || m.sessionID == "" {
+		return
+	}
+	m.modelSeq++
+	m.pollModel(m.modelSeq, m.connSeq, 0)
+}
+
+// pollModel runs one attempt off the loop and, when it comes back empty,
+// schedules the next one from modelPollDelays. Empty is the ordinary answer
+// for a session whose history has not caught up yet, so it retries rather than
+// reporting nothing; a non-empty answer ends the chain.
+//
+// Both generation counters are checked on the way back in: gen drops a read
+// belonging to an agent that has since been torn down, seq drops one belonging
+// to a turn that has since been overtaken.
+func (m *Manager) pollModel(seq, gen, attempt int) {
+	if attempt >= len(modelPollDelays) {
+		return
+	}
+	read, sid := m.resolveModel, m.sessionID
+	run := func() {
+		model := read(sid)
+		m.post(func() {
+			if seq != m.modelSeq || gen != m.connSeq {
+				return
+			}
+			if model != "" {
+				m.setModel(model)
+				return
+			}
+			m.pollModel(seq, gen, attempt+1)
+		})
+	}
+	if d := modelPollDelays[attempt]; d > 0 {
+		time.AfterFunc(d, func() { go run() })
+		return
+	}
+	go run()
+}
+
+// setModel publishes a resolved model, broadcasting only on a real change: the
+// poll re-reads the same history every turn and mostly finds the same answer.
+func (m *Manager) setModel(model string) {
+	if model == m.modelID {
+		return
+	}
+	m.modelID = model
+	m.emit(browserproto.NewChatState(m.stateInfo()))
 }
 
 // --- Permissions --------------------------------------------------------------

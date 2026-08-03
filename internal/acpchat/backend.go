@@ -22,6 +22,18 @@ type BackendDef struct {
 	// reads as a broken agent rather than a wrong account.
 	DropEnv []string
 
+	// ModelAgent names the agent whose on-disk history says which model
+	// answered — the key catway's model resolvers are tabled under (the same
+	// label the sidebar's pane hover card resolves a pane's model through).
+	//
+	// It exists because ACP's own model roster is optional and copilot omits
+	// it: session/new returns no models field (verified live, 1.0.77), so the
+	// panel's model line would stay empty forever. The chat session is an
+	// ordinary session of that agent on disk, and its ACP session id is the
+	// key into that history, so the reader catway already owns answers here.
+	// "" means the backend can only ever report what ACP tells us.
+	ModelAgent string
+
 	// AuthHint and AuthArgv shape the panel's failure row when the agent dies
 	// before serving: the hint is the transcript text, the argv is offered as
 	// a button the client runs in a fresh tab (tab.create). Sign-in is the
@@ -37,11 +49,12 @@ type BackendDef struct {
 func Backends() []BackendDef {
 	return []BackendDef{
 		{
-			ID:      "copilot",
-			Name:    "Copilot",
-			Binary:  "copilot",
-			Args:    []string{"--acp"},
-			DropEnv: []string{"GH_TOKEN", "GITHUB_TOKEN"},
+			ID:         "copilot",
+			Name:       "Copilot",
+			Binary:     "copilot",
+			Args:       []string{"--acp"},
+			DropEnv:    []string{"GH_TOKEN", "GITHUB_TOKEN"},
+			ModelAgent: "copilot",
 			AuthHint: "Copilot is not signed in — run `copilot login`, " +
 				"then send your message again.",
 			AuthArgv: []string{"copilot", "login"},
