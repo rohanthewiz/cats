@@ -85,6 +85,11 @@ server, web client + Mac server), or
   codex, kimi, …) via process inspection plus a manifest catalog that updates
   from herdr.dev; agent hook reports (permission prompts, task completion)
   arrive on a local hook socket and surface as badges/toasts.
+- **Chat side panel**: a real coding agent beside the pane grid, spoken to over
+  [ACP](https://agentclientprotocol.com) instead of a PTY — streamed answers,
+  inline permission prompts every connected client can answer, and a transcript
+  that survives a browser reload. Copilot today; see
+  [below](#chat-side-panel--an-acp-agent-beside-the-panes).
 - **Session persistence & restore**: the model is saved to
   `~/.local/state/cats` on every mutation. A catway restart re-adopts live
   PTYs from the persistent cathost; a cold start re-spawns panes with captured
@@ -170,6 +175,56 @@ plugin claims in its manifest (`cats-todo add -<TAB>`).
 `catctl integration install claude` installs the cats hook integration
 into an agent's own config tree (offline — no catway needed); `catctl probe`
 is a stdlib-only WebSocket probe for exercising the browser protocol headlessly.
+
+### Chat side panel — an ACP agent beside the panes
+
+The **✦ chat** chip in the toolbar opens a side panel that talks to a coding
+agent over the [Agent Client Protocol](https://agentclientprotocol.com) — a
+JSON-RPC conversation over the agent's stdio, not a terminal pane. Today the
+one wired backend is GitHub Copilot (`copilot --acp`).
+
+**Starting it up:**
+
+```bash
+# 1. The agent binary must be on PATH and signed in — its credentials live in
+#    its own store, not in cats.
+copilot --version
+copilot login
+
+# 2. Nothing to enable in catway. Run it as usual…
+CATS_PASSWORD=changeme bin/catway --addr :8421
+
+# 3. …then click the ✦ chat chip in the toolbar and type.
+```
+
+There is no flag, no config section, and no separate daemon: the chip appears
+whenever the server advertises the `chat` capability (any normal
+`make local` / `make binaries` build), and **catway spawns `copilot --acp`
+lazily on your first message** — no agent process exists until you actually
+open a conversation. Panel open/closed is remembered per browser; the
+conversation itself lives in the server, so every client sees the same
+transcript and a late joiner is caught up on connect.
+
+Worth knowing once it is running:
+
+- **Working directory** is the focused pane's cwd at the moment of the first
+  message — that is what "talk about this project" means. An established
+  session keeps the cwd it started with.
+- **`GH_TOKEN` / `GITHUB_TOKEN` are stripped** from the child so Copilot uses
+  its own credential store; a stray token in your environment would silently
+  sign the agent in as a different identity.
+- **⏹ stops** the current turn; **⌫ clears** the conversation *and* the agent
+  with it — the next message starts a fresh session.
+- **Permission prompts are transcript rows**, not modals: several can be open
+  at once, any connected client can answer, and the first answer wins.
+- **If the agent dies or was never installed**, the panel says so and offers a
+  **Sign in** button that runs `copilot login` in a fresh tab. There is no
+  auto-restart by design — sending another message *is* the retry.
+
+Adding another ACP agent (claude-code-acp, `gemini --experimental-acp`) is one
+entry in the registry — `Backends()` in
+[`internal/acpchat/backend.go`](internal/acpchat/backend.go) — since the whole
+per-agent difference is an argv plus its sign-in remedy.
 
 ### cats-todo — prompt backlog
 
