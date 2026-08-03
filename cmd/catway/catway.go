@@ -665,7 +665,8 @@ func (o *orch) agentsMsg() browserproto.Agents {
 				}
 				items = append(items, browserproto.AgentItem{
 					Pane: rt.id, Pub: pub, Workspace: ws.ID, Tab: tab.Number,
-					Agent: agent, State: state, Seen: !rt.unseen, SinceMs: since,
+					Agent: agent, State: state, Model: rt.agentModel,
+					Seen: !rt.unseen, SinceMs: since,
 				})
 			}
 		}

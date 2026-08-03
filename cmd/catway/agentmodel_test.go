@@ -193,6 +193,30 @@ func TestRefreshAgentModelFollowsAgent(t *testing.T) {
 	}
 }
 
+// The sidebar's agents rollup names each row by its model, so a resolved model
+// has to reach the rollup — including the resolution that lands *after* the
+// state change that triggered it, which is the ordinary case.
+func TestAgentsRollupCarriesModel(t *testing.T) {
+	o, rt, _ := hookOrch(t)
+	projects := t.TempDir()
+	o.claudeProjects = projects
+	rt.cwd = "/Users/x/proj"
+	writeTranscript(t, projects, "-Users-x-proj", "s.jsonl", 0, assistant("claude-fable-5"))
+
+	o.onPaneAgent(orchestration.PaneAgent{PaneID: rt.id, Agent: "claude", State: "working"})
+	waitFor(t, o, func() bool { return rt.agentModel != "" }) // the read is off-loop
+	if got := rollupItem(t, o, rt.id).Model; got != "claude-fable-5" {
+		t.Fatalf("rollup model = %q, want claude-fable-5", got)
+	}
+
+	// And a row whose agent has no resolvable model carries none, so the browser
+	// falls back to the agent's own name rather than showing a stale one.
+	o.onPaneAgent(orchestration.PaneAgent{PaneID: rt.id, Agent: "codex", State: "working"})
+	if got := rollupItem(t, o, rt.id).Model; got != "" {
+		t.Fatalf("rollup model = %q for a non-claude agent, want empty", got)
+	}
+}
+
 // waitFor drains the orchestrator mailbox until cond holds — these tests own the
 // loop goroutine, so work posted by the off-loop read only runs when pumped.
 func waitFor(t *testing.T, o *orch, cond func() bool) {

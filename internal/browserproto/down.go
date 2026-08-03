@@ -154,7 +154,12 @@ type AgentItem struct {
 	Tab       int    `json:"tab"` // owning tab's stable number (tab-bar activity markers)
 	Agent     string `json:"agent"`
 	State     string `json:"state"`
-	Seen      bool   `json:"seen"` // false renders as "Done"
+	// Model is the LLM the agent is running under, in the same display spelling
+	// PaneAgent carries ("claude-opus-5 · high") — the sidebar's agent rows name
+	// the model rather than repeat the agent's own name, which every row shares.
+	// Omitted when unresolved, so a row falls back to Agent.
+	Model string `json:"model,omitempty"`
+	Seen  bool   `json:"seen"` // false renders as "Done"
 	// SinceMs is how long the pane has held this state, as of the moment the
 	// rollup was built. The rollup only goes out on a change, so the browser
 	// converts it to an absolute instant on arrival and ticks the label itself.

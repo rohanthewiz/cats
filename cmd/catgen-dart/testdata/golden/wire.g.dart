@@ -182,6 +182,7 @@ class AgentItem {
     required this.tab,
     required this.agent,
     required this.state,
+    this.model = '',
     required this.seen,
     required this.sinceMs,
   });
@@ -194,6 +195,12 @@ class AgentItem {
   final int tab;
   final String agent;
   final String state;
+
+  /// Model is the LLM the agent is running under, in the same display spelling
+  /// PaneAgent carries ("claude-opus-5 · high") — the sidebar's agent rows name
+  /// the model rather than repeat the agent's own name, which every row shares.
+  /// Omitted when unresolved, so a row falls back to Agent.
+  final String model;
 
   /// false renders as "Done"
   final bool seen;
@@ -212,6 +219,7 @@ class AgentItem {
         tab: asInt(j['tab']),
         agent: asString(j['agent']),
         state: asString(j['state']),
+        model: asString(j['model']),
         seen: asBool(j['seen']),
         sinceMs: asInt(j['since_ms']),
       );
@@ -223,6 +231,7 @@ class AgentItem {
         'tab': tab,
         'agent': agent,
         'state': state,
+        if (model.isNotEmpty) 'model': model,
         'seen': seen,
         'since_ms': sinceMs,
       };
