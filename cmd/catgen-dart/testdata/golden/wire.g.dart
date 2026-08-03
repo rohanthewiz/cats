@@ -1435,6 +1435,14 @@ class UpdateReady {
 /// metered models is the plan's business and changes without us. An empty name
 /// means the account reports no such window and the sidebar shows no row.
 ///
+/// Memory is the share of the host machine's RAM in use — the one window here
+/// that has nothing to do with the account. It shares the section because it
+/// answers the same question the others do ("is something about to stop?") on
+/// the same glance, and it shares the poll because it is read on the same tick.
+/// Source does not describe it: it is always local, whichever source the
+/// rate-limit numbers came from. A host whose memory could not be read leaves
+/// Pct at UsagePctUnknown and the row is not drawn.
+///
 /// ReadAt is when the server took the reading (RFC 3339). It is the message's
 /// own age, and it is on the wire because the receiver cannot infer it: the
 /// stored reading is replayed to a browser that connects between polls, so
@@ -1450,6 +1458,7 @@ class Usage {
     required this.weekly,
     required this.weeklyModel,
     this.weeklyModelName = '',
+    required this.memory,
     this.readAt = '',
     this.err = '',
   });
@@ -1464,6 +1473,7 @@ class Usage {
   final UsageWindow weekly;
   final UsageWindow weeklyModel;
   final String weeklyModelName;
+  final UsageWindow memory;
   final String readAt;
   final String err;
 
@@ -1473,6 +1483,7 @@ class Usage {
         weekly: UsageWindow.fromJson(asObj(j['weekly'])),
         weeklyModel: UsageWindow.fromJson(asObj(j['weekly_model'])),
         weeklyModelName: asString(j['weekly_model_name']),
+        memory: UsageWindow.fromJson(asObj(j['memory'])),
         readAt: asString(j['read_at']),
         err: asString(j['err']),
       );
@@ -1484,6 +1495,7 @@ class Usage {
         'weekly': weekly.toJson(),
         'weekly_model': weeklyModel.toJson(),
         if (weeklyModelName.isNotEmpty) 'weekly_model_name': weeklyModelName,
+        'memory': memory.toJson(),
         if (readAt.isNotEmpty) 'read_at': readAt,
         if (err.isNotEmpty) 'err': err,
       };

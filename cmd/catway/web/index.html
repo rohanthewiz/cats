@@ -1716,17 +1716,36 @@
     }
     // Only the fallback explains itself. An account reading is the expected
     // case and needs no caption; an estimate has to say that it is one, and
-    // why the real numbers were not available.
+    // why the real numbers were not available. It sits directly under the rows
+    // it is about, which is why the host row below comes after it: the caption
+    // covers the rate-limit windows and nothing else.
     if (usageMsg.source === "local") {
       const li = document.createElement("li");
       li.className = "unote";
       li.textContent = usageMsg.err ? "estimate · " + usageMsg.err : "local estimate";
       usageListEl.appendChild(li);
     }
+    // The host's own memory — always local, whichever source the windows above
+    // came from, and drawn only when the machine actually reported it (a host
+    // this cannot read leaves pct at -1). It is the one row here that can move
+    // between two polls, so it earns its place: a laptop runs out of RAM long
+    // before an account runs out of week.
+    if (usageMsg.memory && usageMsg.memory.pct >= 0) {
+      usageListEl.appendChild(usageRow("Memory", usageMsg.memory, MEMORY_LEVELS));
+    }
   }
 
-  function usageRow(name, w) {
+  // Where a row turns yellow, then red. The two kinds of row do not share a
+  // scale, because the same percentage does not mean the same thing: a week
+  // that is 70% spent is on track, while a machine 70% into its RAM is a couple
+  // of test runs from swapping — so memory is warned about earlier and
+  // condemned earlier than a rate-limit window is.
+  const USAGE_LEVELS  = { high: 75, crit: 90, of: "of the window used" };
+  const MEMORY_LEVELS = { high: 60, crit: 85, of: "of host memory in use" };
+
+  function usageRow(name, w, levels) {
     w = w || {};
+    levels = levels || USAGE_LEVELS;
     const li = document.createElement("li");
     // pct < 0 is "no denominator" — the local estimate counts tokens but has
     // nothing to measure them against, so the row shows the count and the CSS
@@ -1734,8 +1753,8 @@
     const pct = typeof w.pct === "number" ? w.pct : -1;
     const known = pct >= 0;
     if (!known) li.classList.add("unknown");
-    else if (pct >= 90) li.classList.add("crit");
-    else if (pct >= 75) li.classList.add("high");
+    else if (pct >= levels.crit) li.classList.add("crit");
+    else if (pct >= levels.high) li.classList.add("high");
 
     const row = document.createElement("div"); row.className = "urow";
     const nm = document.createElement("span"); nm.className = "uname"; nm.textContent = name;
@@ -1747,6 +1766,14 @@
       r.dataset.at = String(at); // absolute: the push won't come again until the number moves
       r.textContent = fmtUntil(at - Date.now());
       row.appendChild(r);
+    } else if (known && w.detail) {
+      // A row with both a percentage and a figure — host memory's "16.7G/24.0G"
+      // — puts the figure where a countdown would go. The percentage is what
+      // the row is scanned for; the absolute pair is what a worrying percentage
+      // gets checked against, and it never needs re-rendering on the tick.
+      const d = document.createElement("span"); d.className = "ureset";
+      d.textContent = w.detail;
+      row.appendChild(d);
     }
 
     const val = document.createElement("span"); val.className = "uval";
@@ -1761,7 +1788,7 @@
     li.appendChild(meter);
 
     li.title = known
-      ? name + ": " + pct.toFixed(1) + "% of the window used"
+      ? name + ": " + pct.toFixed(1) + "% " + levels.of + (w.detail ? " (" + w.detail + ")" : "")
       : name + ": " + (w.detail || "unknown") + " (local estimate — no limit to measure against)";
     return li;
   }
@@ -1773,7 +1800,10 @@
   // minute is the one stale number this section exists to prevent.
   setInterval(() => {
     renderUsageAge();
-    for (const el of usageListEl.querySelectorAll(".ureset")) {
+    // Only the stamped ones: the same slot also carries host memory's absolute
+    // figure, which is a fact rather than a countdown and has no instant to
+    // recompute from. [data-at] is what separates the two.
+    for (const el of usageListEl.querySelectorAll(".ureset[data-at]")) {
       el.textContent = fmtUntil(Number(el.dataset.at) - Date.now());
     }
   }, 10000);

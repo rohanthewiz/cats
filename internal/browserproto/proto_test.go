@@ -69,9 +69,12 @@ func TestRoundTrip(t *testing.T) {
 		{"error", NewError(pane, "pane gone"), DecodeDown},
 		{"shutdown", NewShutdown(), DecodeDown},
 		{"update_ready", NewUpdateReady("1.2.3", "brew upgrade cats"), DecodeDown},
+		// The host's memory window rides an account reading: a percentage with a
+		// figure beside it and no reset, which no rate-limit window has.
 		{"usage", NewUsage("account",
 			UsageWindow{Pct: 11, ResetsAt: "2026-07-31T23:10:00.655263+00:00"},
-			UsageWindow{Pct: 19, ResetsAt: "2026-08-05T21:00:00Z"}, ""), DecodeDown},
+			UsageWindow{Pct: 19, ResetsAt: "2026-08-05T21:00:00Z"}, "").
+			WithMemory(UsageWindow{Pct: 69.5, Detail: "16.7G/24.0G"}), DecodeDown},
 		// The fallback's shape: no percentage, a token figure instead, and the
 		// reason the account read was unavailable riding along.
 		{"usage_local", NewUsage("local",

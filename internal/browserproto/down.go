@@ -388,6 +388,14 @@ func NewTheme(name string, colors map[string]string, font string) Theme {
 // metered models is the plan's business and changes without us. An empty name
 // means the account reports no such window and the sidebar shows no row.
 //
+// Memory is the share of the host machine's RAM in use — the one window here
+// that has nothing to do with the account. It shares the section because it
+// answers the same question the others do ("is something about to stop?") on
+// the same glance, and it shares the poll because it is read on the same tick.
+// Source does not describe it: it is always local, whichever source the
+// rate-limit numbers came from. A host whose memory could not be read leaves
+// Pct at UsagePctUnknown and the row is not drawn.
+//
 // ReadAt is when the server took the reading (RFC 3339). It is the message's
 // own age, and it is on the wire because the receiver cannot infer it: the
 // stored reading is replayed to a browser that connects between polls, so
@@ -401,6 +409,7 @@ type Usage struct {
 	Weekly          UsageWindow `json:"weekly"`
 	WeeklyModel     UsageWindow `json:"weekly_model"`
 	WeeklyModelName string      `json:"weekly_model_name,omitempty"`
+	Memory          UsageWindow `json:"memory"`
 	ReadAt          string      `json:"read_at,omitempty"`
 	Err             string      `json:"err,omitempty"`
 }
@@ -421,7 +430,8 @@ const UsagePctUnknown = -1
 
 func NewUsage(source string, fiveHour, weekly UsageWindow, errMsg string) Usage {
 	return Usage{T: MsgUsage, Source: source, FiveHour: fiveHour, Weekly: weekly,
-		WeeklyModel: UsageWindow{Pct: UsagePctUnknown}, Err: errMsg}
+		WeeklyModel: UsageWindow{Pct: UsagePctUnknown},
+		Memory:      UsageWindow{Pct: UsagePctUnknown}, Err: errMsg}
 }
 
 // WithWeeklyModel attaches the per-model weekly window. It is a separate step
@@ -433,6 +443,15 @@ func (u Usage) WithWeeklyModel(name string, w UsageWindow) Usage {
 		return u
 	}
 	u.WeeklyModelName, u.WeeklyModel = name, w
+	return u
+}
+
+// WithMemory attaches the host's memory window. Chained rather than passed to
+// NewUsage because it is orthogonal to both rate-limit sources: the same host
+// reading rides an account reply and a transcript estimate alike, and a machine
+// that will not report its memory simply leaves the field as NewUsage left it.
+func (u Usage) WithMemory(w UsageWindow) Usage {
+	u.Memory = w
 	return u
 }
 

@@ -134,15 +134,22 @@ func (o *orch) setUsage(m browserproto.Usage) {
 // both cooperate, the local estimate otherwise. A failed account read is not
 // silent — its reason rides along with the fallback numbers so the sidebar can
 // say why it is showing an estimate.
+//
+// The host's memory (hostmem.go) is attached either way. It is not an account
+// number and does not depend on one: a machine with no claude login still has a
+// memory ceiling worth watching, and the row should not disappear because a
+// token expired.
 func readUsage(est *usageEstimator) browserproto.Usage {
+	mem := hostMemory()
 	report, err := readAccountUsage()
 	if err == nil {
 		return browserproto.NewUsage("account", report.fiveHour, report.weekly, "").
-			WithWeeklyModel(report.weeklyModelName, report.weeklyModel)
+			WithWeeklyModel(report.weeklyModelName, report.weeklyModel).
+			WithMemory(mem)
 	}
 	logUsageOnce(err.Error())
 	fiveHour, weekly := est.windows(time.Now())
-	return browserproto.NewUsage("local", fiveHour, weekly, err.Error())
+	return browserproto.NewUsage("local", fiveHour, weekly, err.Error()).WithMemory(mem)
 }
 
 // --- The account read ---------------------------------------------------------
