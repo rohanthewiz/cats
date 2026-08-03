@@ -939,10 +939,13 @@
 
   // modelLabel condenses a pane's resolved model (agentmodel.go builds it —
   // "claude-opus-5 · high", "claude-sonnet-4-5-20250929[1m]") down to the family
-  // word the pane header and the sidebar rows have room for: "opus", "sonnet
-  // [1M]". Those two places name the agent, and for a claude pane "claude" is
-  // the one thing already obvious from the pane itself; which model it is
-  // running is not, and is what changes between panes.
+  // word and its version, which is what the pane header and the sidebar rows
+  // name: "opus 5", "sonnet 4.5 [1M]", "gpt 5.4 mini".
+  //
+  // The version rides along because a family word alone stops distinguishing
+  // rows the moment two generations of it are in play — "opus" beside "opus"
+  // says nothing about which pane is on the newer one, and a model switch that
+  // only moved the generation would leave the label unchanged.
   //
   // The 1M-context marker survives the trim because it changes how much the
   // pane can hold; the effort suffix does not, since the hover card still shows
@@ -952,12 +955,30 @@
   // nothing qualifies, so callers fall back to the agent's own name rather than
   // printing a mangled id.
   //
-  // A size qualifier is kept alongside the family ("gpt-5.4-mini" -> "gpt mini")
-  // because for the OpenAI-shaped ids a copilot pane reports it is the whole
-  // distinction: the family alone collapses gpt-5.4 and gpt-5.4-mini onto the
-  // same word, in a list whose entire job is telling rows apart. Anthropic ids
-  // are unaffected — their family token already carries the tier.
+  // A size qualifier is kept alongside the family ("gpt-5.4-mini" -> "gpt 5.4
+  // mini") because for the OpenAI-shaped ids a copilot pane reports it is the
+  // whole distinction: the family alone collapses gpt-5.4 and gpt-5.4-mini onto
+  // the same word, in a list whose entire job is telling rows apart. Anthropic
+  // ids are unaffected — their family token already carries the tier.
   const MODEL_SIZES = ["mini", "nano", "micro", "flash", "lite"];
+  // A version token is one or two digits per component ("5", "4", "5.4"). The
+  // bound is what keeps the trailing release date out — "20250929" is a token of
+  // the same shape and sits exactly where a version component would.
+  const MODEL_VER = /^\d{1,3}(\.\d{1,3})*$/;
+  // modelVersion reads the run of version tokens adjacent to the family at
+  // toks[i], joined with dots: "claude-opus-5" -> "5", "claude-sonnet-4-5-…" ->
+  // "4.5". Forward first, since every current id puts the version after the
+  // family; the backward walk covers the older ordering, where the digits lead
+  // ("claude-3-5-sonnet-20241022" -> "3.5"). Both walks stop at the first token
+  // that isn't a version, so the date and the "claude" prefix bound them.
+  function modelVersion(toks, i) {
+    const fwd = [];
+    for (let j = i + 1; j < toks.length && MODEL_VER.test(toks[j]); j++) fwd.push(toks[j]);
+    if (fwd.length) return fwd.join(".");
+    const back = [];
+    for (let j = i - 1; j >= 0 && MODEL_VER.test(toks[j]); j--) back.unshift(toks[j]);
+    return back.join(".");
+  }
   function modelLabel(model) {
     if (!model) return "";
     let id = model.split("·")[0].trim().toLowerCase();
@@ -971,9 +992,29 @@
       // starts after the family so a family that is itself in the list (were one
       // ever added) cannot be appended to itself.
       const size = toks.slice(i + 1).find((t) => MODEL_SIZES.includes(t));
-      return tok + (size ? " " + size : "") + wide;
+      const ver = modelVersion(toks, i);
+      return tok + (ver ? " " + ver : "") + (size ? " " + size : "") + wide;
     }
     return "";
+  }
+
+  // agentLabel is what every place that names a pane's agent prints: the agent's
+  // own name, then the model it is running — "claude opus 5", "copilot gpt 5.4
+  // mini", "codex" for an agent whose model can't be read.
+  //
+  // The agent name leads even though it repeats down a list of claude panes,
+  // because the lists are no longer single-agent: with copilot and claude panes
+  // interleaved, the model word alone leaves "sonnet 4.5" ambiguous between a
+  // claude pane and a copilot pane running an Anthropic model through its own
+  // harness — a distinction that decides which tool you are about to talk to.
+  //
+  // Either half may be missing: no model until the agent's first answer (or for
+  // an agent with no resolver), and no agent on a plain shell pane, which is why
+  // callers can hand this both and let it print whichever it has.
+  function agentLabel(agent, model) {
+    const m = modelLabel(model);
+    if (!agent) return m;
+    return m ? agent + " " + m : agent;
   }
 
   // ---- Chrome: per-pane header (styled HTML, WS8) ----
@@ -997,7 +1038,7 @@
     } else {
       if (p.title) add("", "  " + p.title);
       if (p.cwd) add("", "  " + p.cwd);
-      if (p.agent) add("agent", "  " + (modelLabel(p.agentModel) || p.agent) + ":" + p.agentState);
+      if (p.agent) add("agent", "  " + agentLabel(p.agent, p.agentModel) + ":" + p.agentState);
       if (p.exited !== null) add("exited", "  exited (" + p.exited + ")");
     }
     const zoom = p.chrome.querySelector(".zoom");
@@ -1358,7 +1399,7 @@
     li.appendChild(pub);
     if (row.title) { const t = document.createElement("span"); t.className = "ttl"; t.textContent = row.title; li.appendChild(t); }
     if (row.agent) {
-      const ag = document.createElement("span"); ag.className = "ag " + stClass(row.state); ag.textContent = modelLabel(row.model) || row.agent;
+      const ag = document.createElement("span"); ag.className = "ag " + stClass(row.state); ag.textContent = agentLabel(row.agent, row.model);
       li.appendChild(ag);
     }
     // A row can name a pane in another workspace or tab, which pane.focus cannot
@@ -1932,13 +1973,13 @@
       if (it.pane === foc) li.classList.add("focused");
       setAgentLocked(li, wsLocked(it.workspace));
       const dot = document.createElement("span"); dot.className = "adot " + stClass(markerState(it)); dot.textContent = "●";
-      // Named by model, as the pane rows and pane headers are: every row in this
-      // section is an agent, so "claude" on all of them says nothing, while which
-      // model each is running is exactly what distinguishes them. The agent's own
-      // name stands in when no model resolved (a non-claude agent, or claude
-      // before its first answer).
+      // Named agent-then-model, as the pane rows and pane headers are: this
+      // section is the one list that spans every workspace, so it is the most
+      // likely to hold two different agents at once, and the pair is what tells
+      // those rows apart. The agent's own name stands alone when no model
+      // resolved (an agent with no resolver, or one before its first answer).
       const name = document.createElement("span"); name.className = "aname";
-      name.textContent = modelLabel(it.model) || it.agent;
+      name.textContent = agentLabel(it.agent, it.model);
       const meta = document.createElement("span"); meta.className = "ameta";
       const st = it.seen ? it.state : "done";
       meta.textContent = paneRef(it.pub, it.pane) + " · ";
