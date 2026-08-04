@@ -176,20 +176,26 @@
   #ws-list li.active { color:var(--accent); }
   #ws-list li .sum { color:var(--muted); font-size:calc(10px * var(--sb-scale)); margin-left:auto; }
   #ws-list li .sum span { margin-left:4px; }
-  /* The finger-with-a-string a workspace wears while its cats-todo backlog has
-     unfinished items in it, with how many are left set as a superscript beside
-     it — the finger says there is something to remember, the number says how
-     much. The two are one mark, so they share a wrapper and skip the row's 6px
-     gap; the wrapper aligns its children at the top, which is what puts the
-     count up at the fingertip.
+  /* The finger-with-a-string a workspace row — or the Workspaces heading, for
+     the global backlog — wears while its cats-todo backlog has unfinished
+     items in it, with how many are left set as a superscript beside it — the
+     finger says there is something to remember, the number says how much. The
+     two are one mark, so they share a wrapper and skip the row's 6px gap; the
+     wrapper aligns its children at the top, which is what puts the count up at
+     the fingertip.
      It rides the text baseline like the glyphs around it, and takes --todo so
      it reads as a reminder rather than as another agent-state dot. */
-  #ws-list li .todo-mark { flex:0 0 auto; align-self:center; color:var(--todo);
+  .todo-mark { flex:0 0 auto; align-self:center; color:var(--todo);
     display:inline-flex; align-items:flex-start; }
-  #ws-list li .todo { width:calc(14px * var(--sb-scale)); height:calc(14px * var(--sb-scale));
+  .todo-mark .todo { width:calc(14px * var(--sb-scale)); height:calc(14px * var(--sb-scale));
     margin-left:-2px; }
-  #ws-list li .todo-n { font-size:calc(8px * var(--sb-scale)); line-height:1; font-weight:600;
+  .todo-mark .todo-n { font-size:calc(8px * var(--sb-scale)); line-height:1; font-weight:600;
     margin-left:-1px; }
+  /* The global backlog's mark rides the Workspaces heading itself — the one
+     element that spans every workspace, which is exactly the mark's scope. It
+     opts back out of the heading's uppercase tracking: the superscript is a
+     count, not part of the label. */
+  #ws-global-todo { display:inline-flex; margin-left:7px; letter-spacing:0; }
   /* A locked workspace — one no plugin or agent may be launched into — reads as
      set aside: the row steps back, and a padlock next to the name says why it
      did. The lock itself is exempt from the dimming, being the one thing in the
@@ -617,7 +623,7 @@
   <aside id="sidebar">
     <div id="brand">cats</div>
     <section><h2>Usage<span class="hctl" id="usage-hctl"></span></h2><ul id="usage-list"><li class="empty">…</li></ul></section>
-    <section><h2>Workspaces</h2><ul id="ws-list"></ul></section>
+    <section><h2>Workspaces<span id="ws-global-todo"></span></h2><ul id="ws-list"></ul></section>
     <section><h2>Panes<span class="hctl" id="pane-hctl"></span></h2><ul id="pane-list"></ul></section>
     <section><h2>Agents</h2><ul id="agent-list"><li class="empty">none</li></ul></section>
   </aside>
@@ -663,6 +669,7 @@
 
   const panesEl = document.getElementById("panes");
   const wsListEl = document.getElementById("ws-list");
+  const wsGlobalTodoEl = document.getElementById("ws-global-todo");
   const paneListEl = document.getElementById("pane-list");
   const agentListEl = document.getElementById("agent-list");
   const usageListEl = document.getElementById("usage-list");
@@ -1211,6 +1218,7 @@
   // every render, and these lists are already grouped by workspace.
   function workspaceRollups() {
     const states = new Map(), todos = new Map();
+    let globalTodos = 0;
     for (const it of agentItems) {
       let c = states.get(it.workspace);
       if (!c) states.set(it.workspace, c = { blocked: 0, done: 0, working: 0, idle: 0 });
@@ -1221,11 +1229,21 @@
       if (!pi.handle) continue;
       const n = todoOpenCount(pi.title);
       if (!n) continue;
+      // A manager counting the global backlog is counting the same list from
+      // every workspace, so its count belongs to no workspace row. Crediting
+      // it to the pane's host made the work migrate when the pane moved, and
+      // two global managers in different workspaces wore the same items twice.
+      // Max rather than sum for the same reason: every such pane advertises
+      // one list, so two of them agreeing is not twice the work.
+      if (isGlobalTodoTitle(pi.title)) {
+        globalTodos = Math.max(globalTodos, n);
+        continue;
+      }
       const i = pi.handle.indexOf(":"); // "w1:p3" → "w1"
       const ws = i < 0 ? pi.handle : pi.handle.slice(0, i);
       todos.set(ws, (todos.get(ws) || 0) + n);
     }
-    return { states, todos };
+    return { states, todos, globalTodos };
   }
 
   // workspaceSummary compresses a workspace's detected-agent states into a
@@ -1258,6 +1276,15 @@
   function todoOpenCount(t) {
     const m = /^todo(?:: .+?)? \((\d+)\)$/.exec(t || "");
     return m ? Number(m[1]) : 0;
+  }
+
+  // isGlobalTodoTitle says whether a manager's advertised count is the global
+  // backlog rather than a project's. "todo: global (N)" is a --global launch;
+  // bare "todo (N)" is a launch that resolved no project, whose count falls
+  // back to the global store (cats-todo's model.openCount) — the project name
+  // in the title is the only thing that marks a count as project-scoped.
+  function isGlobalTodoTitle(t) {
+    return /^todo(?:: global)? \(/.test(t || "");
   }
 
   // todoMark: a finger with a string tied around it, worn by a workspace whose
@@ -1359,7 +1386,17 @@
 
   function renderWorkspaces(msg) {
     wsListEl.innerHTML = "";
-    const { states, todos } = workspaceRollups();
+    const { states, todos, globalTodos } = workspaceRollups();
+    // The global backlog's mark sits on the section heading — the one element
+    // scoped to everything, which is what the global list is. Same mark as the
+    // rows below so it reads as the same kind of reminder; only the tooltip
+    // says whose.
+    wsGlobalTodoEl.innerHTML = "";
+    const gmark = todoMark(globalTodos);
+    if (gmark) {
+      gmark.title = globalTodos === 1 ? "1 unfinished global todo" : globalTodos + " unfinished global todos";
+      wsGlobalTodoEl.appendChild(gmark);
+    }
     for (const w of msg.workspaces) {
       const li = document.createElement("li");
       li.className = "ws" + (w.active ? " active" : "") + (w.locked ? " locked" : "");
