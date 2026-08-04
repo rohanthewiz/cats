@@ -65,7 +65,7 @@ grid the sizers established. Absent ⇒ false, so browsers need no change.
 Version mismatch or rejection ⇒ `error` set, socket closed (and no `caps` — that socket is
 about to go). Otherwise the server immediately pushes initial full state: `layout` (§3), then
 for each **visible** pane (§8) a full `pane_frame` + current
-`pane_title`/`pane_cwd`/`pane_modes`, plus the `agents` rollup and app `title`.
+`pane_title`/`pane_cwd`/`pane_branch`/`pane_modes`, plus the `agents` rollup and app `title`.
 
 `caps` names optional behaviours added **within** `v:1` — additive fields an older server
 ignores rather than rejects. A client reads it to tell "the server honoured my field" from
@@ -120,6 +120,12 @@ panes, but agent chrome is global):
   most default shell setups never emit OSC 7), and OSC 7 itself, which retires the probe
   for that pane once seen since a reporting shell can name directories the local probe
   cannot see at all (an ssh session's remote path).
+- `{t:"pane_branch", pane, branch}` — the git branch checked out in the pane's cwd
+  (`""` clears; `"@<short sha>"` for a detached HEAD). No β event behind it: catway
+  resolves it itself by reading `.git/HEAD` under the pane's cwd (`gitbranch.go`), on
+  every `pane_cwd` and on a slow sweep, since a `git checkout` changes the branch with
+  no terminal event of any kind to notice. Separate from `pane_cwd` for that reason —
+  the two halves move independently.
 - `{t:"pane_agent", pane, agent, state, model?, seen}` (β `:249` + server's Seen tracking;
   also patches the `agents` rollup client-side). `model` is the LLM the agent is currently
   running under, read from the agent's own transcript server-side (catway's

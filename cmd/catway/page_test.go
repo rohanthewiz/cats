@@ -97,6 +97,28 @@ func TestRenderPageBuildScript(t *testing.T) {
 	}
 }
 
+// The home directory rides along so the front end can draw paths prompt-style.
+// A host with no resolvable home injects nothing and the page draws full paths,
+// so both shapes are legal — what must hold is that it lands before </head> and
+// that its value is a JSON string rather than a bare path pasted into JS.
+func TestRenderPageHomeScript(t *testing.T) {
+	out := string(renderPage([]byte(baseHead), config.Default()))
+	block := homeScript()
+
+	if block == "" {
+		if strings.Contains(out, "__catsHome") {
+			t.Error("no home must not inject a value")
+		}
+		return
+	}
+	if !strings.Contains(out, `<script id="cats-home">window.__catsHome="`) {
+		t.Errorf("home script not injected:\n%s", block)
+	}
+	if head := strings.Index(out, "</head>"); strings.Index(out, "__catsHome") > head {
+		t.Error("home script must precede </head>")
+	}
+}
+
 // A commit subject holding markup can't close the injected <script> —
 // json.Marshal's HTML escaping keeps it inert.
 func TestBuildScriptEscapesSubject(t *testing.T) {

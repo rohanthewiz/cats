@@ -196,6 +196,25 @@ func NewPaneCwd(pane uint32, cwd string) PaneCwd {
 	return PaneCwd{T: MsgPaneCwd, Pane: pane, Cwd: cwd}
 }
 
+// PaneBranch reports the git branch checked out in a pane's working directory;
+// "" clears it (the pane left the repo, or never was in one).
+//
+// It rides its own message rather than a field on PaneCwd because the two move
+// independently: a checkout in a pane that never cd's changes the branch with
+// no cwd event behind it, and a cd within one repo changes the path with no
+// branch change. Coupling them would mean re-sending the unchanged half on
+// every update of the other, and — worse — would tie the branch's refresh
+// cadence to OSC 7, which only fires when the shell moves.
+type PaneBranch struct {
+	T      Type   `json:"t"`
+	Pane   uint32 `json:"pane"`
+	Branch string `json:"branch"`
+}
+
+func NewPaneBranch(pane uint32, branch string) PaneBranch {
+	return PaneBranch{T: MsgPaneBranch, Pane: pane, Branch: branch}
+}
+
 // PaneAgent reports one pane's agent identity + state change (also patches the
 // Agents rollup client-side). Agent is "" for a plain shell. Model is the LLM
 // the agent is currently running under — display text, so it may carry the

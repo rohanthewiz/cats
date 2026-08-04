@@ -27,8 +27,8 @@ import (
 )
 
 // chromeRows is reserved at the top of every pane rect for browser-side pane
-// decoration — the per-pane header strip (pub · title · cwd · agent, the
-// pane-scoped mode chips, and the icon buttons). It was briefly 0 when the
+// decoration — the per-pane header strip (pub · title · cwd · branch · agent ·
+// state, the pane-scoped mode chips, and the icon buttons). It was briefly 0 when the
 // strip was dropped in the green-theme facelift; the strip is back, so the
 // terminal grid gives the row up again.
 const chromeRows = 1
@@ -42,15 +42,22 @@ var defaultArea = layout.Rect{Width: 120, Height: 32}
 // encoder, cached chrome for late-joining browsers, the desired grid, and
 // whether the daemon has spawned its PTY. Keyed by pane id in orch.panes.
 type paneRuntime struct {
-	id     uint32
-	enc    *inputenc.Encoder
-	modes  terminal.InputModes
-	title  string
-	cwd    string
-	agent  *orchestration.PaneAgent
-	cols   uint16
-	rows   uint16
-	exited *int
+	id    uint32
+	enc   *inputenc.Encoder
+	modes terminal.InputModes
+	title string
+	cwd   string
+	// branch is the git branch checked out in cwd (gitbranch.go), "" when the
+	// pane is not in a repository or its cwd is not known yet. branchAt stamps
+	// the last resolution and branchBusy marks one in flight — together they
+	// throttle the HEAD reads, which happen off the loop goroutine.
+	branch     string
+	branchAt   time.Time
+	branchBusy bool
+	agent      *orchestration.PaneAgent
+	cols       uint16
+	rows       uint16
+	exited     *int
 	// --- hook-report ingestion (hooks.go), all loop-goroutine only ---
 	// agentAt stamps when the daemon's detection last reported (hook-vs-detection
 	// recency in effectiveAgent). hook is the live hook authority; agentSession
@@ -1288,6 +1295,9 @@ func (o *orch) broadcastPaneChrome(pid uint32) {
 	if rt.cwd != "" {
 		o.broadcast(browserproto.NewPaneCwd(pid, rt.cwd))
 	}
+	if rt.branch != "" {
+		o.broadcast(browserproto.NewPaneBranch(pid, rt.branch))
+	}
 	if agent, state := rt.effectiveAgent(); agent != "" {
 		o.broadcast(browserproto.NewPaneAgent(pid, agent, state, rt.agentModel, true))
 	}
@@ -1588,6 +1598,9 @@ func (o *orch) registerConn(c *client, init *browserproto.Init) {
 		}
 		if rt.cwd != "" {
 			o.send(c, browserproto.NewPaneCwd(pid, rt.cwd))
+		}
+		if rt.branch != "" {
+			o.send(c, browserproto.NewPaneBranch(pid, rt.branch))
 		}
 		if agent, state := rt.effectiveAgent(); agent != "" {
 			o.send(c, browserproto.NewPaneAgent(pid, agent, state, rt.agentModel, true))

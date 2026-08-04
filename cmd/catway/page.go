@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"log"
+	"os"
 	"sort"
 	"strings"
 
@@ -14,7 +15,9 @@ import (
 // renderPage bakes the front-end's server-side settings into the served HTML: a
 // <style> that overrides the :root CSS custom properties (theme colours + font),
 // a <script> that publishes the copy-mode keybindings as window.__catsKeys, and
-// a <script> that publishes this binary's git identity as window.__catsBuild.
+// a <script> that publishes this binary's git identity as window.__catsBuild,
+// and a <script> that publishes the user's home directory as window.__catsHome
+// (so paths can be drawn prompt-style).
 // All are injected just before </head> so they win the cascade / load before the
 // app script runs. The base page keeps working with no injection (its stylesheet
 // has fallback values, the JS has a default binding table, and the build badge
@@ -25,7 +28,7 @@ import (
 // keybindings and build info ride through json.Marshal, whose default HTML
 // escaping keeps a "</script>" in a value inert.
 func renderPage(base []byte, cfg config.Config) []byte {
-	inject := themeStyle(resolveTheme(cfg)) + keybindingsScript(cfg.Keybindings) + buildScript()
+	inject := themeStyle(resolveTheme(cfg)) + keybindingsScript(cfg.Keybindings) + buildScript() + homeScript()
 	html := string(base)
 	if i := strings.LastIndex(html, "</head>"); i >= 0 {
 		return []byte(html[:i] + inject + html[i:])
@@ -120,6 +123,29 @@ func buildScript() string {
 		return ""
 	}
 	return "<script id=\"cats-build\">window.__catsBuild=" + string(data) + ";</script>\n"
+}
+
+// homeScript publishes the user's home directory so the front end can render
+// paths the way a prompt does ("~/projs/go/cats").
+//
+// It is display-only, and deliberately not applied to the cwd on the wire: the
+// browser hands a pane's cwd straight back to the server as tab.create's spawn
+// directory, and a "~" in that field would be a path no spawn can resolve. So
+// the wire keeps the absolute truth and the front end abbreviates at the moment
+// it draws — which is also the only place the abbreviation is worth anything.
+//
+// No home (a daemon under an account with none) emits nothing, and the front
+// end simply draws full paths.
+func homeScript() string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return ""
+	}
+	data, err := json.Marshal(home)
+	if err != nil {
+		return ""
+	}
+	return "<script id=\"cats-home\">window.__catsHome=" + string(data) + ";</script>\n"
 }
 
 // sanitizeCSSName keeps a CSS custom-property name to [A-Za-z0-9-] so it stays a

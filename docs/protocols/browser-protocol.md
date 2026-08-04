@@ -50,6 +50,7 @@ server assumes a default 120×32 area.
 | `agents` | the cross-session agent roster for the sidebar |
 | `pane_title` | OSC 0/2 title for a pane |
 | `pane_cwd` | working directory for a pane |
+| `pane_branch` | the git branch checked out in that working directory (`""` when the pane is not in a repository); sent separately from `pane_cwd` because a checkout moves the branch without moving the pane |
 | `pane_agent` | agent identity + arbitrated state for a pane |
 | `pane_modes` | the pane's DEC mode state, so the UI knows whether a drag belongs to the program or to selection |
 | `pane_exited` | the pane's child exited |
@@ -116,7 +117,7 @@ wanted. The full vocabulary is in [Control API](control-api.md#command-vocabular
 flowchart TD
   D["cathost streams everything<br/>over the seam — detection needs it"]
   F{"is the pane in this connection's<br/>active workspace + tab?"}
-  Y["send pane_frame / pane_diff,<br/>plus that pane's chrome:<br/>pane_title / pane_cwd /<br/>pane_agent / pane_modes / pane_exited"]
+  Y["send pane_frame / pane_diff,<br/>plus that pane's chrome:<br/>pane_title / pane_cwd / pane_branch /<br/>pane_agent / pane_modes / pane_exited"]
   N["drop both; the pane keeps running"]
   C["agents rollup: always sent,<br/>covering every pane in the session"]
 

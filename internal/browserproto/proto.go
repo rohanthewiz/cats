@@ -34,6 +34,7 @@ const (
 	MsgAgents      Type = "agents"
 	MsgPaneTitle   Type = "pane_title"
 	MsgPaneCwd     Type = "pane_cwd"
+	MsgPaneBranch  Type = "pane_branch"
 	MsgPaneAgent   Type = "pane_agent"
 	MsgPaneModes   Type = "pane_modes"
 	MsgPaneExited  Type = "pane_exited"
@@ -144,6 +145,8 @@ func DecodeDown(data []byte) (any, error) {
 		return decodeAs[PaneTitle](data)
 	case MsgPaneCwd:
 		return decodeAs[PaneCwd](data)
+	case MsgPaneBranch:
+		return decodeAs[PaneBranch](data)
 	case MsgPaneAgent:
 		return decodeAs[PaneAgent](data)
 	case MsgPaneModes:

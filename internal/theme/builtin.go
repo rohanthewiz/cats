@@ -26,7 +26,12 @@ func builtins() []Theme {
 				// a greenish brown that separates them from both the green
 				// headings above and the muted pane rows below.
 				"ws-heading": "#a09a62",
-				"todo":       "#f0dfa0", "ok": "#6ac47a", "warn": "#e0b64e", "err": "#e57373",
+				// The pane header's git branch takes the same warm tan: it is
+				// the same kind of secondary label, and sharing the tone keeps
+				// the strip to three hues (green handle, tan branch, yellow
+				// agent) instead of four.
+				"branch": "#a09a62",
+				"todo":   "#f0dfa0", "ok": "#6ac47a", "warn": "#e0b64e", "err": "#e57373",
 				"done": "#00ccf5",
 				// The formerly-hardcoded stylesheet colors, preserved exactly.
 				"fg-strong": "#e8e8e8", "fg-soft": "#dddddd", "fg-bright": "#ffffff",

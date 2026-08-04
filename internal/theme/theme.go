@@ -68,7 +68,7 @@ var requiredKeys = []string{"bg", "fg", "muted", "line", "accent", "ok", "warn",
 //	    └─ accent-fg                            ├─ chrome-fg-dim
 //	 line ── chrome-focus                       ├─ term-fg
 //	                                            └─ hover/scroll-thumb-idle (α)
-//	muted ── ws-heading
+//	muted ── ws-heading ── branch
 //	 accent ─ heading · accent-dim(α) · done · sel-fill(α) · cm-cursor(α) · scroll-thumb(α)
 var derivations = []struct {
 	key   string
@@ -86,6 +86,11 @@ var derivations = []struct {
 	// heading, so a theme that doesn't author one falls back to plain muted
 	// label text — which is what those rows were before they were themeable.
 	{"ws-heading", "muted", 0},
+	// The git branch in a pane header, one more tier of secondary label. It
+	// follows ws-heading (and so, for a theme that authors neither, muted)
+	// because both are the same kind of thing: a warm counterweight to the
+	// accent, naming where something lives rather than what it is doing.
+	{"branch", "ws-heading", 0},
 	{"accent-dim", "accent", 0.45},
 	{"accent-fg", "bg", 0},
 	{"todo", "warn", 0},

@@ -20,6 +20,11 @@
        greenish brown so they read as group dividers without competing with the
        green section titles. Themes that don't set it get plain --muted. */
     --ws-heading:#a09a62;
+    /* The git branch in a pane header. Same warm tan as the workspace headers
+       (and derived from it for themes that author neither): it has to read as a
+       distinct field beside the green handle and the yellow agent without
+       adding a fourth hue to a 19px strip. */
+    --branch:#a09a62;
     /* The todo reminder mark keeps the old warm yellow: it has to stay clear of
        the green agent-state dots so it reads as a reminder, not as a state. */
     --todo:#f0dfa0;
@@ -302,7 +307,30 @@
     align-items:center; gap:0; font-size:12px; color:var(--muted); background:var(--chrome);
     padding:0 5px 0 9px; box-sizing:border-box; }
   .pane.focused .chrome { color:var(--chrome-fg); background:var(--chrome-focus); }
-  .pane .chrome .info { flex:1; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+  /* The identity line reads left to right as one sentence about the pane —
+     pane id · title · path · branch · agent · state — and then hands the rest
+     of the row to the toolbar.
+       ┌────────────────────────────────────────────────────────┬───────────┐
+       │ w1:p3 · vim · ~/projs/go/cats · main · claude · working │  toolbar  │
+       └────────────────────────────────────────────────────────┴───────────┘
+     Laying it out as a flex row, rather than as one run of text ellipsized as a
+     whole, is what lets the row give up the *right* field when it runs out of
+     width: the title and path shrink and ellipsize, while the short fields —
+     each of which answers a question you would otherwise have to click into the
+     pane to ask — stay whole. Ellipsizing the line as a whole truncated from the
+     right, which dropped the agent and its state first. */
+  .pane .chrome .info { flex:1; min-width:0; display:flex; align-items:center;
+    overflow:hidden; white-space:nowrap; }
+  /* Fields hold their width by default; only the two free-text ones give way,
+     the title twice as readily as the path (a shell's title is usually the
+     command you can also see running, while the path may be the only thing
+     telling two panes apart). */
+  .pane .chrome .info > span { flex:none; }
+  .pane .chrome .info .ttl { flex:0 2 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; }
+  .pane .chrome .info .cwd { flex:0 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; }
+  /* The separator belongs to no field: it is emitted between two present ones,
+     so an absent field leaves no orphan dot behind. */
+  .pane .chrome .info .sep { padding:0 6px; opacity:.45; }
   /* A pane whose child has exited keeps its header readable but stops competing
      with the live ones: the identity text drops to --muted at normal weight,
      leaving the red "exited (N)" as the only emphasised run in the row. The
@@ -310,11 +338,26 @@
      the handle keeps its accent. */
   .pane.dead .chrome .info { color:var(--muted); font-weight:400; }
   .pane .chrome .info .pub { color:var(--accent); }
+  /* The branch carries its own hue because it is the field a glance is looking
+     for when several panes sit in worktrees of the same repository — where the
+     paths differ by one segment and the branch is the whole distinction. Capped
+     rather than shrinkable: a generated worktree slug can run to 60 characters,
+     and past ~24 it stops being an identifier you read and starts eating the
+     row. */
+  .pane .chrome .info .branch { color:var(--branch); max-width:24ch;
+    overflow:hidden; text-overflow:ellipsis; }
+  /* A detached HEAD ("@a1b2c3d") is drawn as the warning it is: a commit made
+     there belongs to no branch, and the header is the only place that says so. */
+  .pane .chrome .info .branch.detached { color:var(--warn); }
   .pane .chrome .info .agent { color:var(--warn); }
   .pane .chrome .info .exited { color:var(--err); font-weight:600; }
   /* Pane-scoped mode chips (copy mode, zoom) ride the header of the pane they
      describe — the tab-row status area only keeps the app-global affordances. */
   .pane .chrome .info .mode { color:var(--warn); font-weight:600; }
+  /* Copy mode's key hints are the one long run that is neither a name nor a
+     path: in a narrow pane it gives way from the right, since the bindings are
+     listed in decreasing order of how often they're needed. */
+  .pane .chrome .info .hint { flex:0 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; }
   .pane .chrome .zoom { flex:none; color:var(--accent); cursor:pointer; padding:0 6px; }
   .pane .chrome .ctl { display:flex; gap:1px; flex:none; }
   .pane .chrome .ctl button { background:none; border:none; color:var(--muted); cursor:pointer;
@@ -788,7 +831,7 @@
       pub: "", info: null, W: 0, H: 0, cells: [], links: [], cur: null,
       gs: 1, ox: 0, oy: 0,   // grid inset: scale + centring offsets (setInset)
       defFg: THEME_FG, defBg: THEME_BG, modes: { mouse: false, alt: false },
-      title: "", cwd: "", agent: "", agentState: "", agentModel: "", exited: null,
+      title: "", cwd: "", branch: "", agent: "", agentState: "", agentModel: "", exited: null,
       pressed: -1, lastCell: "", dirty: false, scroll: null, sel: null, cm: null };
     // Clicking the header (not its buttons) focuses the pane; double-click
     // renames, right-click opens the pane menu (chrome or canvas); holding
@@ -1031,11 +1074,31 @@
     return m ? agent + " " + m : agent;
   }
 
+  // HOME is the server's home directory, baked into the page at render time
+  // (page.go's homeScript). "" — no home, or an old page — simply turns the
+  // abbreviation off and paths draw in full.
+  const HOME = (typeof window.__catsHome === "string" ? window.__catsHome : "").replace(/\/+$/, "");
+  // shortPath renders an absolute path the way a shell prompt does. Display
+  // only: p.cwd keeps the absolute path it arrived as, because that same value
+  // is handed back to the server as a new tab's spawn directory (see
+  // focusedPaneCwd), and "~" is not a directory anything can spawn in.
+  function shortPath(path) {
+    if (!path || !HOME) return path;
+    if (path === HOME) return "~";
+    if (path.startsWith(HOME + "/")) return "~" + path.slice(HOME.length);
+    return path;
+  }
+
   // ---- Chrome: per-pane header (styled HTML, WS8) ----
-  // The identity line (pub · title · cwd · agent · exited) plus the pane-scoped
-  // mode chips: keyboard copy-mode replaces the identity while active — its
-  // hints need the room, and the mode is what you need to know about the pane
-  // just then — and a zoomed pane carries a clickable ZOOM chip.
+  // The identity line — pane id · title · path · branch · agent · agent state —
+  // followed by the flexible gap the CSS opens, and then the pane toolbar at the
+  // right edge. Every field is its own span with its own class, so the row can
+  // colour them apart and decide which ones give up width (see the .info rules).
+  //
+  // Plus the pane-scoped mode chips: keyboard copy-mode replaces the identity
+  // while active — its hints need the room, and the mode is what you need to
+  // know about the pane just then — and a zoomed pane carries a clickable ZOOM
+  // chip.
   function renderChrome(p) {
     p.chromeInfo.innerHTML = "";
     p.el.classList.toggle("dead", p.exited !== null && p.exited !== undefined);
@@ -1044,16 +1107,44 @@
       if (cls) s.className = cls;
       s.textContent = text;
       p.chromeInfo.appendChild(s);
+      return s;
     };
-    add("pub", paneRef(p.pub, p.id));
+    // seg() owns the separators so no field has to know its own position: the
+    // dot is emitted between two fields that are actually present, which is what
+    // keeps a pane with no title (or no repo, or no agent) from showing a run of
+    // orphaned dots. Empty text drops the field and its separator together.
+    let placed = 0;
+    const seg = (cls, text) => {
+      if (!text) return null;
+      if (placed++) add("sep", "·");
+      return add(cls, text);
+    };
+    seg("pub", paneRef(p.pub, p.id));
     if (p.cm) {
-      add("mode", "  COPY");
-      add("", "  hjkl/arrows move · v select · r rect · y copy · Esc exit");
+      seg("mode", "COPY");
+      seg("hint", "hjkl/arrows move · v select · r rect · y copy · Esc exit");
     } else {
-      if (p.title) add("", "  " + p.title);
-      if (p.cwd) add("", "  " + p.cwd);
-      if (p.agent) add("agent", "  " + agentLabel(p.agent, p.agentModel) + ":" + p.agentState);
-      if (p.exited !== null) add("exited", "  exited (" + p.exited + ")");
+      seg("ttl", p.title);
+      // Path then branch, reading outside-in: the path says which tree, the
+      // branch says where in it — the same order a prompt puts them in, and the
+      // order that keeps the two panes-in-sibling-worktrees case legible, since
+      // the differing path segment and the branch end up side by side.
+      seg("cwd", shortPath(p.cwd));
+      // "@a1b2c3d" is gitBranch's spelling for a detached HEAD (see the server's
+      // gitbranch.go); the leading @ is the only thing that can't be a branch
+      // name's first character in what it sends, so it doubles as the flag.
+      const br = seg("branch", p.branch);
+      if (br && p.branch[0] === "@") br.classList.add("detached");
+      // Agent and state are separate fields now rather than "claude opus 5:idle":
+      // the state is the half that changes minute to minute, and as its own span
+      // it can carry the same colour the sidebar gives that state. Both hang off
+      // the agent — a model without an agent to run it is a leftover, not a
+      // fact about the pane.
+      if (p.agent) {
+        seg("agent", agentLabel(p.agent, p.agentModel));
+        seg("astate " + stClass(p.agentState), p.agentState);
+      }
+      if (p.exited !== null) seg("exited", "exited (" + p.exited + ")");
     }
     const zoom = p.chrome.querySelector(".zoom");
     if (tabZoomed && p.info && p.info.focused) {
@@ -2231,6 +2322,10 @@
       }
       case "pane_title": { const p = pane(msg.pane); p.title = msg.title; renderChrome(p); refreshPaneList(); break; }
       case "pane_cwd": { const p = pane(msg.pane); p.cwd = msg.cwd; renderChrome(p); break; }
+      // The branch arrives on its own message rather than with the cwd: a
+      // checkout changes it without the pane ever moving, so the two are pushed
+      // independently (see browserproto's PaneBranch).
+      case "pane_branch": { const p = pane(msg.pane); p.branch = msg.branch; renderChrome(p); break; }
       case "pane_agent": {
         const p = pane(msg.pane); p.agent = msg.agent; p.agentState = msg.state;
         // Absent (an agent with no resolvable model) clears it — a stale model

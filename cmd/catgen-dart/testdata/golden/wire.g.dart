@@ -55,6 +55,7 @@ abstract final class MsgType {
   static const String agents = 'agents';
   static const String paneTitle = 'pane_title';
   static const String paneCwd = 'pane_cwd';
+  static const String paneBranch = 'pane_branch';
   static const String paneAgent = 'pane_agent';
   static const String paneModes = 'pane_modes';
   static const String paneExited = 'pane_exited';
@@ -1261,6 +1262,42 @@ class PaneAgent {
       };
 }
 
+/// PaneBranch reports the git branch checked out in a pane's working directory;
+/// "" clears it (the pane left the repo, or never was in one).
+///
+/// It rides its own message rather than a field on PaneCwd because the two move
+/// independently: a checkout in a pane that never cd's changes the branch with
+/// no cwd event behind it, and a cd within one repo changes the path with no
+/// branch change. Coupling them would mean re-sending the unchanged half on
+/// every update of the other, and — worse — would tie the branch's refresh
+/// cadence to OSC 7, which only fires when the shell moves.
+///
+/// Wire type: `pane_branch`.
+class PaneBranch {
+  const PaneBranch({
+    required this.pane,
+    required this.branch,
+  });
+
+  /// The `t` discriminator this class always carries. It is a property of
+  /// the type, not a field: a caller who could set it could set it wrong.
+  static const String type = 'pane_branch';
+
+  final int pane;
+  final String branch;
+
+  factory PaneBranch.fromJson(Map<String, Object?> j) => PaneBranch(
+        pane: asInt(j['pane']),
+        branch: asString(j['branch']),
+      );
+
+  Map<String, Object?> toJson() => {
+        't': type,
+        'pane': pane,
+        'branch': branch,
+      };
+}
+
 /// PaneCwd reports a pane's working directory (OSC 7).
 ///
 /// Wire type: `pane_cwd`.
@@ -1983,6 +2020,8 @@ Object? decodeDown(Map<String, Object?> j) {
       return PaneTitle.fromJson(j);
     case PaneCwd.type:
       return PaneCwd.fromJson(j);
+    case PaneBranch.type:
+      return PaneBranch.fromJson(j);
     case PaneAgent.type:
       return PaneAgent.fromJson(j);
     case PaneModes.type:

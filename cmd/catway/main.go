@@ -268,8 +268,9 @@ func main() {
 	if o.historyPath != "" {
 		go o.runHistoryCapture() // periodic scrollback sweep for cold-restore seeds
 	}
-	go o.runAgentModels() // periodic re-read of each agent pane's current model
-	go o.runUsage()       // periodic re-read of the account's rate-limit windows
+	go o.runAgentModels()  // periodic re-read of each agent pane's current model
+	go o.runPaneBranches() // periodic re-read of each pane's checked-out git branch
+	go o.runUsage()        // periodic re-read of the account's rate-limit windows
 
 	// TLS: operator PEMs, or an auto-generated self-signed pair. Naming a cert,
 	// a key, or a SAN is itself the opt-in — each is meaningless without HTTPS,
