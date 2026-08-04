@@ -1887,13 +1887,13 @@
     usageListEl.appendChild(li);
   }
 
-  // Where a row turns yellow, then red. The two kinds of row do not share a
-  // scale, because the same percentage does not mean the same thing: a week
-  // that is 70% spent is on track, while a machine 70% into its RAM is a couple
-  // of test runs from swapping — so memory is warned about earlier and
-  // condemned earlier than a rate-limit window is.
+  // Where a row turns yellow, then red. The two kinds of row keep separate
+  // scales because the same percentage does not mean the same thing: a week
+  // that is 80% spent is on track, while a machine 80% into its RAM is a couple
+  // of test runs from swapping. They happen to agree on where the warning and
+  // the alarm sit; the scales stay separate so either can move on its own.
   const USAGE_LEVELS  = { high: 75, crit: 90, of: "of the window used" };
-  const MEMORY_LEVELS = { high: 60, crit: 85, of: "of host memory in use" };
+  const MEMORY_LEVELS = { high: 80, crit: 90, of: "of host memory in use" };
 
   function usageRow(name, w, levels) {
     w = w || {};
