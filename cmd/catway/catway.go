@@ -96,6 +96,13 @@ type paneRuntime struct {
 	// sweep only captures panes whose content actually changed. Set on every
 	// pane_frame, cleared when a capture is issued.
 	histDirty bool
+	// appFocused is the focus state last delivered to (or assumed by) the
+	// pane's program: "this is the session's focused pane AND some client
+	// window is in the foreground". syncAppFocus forwards its transitions as
+	// focus reports (CSI I/O) when the program enabled DEC mode 1004; the
+	// zero value (unfocused) means a fresh pane earns an explicit focus-in
+	// on the first sync rather than silently assuming it is being watched.
+	appFocused bool
 }
 
 // orch is the WS2 orchestrator: a single event-loop actor (run) that owns all
@@ -1057,6 +1064,54 @@ func (o *orch) emitStructuralEvents() {
 		o.structFocus = focus
 		h, _ := o.session.PublicPaneID(layout.PaneID(focus))
 		o.emitEvent(app.EventFocusChanged, focus, app.PaneRefEvent{Pane: focus, Handle: h})
+		// The pane programs' view of focus moved with it: the old pane's
+		// program is no longer being watched, the new one is (window
+		// permitting). Piggybacked here because this is already the one
+		// choke point every model mutation flows through.
+		o.syncAppFocus()
+	}
+}
+
+// anyClientFocused reports whether at least one connected window is in the
+// OS foreground — the "is anyone looking" half of a pane program's focus.
+func (o *orch) anyClientFocused() bool {
+	for c := range o.conns {
+		if c.focused {
+			return true
+		}
+	}
+	return false
+}
+
+// paneSeen is the focus state a pane's program should believe: it is the
+// session's focused pane and somebody's window is in front to see it. Both
+// halves matter — a focused pane in a backgrounded app is not being watched,
+// and neither is a background pane in a focused app.
+func (o *orch) paneSeen(pid uint32) bool {
+	return o.anyClientFocused() && pid == o.focusedPaneID()
+}
+
+// syncAppFocus reconciles every pane program's believed focus (appFocused)
+// with paneSeen, forwarding each transition as a focus report. Encoding is
+// per-pane mode state (inputenc.Focus returns nil unless the program enabled
+// DEC mode 1004), so panes that never asked receive nothing — but appFocused
+// still tracks the truth for them, ready for the seed report the moment they
+// do ask (see the pane_modes handler). This is what lets a TUI stop blinking
+// its caret when the user switches away from the app: the window's blur
+// arrives as a Focus up-message, and the focused pane's program hears CSI O.
+func (o *orch) syncAppFocus() {
+	for pid, rt := range o.panes {
+		want := o.paneSeen(pid)
+		if want == rt.appFocused {
+			continue
+		}
+		rt.appFocused = want
+		if rt.exited != nil {
+			continue
+		}
+		if b := rt.enc.Focus(want); len(b) > 0 {
+			o.daemon.send(orchestration.NewInput(rt.id, b))
+		}
 	}
 }
 
@@ -1360,9 +1415,17 @@ func (o *orch) clientsMsg() browserproto.Clients {
 // strict decrease in len(o.conns), so it terminates — at worst when the last
 // connection is gone.
 func (o *orch) flushClients() {
+	dirty := o.connsDirty
 	for o.connsDirty {
 		o.connsDirty = false
 		o.broadcast(o.clientsMsg())
+	}
+	// A changed connection set can change the "is anyone looking" aggregate —
+	// the last focused window leaving is a blur no Focus message will ever
+	// report. Deferred here with the census, and for the same reason: dropConn
+	// runs mid-broadcast, where no further sends should be triggered.
+	if dirty {
+		o.syncAppFocus()
 	}
 }
 
@@ -1407,6 +1470,11 @@ type client struct {
 	pong   chan []byte // ping payloads to echo back; see serve's ping handler
 	viewer bool
 	trans  map[uint32]*browserproto.FrameTranslator
+	// focused is this window's OS-level focus, per its Focus reports. Starts
+	// true in registerConn: a browser that just connected is in front until it
+	// says otherwise, which keeps clients that never report (older pages, ctl
+	// harnesses) behaving as the pre-Focus world did. Loop-goroutine only.
+	focused bool
 }
 
 func (c *client) translator(pid uint32) *browserproto.FrameTranslator {
@@ -1564,6 +1632,7 @@ func (o *orch) serve(ws *rweb.WSConn) error {
 // initial viewport state (welcome, layout, cached chrome, agents) plus a full
 // frame per visible pane. Loop-goroutine only.
 func (o *orch) registerConn(c *client, init *browserproto.Init) {
+	c.focused = true // in front until its first Focus report says otherwise
 	o.conns[c] = struct{}{}
 	o.connsDirty = true
 	// A viewer declares no geometry: neither the cell grid nor the cell pixel
@@ -1712,6 +1781,15 @@ func (o *orch) handleUp(c *client, up any) {
 		} else if len(b) > 0 {
 			o.daemon.send(orchestration.NewInput(rt.id, b))
 		}
+
+	case *browserproto.Focus:
+		// Viewers count: a phone in the foreground is somebody looking, even
+		// if it never owns the geometry.
+		if c == nil || c.focused == m.Focused {
+			return
+		}
+		c.focused = m.Focused
+		o.syncAppFocus()
 
 	case *browserproto.Raw:
 		id, ok := o.session.FocusedPane()

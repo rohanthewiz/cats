@@ -119,6 +119,18 @@ type Resize struct {
 	Rows uint16 `json:"rows"`
 }
 
+// Focus reports the client *window's* focus — the OS-level "is this app in
+// front" state, not which pane is focused (that is a session command). The
+// server folds every connection's report into one "is anyone looking" bit and
+// forwards its transitions to pane programs that enabled focus reporting (DEC
+// mode 1004), which is how a TUI knows to park its caret blink while the user
+// is in another app. A client that never sends this is treated as focused,
+// which is the world every program assumed before the message existed.
+type Focus struct {
+	T       Type `json:"t"`
+	Focused bool `json:"focused"`
+}
+
 // Raw is pre-encoded bytes to the focused pane.
 //
 // Deprecated: transition escape hatch only (α's "input"); removed before WS11.

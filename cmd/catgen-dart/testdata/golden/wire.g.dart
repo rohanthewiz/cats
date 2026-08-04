@@ -88,6 +88,7 @@ abstract final class MsgType {
   static const String paste = 'paste';
   static const String image = 'image';
   static const String resize = 'resize';
+  static const String focus = 'focus';
   static const String raw = 'raw';
   static const String cmd = 'cmd';
 }
@@ -930,6 +931,36 @@ class ErrorMsg {
         't': type,
         'msg': msg,
         if (pane != 0) 'pane': pane,
+      };
+}
+
+/// Focus reports the client *window's* focus — the OS-level "is this app in
+/// front" state, not which pane is focused (that is a session command). The
+/// server folds every connection's report into one "is anyone looking" bit and
+/// forwards its transitions to pane programs that enabled focus reporting (DEC
+/// mode 1004), which is how a TUI knows to park its caret blink while the user
+/// is in another app. A client that never sends this is treated as focused,
+/// which is the world every program assumed before the message existed.
+///
+/// Wire type: `focus`.
+class Focus {
+  const Focus({
+    required this.focused,
+  });
+
+  /// The `t` discriminator this class always carries. It is a property of
+  /// the type, not a field: a caller who could set it could set it wrong.
+  static const String type = 'focus';
+
+  final bool focused;
+
+  factory Focus.fromJson(Map<String, Object?> j) => Focus(
+        focused: asBool(j['focused']),
+      );
+
+  Map<String, Object?> toJson() => {
+        't': type,
+        'focused': focused,
       };
 }
 
@@ -2086,6 +2117,8 @@ Object? decodeUp(Map<String, Object?> j) {
     case Resize.type:
       // ignore: deprecated_member_use_from_same_package
       return Resize.fromJson(j);
+    case Focus.type:
+      return Focus.fromJson(j);
     case Raw.type:
       // ignore: deprecated_member_use_from_same_package
       return Raw.fromJson(j);

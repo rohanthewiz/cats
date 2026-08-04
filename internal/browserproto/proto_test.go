@@ -114,6 +114,8 @@ func TestRoundTrip(t *testing.T) {
 		{"paste", Paste{T: MsgPaste, Data: "ls -la\n"}, DecodeUp},
 		{"image", Image{T: MsgImage, Data: []byte{0x89, 0x50}, Ext: "png"}, DecodeUp},
 		{"resize", Resize{T: MsgResize, Cols: 200, Rows: 60}, DecodeUp},
+		{"focus", Focus{T: MsgFocus, Focused: true}, DecodeUp},
+		{"blur", Focus{T: MsgFocus, Focused: false}, DecodeUp},
 		{"raw", Raw{T: MsgRaw, Data: []byte{0x1b, '[', 'A'}}, DecodeUp},
 		{"cmd", mustCmd(t, "9", CmdPaneSplit, SplitParams{Direction: SplitV}), DecodeUp},
 	}

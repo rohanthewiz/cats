@@ -741,6 +741,7 @@
   let layoutMsg = null;          // last layout message
   let tabZoomed = false;         // active tab zoomed (applyLayout; header ZOOM chip)
   const panes = new Map();       // pane id -> pane state
+  let winFocused = document.hasFocus(); // window in OS foreground (see onWinFocus)
   let copyModePane = null;       // the pane in keyboard copy-mode, or null
   let agentItems = [];           // last agents rollup (drives sidebar + workspace summaries)
   // Last pane.list snapshot: every pane in the session, across all workspaces and
@@ -2275,8 +2276,19 @@
       }
     }
     if (p.cur && p.cur.vis && p.info && p.info.focused) {
-      ctx.fillStyle = css(defFg); ctx.globalAlpha = 0.7;
-      ctx.fillRect(p.cur.x * cellW, p.cur.y * cellH, cellW, cellH);
+      // The filled block belongs to the window that owns the keyboard. When
+      // the app itself is in the background it hollows to an outline — the
+      // classic terminal idiom for "this is where typing would land, but
+      // nothing lands here right now".
+      ctx.globalAlpha = 0.7;
+      const px = p.cur.x * cellW, py = p.cur.y * cellH;
+      if (winFocused) {
+        ctx.fillStyle = css(defFg);
+        ctx.fillRect(px, py, cellW, cellH);
+      } else {
+        ctx.strokeStyle = css(defFg); ctx.lineWidth = 1;
+        ctx.strokeRect(px + 0.5, py + 0.5, cellW - 1, cellH - 1);
+      }
       ctx.globalAlpha = 1;
     }
     if (p.sel) drawSelection(p, ctx);
@@ -4283,6 +4295,9 @@
       paneInvBusy = false; paneInvAgain = false;
       sendMsg({ t: "init", v: PV, cols, rows, dpr,
         cell_w_px: Math.round(cellW * dpr), cell_h_px: Math.round(cellH * dpr) });
+      // The server assumes a fresh connection is in front; correct it straight
+      // away if this window actually reconnected while in the background.
+      if (!winFocused) sendMsg({ t: "focus", focused: false });
     };
     ws.onmessage = (ev) => onMessage(JSON.parse(ev.data));
     ws.onclose = () => { setStatus("disconnected — retrying…", true); setTimeout(connect, 1500); };
@@ -4303,6 +4318,27 @@
       // the pane hover card, which reads cols/rows live when it opens.)
     }, 120);
   });
+
+  // ---- Window focus ----
+  // The window's own focus (app-level, not pane-level), tracked for two jobs:
+  // the focused pane's cursor hollows out so the eye can tell at a glance the
+  // app is in the background (draw), and the state is reported up so pane
+  // programs that enabled focus reporting — Claude Code, bubbletea TUIs — stop
+  // blinking their own carets while nobody is watching. Without the report,
+  // the app-drawn blink keeps arriving as cell updates and no amount of
+  // client-side cursor styling can still it.
+  function onWinFocus(f) {
+    if (f === winFocused) return;
+    winFocused = f;
+    sendMsg({ t: "focus", focused: f });
+    // Restyle the drawn cursor now rather than on the next frame diff — a
+    // backgrounded app may not produce one for minutes.
+    for (const p of panes.values()) {
+      if (p.info && p.info.focused) scheduleDraw(p);
+    }
+  }
+  window.addEventListener("focus", () => onWinFocus(true));
+  window.addEventListener("blur", () => onWinFocus(false));
 
   // ---- Sidebar splitter ----
   // The width is a per-browser display preference like the terminal font size,

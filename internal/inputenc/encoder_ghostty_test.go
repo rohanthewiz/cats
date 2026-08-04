@@ -368,3 +368,23 @@ func TestModeSwitchMidStream(t *testing.T) {
 		t.Fatalf("after kitty on, esc = %q", got)
 	}
 }
+
+// Focus reports are pure mode gate: fixed bytes when the program asked for
+// them (DEC 1004), nothing at all when it didn't — a shell that never enabled
+// the mode would print `I` at its prompt if the gate leaked.
+func TestFocus(t *testing.T) {
+	e := newEnc(t, terminal.InputModes{})
+	if got := e.Focus(true); got != nil {
+		t.Fatalf("focus-in with 1004 off = %q, want nothing", got)
+	}
+	if got := e.Focus(false); got != nil {
+		t.Fatalf("focus-out with 1004 off = %q, want nothing", got)
+	}
+	e.SetModes(terminal.InputModes{FocusReporting: true})
+	if got := e.Focus(true); string(got) != "\x1b[I" {
+		t.Fatalf("focus-in = %q, want CSI I", got)
+	}
+	if got := e.Focus(false); string(got) != "\x1b[O" {
+		t.Fatalf("focus-out = %q, want CSI O", got)
+	}
+}

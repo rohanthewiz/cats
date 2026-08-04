@@ -209,17 +209,7 @@ func (d *daemon) dispatch(mt orchestration.MessageType, payload []byte) {
 		if err := json.Unmarshal(payload, &ev); err != nil {
 			return
 		}
-		o.post(func() {
-			rt := o.panes[ev.PaneID]
-			if rt == nil {
-				return
-			}
-			rt.modes = inputModesFrom(ev)
-			rt.enc.SetModes(rt.modes)
-			if o.visible[ev.PaneID] {
-				o.broadcast(browserproto.ModesFrom(ev))
-			}
-		})
+		o.post(func() { o.applyPaneModes(ev) })
 
 	case orchestration.MsgPaneTitle:
 		var ev orchestration.PaneTitle
@@ -322,6 +312,34 @@ func (d *daemon) dispatch(mt orchestration.MessageType, payload []byte) {
 		}
 		log.Printf("catway: daemon error (pane %d): %s", ev.PaneID, ev.Message)
 		o.post(func() { o.broadcast(browserproto.NewError(ev.PaneID, ev.Message)) })
+	}
+}
+
+// applyPaneModes folds a β pane_modes event into the pane's runtime: the
+// encoder's mode state, the browser mirror, and the focus-reporting seed.
+// Loop-goroutine only.
+func (o *orch) applyPaneModes(ev orchestration.PaneModes) {
+	rt := o.panes[ev.PaneID]
+	if rt == nil {
+		return
+	}
+	wasReporting := rt.modes.FocusReporting
+	rt.modes = inputModesFrom(ev)
+	rt.enc.SetModes(rt.modes)
+	// A program that just enabled focus reporting (DEC 1004) has heard nothing
+	// yet and assumes it is focused — for a TUI launched while the window sat
+	// in the background, that assumption is exactly the blinking caret the
+	// mode exists to stop. Answer the enable with the current state (the way
+	// tmux seeds it) so the program starts converged instead of waiting for
+	// the next transition.
+	if !wasReporting && rt.modes.FocusReporting && rt.exited == nil {
+		rt.appFocused = o.paneSeen(ev.PaneID)
+		if b := rt.enc.Focus(rt.appFocused); len(b) > 0 {
+			o.daemon.send(orchestration.NewInput(rt.id, b))
+		}
+	}
+	if o.visible[ev.PaneID] {
+		o.broadcast(browserproto.ModesFrom(ev))
 	}
 }
 

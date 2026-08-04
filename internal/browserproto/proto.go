@@ -66,6 +66,7 @@ const (
 	MsgPaste  Type = "paste"
 	MsgImage  Type = "image"
 	MsgResize Type = "resize"
+	MsgFocus  Type = "focus"
 	MsgRaw    Type = "raw"
 	MsgCmd    Type = "cmd"
 )
@@ -99,7 +100,8 @@ func peekType(data []byte) (Type, error) {
 }
 
 // DecodeUp decodes one browser → server message into a pointer to its
-// concrete struct (*Init, *Key, *Mouse, *Paste, *Image, *Resize, *Raw, *Cmd).
+// concrete struct (*Init, *Key, *Mouse, *Paste, *Image, *Resize, *Focus,
+// *Raw, *Cmd).
 func DecodeUp(data []byte) (any, error) {
 	t, err := peekType(data)
 	if err != nil {
@@ -118,6 +120,8 @@ func DecodeUp(data []byte) (any, error) {
 		return decodeAs[Image](data)
 	case MsgResize:
 		return decodeAs[Resize](data)
+	case MsgFocus:
+		return decodeAs[Focus](data)
 	case MsgRaw:
 		return decodeAs[Raw](data)
 	case MsgCmd:

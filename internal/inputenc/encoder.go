@@ -110,6 +110,21 @@ func (e *Encoder) SetGrid(cols, rows uint16) {
 // Modes returns the last applied mode state.
 func (e *Encoder) Modes() terminal.InputModes { return e.modes }
 
+// Focus encodes a focus-in/out report (CSI I / CSI O), or nil when the pane's
+// program has not enabled focus reporting (DEC mode 1004). The bytes are fixed
+// — unlike keys there is nothing libghostty could add — so the mode gate is
+// this method's whole job, kept here because "does this pane want the event"
+// is mode state, and mode state lives in the encoder.
+func (e *Encoder) Focus(focused bool) []byte {
+	if !e.modes.FocusReporting {
+		return nil
+	}
+	if focused {
+		return []byte("\x1b[I")
+	}
+	return []byte("\x1b[O")
+}
+
 // Key encodes a structured key event. A nil result with nil error means the
 // event produces no bytes under the current modes (e.g. a bare modifier, or
 // a release the pane didn't ask to see).
