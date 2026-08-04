@@ -369,37 +369,18 @@ func NewTheme(name string, colors map[string]string, font string) Theme {
 	return Theme{T: MsgTheme, Name: name, Colors: colors, Font: font}
 }
 
-// Usage is the account's standing against Claude's rate-limit windows — the
-// same two numbers claude's own /usage screen shows, surfaced in the sidebar so
-// "how much of the week have I spent?" is answerable without leaving the pane
-// you are working in.
+// Usage is what the agents on this machine have spent, and against what — the
+// sidebar's USAGE section, surfaced so "how much of the week have I spent?" is
+// answerable without leaving the pane you are working in.
 //
-// Source names where the numbers came from, because the two answers are not the
-// same kind of answer: "account" is the authoritative per-window utilization
-// read from the account itself, "local" is the fallback estimate summed from
-// claude's transcripts on this machine. A local estimate knows how many tokens
-// were spent but not what they were spent against, so it carries no percentage
-// (see UsageWindow.Pct) — the sidebar renders it as a figure rather than a bar,
-// which is the honest rendering of a number with no denominator.
-//
-// Err is a short reason the account read failed, shown beside whatever the
-// fallback managed. It never carries the credential or the raw response.
-//
-// WeeklyModel is the weekly window of whichever model has its own allowance on
-// top of the all-models week — Fable on a Max plan, for instance. It is the
-// window that actually bites first on a heavy week, so it earns a row of its
-// own rather than being folded into Weekly. WeeklyModelName is what to call it
-// ("Fable"), taken from the account rather than guessed: the set of separately
-// metered models is the plan's business and changes without us. An empty name
-// means the account reports no such window and the sidebar shows no row.
-//
-// Memory is the share of the host machine's RAM in use — the one window here
-// that has nothing to do with the account. It shares the section because it
-// answers the same question the others do ("is something about to stop?") on
-// the same glance, and it shares the poll because it is read on the same tick.
-// Source does not describe it: it is always local, whichever source the
-// rate-limit numbers came from. A host whose memory could not be read leaves
-// Pct at UsagePctUnknown and the row is not drawn.
+// Groups are the section's subsections, in the order they are drawn. One per
+// provider that reports anything (claude, copilot), plus the host's own memory
+// last. The message is a LIST rather than a fixed set of named windows because
+// the providers do not meter alike: claude reports percentages of a 5-hour and
+// a weekly allowance, copilot reports counts with no allowance at all, and the
+// next one will do something else again. A struct with a field per window would
+// have to be widened for every provider added; a list is widened by the reader
+// that produces it.
 //
 // ReadAt is when the server took the reading (RFC 3339). It is the message's
 // own age, and it is on the wire because the receiver cannot infer it: the
@@ -408,23 +389,44 @@ func NewTheme(name string, colors map[string]string, font string) Theme {
 // A front-end shows it as "n ago" — a percentage with no date beside it looks
 // equally current whether it was read a minute or an hour ago.
 type Usage struct {
-	T               Type        `json:"t"`
-	Source          string      `json:"source"` // "account" | "local"
-	FiveHour        UsageWindow `json:"five_hour"`
-	Weekly          UsageWindow `json:"weekly"`
-	WeeklyModel     UsageWindow `json:"weekly_model"`
-	WeeklyModelName string      `json:"weekly_model_name,omitempty"`
-	Memory          UsageWindow `json:"memory"`
-	ReadAt          string      `json:"read_at,omitempty"`
-	Err             string      `json:"err,omitempty"`
+	T      Type         `json:"t"`
+	Groups []UsageGroup `json:"groups"`
+	ReadAt string       `json:"read_at,omitempty"`
 }
 
-// UsageWindow is one rate-limit window. Pct is the share of the window's
-// allowance already spent (0–100), or -1 when there is no denominator to divide
-// by — the local fallback fills Detail instead and leaves Pct at -1, so a
-// missing number reads as missing rather than as zero. ResetsAt is when the
-// window rolls over (RFC 3339), "" when unknown.
+// UsageGroup is one subsection: a heading and the rows drawn beneath it.
+//
+// ID is a detect.IdentifyAgent label ("claude", "copilot") for a provider, or
+// the literal "host" for the one group the server synthesises rather than reads
+// from a provider. That value is CLOSED, and a front-end may branch on it to
+// pick a warning scale: the same percentage does not mean the same thing on a
+// rate-limit window as on host memory, and only the group says which this is.
+// Every other ID is opaque — nothing downstream should enumerate providers.
+//
+// Name is the heading text. Note is the caption under the rows, composed here
+// because only the server knows why a group is showing an estimate rather than
+// a reading. Note never carries a credential or a raw response body: the reader
+// that fills it strips both first (see fetchAccountUsage).
+//
+// A group with neither Windows nor Note is never sent. An empty heading reads
+// as a broken section rather than as an absent provider.
+type UsageGroup struct {
+	ID      string        `json:"id"`
+	Name    string        `json:"name"`
+	Note    string        `json:"note,omitempty"`
+	Windows []UsageWindow `json:"windows"`
+}
+
+// UsageWindow is one row. Name is its label ("5 hr", "Week · Fable"), supplied
+// by the server for the same reason Groups is a list: the meters a provider
+// reports are the provider's business, and the browser cannot enumerate them.
+//
+// Pct is the share of the window's allowance already spent (0–100), or -1 when
+// there is no denominator to divide by — a local count fills Detail instead and
+// leaves Pct at -1, so a missing number reads as missing rather than as zero.
+// ResetsAt is when the window rolls over (RFC 3339), "" when unknown.
 type UsageWindow struct {
+	Name     string  `json:"name"`
 	Pct      float64 `json:"pct"`
 	ResetsAt string  `json:"resets_at,omitempty"`
 	Detail   string  `json:"detail,omitempty"`
@@ -433,31 +435,8 @@ type UsageWindow struct {
 // UsagePctUnknown is UsageWindow.Pct's "no denominator" value.
 const UsagePctUnknown = -1
 
-func NewUsage(source string, fiveHour, weekly UsageWindow, errMsg string) Usage {
-	return Usage{T: MsgUsage, Source: source, FiveHour: fiveHour, Weekly: weekly,
-		WeeklyModel: UsageWindow{Pct: UsagePctUnknown},
-		Memory:      UsageWindow{Pct: UsagePctUnknown}, Err: errMsg}
-}
-
-// WithWeeklyModel attaches the per-model weekly window. It is a separate step
-// rather than another NewUsage parameter because only the account read has one:
-// the local estimate counts tokens without knowing which model spent them, so
-// it leaves this alone and the row stays hidden.
-func (u Usage) WithWeeklyModel(name string, w UsageWindow) Usage {
-	if name == "" {
-		return u
-	}
-	u.WeeklyModelName, u.WeeklyModel = name, w
-	return u
-}
-
-// WithMemory attaches the host's memory window. Chained rather than passed to
-// NewUsage because it is orthogonal to both rate-limit sources: the same host
-// reading rides an account reply and a transcript estimate alike, and a machine
-// that will not report its memory simply leaves the field as NewUsage left it.
-func (u Usage) WithMemory(w UsageWindow) Usage {
-	u.Memory = w
-	return u
+func NewUsage(groups []UsageGroup) Usage {
+	return Usage{T: MsgUsage, Groups: groups}
 }
 
 // WithReadAt stamps the reading with the instant it was taken. Chained by the

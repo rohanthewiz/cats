@@ -151,12 +151,6 @@ func TestFetchAccountUsageWithoutScopedWeeklyLimit(t *testing.T) {
 	if got.weeklyModel.Pct != browserproto.UsagePctUnknown {
 		t.Errorf("weekly model pct = %v, want unknown", got.weeklyModel.Pct)
 	}
-	// And it must not reach the browser as a row at all.
-	msg := browserproto.NewUsage("account", got.fiveHour, got.weekly, "").
-		WithWeeklyModel(got.weeklyModelName, got.weeklyModel)
-	if msg.WeeklyModelName != "" {
-		t.Errorf("published a nameless per-model row: %+v", msg)
-	}
 }
 
 // A 200 whose windows are all zero is an account that has spent nothing, not a
@@ -426,11 +420,16 @@ func TestFormatTokens(t *testing.T) {
 func TestSetUsageStoresLatest(t *testing.T) {
 	o := &orch{}
 	at := time.Date(2026, 8, 2, 10, 0, 0, 0, time.UTC)
-	m := browserproto.NewUsage("account",
-		browserproto.UsageWindow{Pct: 10}, browserproto.UsageWindow{Pct: 20}, "").WithReadAt(at)
+	claude := func(pct float64) browserproto.Usage {
+		return browserproto.NewUsage([]browserproto.UsageGroup{{
+			ID: "claude", Name: "Claude", Windows: []browserproto.UsageWindow{
+				{Name: "5 hr", Pct: pct}, {Name: "Week", Pct: 20},
+			}}})
+	}
+	m := claude(10).WithReadAt(at)
 
 	o.setUsage(m)
-	if o.usage == nil || o.usage.FiveHour.Pct != 10 {
+	if o.usage == nil || len(o.usage.Groups) != 1 || o.usage.Groups[0].Windows[0].Pct != 10 {
 		t.Fatalf("usage not stored: %+v", o.usage)
 	}
 	if o.usage.ReadAt != "2026-08-02T10:00:00Z" {
@@ -444,10 +443,8 @@ func TestSetUsageStoresLatest(t *testing.T) {
 		t.Errorf("read_at = %q, want the re-read instant", o.usage.ReadAt)
 	}
 
-	moved := browserproto.NewUsage("account",
-		browserproto.UsageWindow{Pct: 11}, browserproto.UsageWindow{Pct: 20}, "")
-	o.setUsage(moved)
-	if o.usage.FiveHour.Pct != 11 {
+	o.setUsage(claude(11))
+	if o.usage.Groups[0].Windows[0].Pct != 11 {
 		t.Errorf("moved reading not stored: %+v", o.usage)
 	}
 }

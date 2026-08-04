@@ -106,8 +106,22 @@
   #usage-list li { display:block; padding:3px 8px 5px; cursor:default; }
   #usage-list li:hover { background:none; }
   #usage-list li.empty { color:var(--muted); font-style:italic; }
+  /* A heading over the rows it covers — one per provider, plus the host — in
+     the same register #pane-list's workspace headers use. A header only: no
+     caret, no click, nothing to collapse. Each group is two or three rows, so
+     folding one would be a control that saves nothing.
+     It stays display:block (inherited from the rule above) rather than copying
+     .wsgrp's flex: there is no rollup or caret here to push to the right edge,
+     and its padding is its own — the rows' 3px/5px is tuned around a meter this
+     has not got. */
+  #usage-list li.ugrp { color:var(--ws-heading); font-size:calc(10px * var(--sb-scale));
+    text-transform:uppercase; letter-spacing:.5px; font-weight:600; padding:2px 8px 1px; }
+  #usage-list li.ugrp.sep { border-top:1px solid var(--line); margin-top:5px; padding-top:7px; }
   #usage-list .urow { display:flex; align-items:baseline; gap:6px; }
-  #usage-list .uname { color:var(--fg-strong); }
+  /* Body weight and body color: with a genuinely bold heading now above them,
+     a row's label is no longer the most important thing in its line, and
+     lifting it to --fg-strong made every key read as emphasised. */
+  #usage-list .uname { color:var(--fg); }
   /* The reading sits hard right against the window name, and is the one thing
      in the row worth reading at a glance when the bar is only a hint. */
   #usage-list .uval { margin-left:auto; color:var(--muted); font-variant-numeric:tabular-nums; }
@@ -1726,7 +1740,7 @@
     window.addEventListener("mouseup", up);
   }
 
-  // ---- Usage: the account's standing against Claude's rate-limit windows ----
+  // ---- Usage: what the agents on this machine have spent, and against what ----
 
   // The server polls every couple of minutes, so the reset countdowns it
   // stamped would sit frozen in between — same problem the agent-age labels
@@ -1817,6 +1831,11 @@
     return h < 24 ? "resets in " + h + "h" : "resets in " + Math.round(h / 24) + "d";
   }
 
+  // renderUsage draws the section as one subsection per group: a heading, its
+  // rows, and the caption that explains them. The server decides what the groups
+  // are, what each row is called and what the caption says, because the set of
+  // providers and the meters each one reports is the server's to know — this
+  // walks the list rather than naming anything in it.
   function renderUsage(msg) {
     usageMsg = msg || null;
     // Any reading answers a pending refresh: the poller pushes every reading it
@@ -1824,41 +1843,48 @@
     usageIdle();
     renderUsageAge();
     usageListEl.innerHTML = "";
-    if (!usageMsg) {
-      const li = document.createElement("li");
-      li.className = "empty"; li.textContent = "…";
-      usageListEl.appendChild(li); return;
+    if (usageMsg) {
+      let drew = false;
+      for (const g of (usageMsg.groups || [])) {
+        const wins = g.windows || [];
+        // Never a bare heading: a subsection with nothing under it reads as a
+        // broken section rather than as a provider with nothing to report.
+        if (!wins.length && !g.note) continue;
+
+        const h = document.createElement("li");
+        // The rule tracks what was EMITTED, not the index. A group skipped by
+        // the line above would otherwise leave the next one drawing a hairline
+        // as the first thing in the section, under the heading's own border.
+        h.className = "ugrp" + (drew ? " sep" : "");
+        h.textContent = g.name || g.id || "—";
+        usageListEl.appendChild(h);
+        drew = true;
+
+        // "host" is the one group the server synthesises rather than reads from
+        // a provider, and the one whose percentage means something else: a
+        // machine 70% into its RAM is a couple of test runs from swapping, while
+        // a week 70% spent is on track. Every other id is opaque here.
+        const levels = g.id === "host" ? MEMORY_LEVELS : USAGE_LEVELS;
+        for (const w of wins) usageListEl.appendChild(usageRow(w.name, w, levels));
+
+        // The caption sits directly under the rows it is about and above the
+        // next heading, so it never reads as covering the whole section — only
+        // some groups are showing an estimate, and only they explain themselves.
+        if (g.note) {
+          const li = document.createElement("li");
+          li.className = "unote";
+          li.textContent = g.note;
+          usageListEl.appendChild(li);
+        }
+      }
+      if (drew) return;
+      // Nothing at all was drawable — no credential, no other provider, no
+      // readable memory. Fall through to the pending state rather than leave an
+      // empty section, which would look like a render that failed.
     }
-    usageListEl.appendChild(usageRow("5 hr", usageMsg.five_hour));
-    usageListEl.appendChild(usageRow("Week", usageMsg.weekly));
-    // A model with its own weekly allowance on top of the all-models week —
-    // Fable, say. Only the account read knows about it, and only on plans that
-    // meter one, so the row appears when a name came back and not otherwise:
-    // an empty "Week ·" row would read as a broken window rather than an
-    // absent one. The name is the account's own label, printed as given.
-    if (usageMsg.weekly_model_name) {
-      usageListEl.appendChild(
-        usageRow("Week · " + usageMsg.weekly_model_name, usageMsg.weekly_model));
-    }
-    // Only the fallback explains itself. An account reading is the expected
-    // case and needs no caption; an estimate has to say that it is one, and
-    // why the real numbers were not available. It sits directly under the rows
-    // it is about, which is why the host row below comes after it: the caption
-    // covers the rate-limit windows and nothing else.
-    if (usageMsg.source === "local") {
-      const li = document.createElement("li");
-      li.className = "unote";
-      li.textContent = usageMsg.err ? "estimate · " + usageMsg.err : "local estimate";
-      usageListEl.appendChild(li);
-    }
-    // The host's own memory — always local, whichever source the windows above
-    // came from, and drawn only when the machine actually reported it (a host
-    // this cannot read leaves pct at -1). It is the one row here that can move
-    // between two polls, so it earns its place: a laptop runs out of RAM long
-    // before an account runs out of week.
-    if (usageMsg.memory && usageMsg.memory.pct >= 0) {
-      usageListEl.appendChild(usageRow("Memory", usageMsg.memory, MEMORY_LEVELS));
-    }
+    const li = document.createElement("li");
+    li.className = "empty"; li.textContent = "…";
+    usageListEl.appendChild(li);
   }
 
   // Where a row turns yellow, then red. The two kinds of row do not share a
@@ -1873,9 +1899,10 @@
     w = w || {};
     levels = levels || USAGE_LEVELS;
     const li = document.createElement("li");
-    // pct < 0 is "no denominator" — the local estimate counts tokens but has
-    // nothing to measure them against, so the row shows the count and the CSS
-    // drops the meter rather than drawing an empty one.
+    // pct < 0 is "no denominator" — a locally counted row (claude's transcript
+    // estimate, every copilot row) has a figure but no allowance to measure it
+    // against, so the row shows the figure and the CSS drops the meter rather
+    // than drawing an empty one.
     const pct = typeof w.pct === "number" ? w.pct : -1;
     const known = pct >= 0;
     if (!known) li.classList.add("unknown");
@@ -1915,7 +1942,7 @@
 
     li.title = known
       ? name + ": " + pct.toFixed(1) + "% " + levels.of + (w.detail ? " (" + w.detail + ")" : "")
-      : name + ": " + (w.detail || "unknown") + " (local estimate — no limit to measure against)";
+      : name + ": " + (w.detail || "unknown") + " (counted locally — no allowance on record to measure against)";
     return li;
   }
 

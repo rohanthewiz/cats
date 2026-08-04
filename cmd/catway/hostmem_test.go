@@ -151,3 +151,27 @@ func TestHostMemoryLive(t *testing.T) {
 		}
 	}
 }
+
+// The window's other half: an unreadable host yields no HOST subsection at all,
+// rather than a heading with nothing under it. The ID is checked because the
+// sidebar branches on it to pick the memory warning scale — a machine 70% into
+// its RAM is in more trouble than a week 70% spent.
+func TestHostUsageGroup(t *testing.T) {
+	g, ok := hostUsageGroup()
+	switch runtime.GOOS {
+	case "darwin", "linux":
+		if !ok {
+			t.Fatalf("no group on %s", runtime.GOOS)
+		}
+		if g.ID != "host" {
+			t.Errorf("id = %q, want host — the sidebar's memory scale keys on it", g.ID)
+		}
+		if len(g.Windows) != 1 || g.Windows[0].Name != "Memory" {
+			t.Fatalf("windows = %+v, want one row named Memory", g.Windows)
+		}
+	default:
+		if ok {
+			t.Fatalf("a group was returned on %s, where memory is not readable", runtime.GOOS)
+		}
+	}
+}

@@ -90,8 +90,9 @@ const (
 // a nudge costs one goroutine wake-up and no synchronization.
 func (o *orch) runUsage() {
 	est := newUsageEstimator(o.claudeProjects)
+	cop := newCopilotEstimator(copilotStateDir())
 	for {
-		msg := readUsage(est).WithReadAt(time.Now())
+		msg := readUsage(est, cop).WithReadAt(time.Now())
 		o.post(func() { o.setUsage(msg) })
 
 		tick := time.NewTimer(usageInterval)
@@ -130,26 +131,89 @@ func (o *orch) setUsage(m browserproto.Usage) {
 	o.broadcast(m)
 }
 
-// readUsage produces one reading: the account when its credential and endpoint
-// both cooperate, the local estimate otherwise. A failed account read is not
-// silent — its reason rides along with the fallback numbers so the sidebar can
-// say why it is showing an estimate.
+// readUsage produces one reading: a subsection per provider that reports
+// anything, with the host's own memory last.
 //
-// The host's memory (hostmem.go) is attached either way. It is not an account
-// number and does not depend on one: a machine with no claude login still has a
-// memory ceiling worth watching, and the row should not disappear because a
-// token expired.
-func readUsage(est *usageEstimator) browserproto.Usage {
-	mem := hostMemory()
+// The order is fixed rather than sorted, because it is a reading order: claude
+// first because it is the one with real percentages, copilot after it, and the
+// machine itself at the bottom because it answers a different question from the
+// two above it. A provider that reports nothing on this host contributes no
+// group at all — an empty heading would say "copilot spent nothing" where the
+// truth is "there is no copilot here".
+//
+// The host group does not depend on any account: a machine with no claude login
+// still has a memory ceiling worth watching, and the row should not disappear
+// because a token expired.
+func readUsage(claude *usageEstimator, copilot *copilotEstimator) browserproto.Usage {
+	now := time.Now()
+	groups := []browserproto.UsageGroup{claudeUsageGroup(claude, now)}
+	if g, ok := copilot.group(now); ok {
+		groups = append(groups, g)
+	}
+	if g, ok := hostUsageGroup(); ok {
+		groups = append(groups, g)
+	}
+	return browserproto.NewUsage(groups)
+}
+
+// claudeUsageGroup is the CLAUDE subsection: the account when its credential and
+// endpoint both cooperate, the local estimate otherwise. A failed account read
+// is not silent — its reason becomes the group's note, so the sidebar can say
+// why it is showing an estimate.
+//
+// This group is always returned, even when both sources come up empty. It is
+// the section's reason for existing, and an absent CLAUDE heading would read as
+// a broken sidebar rather than as an unreadable account; the note carries the
+// explanation instead.
+func claudeUsageGroup(est *usageEstimator, now time.Time) browserproto.UsageGroup {
+	g := browserproto.UsageGroup{ID: "claude", Name: "Claude"}
 	report, err := readAccountUsage()
 	if err == nil {
-		return browserproto.NewUsage("account", report.fiveHour, report.weekly, "").
-			WithWeeklyModel(report.weeklyModelName, report.weeklyModel).
-			WithMemory(mem)
+		report.fiveHour.Name = "5 hr"
+		report.weekly.Name = "Week"
+		g.Windows = []browserproto.UsageWindow{report.fiveHour, report.weekly}
+		// A model with its own weekly allowance on top of the all-models week —
+		// Fable, say. Only the account read knows about it, and only on plans
+		// that meter one, so the row appears when a name came back and not
+		// otherwise: an empty "Week ·" row would read as a broken window rather
+		// than an absent one. The name is the account's own label, printed as
+		// given.
+		if report.weeklyModelName != "" {
+			report.weeklyModel.Name = "Week · " + report.weeklyModelName
+			g.Windows = append(g.Windows, report.weeklyModel)
+		}
+		return g
 	}
 	logUsageOnce(err.Error())
-	fiveHour, weekly := est.windows(time.Now())
-	return browserproto.NewUsage("local", fiveHour, weekly, err.Error()).WithMemory(mem)
+	fiveHour, weekly := est.windows(now)
+	fiveHour.Name, weekly.Name = "5 hr", "Week"
+	g.Windows = []browserproto.UsageWindow{fiveHour, weekly}
+	// Only the fallback explains itself. An account reading is the expected case
+	// and needs no caption; an estimate has to say that it is one, and why the
+	// real numbers were not available.
+	g.Note = "estimate · " + err.Error()
+	return g
+}
+
+// hostUsageGroup is the HOST subsection: the machine's own memory, the one
+// window here with nothing to do with any account. It shares the section
+// because it answers the same question the others do ("is something about to
+// stop?") on the same glance, and it shares the poll because it is read on the
+// same tick — a laptop runs out of RAM long before an account runs out of week.
+//
+// A host that will not report its memory yields no group rather than an empty
+// one: see hostMemory.
+func hostUsageGroup() (browserproto.UsageGroup, bool) {
+	mem := hostMemory()
+	if mem.Pct < 0 {
+		return browserproto.UsageGroup{}, false
+	}
+	mem.Name = "Memory"
+	return browserproto.UsageGroup{
+		ID:      "host",
+		Name:    "Host",
+		Windows: []browserproto.UsageWindow{mem},
+	}, true
 }
 
 // --- The account read ---------------------------------------------------------

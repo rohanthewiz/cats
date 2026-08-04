@@ -69,18 +69,37 @@ func TestRoundTrip(t *testing.T) {
 		{"error", NewError(pane, "pane gone"), DecodeDown},
 		{"shutdown", NewShutdown(), DecodeDown},
 		{"update_ready", NewUpdateReady("1.2.3", "brew upgrade cats"), DecodeDown},
-		// The host's memory window rides an account reading: a percentage with a
-		// figure beside it and no reset, which no rate-limit window has.
-		{"usage", NewUsage("account",
-			UsageWindow{Pct: 11, ResetsAt: "2026-07-31T23:10:00.655263+00:00"},
-			UsageWindow{Pct: 19, ResetsAt: "2026-08-05T21:00:00Z"}, "").
-			WithMemory(UsageWindow{Pct: 69.5, Detail: "16.7G/24.0G"}), DecodeDown},
-		// The fallback's shape: no percentage, a token figure instead, and the
-		// reason the account read was unavailable riding along.
-		{"usage_local", NewUsage("local",
-			UsageWindow{Pct: UsagePctUnknown, Detail: "1.2M tok"},
-			UsageWindow{Pct: UsagePctUnknown, Detail: "14.8M tok"},
-			"no claude credential"), DecodeDown},
+		// An account reading: percentages with resets, a scoped weekly row, and
+		// the host group's memory window — a percentage with a figure beside it
+		// and no reset, which no rate-limit window has.
+		{"usage", NewUsage([]UsageGroup{
+			{ID: "claude", Name: "Claude", Windows: []UsageWindow{
+				{Name: "5 hr", Pct: 11, ResetsAt: "2026-07-31T23:10:00.655263+00:00"},
+				{Name: "Week", Pct: 19, ResetsAt: "2026-08-05T21:00:00Z"},
+				{Name: "Week · Fable", Pct: 17, ResetsAt: "2026-08-05T21:00:00Z"},
+			}},
+			{ID: "host", Name: "Host", Windows: []UsageWindow{
+				{Name: "Memory", Pct: 69.5, Detail: "16.7G/24.0G"},
+			}},
+		}), DecodeDown},
+		// The estimate shape: no percentage, a figure instead, and a note saying
+		// why. Both groups here carry it, for different reasons.
+		{"usage_local", NewUsage([]UsageGroup{
+			{ID: "claude", Name: "Claude", Note: "estimate · no claude credential",
+				Windows: []UsageWindow{
+					{Name: "5 hr", Pct: UsagePctUnknown, Detail: "1.2M tok"},
+					{Name: "Week", Pct: UsagePctUnknown, Detail: "14.8M tok"},
+				}},
+			{ID: "copilot", Name: "Copilot", Note: "output tokens counted on this machine",
+				Windows: []UsageWindow{
+					{Name: "5 hr", Pct: UsagePctUnknown, Detail: "5.7K tok out"},
+					{Name: "Week", Pct: UsagePctUnknown, Detail: "7.9K tok out"},
+					{Name: "Week · AIU", Pct: UsagePctUnknown, Detail: "2.2 AIU"},
+				}},
+		}), DecodeDown},
+		// Nothing readable at all: no credential, no copilot, no memory. The
+		// message still goes out, because its age label is the reading.
+		{"usage_empty", NewUsage(nil), DecodeDown},
 		{"cmd_result", mustCmdResult(t, "42", true, "", ReadResult{Text: "hello\n"}), DecodeDown},
 
 		// Up.

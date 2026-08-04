@@ -1764,37 +1764,18 @@ class UpdateReady {
       };
 }
 
-/// Usage is the account's standing against Claude's rate-limit windows — the
-/// same two numbers claude's own /usage screen shows, surfaced in the sidebar so
-/// "how much of the week have I spent?" is answerable without leaving the pane
-/// you are working in.
+/// Usage is what the agents on this machine have spent, and against what — the
+/// sidebar's USAGE section, surfaced so "how much of the week have I spent?" is
+/// answerable without leaving the pane you are working in.
 ///
-/// Source names where the numbers came from, because the two answers are not the
-/// same kind of answer: "account" is the authoritative per-window utilization
-/// read from the account itself, "local" is the fallback estimate summed from
-/// claude's transcripts on this machine. A local estimate knows how many tokens
-/// were spent but not what they were spent against, so it carries no percentage
-/// (see UsageWindow.Pct) — the sidebar renders it as a figure rather than a bar,
-/// which is the honest rendering of a number with no denominator.
-///
-/// Err is a short reason the account read failed, shown beside whatever the
-/// fallback managed. It never carries the credential or the raw response.
-///
-/// WeeklyModel is the weekly window of whichever model has its own allowance on
-/// top of the all-models week — Fable on a Max plan, for instance. It is the
-/// window that actually bites first on a heavy week, so it earns a row of its
-/// own rather than being folded into Weekly. WeeklyModelName is what to call it
-/// ("Fable"), taken from the account rather than guessed: the set of separately
-/// metered models is the plan's business and changes without us. An empty name
-/// means the account reports no such window and the sidebar shows no row.
-///
-/// Memory is the share of the host machine's RAM in use — the one window here
-/// that has nothing to do with the account. It shares the section because it
-/// answers the same question the others do ("is something about to stop?") on
-/// the same glance, and it shares the poll because it is read on the same tick.
-/// Source does not describe it: it is always local, whichever source the
-/// rate-limit numbers came from. A host whose memory could not be read leaves
-/// Pct at UsagePctUnknown and the row is not drawn.
+/// Groups are the section's subsections, in the order they are drawn. One per
+/// provider that reports anything (claude, copilot), plus the host's own memory
+/// last. The message is a LIST rather than a fixed set of named windows because
+/// the providers do not meter alike: claude reports percentages of a 5-hour and
+/// a weekly allowance, copilot reports counts with no allowance at all, and the
+/// next one will do something else again. A struct with a field per window would
+/// have to be widened for every provider added; a list is widened by the reader
+/// that produces it.
 ///
 /// ReadAt is when the server took the reading (RFC 3339). It is the message's
 /// own age, and it is on the wire because the receiver cannot infer it: the
@@ -1806,77 +1787,103 @@ class UpdateReady {
 /// Wire type: `usage`.
 class Usage {
   const Usage({
-    required this.source,
-    required this.fiveHour,
-    required this.weekly,
-    required this.weeklyModel,
-    this.weeklyModelName = '',
-    required this.memory,
+    required this.groups,
     this.readAt = '',
-    this.err = '',
   });
 
   /// The `t` discriminator this class always carries. It is a property of
   /// the type, not a field: a caller who could set it could set it wrong.
   static const String type = 'usage';
 
-  /// "account" | "local"
-  final String source;
-  final UsageWindow fiveHour;
-  final UsageWindow weekly;
-  final UsageWindow weeklyModel;
-  final String weeklyModelName;
-  final UsageWindow memory;
+  final List<UsageGroup> groups;
   final String readAt;
-  final String err;
 
   factory Usage.fromJson(Map<String, Object?> j) => Usage(
-        source: asString(j['source']),
-        fiveHour: UsageWindow.fromJson(asObj(j['five_hour'])),
-        weekly: UsageWindow.fromJson(asObj(j['weekly'])),
-        weeklyModel: UsageWindow.fromJson(asObj(j['weekly_model'])),
-        weeklyModelName: asString(j['weekly_model_name']),
-        memory: UsageWindow.fromJson(asObj(j['memory'])),
+        groups: asList(j['groups'], (e) => UsageGroup.fromJson(asObj(e))),
         readAt: asString(j['read_at']),
-        err: asString(j['err']),
       );
 
   Map<String, Object?> toJson() => {
         't': type,
-        'source': source,
-        'five_hour': fiveHour.toJson(),
-        'weekly': weekly.toJson(),
-        'weekly_model': weeklyModel.toJson(),
-        if (weeklyModelName.isNotEmpty) 'weekly_model_name': weeklyModelName,
-        'memory': memory.toJson(),
+        'groups': [for (final e in groups) e.toJson()],
         if (readAt.isNotEmpty) 'read_at': readAt,
-        if (err.isNotEmpty) 'err': err,
       };
 }
 
-/// UsageWindow is one rate-limit window. Pct is the share of the window's
-/// allowance already spent (0–100), or -1 when there is no denominator to divide
-/// by — the local fallback fills Detail instead and leaves Pct at -1, so a
-/// missing number reads as missing rather than as zero. ResetsAt is when the
-/// window rolls over (RFC 3339), "" when unknown.
+/// UsageGroup is one subsection: a heading and the rows drawn beneath it.
+///
+/// ID is a detect.IdentifyAgent label ("claude", "copilot") for a provider, or
+/// the literal "host" for the one group the server synthesises rather than reads
+/// from a provider. That value is CLOSED, and a front-end may branch on it to
+/// pick a warning scale: the same percentage does not mean the same thing on a
+/// rate-limit window as on host memory, and only the group says which this is.
+/// Every other ID is opaque — nothing downstream should enumerate providers.
+///
+/// Name is the heading text. Note is the caption under the rows, composed here
+/// because only the server knows why a group is showing an estimate rather than
+/// a reading. Note never carries a credential or a raw response body: the reader
+/// that fills it strips both first (see fetchAccountUsage).
+///
+/// A group with neither Windows nor Note is never sent. An empty heading reads
+/// as a broken section rather than as an absent provider.
+class UsageGroup {
+  const UsageGroup({
+    required this.id,
+    required this.name,
+    this.note = '',
+    required this.windows,
+  });
+
+  final String id;
+  final String name;
+  final String note;
+  final List<UsageWindow> windows;
+
+  factory UsageGroup.fromJson(Map<String, Object?> j) => UsageGroup(
+        id: asString(j['id']),
+        name: asString(j['name']),
+        note: asString(j['note']),
+        windows: asList(j['windows'], (e) => UsageWindow.fromJson(asObj(e))),
+      );
+
+  Map<String, Object?> toJson() => {
+        'id': id,
+        'name': name,
+        if (note.isNotEmpty) 'note': note,
+        'windows': [for (final e in windows) e.toJson()],
+      };
+}
+
+/// UsageWindow is one row. Name is its label ("5 hr", "Week · Fable"), supplied
+/// by the server for the same reason Groups is a list: the meters a provider
+/// reports are the provider's business, and the browser cannot enumerate them.
+///
+/// Pct is the share of the window's allowance already spent (0–100), or -1 when
+/// there is no denominator to divide by — a local count fills Detail instead and
+/// leaves Pct at -1, so a missing number reads as missing rather than as zero.
+/// ResetsAt is when the window rolls over (RFC 3339), "" when unknown.
 class UsageWindow {
   const UsageWindow({
+    required this.name,
     required this.pct,
     this.resetsAt = '',
     this.detail = '',
   });
 
+  final String name;
   final double pct;
   final String resetsAt;
   final String detail;
 
   factory UsageWindow.fromJson(Map<String, Object?> j) => UsageWindow(
+        name: asString(j['name']),
         pct: asDouble(j['pct']),
         resetsAt: asString(j['resets_at']),
         detail: asString(j['detail']),
       );
 
   Map<String, Object?> toJson() => {
+        'name': name,
         'pct': pct,
         if (resetsAt.isNotEmpty) 'resets_at': resetsAt,
         if (detail.isNotEmpty) 'detail': detail,
