@@ -1861,11 +1861,18 @@
         drew = true;
 
         // "host" is the one group the server synthesises rather than reads from
-        // a provider, and the one whose percentage means something else: a
+        // a provider, and the one whose percentages mean something else: a
         // machine 70% into its RAM is a couple of test runs from swapping, while
-        // a week 70% spent is on track. Every other id is opaque here.
-        const levels = g.id === "host" ? MEMORY_LEVELS : USAGE_LEVELS;
-        for (const w of wins) usageListEl.appendChild(usageRow(w.name, w, levels));
+        // a week 70% spent is on track. Its rows do not even share a scale with
+        // each other, so they are looked up by name — the only group whose row
+        // names this file is entitled to know, because this file's own server
+        // chose them. Every other id is opaque here, and its rows take the
+        // rate-limit scale.
+        const host = g.id === "host";
+        for (const w of wins) {
+          const levels = host ? (HOST_LEVELS[w.name] || MEMORY_LEVELS) : USAGE_LEVELS;
+          usageListEl.appendChild(usageRow(w.name, w, levels));
+        }
 
         // The caption sits directly under the rows it is about and above the
         // next heading, so it never reads as covering the whole section — only
@@ -1887,13 +1894,27 @@
     usageListEl.appendChild(li);
   }
 
-  // Where a row turns yellow, then red. The two kinds of row keep separate
-  // scales because the same percentage does not mean the same thing: a week
-  // that is 80% spent is on track, while a machine 80% into its RAM is a couple
-  // of test runs from swapping. They happen to agree on where the warning and
-  // the alarm sit; the scales stay separate so either can move on its own.
+  // Where a row turns yellow, then red. Each kind of row keeps its own scale
+  // because the same percentage does not mean the same thing on each of them:
+  //
+  //   window  a week 80% spent is on track — it is measured against a clock
+  //           that will reset it.
+  //   memory  a machine 80% into its RAM is a couple of test runs from
+  //           swapping, and nothing resets it but a process exiting.
+  //   disk    a volume 80% full is unremarkable and stays that way for weeks;
+  //           it is the last few percent that end a build mid-write, so the
+  //           warning waits and the alarm sits higher than either of the above.
+  //
+  // Several of the numbers happen to coincide today. The scales stay separate
+  // so any of them can move without dragging the others with it.
   const USAGE_LEVELS  = { high: 75, crit: 90, of: "of the window used" };
   const MEMORY_LEVELS = { high: 80, crit: 90, of: "of host memory in use" };
+  const DISK_LEVELS   = { high: 85, crit: 95, of: "of the disk in use" };
+
+  // The HOST group's rows, by the name the server gives each one. An unknown
+  // name falls back to the memory scale at the call site — a new host row is far
+  // likelier to be another "nothing resets this" resource than a rate window.
+  const HOST_LEVELS = { Memory: MEMORY_LEVELS, Disk: DISK_LEVELS };
 
   function usageRow(name, w, levels) {
     w = w || {};
@@ -1953,8 +1974,8 @@
   // minute is the one stale number this section exists to prevent.
   setInterval(() => {
     renderUsageAge();
-    // Only the stamped ones: the same slot also carries host memory's absolute
-    // figure, which is a fact rather than a countdown and has no instant to
+    // Only the stamped ones: the same slot also carries the HOST rows' absolute
+    // figures, which are facts rather than countdowns and have no instant to
     // recompute from. [data-at] is what separates the two.
     for (const el of usageListEl.querySelectorAll(".ureset[data-at]")) {
       el.textContent = fmtUntil(Number(el.dataset.at) - Date.now());

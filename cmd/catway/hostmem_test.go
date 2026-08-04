@@ -117,6 +117,9 @@ func TestFormatBytes(t *testing.T) {
 	}{
 		{25769803776, "24.0G"}, // the "24 GB" printed on the machine
 		{17_930_000_000, "16.7G"},
+		{494_384_795_648, "460G"}, // disk scale: no tenths above 100 G
+		{100 << 30, "100G"},       // exactly at the boundary, which takes the wider form
+		{(100 << 30) - 1, "100.0G"},
 		{512 << 20, "512M"},
 		{64 << 10, "64K"},
 		{0, "0K"},
@@ -154,8 +157,10 @@ func TestHostMemoryLive(t *testing.T) {
 
 // The window's other half: an unreadable host yields no HOST subsection at all,
 // rather than a heading with nothing under it. The ID is checked because the
-// sidebar branches on it to pick the memory warning scale — a machine 70% into
-// its RAM is in more trouble than a week 70% spent.
+// sidebar branches on it to pick the memory and disk warning scales — a machine
+// 70% into its RAM is in more trouble than a week 70% spent. The row names are
+// checked for the same reason: within the HOST group the sidebar picks a scale
+// per row by name, so a renamed row would silently take the wrong thresholds.
 func TestHostUsageGroup(t *testing.T) {
 	g, ok := hostUsageGroup()
 	switch runtime.GOOS {
@@ -164,14 +169,18 @@ func TestHostUsageGroup(t *testing.T) {
 			t.Fatalf("no group on %s", runtime.GOOS)
 		}
 		if g.ID != "host" {
-			t.Errorf("id = %q, want host — the sidebar's memory scale keys on it", g.ID)
+			t.Errorf("id = %q, want host — the sidebar's host scales key on it", g.ID)
 		}
-		if len(g.Windows) != 1 || g.Windows[0].Name != "Memory" {
-			t.Fatalf("windows = %+v, want one row named Memory", g.Windows)
+		var names []string
+		for _, w := range g.Windows {
+			names = append(names, w.Name)
+		}
+		if len(names) != 2 || names[0] != "Memory" || names[1] != "Disk" {
+			t.Fatalf("rows = %v, want [Memory Disk] — the sidebar keys its scales on these names", names)
 		}
 	default:
 		if ok {
-			t.Fatalf("a group was returned on %s, where memory is not readable", runtime.GOOS)
+			t.Fatalf("a group was returned on %s, where neither resource is readable", runtime.GOOS)
 		}
 	}
 }

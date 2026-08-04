@@ -195,25 +195,36 @@ func claudeUsageGroup(est *usageEstimator, now time.Time) browserproto.UsageGrou
 	return g
 }
 
-// hostUsageGroup is the HOST subsection: the machine's own memory, the one
-// window here with nothing to do with any account. It shares the section
-// because it answers the same question the others do ("is something about to
-// stop?") on the same glance, and it shares the poll because it is read on the
-// same tick — a laptop runs out of RAM long before an account runs out of week.
+// hostUsageGroup is the HOST subsection: the machine's own memory and disk, the
+// windows here with nothing to do with any account. They share the section
+// because they answer the same question the others do ("is something about to
+// stop?") on the same glance, and they share the poll because they are read on
+// the same tick — a laptop runs out of RAM, or out of disk, long before an
+// account runs out of week.
 //
-// A host that will not report its memory yields no group rather than an empty
-// one: see hostMemory.
+// The two rows are gathered independently. Each reader reports nothing rather
+// than a guess on a host it cannot ask (see hostMemory, hostDisk), and a reader
+// that came up empty drops its row instead of taking the section down with it:
+// the pair have no host in common where exactly one is expected to fail, but a
+// permission or a synthetic mount can silence either on its own, and the
+// surviving number is still worth showing. Only a group with no rows at all is
+// withheld — an empty heading reads as a broken sidebar.
 func hostUsageGroup() (browserproto.UsageGroup, bool) {
-	mem := hostMemory()
-	if mem.Pct < 0 {
+	g := browserproto.UsageGroup{ID: "host", Name: "Host"}
+	if mem := hostMemory(); mem.Pct >= 0 {
+		mem.Name = "Memory"
+		g.Windows = append(g.Windows, mem)
+	}
+	// Memory first: it moves in minutes and is the one that will stop a session
+	// today. Disk moves in weeks and is read second for the same reason.
+	if disk := hostDisk(); disk.Pct >= 0 {
+		disk.Name = "Disk"
+		g.Windows = append(g.Windows, disk)
+	}
+	if len(g.Windows) == 0 {
 		return browserproto.UsageGroup{}, false
 	}
-	mem.Name = "Memory"
-	return browserproto.UsageGroup{
-		ID:      "host",
-		Name:    "Host",
-		Windows: []browserproto.UsageWindow{mem},
-	}, true
+	return g, true
 }
 
 // --- The account read ---------------------------------------------------------

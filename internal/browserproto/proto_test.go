@@ -70,7 +70,7 @@ func TestRoundTrip(t *testing.T) {
 		{"shutdown", NewShutdown(), DecodeDown},
 		{"update_ready", NewUpdateReady("1.2.3", "brew upgrade cats"), DecodeDown},
 		// An account reading: percentages with resets, a scoped weekly row, and
-		// the host group's memory window — a percentage with a figure beside it
+		// the host group's two windows — percentages with a figure beside them
 		// and no reset, which no rate-limit window has.
 		{"usage", NewUsage([]UsageGroup{
 			{ID: "claude", Name: "Claude", Windows: []UsageWindow{
@@ -80,6 +80,7 @@ func TestRoundTrip(t *testing.T) {
 			}},
 			{ID: "host", Name: "Host", Windows: []UsageWindow{
 				{Name: "Memory", Pct: 69.5, Detail: "16.7G/24.0G"},
+				{Name: "Disk", Pct: 77.8, Detail: "358G/460G"},
 			}},
 		}), DecodeDown},
 		// The estimate shape: no percentage, a figure instead, and a note saying

@@ -243,8 +243,15 @@ func parseMeminfo(raw []byte) (total, used uint64, err error) {
 // because RAM is sold, specified and reported that way: 25769803776 bytes is the
 // "24 GB" printed on the machine, and rendering it as 25.8 GB beside a
 // percentage of itself would read as an error in the percentage.
+//
+// The tenth of a gigabyte is dropped above 100 G, which is where disk figures
+// live: "347.7G/460.4G" is two characters of noise wider than the slot wants,
+// and at that scale a tenth of a gigabyte is below the resolution of any
+// decision the row informs.
 func formatBytes(n uint64) string {
 	switch {
+	case n >= 100<<30:
+		return fmt.Sprintf("%.0fG", float64(n)/(1<<30))
 	case n >= 1<<30:
 		return fmt.Sprintf("%.1fG", float64(n)/(1<<30))
 	case n >= 1<<20:
