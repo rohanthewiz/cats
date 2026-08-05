@@ -1205,6 +1205,20 @@ func TestDispatchWorkspaceCreatePath(t *testing.T) {
 			t.Fatalf("a refused create must not add a workspace (%d → %d)", before, len(h.s.Workspaces()))
 		}
 	})
+
+	// The mkdir retry the new-workspace dialog sends after the user confirms:
+	// the same path that just failed now comes into existence and the
+	// workspace roots there.
+	t.Run("mkdir creates a missing path", func(t *testing.T) {
+		h := newCmdHarness(t)
+		want := filepath.Join(home, "brand", "new")
+		if got := created(t, h, WorkspaceCreateParams{Path: ptr("~/brand/new"), Mkdir: true}); got != want {
+			t.Fatalf("identity cwd = %q, want %q", got, want)
+		}
+		if fi, err := os.Stat(want); err != nil || !fi.IsDir() {
+			t.Fatalf("%s was not created as a directory: %v", want, err)
+		}
+	})
 }
 
 // okDataFor dispatches a read-only query on a fresh responder and returns its

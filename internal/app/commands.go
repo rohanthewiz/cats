@@ -593,7 +593,7 @@ func (d *Dispatcher) Dispatch(name string, dec ParamDecoder, r Responder) {
 			bad(err)
 			return
 		}
-		cwd, err := workspaceStartDir(p.Path, d.session.Cwd())
+		cwd, err := workspaceStartDir(p.Path, d.session.Cwd(), p.Mkdir)
 		if err != nil {
 			r.Fail(err.Error())
 			return
@@ -965,12 +965,19 @@ func workspaceLockedErr(id, verb string) string {
 // somewhere neutral", the cleared field in the new-workspace dialog), and a
 // typed path is expanded and checked. A path that does not resolve is returned
 // as an error so the caller sees "no such directory" instead of a workspace
-// quietly rooted somewhere else.
-func workspaceStartDir(path *string, sessionCwd string) (string, error) {
+// quietly rooted somewhere else — unless mkdir says the user already confirmed
+// they want that directory brought into existence, in which case it is created
+// parents-and-all. The two defaulted states ignore mkdir: there is nothing to
+// create when the answer is the session cwd or home.
+func workspaceStartDir(path *string, sessionCwd string, mkdir bool) (string, error) {
 	if path == nil {
 		return sessionCwd, nil
 	}
-	dir, err := startdir.Resolve(*path, sessionCwd)
+	resolve := startdir.Resolve
+	if mkdir {
+		resolve = startdir.ResolveOrCreate
+	}
+	dir, err := resolve(*path, sessionCwd)
 	if err != nil {
 		return "", err
 	}

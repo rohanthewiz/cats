@@ -47,6 +47,54 @@ func Home() string {
 // Unlike Usable, an explicit "/" is honoured: a user who types the filesystem
 // root means it.
 func Resolve(path, base string) (string, error) {
+	p, err := expand(path, base)
+	if err != nil || p == "" {
+		return p, err
+	}
+	fi, err := os.Stat(p)
+	if errors.Is(err, fs.ErrNotExist) {
+		return "", fmt.Errorf("no such directory: %s", p)
+	}
+	if err != nil {
+		return "", fmt.Errorf("%s: %w", p, err)
+	}
+	if !fi.IsDir() {
+		return "", fmt.Errorf("not a directory: %s", p)
+	}
+	return p, nil
+}
+
+// ResolveOrCreate is Resolve for a directory the user has asked to bring into
+// existence: same expansion, but a path that does not exist is created (parents
+// included) instead of rejected. It stays a distinct entry point rather than a
+// flag on Resolve because creating is a side effect the caller must opt into
+// explicitly — a typo under Resolve is an error, never a new directory.
+// A path that exists but is not a directory is still an error: a file cannot
+// be made into one.
+func ResolveOrCreate(path, base string) (string, error) {
+	p, err := expand(path, base)
+	if err != nil || p == "" {
+		return p, err
+	}
+	fi, err := os.Stat(p)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		if err := os.MkdirAll(p, 0o755); err != nil {
+			return "", fmt.Errorf("cannot create directory: %w", err)
+		}
+	case err != nil:
+		return "", fmt.Errorf("%s: %w", p, err)
+	case !fi.IsDir():
+		return "", fmt.Errorf("not a directory: %s", p)
+	}
+	return p, nil
+}
+
+// expand is the shared normalization half of Resolve/ResolveOrCreate: env and
+// "~" expansion, relative-against-base resolution, and cleaning — everything
+// short of touching the filesystem. Empty input stays "" (the caller's "no
+// opinion" state).
+func expand(path, base string) (string, error) {
 	p := os.ExpandEnv(strings.TrimSpace(path))
 	if p == "" {
 		return "", nil
@@ -64,18 +112,7 @@ func Resolve(path, base string) (string, error) {
 		}
 		p = filepath.Join(base, p)
 	}
-	p = filepath.Clean(p)
-	fi, err := os.Stat(p)
-	if errors.Is(err, fs.ErrNotExist) {
-		return "", fmt.Errorf("no such directory: %s", p)
-	}
-	if err != nil {
-		return "", fmt.Errorf("%s: %w", p, err)
-	}
-	if !fi.IsDir() {
-		return "", fmt.Errorf("not a directory: %s", p)
-	}
-	return p, nil
+	return filepath.Clean(p), nil
 }
 
 // usable reports whether p is an existing directory other than the filesystem

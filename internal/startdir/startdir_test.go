@@ -91,3 +91,45 @@ func TestResolveRejects(t *testing.T) {
 		t.Error("relative path with no base: want an error")
 	}
 }
+
+// ResolveOrCreate shares Resolve's expansion but treats a missing directory as
+// something to make (parents included) rather than a typo to reject.
+func TestResolveOrCreate(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	t.Run("creates a missing directory with parents", func(t *testing.T) {
+		want := filepath.Join(home, "projs", "newapp")
+		got, err := ResolveOrCreate("~/projs/newapp", "")
+		if err != nil || got != want {
+			t.Fatalf("ResolveOrCreate = %q, %v; want %q", got, err, want)
+		}
+		if fi, err := os.Stat(want); err != nil || !fi.IsDir() {
+			t.Fatalf("%s was not created as a directory: %v", want, err)
+		}
+	})
+
+	t.Run("an existing directory passes through untouched", func(t *testing.T) {
+		got, err := ResolveOrCreate(home, "")
+		if err != nil || got != home {
+			t.Fatalf("ResolveOrCreate = %q, %v; want %q", got, err, home)
+		}
+	})
+
+	t.Run("a file still refuses — it cannot become a directory", func(t *testing.T) {
+		file := filepath.Join(home, "file")
+		if err := os.WriteFile(file, nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := ResolveOrCreate(file, ""); err == nil ||
+			!strings.Contains(err.Error(), "not a directory") {
+			t.Errorf("plain file: got %v, want a not-a-directory error", err)
+		}
+	})
+
+	t.Run("empty stays no opinion, nothing created", func(t *testing.T) {
+		if got, err := ResolveOrCreate("", home); err != nil || got != "" {
+			t.Fatalf("ResolveOrCreate(\"\") = %q, %v; want \"\", nil", got, err)
+		}
+	})
+}

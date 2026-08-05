@@ -1618,23 +1618,33 @@ class WaitForOutputResult {
 /// here" from the new-workspace dialog; and a non-empty value is that directory,
 /// with "~"/"$VAR"/relative forms expanded and its existence verified (a bad
 /// path fails the command rather than silently landing somewhere else).
+///
+/// Mkdir turns that last failure into consent: a Path that does not exist is
+/// created (parents included) instead of failing the command. It is a separate
+/// flag rather than the default because a typo must stay an error on the first
+/// attempt — the dialog offers creation only after the user confirms the missing
+/// path is intentional, then retries with Mkdir set.
 class WorkspaceCreateParams {
   const WorkspaceCreateParams({
     this.name = '',
     this.path,
+    this.mkdir = false,
   });
 
   final String name;
   final String? path;
+  final bool mkdir;
 
   factory WorkspaceCreateParams.fromJson(Map<String, Object?> j) => WorkspaceCreateParams(
         name: asString(j['name']),
         path: asStringOrNull(j['path']),
+        mkdir: asBool(j['mkdir']),
       );
 
   Map<String, Object?> toJson() => {
         if (name.isNotEmpty) 'name': name,
         if (path != null) 'path': path,
+        if (mkdir) 'mkdir': mkdir,
       };
 }
 
