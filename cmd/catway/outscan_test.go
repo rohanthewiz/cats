@@ -55,6 +55,48 @@ func TestOutputScannerDropsCarriageReturn(t *testing.T) {
 	}
 }
 
+// A same-row cursor jump between words leaves exactly one space, so a spaced
+// pattern matches text a TUI draws with column-address moves instead of literal
+// spaces. The input is the byte shape Claude Code's banner actually emits.
+func TestOutputScannerCursorJumpBecomesSpace(t *testing.T) {
+	var s outputScanner
+	got := s.feed([]byte("\x1b[1mWelcome\x1b[28Gback\x1b[33GRo!"))
+	if !strings.Contains(got, "Welcome back Ro!") {
+		t.Fatalf("column jumps should read as word gaps: %q", got)
+	}
+}
+
+// A run of movement sequences collapses to a single separator — an alignment
+// jump made of several moves is still one word gap, and a redraw's constant
+// repositioning cannot smear the buffer with whitespace.
+func TestOutputScannerMovementRunCollapses(t *testing.T) {
+	var s outputScanner
+	got := s.feed([]byte("left\x1b[10C\x1b[20G\x1b[5aright"))
+	if got != "left right" {
+		t.Fatalf("movement run = %q, want %q", got, "left right")
+	}
+}
+
+// A row move (CUP, as a full-screen redraw uses per line) reads as a line
+// break, and movement before any text separates nothing.
+func TestOutputScannerRowMoveBecomesNewline(t *testing.T) {
+	var s outputScanner
+	got := s.feed([]byte("\x1b[1;1Hfirst\x1b[2;1Hsecond"))
+	if got != "first\nsecond" {
+		t.Fatalf("row moves = %q, want %q", got, "first\nsecond")
+	}
+}
+
+// Non-movement sequences still strip to nothing: colour-wrapped text stays
+// contiguous exactly as before the movement separators were added.
+func TestOutputScannerSGRStaysContiguous(t *testing.T) {
+	var s outputScanner
+	got := s.feed([]byte("RE\x1b[32mAD\x1b[0mY"))
+	if got != "READY" {
+		t.Fatalf("SGR should leave no separator: %q", got)
+	}
+}
+
 // Multi-byte UTF-8 passes through untouched (only ESC and C0 bytes are examined).
 func TestOutputScannerPassesUTF8(t *testing.T) {
 	var s outputScanner

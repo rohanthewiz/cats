@@ -14,6 +14,15 @@ package main
 // (the daemon already owns the real one). The state machine carries across feed()
 // calls so an escape split over two chunks is still consumed whole.
 //
+// Cursor-movement sequences do leave one trace: a single separator. TUI
+// renderers routinely draw the gap between words as a column jump instead of
+// literal spaces ("Welcome" CHA-to-col-28 "back"), so deleting the sequence
+// outright would fuse the words ("Welcomeback") and no spaced pattern could
+// ever match the stream. A same-row move (CHA/CUF/HPA/HPR) therefore appends
+// one space and a row move (CUP/VPA/CUU/CUD/CNL/CPL/VPR) one newline —
+// collapsed against an existing separator, so alignment jumps of any width
+// still read as a single word gap.
+//
 // This file is untagged (like page.go) so its logic is testable without the
 // libghostty toolchain; the ghostty-tagged orchestrator wires it into the waiter
 // path in catway.go.
@@ -99,6 +108,7 @@ func (s *outputScanner) step(b byte) {
 			s.state = scEsc // malformed; treat as a fresh sequence
 		case b >= 0x40 && b <= 0x7e:
 			s.state = scGround // final byte ends the CSI
+			s.sepForCSI(b)
 		default:
 			// parameter/intermediate byte (0x20–0x3f) or embedded control: stay in CSI
 		}
@@ -134,4 +144,33 @@ func (s *outputScanner) step(b byte) {
 		}
 		// else: another intermediate (0x20–0x2f), stay
 	}
+}
+
+// sepForCSI appends the word/line separator a completed CSI implies (see the
+// file comment). Only cursor-movement finals leave a trace; everything else —
+// SGR colours, erases, mode toggles — still strips to nothing, which is what
+// keeps colour-wrapped text contiguous.
+func (s *outputScanner) sepForCSI(final byte) {
+	switch final {
+	case 'G', 'C', '`', 'a': // CHA, CUF, HPA, HPR — a jump within the row
+		s.appendSep(' ')
+	case 'H', 'f', 'd', 'A', 'B', 'E', 'F', 'e': // CUP, VPA, CUU, CUD, CNL, CPL, VPR — a row change
+		s.appendSep('\n')
+	}
+}
+
+// appendSep writes one separator byte, collapsed: a run of movement sequences
+// (a full-screen redraw repositions constantly) must widen a gap to exactly one
+// separator, not smear the buffer with whitespace. Nothing is appended at the
+// start of the buffer or straight after a newline — a move before any text, or
+// at a fresh line, separates nothing.
+func (s *outputScanner) appendSep(sep byte) {
+	if len(s.buf) == 0 {
+		return
+	}
+	last := s.buf[len(s.buf)-1]
+	if last == sep || last == '\n' {
+		return
+	}
+	s.buf = append(s.buf, sep)
 }
