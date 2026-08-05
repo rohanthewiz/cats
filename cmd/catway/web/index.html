@@ -95,7 +95,14 @@
   /* Splitter between Workspaces / Panes / Agents — the headings alone read as
      one long list once a workspace has more than a couple of panes. */
   #sidebar section + section { border-top:1px solid var(--line); }
-  #sidebar h2 { font-size:calc(10px * var(--sb-scale)); text-transform:uppercase; letter-spacing:.8px; color:var(--heading);
+  /* The section headings sit at the top of the sidebar's three-tier scale:
+     section title (12px) > group subtitle (11px) > row (12px, but lower-case,
+     regular weight and un-tracked). A heading used to be set two steps *below*
+     its own rows, which inverted the hierarchy — the rows read as the loudest
+     thing in the section and the label above them as a footnote. Matching the
+     row's pixel size is enough to win it back: uppercase, 700 weight and the
+     tracking do the rest, so the title dominates without shouting. */
+  #sidebar h2 { font-size:calc(12px * var(--sb-scale)); text-transform:uppercase; letter-spacing:.8px; color:var(--heading);
     font-weight:700; margin:0 0 6px; padding:0 8px; display:flex; align-items:baseline; }
   /* Section-level controls, pinned to the heading's right edge. Muted until
      hovered so the heading still reads as a label, not a toolbar. */
@@ -104,7 +111,10 @@
     font:inherit; font-size:calc(11px * var(--sb-scale)); line-height:1; color:var(--muted); }
   #sidebar h2 .hctl button:hover { color:var(--accent); }
   #sidebar ul { list-style:none; margin:0; padding:0; }
-  #sidebar li { font-size:calc(12px * var(--sb-scale)); padding:4px 8px; border-radius:4px; white-space:nowrap;
+  /* Rows sit one step under their section title and level with the group
+     subtitles — a subtitle separates itself by case, weight and colour rather
+     than by size, which keeps the whole sidebar inside a two-size scale. */
+  #sidebar li { font-size:calc(11px * var(--sb-scale)); padding:4px 8px; border-radius:4px; white-space:nowrap;
     overflow:hidden; text-overflow:ellipsis; cursor:default; display:flex; align-items:baseline; gap:6px; }
   /* Usage rows stack a label line over a meter, so the row is two lines tall
      rather than the one line every other sidebar row is. */
@@ -119,7 +129,7 @@
      .wsgrp's flex: there is no rollup or caret here to push to the right edge,
      and its padding is its own — the rows' 3px/5px is tuned around a meter this
      has not got. */
-  #usage-list li.ugrp { color:var(--ws-heading); font-size:calc(10px * var(--sb-scale));
+  #usage-list li.ugrp { color:var(--ws-heading); font-size:calc(11px * var(--sb-scale));
     text-transform:uppercase; letter-spacing:.5px; font-weight:600; padding:2px 8px 1px; }
   #usage-list li.ugrp.sep { border-top:1px solid var(--line); margin-top:5px; padding-top:7px; }
   #usage-list .urow { display:flex; align-items:baseline; gap:6px; }
@@ -147,9 +157,13 @@
                        font-style:italic; padding:1px 8px 3px; }
   /* How old the numbers below are, in the heading beside the control that
      refreshes them. It rides .hctl's right edge but opts out of the heading's
-     uppercase and tracking: it is a reading, not a label. */
+     uppercase and tracking: it is a reading, not a label. It also pins its own
+     size rather than inheriting the heading's — the title grew to lead the
+     section, and an age stamp that grew with it would compete with the label
+     it is meant to annotate. */
   #sidebar h2 .hage { color:var(--muted); font-weight:400; text-transform:none;
-    letter-spacing:0; font-variant-numeric:tabular-nums; margin-right:3px; }
+    letter-spacing:0; font-size:calc(10px * var(--sb-scale));
+    font-variant-numeric:tabular-nums; margin-right:3px; }
   /* The refresh control carries a drawn mark (see refreshMark), so it is sized
      in pixels and centered on the heading's text rather than stretching to it. */
   #usage-hctl { align-items:center; }
@@ -228,7 +242,7 @@
   /* Bold, so the header reads as a heading over its rows rather than as one more
      muted row among them — at this size weight separates the two tiers better than
      the colour alone did. */
-  #pane-list li.wsgrp { color:var(--ws-heading); font-size:calc(10px * var(--sb-scale)); text-transform:uppercase;
+  #pane-list li.wsgrp { color:var(--ws-heading); font-size:calc(11px * var(--sb-scale)); text-transform:uppercase;
     letter-spacing:.5px; cursor:pointer; font-weight:600; }
   #pane-list li.wsgrp.sep { border-top:1px solid var(--line); margin-top:5px; padding-top:7px; }
   #pane-list li.wsgrp:hover { background:var(--panel2); color:var(--fg-soft); }
@@ -238,7 +252,9 @@
   /* The count is the header's secondary half, so it stays at normal weight — only
      the workspace name carries the bold. */
   #pane-list li.wsgrp .gsum { text-transform:none; letter-spacing:0; font-weight:400; }
-  #pane-list li.wsgrp .car { font-size:calc(9px * var(--sb-scale)); }
+  /* The caret tracks its header's size — a step under it, as before, so the
+     fold marker stays subordinate to the name it folds. */
+  #pane-list li.wsgrp .car { font-size:calc(10px * var(--sb-scale)); }
   #pane-list .pub { color:var(--accent); }
   #pane-list .ttl { color:var(--muted); overflow:hidden; text-overflow:ellipsis; }
   #pane-list .ag, #agent-list .aname { margin-left:auto; }
