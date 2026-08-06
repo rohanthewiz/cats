@@ -122,16 +122,28 @@
   #usage-list li:hover { background:none; }
   #usage-list li.empty { color:var(--muted); font-style:italic; }
   /* A heading over the rows it covers — one per provider, plus the host — in
-     the same register #pane-list's workspace headers use. A header only: no
-     caret, no click, nothing to collapse. Each group is two or three rows, so
-     folding one would be a control that saves nothing.
-     It stays display:block (inherited from the rule above) rather than copying
-     .wsgrp's flex: there is no rollup or caret here to push to the right edge,
-     and its padding is its own — the rows' 3px/5px is tuned around a meter this
-     has not got. */
+     the same register #pane-list's workspace headers use, and with the same job:
+     it names the group and folds it. Flex like .wsgrp so the summary and caret
+     can be pushed to the right edge; the padding stays its own — the rows'
+     3px/5px is tuned around a meter this has not got. */
   #usage-list li.ugrp { color:var(--ws-heading); font-size:calc(11px * var(--sb-scale));
-    text-transform:uppercase; letter-spacing:.5px; font-weight:600; padding:2px 8px 1px; }
+    text-transform:uppercase; letter-spacing:.5px; font-weight:600; padding:2px 8px 1px;
+    display:flex; align-items:baseline; gap:6px; cursor:pointer; }
   #usage-list li.ugrp.sep { border-top:1px solid var(--line); margin-top:5px; padding-top:7px; }
+  /* Overrides #usage-list li:hover's background:none — these rows ARE clickable,
+     so they take the same hover the pane group headers do. */
+  #usage-list li.ugrp:hover { background:var(--panel2); color:var(--fg-soft); }
+  /* Summary then caret, both pinned right, exactly as in #pane-list. */
+  #usage-list li.ugrp .gsum, #usage-list li.ugrp .car { margin-left:auto; }
+  #usage-list li.ugrp .gsum + .car { margin-left:0; }
+  /* The stand-in reading a folded group shows: the secondary half of the header,
+     so it drops the label's case, tracking and weight, and it takes the warning
+     colors its hidden meter would have taken. */
+  #usage-list li.ugrp .gsum { text-transform:none; letter-spacing:0; font-weight:400;
+    color:var(--muted); font-variant-numeric:tabular-nums; }
+  #usage-list li.ugrp.high .gsum { color:var(--warn); }
+  #usage-list li.ugrp.crit .gsum { color:var(--err); }
+  #usage-list li.ugrp .car { font-size:calc(10px * var(--sb-scale)); }
   #usage-list .urow { display:flex; align-items:baseline; gap:6px; }
   /* Body weight and body color: with a genuinely bold heading now above them,
      a row's label is no longer the most important thing in its line, and
@@ -779,6 +791,19 @@
   } catch (e) { /* storage disabled or corrupt — start with everything expanded */ }
   function savePaneCollapsed() {
     try { localStorage.setItem(PGRP_KEY, JSON.stringify([...paneCollapsed])); } catch (e) { /* not persisted */ }
+  }
+  // The same arrangement for the Usage section's provider groups, kept separate
+  // from the pane groups rather than merged into one map: the two sections'
+  // group ids come from different namespaces (workspace ids vs. provider ids),
+  // and folding CLAUDE has nothing to do with folding a workspace of panes.
+  const UGRP_KEY = "cats.usage.collapsed";
+  let usageCollapsed = new Set(), usageGroupIDs = [];
+  try {
+    const raw = JSON.parse(localStorage.getItem(UGRP_KEY));
+    if (Array.isArray(raw)) usageCollapsed = new Set(raw);
+  } catch (e) { /* storage disabled or corrupt — start with everything expanded */ }
+  function saveUsageCollapsed() {
+    try { localStorage.setItem(UGRP_KEY, JSON.stringify([...usageCollapsed])); } catch (e) { /* not persisted */ }
   }
 
   function measure() {
@@ -1898,13 +1923,25 @@
   // re-render the label on a tick of our own.
   let usageMsg = null;
 
-  // The section's heading controls: how old the reading is, and a way to take a
-  // new one. Built here rather than in the markup so the age label lives beside
-  // the code that maintains it — and beside the button whose whole purpose is
-  // to reset it.
+  // The section's heading controls: fold or unfold every group at once, how old
+  // the reading is, and a way to take a new one. Built here rather than in the
+  // markup so the age label lives beside the code that maintains it — and beside
+  // the button whose whole purpose is to reset it.
+  //
+  // The fold pair leads and the refresh keeps the right edge it already had:
+  // they are the same two marks the Panes heading uses, in the same order, so
+  // the two sections' controls read as one vocabulary. Like Panes', they act on
+  // the groups the last draw emitted, so a provider that stops reporting doesn't
+  // linger in the collapsed set.
   let usageAgeEl = null, usageBtnEl = null, usageBusyTimer = null;
   (function initUsageHeadingCtl() {
     const el = document.getElementById("usage-hctl");
+    el.appendChild(mkBtn("⊞", "expand all usage groups", "", () => {
+      usageCollapsed.clear(); saveUsageCollapsed(); drawUsage();
+    }));
+    el.appendChild(mkBtn("⊟", "collapse all usage groups", "", () => {
+      usageCollapsed = new Set(usageGroupIDs); saveUsageCollapsed(); drawUsage();
+    }));
     usageAgeEl = document.createElement("span");
     usageAgeEl.className = "hage";
     el.appendChild(usageAgeEl);
@@ -1981,18 +2018,31 @@
     return h < 24 ? "resets in " + h + "h" : "resets in " + Math.round(h / 24) + "d";
   }
 
-  // renderUsage draws the section as one subsection per group: a heading, its
-  // rows, and the caption that explains them. The server decides what the groups
-  // are, what each row is called and what the caption says, because the set of
-  // providers and the meters each one reports is the server's to know — this
-  // walks the list rather than naming anything in it.
+  // renderUsage takes a new reading: it stores the message, settles the refresh
+  // control and the age label, then draws. Folding a group re-draws WITHOUT
+  // coming through here — a click is not a reading, and running usageIdle() on
+  // one would stop the spinner on a refresh still in flight.
   function renderUsage(msg) {
     usageMsg = msg || null;
     // Any reading answers a pending refresh: the poller pushes every reading it
     // takes, so the next one to arrive IS the one the click asked for.
     usageIdle();
     renderUsageAge();
+    drawUsage();
+  }
+
+  // drawUsage paints the section as one subsection per group: a heading, its
+  // rows, and the caption that explains them. The server decides what the groups
+  // are, what each row is called and what the caption says, because the set of
+  // providers and the meters each one reports is the server's to know — this
+  // walks the list rather than naming anything in it.
+  //
+  // A folded group builds its heading and nothing else, the way renderPaneList
+  // skips a collapsed workspace's rows: the rows and the caption below them are
+  // one subsection, so the caption folds with the numbers it annotates.
+  function drawUsage() {
     usageListEl.innerHTML = "";
+    usageGroupIDs = [];
     if (usageMsg) {
       let drew = false;
       for (const g of (usageMsg.groups || [])) {
@@ -2000,15 +2050,6 @@
         // Never a bare heading: a subsection with nothing under it reads as a
         // broken section rather than as a provider with nothing to report.
         if (!wins.length && !g.note) continue;
-
-        const h = document.createElement("li");
-        // The rule tracks what was EMITTED, not the index. A group skipped by
-        // the line above would otherwise leave the next one drawing a hairline
-        // as the first thing in the section, under the heading's own border.
-        h.className = "ugrp" + (drew ? " sep" : "");
-        h.textContent = g.name || g.id || "—";
-        usageListEl.appendChild(h);
-        drew = true;
 
         // "host" is the one group the server synthesises rather than reads from
         // a provider, and the one whose percentages mean something else: a
@@ -2019,10 +2060,19 @@
         // chose them. Every other id is opaque here, and its rows take the
         // rate-limit scale.
         const host = g.id === "host";
-        for (const w of wins) {
-          const levels = host ? (HOST_LEVELS[w.name] || MEMORY_LEVELS) : USAGE_LEVELS;
-          usageListEl.appendChild(usageRow(w.name, w, levels));
-        }
+        const levelsFor = (w) => host ? (HOST_LEVELS[w.name] || MEMORY_LEVELS) : USAGE_LEVELS;
+
+        const gid = usageGroupID(g);
+        usageGroupIDs.push(gid);
+        const collapsed = usageCollapsed.has(gid);
+        // The rule tracks what was EMITTED, not the index. A group skipped by
+        // the check above would otherwise leave the next one drawing a hairline
+        // as the first thing in the section, under the heading's own border.
+        usageListEl.appendChild(usageGroupEl(g, gid, wins, levelsFor, collapsed, drew));
+        drew = true;
+        if (collapsed) continue;
+
+        for (const w of wins) usageListEl.appendChild(usageRow(w.name, w, levelsFor(w)));
 
         // The caption sits directly under the rows it is about and above the
         // next heading, so it never reads as covering the whole section — only
@@ -2042,6 +2092,60 @@
     const li = document.createElement("li");
     li.className = "empty"; li.textContent = "…";
     usageListEl.appendChild(li);
+  }
+
+  // What a folded group is remembered by. The id is the server's stable handle
+  // ("host", a provider key); the display name is the fallback for a server that
+  // sends one without the other, so the fold survives a re-render either way.
+  function usageGroupID(g) { return g.id || g.name || "—"; }
+
+  // usageGroupEl builds one provider's header row — the click target that folds
+  // and unfolds it, mirroring paneGroupEl.
+  //
+  // Folded, it stands in for the meters it hid by carrying the worst of them:
+  // the reason to fold CLAUDE is that its numbers are quiet, and the one thing
+  // worth interrupting that with is a window about to run out. Expanded there is
+  // no summary — the rows say it better, and repeating the peak in the header
+  // would only be the same number twice.
+  function usageGroupEl(g, gid, wins, levelsFor, collapsed, sep) {
+    const li = document.createElement("li");
+    li.className = "ugrp" + (sep ? " sep" : "");
+    const name = document.createElement("span");
+    name.textContent = g.name || g.id || "—";
+    li.appendChild(name);
+
+    // The peak is picked by percentage but graded against ITS OWN row's scale:
+    // 82% of the disk is calm where 82% of a rate window is not, so a group's
+    // worst row is not simply its highest number. Rows with no denominator
+    // (locally counted figures) have no percentage to rank, and are skipped —
+    // a group of only those folds with no summary at all, which is honest.
+    let peak = null, peakLv = null;
+    if (collapsed) {
+      for (const w of wins) {
+        if (typeof w.pct !== "number" || w.pct < 0) continue;
+        if (!peak || w.pct > peak.pct) { peak = w; peakLv = levelsFor(w); }
+      }
+    }
+    if (peak) {
+      if (peak.pct >= peakLv.crit) li.classList.add("crit");
+      else if (peak.pct >= peakLv.high) li.classList.add("high");
+      const s = document.createElement("span");
+      s.className = "gsum";
+      s.textContent = Math.round(peak.pct) + "%";
+      s.title = peak.name + ": " + peak.pct.toFixed(1) + "% " + peakLv.of;
+      li.appendChild(s);
+    }
+
+    const car = document.createElement("span");
+    car.className = "car"; car.textContent = collapsed ? "▶" : "▼";
+    li.appendChild(car);
+    li.title = (collapsed ? "expand " : "collapse ") + (g.name || g.id || "group");
+    li.addEventListener("click", () => {
+      if (collapsed) usageCollapsed.delete(gid); else usageCollapsed.add(gid);
+      saveUsageCollapsed();
+      drawUsage();
+    });
+    return li;
   }
 
   // Where a row turns yellow, then red. Each kind of row keeps its own scale
