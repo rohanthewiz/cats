@@ -116,14 +116,65 @@ Anchors targeted by the new cross-links (`#push`, `#where-to-look-first`,
 `#i-have-to-log-in-again-after-every-restart`) were each confirmed present in
 the rendered HTML, not just in the source headings.
 
+## 5. Docs build in CI (`88332b5`, added after the four above)
+
+The docs had no CI at all — which is how eight admonitions rendered as literal
+text and nobody noticed. New `docs` job in `.github/workflows/ci.yml`: ~30s, no
+Go and no Zig, running unconditionally rather than behind a `paths:` filter,
+since a page can break from a link in a page that did not change.
+
+**`mkdocs build --strict` alone would not have caught the link rot.** mkdocs
+does not validate relative links or `#anchors` by default — it renders a dead
+cross-reference without complaint. So `mkdocs.yml` gained a `validation:` block
+(`omitted_files`, `absolute_links`, `unrecognized_links`, `anchors` → `warn`,
+needs mkdocs >= 1.6), and `--strict` promotes those warnings to errors. Neither
+half works alone. Verified by planting a dead link and a dead `#anchor` in
+`concepts.md`:
+
+```
+WARNING - ... contains a link 'reference/nope.md', but the target is not found ...
+WARNING - ... the doc 'reference/cli.md' does not contain an anchor '#no-such-anchor'.
+Aborted with 2 warnings in strict mode!      → exit 1
+```
+
+**Admonitions need a separate grep guard**, and this is the interesting part:
+mkdocs renders `!!!` *correctly*, gkdocs does not. So the strict build is
+structurally blind to the exact bug that motivated the job — the check that
+guards the real renderer cannot come from the other one. Guard verified both
+ways (passes clean, exit 1 on a planted `!!! note`).
+
+## Verification status of the CI job
+
+Locally proven; **not yet confirmed green on GitHub**. No Actions run was
+created for any of the three commits this session. That is a GitHub-side
+outage, not a bad workflow file — the run for `ef57af9` (the commit *before*
+this session) failed the same way:
+
+```
+##[error]Failed to resolve action download info. Error: Service Unavailable
+```
+
+i.e. the runner could not download `actions/checkout`. `gh workflow list` shows
+ci active, the commit is on `origin/main`, and the YAML parses. **When Actions
+recovers, confirm the `docs` job goes green** — that is the one open item from
+this session.
+
 ## Follow-ups
 
-- **No docs build in CI.** Nothing catches link rot or nav drift; both renderers
-  are manual. A `mkdocs build --strict` step (needs `requirements-docs.txt`)
-  would catch broken links, and is the cheapest guard against the class of bug
-  this session fixed. Not added — was outside the four agreed items.
+- **Confirm the new `docs` CI job passes** once GitHub Actions recovers (see
+  above). Nothing else is pending.
 - **Admonitions in gkdocs** remain unimplemented upstream. The blockquote
   rewrite sidesteps it; if gkdocs ever gains `!!!` support the docs need no
-  change.
+  change, and the CI grep guard could then be dropped.
 - The mkdocs path is a compatibility fallback, not the primary — gkdocs stays
-  the served renderer per the README.
+  the served renderer per the README. The CI job checks the content the two
+  share, which is why it is worth running despite mkdocs not being the
+  production renderer.
+
+## Commits (all on main, pushed)
+
+| | |
+|---|---|
+| `054d098` | `docs:` the four content fixes — 12 files, +195/−40 |
+| `219b52f` | `docs(session):` this doc |
+| `88332b5` | `ci:` docs build + link-rot and admonition guards |
