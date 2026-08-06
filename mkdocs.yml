@@ -9,6 +9,17 @@ repo_url: https://github.com/rohanthewiz/cats
 repo_name: rohanthewiz/cats
 edit_uri: edit/main/docs/
 
+# What makes `mkdocs build --strict` in CI worth running. mkdocs does not check
+# relative links or #anchors by default — it renders a dead cross-reference
+# without complaint. Promoting them to warnings here, plus --strict promoting
+# warnings to errors, is what turns link rot into a red build. anchors needs
+# mkdocs >= 1.6 (pinned in requirements-docs.txt).
+validation:
+  omitted_files: warn
+  absolute_links: warn
+  unrecognized_links: warn
+  anchors: warn
+
 # The site is normally served by gkdocs (github.com/rohanthewiz/gkdocs), which
 # reads site_name/site_description/docs_dir/nav and brings its own theme. The
 # theme, plugins and markdown_extensions blocks below are for the `mkdocs build`

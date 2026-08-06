@@ -1,6 +1,7 @@
 # CI: untagged quick checks, then the real (ghostty-tagged, CGO) build+tests
 # on Linux and macOS against the vendored libghostty-vt (third_party/),
-# compiled by scripts/build-libghostty-vt.sh with pinned Zig 0.15.2.
+# compiled by scripts/build-libghostty-vt.sh with pinned Zig 0.15.2. Plus a
+# docs job, which needs no Go at all and runs alongside them.
 name: ci
 
 on:
@@ -67,3 +68,33 @@ jobs:
       - run: make vt
       - run: make vet-ghostty
       - run: make race-ghostty
+
+  # The docs site. It is served by gkdocs, but mkdocs.yml invites `mkdocs build`
+  # and both must keep working, so this job checks what the two renderers share:
+  # the content. Cheap (~30s, no Go, no Zig) and it runs unconditionally rather
+  # than behind a paths filter — a docs page can break from a link in a page
+  # that did not change.
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-docs.txt
+      - run: pip install -r requirements-docs.txt
+      # --strict promotes warnings to errors; mkdocs.yml's validation block is
+      # what makes broken relative links and #anchors warnings in the first
+      # place. Neither half catches link rot alone.
+      - run: mkdocs build --strict
+      # gkdocs — the renderer that actually serves the site — does not implement
+      # python-markdown admonitions, so a `!!! note` reaches the page as literal
+      # text. mkdocs renders them happily, which is precisely why the strict
+      # build above cannot catch this and a grep has to.
+      - name: No '!!!' admonitions (gkdocs renders them literally)
+        run: |
+          if grep -rn '^!!!' docs; then
+            echo "::error::gkdocs cannot render '!!!' admonitions — use a '> **Note — ...**' blockquote instead."
+            exit 1
+          fi

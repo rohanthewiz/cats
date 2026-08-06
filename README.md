@@ -81,7 +81,9 @@ mkdocs serve            # or: mkdocs build --strict
 ```
 
 Both renderers must stay working — the pages use mermaid and plain markdown
-only, no renderer-specific syntax.
+only, no renderer-specific syntax. CI runs `mkdocs build --strict`, which fails
+on a broken cross-reference or `#anchor`, and rejects `!!!` admonitions (gkdocs
+renders those as literal text — use a `> **Note — ...**` blockquote).
 
 Start with [Architecture → Overview](docs/architecture/index.md) for the
 component map and the three run topologies (standalone Mac, Mac client + Linux
