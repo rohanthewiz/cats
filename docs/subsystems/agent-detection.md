@@ -140,11 +140,12 @@ shares one cache.
 | Override | `CATS_AGENT_DETECTION_MANIFEST_CATALOG_URL` |
 | Disable | `cathost -manifest-update=false` |
 
-!!! note "Why `herdr.dev`"
-    The project was renamed from herdr to cats, but the manifest host was
-    deliberately left in place — it still serves the live catalog. A `cats.dev`
-    equivalent is a known to-do; until it exists, pointing at `herdr.dev` is what
-    keeps manifest fetches working.
+> **Note — why `herdr.dev`**
+>
+> The project was renamed from herdr to cats, but the manifest host was
+> deliberately left in place — it still serves the live catalog. A `cats.dev`
+> equivalent is a known to-do; until it exists, pointing at `herdr.dev` is what
+> keeps manifest fetches working.
 
 ## Stage C — flicker smoothing
 
@@ -217,12 +218,13 @@ than corrupt.
 
 The port is unix-only — on Windows every target reports not-supported.
 
-!!! warning "Install on the host that runs cathost"
-    A hook reaches cats via `CATS_SOCKET_PATH`, which is injected into the pane's
-    environment by the `catway` that owns it. In
-    [Mode 2](../architecture/mac-client-linux-server.md) that means installing
-    integrations on the **Linux** host. Installing them on your Mac does nothing
-    for a Linux-hosted session.
+> **Warning — install on the host that runs cathost**
+>
+> A hook reaches cats via `CATS_SOCKET_PATH`, which is injected into the pane's
+> environment by the `catway` that owns it. In
+> [Mode 2](../architecture/mac-client-linux-server.md) that means installing
+> integrations on the **Linux** host. Installing them on your Mac does nothing
+> for a Linux-hosted session.
 
 ## What surfaces in the UI
 

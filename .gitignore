@@ -20,6 +20,11 @@
 # category of local state.
 .cats-todo/
 
+# Docs build output and the python venv the mkdocs path needs (see
+# requirements-docs.txt). The gkdocs path produces neither.
+/site/
+.venv/
+
 # Editor / OS
 .DS_Store
 .idea/

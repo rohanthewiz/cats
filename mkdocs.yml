@@ -5,6 +5,63 @@ site_description: >-
 
 docs_dir: docs
 
+repo_url: https://github.com/rohanthewiz/cats
+repo_name: rohanthewiz/cats
+edit_uri: edit/main/docs/
+
+# The site is normally served by gkdocs (github.com/rohanthewiz/gkdocs), which
+# reads site_name/site_description/docs_dir/nav and brings its own theme. The
+# theme, plugins and markdown_extensions blocks below are for the `mkdocs build`
+# path, which is otherwise unusable here: without pymdownx.superfences every
+# ```mermaid fence on 24 of these 26 pages renders as a raw code block, and
+# without admonition a `!!! note` renders as literal text.
+#
+# gkdocs ignores keys it does not know and strips !!python/ tags before parsing,
+# so everything below is inert there. Anything added here must stay that way —
+# content must render correctly under both renderers, never one or the other.
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.top
+    - navigation.tracking
+    - content.code.copy
+    - toc.follow
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+
+plugins:
+  - search
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - def_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight
+  - pymdownx.inlinehilite
+  # The mermaid custom fence is the whole reason superfences is here: it hands
+  # ```mermaid blocks to Material's bundled mermaid.js instead of the syntax
+  # highlighter. gkdocs renders mermaid natively and needs no equivalent.
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+
 nav:
   - Home: index.md
   - Getting started: getting-started.md

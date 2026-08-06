@@ -20,8 +20,9 @@ flowchart TD
   F --> E
 ```
 
-**`flag > config > default`**, and only for `server.*` — those are the only
-settings with flags. Theme and keybindings come from the file alone.
+**`flag > config > default`**, and only for the sections that have flags:
+`server.*`, `persistence.*` (`--persist`, `--state-dir`) and `push.url`
+(`--push-url`). Theme and keybindings come from the file alone.
 
 The implementation matters here: `catway` starts from the config (which starts
 from the defaults), then applies only the flags you **explicitly passed**.
@@ -80,10 +81,11 @@ server:
 | `tls.cert` / `tls.key` | `--tls-cert` / `--tls-key` | operator PEMs. Both must be set together; either implies `--tls` |
 | `tls.sans` | `--tls-san` | extra names/IPs for the auto-generated cert (a LAN DNS name, a relay hostname). Implies `--tls`; ignored when operator PEMs are given. Adding one re-mints the certificate |
 
-!!! warning "The password is not in this file"
-    There is no `server.password`. Set `CATS_PASSWORD` or pass `--password`, so
-    the secret never lands in a committed config. If neither is given, `catway`
-    generates one and logs it.
+> **Warning — the password is not in this file**
+>
+> There is no `server.password`. Set `CATS_PASSWORD` or pass `--password`, so
+> the secret never lands in a committed config. If neither is given, `catway`
+> generates one and logs it.
 
 `server.*` settings are fixed for the process's lifetime. Changing them needs a
 restart.
@@ -106,6 +108,54 @@ persistence:
 | `resume_agents` | — | relaunch supported agent panes into their native conversations on a cold restore |
 
 See [Persistence](../subsystems/persistence.md).
+
+## `push`
+
+The outbound notification bridge. When an agent needs attention, `catway` POSTs
+to an [ntfy](https://ntfy.sh)-shaped webhook so a phone with its screen off gets
+a real system push — not a toast on a screen nobody is looking at.
+
+```yaml
+push:
+  enabled: false
+  url: "https://ntfy.sh/cats-CHANGE-ME-TO-SOMETHING-UNGUESSABLE"
+  kinds: ["attention"]      # "attention" and/or "finished"
+  priority:                 # ntfy priority per kind
+    attention: "high"
+    finished: "low"
+  min_interval: "60s"       # debounce per (pane, kind)
+  click_url: "cats://pane/" # deep-link base; the pane handle is appended
+```
+
+| Key | Flag | Default | Notes |
+|-----|------|---------|-------|
+| `enabled` | — | `false` | passing `--push-url` turns it on by itself; `--push-url ""` forces it off |
+| `url` | `--push-url` | — | required when enabled. Must be `http`/`https` |
+| `kinds` | — | `["attention"]` | which [notify kinds](../protocols/browser-protocol.md) to forward |
+| `priority` | — | `attention: high`, `finished: low` | per kind. Accepts ntfy's `min`/`low`/`default`/`high`/`urgent` or `1`–`5` |
+| `min_interval` | — | `60s` | Go duration. `0` disables the debounce |
+| `click_url` | — | — | tap target; the pane's public handle (`w1:p3`) is appended. Empty means no click action |
+
+Because the POST is an ordinary outbound request from the machine `catway` runs
+on, it needs no inbound reachability and keeps working when no client is
+connected at all. Unknown kinds and non-ntfy priorities are rejected at startup
+rather than silently downgrading every notification. The bridge is built once at
+startup, so like `server.*` it needs a restart, not `catctl reload`.
+
+Two defaults are deliberate. `kinds` is attention-only — `finished` fires on
+every completion of every agent, and a bridge that pushes those is how its owner
+learns to ignore it. `priority` tops out at `high`, never `urgent`: ntfy's
+urgent bypasses Do Not Disturb on Android, and a blocked agent is not a 3am
+emergency.
+
+> **Warning — the topic URL is a capability**
+>
+> Anyone who learns your ntfy topic path can read your notifications, so treat
+> the URL like a secret and pick something unguessable. If your endpoint also
+> wants a bearer credential, set `CATS_PUSH_TOKEN` in the environment. Like
+> `CATS_PASSWORD` it is deliberately **not** read from this file: the settings
+> modal rewrites `config.yaml`, and a token field would mean it silently copied
+> your secret into a file you may well commit.
 
 ## `worktrees`
 
@@ -236,6 +286,7 @@ an arrow key. Apply with `catctl reload`.
 |----------|---------|---------|
 | `CATS_CONFIG` | `catway` | config file path |
 | `CATS_PASSWORD` | `catway` | the shared secret |
+| `CATS_PUSH_TOKEN` | `catway` | bearer credential for the [push](#push) webhook. Never read from the config file |
 | `CATS_CONTROL_SOCKET` | `catway`, `catctl` | control socket path. Injected into every pane |
 | `CATS_CATCTL` | `catway` | where to find `catctl` when spawning plugin operations |
 | `CATS_PLUGINS_DIR` | plugin host | override the plugins root |

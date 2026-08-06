@@ -72,6 +72,17 @@ MKDOCS_CONFIG=mkdocs.yml PORT=8000 gkdocs
 MKDOCS_CONFIG=mkdocs.yml PORT=8000 go run github.com/rohanthewiz/gkdocs/cmd/gkdocs@latest
 ```
 
+The config is also a valid mkdocs one, if you would rather build it that way:
+
+```sh
+python3 -m venv .venv && . .venv/bin/activate
+pip install -r requirements-docs.txt
+mkdocs serve            # or: mkdocs build --strict
+```
+
+Both renderers must stay working — the pages use mermaid and plain markdown
+only, no renderer-specific syntax.
+
 Start with [Architecture → Overview](docs/architecture/index.md) for the
 component map and the three run topologies (standalone Mac, Mac client + Linux
 server, web client + Mac server), or

@@ -63,9 +63,10 @@ deliberately tiny surface:
 That is all. No REST API, no asset pipeline, no CDN. The page is
 **self-contained** and embedded into the binary with `//go:embed`.
 
-!!! note "Rebuild after editing the UI"
-    Because `index.html` is compiled in, editing it and reloading the browser
-    keeps serving the old page. Rebuild and restart `catway`.
+> **Note — rebuild after editing the UI**
+>
+> Because `index.html` is compiled in, editing it and reloading the browser
+> keeps serving the old page. Rebuild and restart `catway`.
 
 Theme colours and keybindings are injected into the served page at render time,
 which is why `catctl reload` can apply a config edit with no restart: the
@@ -139,11 +140,12 @@ Consequences worth knowing:
 * Behind a reverse proxy, add the proxy's host to `server.allowed_origins` so
   the WebSocket origin check passes.
 
-!!! warning "No `X-Forwarded-*` trust"
-    `catway` does not interpret forwarded headers. Behind a proxy it sees the
-    proxy's address, and the same-origin check compares the `Origin` header to
-    the `Host` header it received. Subdomain-style routing keeps those equal;
-    path-prefix routing does not.
+> **Warning — no `X-Forwarded-*` trust**
+>
+> `catway` does not interpret forwarded headers. Behind a proxy it sees the
+> proxy's address, and the same-origin check compares the `Origin` header to
+> the `Host` header it received. Subdomain-style routing keeps those equal;
+> path-prefix routing does not.
 
 ## Running it as a background service on macOS
 

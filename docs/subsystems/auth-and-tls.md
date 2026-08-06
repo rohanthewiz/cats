@@ -162,11 +162,12 @@ server:
 
 Flag: `--allowed-origins a,b,c`.
 
-!!! warning "No `X-Forwarded-*` trust"
-    `catway` does not interpret forwarded headers. Behind a reverse proxy it
-    compares the `Origin` header against the `Host` header it actually received.
-    Subdomain-style routing keeps those equal; path-prefix routing does not, which
-    is why the allowlist exists.
+> **Warning — no `X-Forwarded-*` trust**
+>
+> `catway` does not interpret forwarded headers. Behind a reverse proxy it
+> compares the `Origin` header against the `Host` header it actually received.
+> Subdomain-style routing keeps those equal; path-prefix routing does not, which
+> is why the allowlist exists.
 
 ## Auth is checked once
 
@@ -279,3 +280,8 @@ mid-session revocation, and no per-device revocation (a paired phone holds an
 anonymous session like everyone else). If you need any of those, put cats behind
 something that provides them and use `allowed_origins` to let the WebSocket
 through.
+
+For the symptoms this subsystem produces — a WebSocket that
+[connects then immediately fails](../reference/troubleshooting.md#websocket-connects-then-immediately-fails),
+or [having to log in again after every restart](../reference/troubleshooting.md#i-have-to-log-in-again-after-every-restart)
+— see [Troubleshooting](../reference/troubleshooting.md).

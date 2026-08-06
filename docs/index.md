@@ -14,6 +14,10 @@ The repo is the complete application. Three binaries plus a macOS launcher:
 | [`catctl`](reference/cli.md#catctl) | CLI client for the control API — the same command table the browser drives — plus offline agent-integration and plugin installers |
 | [`catapp`](reference/cli.md#catapp) | macOS launcher: a WebKit window around either supervised local daemons or a remote `catway` |
 
+To build and run it, start with [Getting started](getting-started.md).
+[Concepts](concepts.md) defines the vocabulary — workspace, tab, pane, handle —
+that the rest of these pages assume.
+
 ## The shape of the system
 
 Four seams, each independently versioned, hold the app together. Everything else
@@ -86,8 +90,15 @@ is the side-by-side comparison.
   companion: a prompt backlog you can *drop* into a Claude Code session, and the
   reference implementation of a plugin —
   `catctl plugin install rohanthewiz/cats-todo`.
+* **Push notifications** to a phone when an agent hits a permission prompt, as
+  an outbound POST to an ntfy-shaped webhook — so it works with the screen off
+  and with no client connected. See
+  [Configuration → `push`](reference/configuration.md#push).
 * **Configuration** in YAML with live-reloadable theme and keybindings —
   [Configuration](reference/configuration.md).
+
+When something misbehaves, [Troubleshooting](reference/troubleshooting.md) is
+organised by symptom and names the log line or command that confirms each cause.
 
 ## Where things live
 

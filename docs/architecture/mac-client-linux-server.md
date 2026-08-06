@@ -232,11 +232,12 @@ The one piece already landed for it is the configurable WebSocket origin
 allowlist — `server.allowed_origins` / `--allowed-origins` — which lets a
 reverse proxy or relay serve the UI under a different host.
 
-!!! warning "Relay trust model"
-    A relay terminates the browser's TLS, so it can see plaintext — including
-    the password at login. That is the ngrok model and is acceptable for a
-    **self-hosted** relay you control. App-layer end-to-end encryption is a
-    possible later hardening, not part of the design's v1.
+> **Warning — relay trust model**
+>
+> A relay terminates the browser's TLS, so it can see plaintext — including
+> the password at login. That is the ngrok model and is acceptable for a
+> **self-hosted** relay you control. App-layer end-to-end encryption is a
+> possible later hardening, not part of the design's v1.
 
 ## Security posture
 

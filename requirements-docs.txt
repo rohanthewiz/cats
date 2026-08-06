@@ -1,0 +1,19 @@
+# Dependencies for building docs/ with `mkdocs build`.
+#
+# Not needed for the normal path: the site is served with gkdocs
+# (github.com/rohanthewiz/gkdocs), which is a Go binary and brings its own
+# theme and mermaid support. This file exists so `mkdocs build` — which the
+# mkdocs.yml filename invites people to reach for — produces a correct site
+# rather than one with 72 mermaid diagrams rendered as raw code blocks.
+#
+#   python3 -m venv .venv && . .venv/bin/activate
+#   pip install -r requirements-docs.txt
+#   mkdocs build --strict     # or: mkdocs serve
+#
+# mkdocs.yml's theme/markdown_extensions blocks are what require these; see the
+# comment there. mkdocs-material supplies the mermaid bundling, and
+# pymdown-extensions the superfences custom fence that routes ```mermaid to it.
+
+mkdocs>=1.6.1
+mkdocs-material>=9.7.7
+pymdown-extensions>=11.0.1

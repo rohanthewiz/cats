@@ -54,10 +54,11 @@ For a trusted-localhost setup, `catway --auth none` skips the login entirely.
 Precedence for server settings is **flag > config file > default**. Run
 `catway -h` for the full flag set.
 
-!!! note "The web UI is embedded"
-    `cmd/catway/web/index.html` is compiled into the `catway` binary with
-    `//go:embed`. After editing it you must rebuild and restart `catway` — a
-    browser reload alone keeps serving the old page.
+> **Note — the web UI is embedded**
+>
+> `cmd/catway/web/index.html` is compiled into the `catway` binary with
+> `//go:embed`. After editing it you must rebuild and restart `catway` — a
+> browser reload alone keeps serving the old page.
 
 ## Run it as a Mac app
 
@@ -143,3 +144,10 @@ the manifest format and for writing your own.
 
 `catapp` in local mode moves all three sockets under `$TMPDIR` keyed by its pid
 — per-user, `0700`, and unique per launch.
+
+## When something does not work
+
+[Troubleshooting](reference/troubleshooting.md) is organised by symptom — empty
+panes, a WebSocket that connects then drops, hooks that never arrive, agents
+that did not resume. Start with
+[Where to look first](reference/troubleshooting.md#where-to-look-first).

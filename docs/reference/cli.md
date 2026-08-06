@@ -28,7 +28,7 @@ catway [--config PATH] [--addr :8421] [--socket /tmp/cats-cathost.sock]
        [--auth password|none] [--password SECRET] [--session-ttl 24h]
        [--allowed-origins a,b] [--tls] [--tls-cert PEM] [--tls-key PEM]
        [--tls-san NAME,IP]
-       [--persist=false] [--state-dir DIR]
+       [--persist=false] [--state-dir DIR] [--push-url URL]
 ```
 
 | Flag | Default | Notes |
@@ -47,6 +47,7 @@ catway [--config PATH] [--addr :8421] [--socket /tmp/cats-cathost.sock]
 | `--tls-san` | — | comma-separated extra names/IPs for the **auto-generated** cert; implies `--tls`. Adding one re-mints |
 | `--persist` | `true` | |
 | `--state-dir` | `$XDG_STATE_HOME/cats` | |
+| `--push-url` | — | ntfy topic URL for [push notifications](configuration.md#push). Passing it is the opt-in; `""` forces the bridge off. Token: `$CATS_PUSH_TOKEN` |
 
 Build requires `-tags ghostty` and `PKG_CONFIG_PATH`. Startup order relative to
 `cathost` does not matter — `catway` dials lazily with retry.
