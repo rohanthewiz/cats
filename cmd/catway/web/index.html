@@ -181,6 +181,11 @@
   #usage-hctl { align-items:center; }
   #usage-hctl .refresh { display:block; width:calc(12px * var(--sb-scale));
     height:calc(12px * var(--sb-scale)); }
+  /* The fold pair now sits outboard of the refresh (far right of the heading), so
+     the drawn mark needs clearance it did not need when it was the last control:
+     .hctl's 1px gap is tuned for two glyph buttons touching, and a drawn arc
+     abutting a ⊞ reads as one smudged mark at 12px. */
+  #usage-hctl button.uref { margin-right:5px; }
   /* The mark turns while a reading is in flight. The server acks the ask
      immediately and pushes the numbers only when the read lands, so the spin is
      the only thing saying the click was heard. */
@@ -253,20 +258,24 @@
      than on the first pane, so a focused pane never paints across the divider. */
   /* Bold, so the header reads as a heading over its rows rather than as one more
      muted row among them — at this size weight separates the two tiers better than
-     the colour alone did. */
-  #pane-list li.wsgrp { color:var(--ws-heading); font-size:calc(11px * var(--sb-scale)); text-transform:uppercase;
+     the colour alone did.
+     The Workspaces list above splits open from locked with the same kind of header
+     (see renderWorkspaces), so both lists share the style rather than each growing
+     its own copy: a fold header is a fold header wherever it appears. */
+  #pane-list li.wsgrp, #ws-list li.wsgrp { color:var(--ws-heading); font-size:calc(11px * var(--sb-scale)); text-transform:uppercase;
     letter-spacing:.5px; cursor:pointer; font-weight:600; }
-  #pane-list li.wsgrp.sep { border-top:1px solid var(--line); margin-top:5px; padding-top:7px; }
-  #pane-list li.wsgrp:hover { background:var(--panel2); color:var(--fg-soft); }
+  #pane-list li.wsgrp.sep, #ws-list li.wsgrp.sep { border-top:1px solid var(--line); margin-top:5px; padding-top:7px; }
+  #pane-list li.wsgrp:hover, #ws-list li.wsgrp:hover { background:var(--panel2); color:var(--fg-soft); }
   /* The rollup sits ahead of the caret and the pair is pushed to the right edge. */
-  #pane-list li.wsgrp .gsum, #pane-list li.wsgrp .car { margin-left:auto; }
-  #pane-list li.wsgrp .gsum + .car { margin-left:0; }
+  #pane-list li.wsgrp .gsum, #pane-list li.wsgrp .car,
+  #ws-list li.wsgrp .gsum, #ws-list li.wsgrp .car { margin-left:auto; }
+  #pane-list li.wsgrp .gsum + .car, #ws-list li.wsgrp .gsum + .car { margin-left:0; }
   /* The count is the header's secondary half, so it stays at normal weight — only
      the workspace name carries the bold. */
-  #pane-list li.wsgrp .gsum { text-transform:none; letter-spacing:0; font-weight:400; }
+  #pane-list li.wsgrp .gsum, #ws-list li.wsgrp .gsum { text-transform:none; letter-spacing:0; font-weight:400; }
   /* The caret tracks its header's size — a step under it, as before, so the
      fold marker stays subordinate to the name it folds. */
-  #pane-list li.wsgrp .car { font-size:calc(10px * var(--sb-scale)); }
+  #pane-list li.wsgrp .car, #ws-list li.wsgrp .car { font-size:calc(10px * var(--sb-scale)); }
   #pane-list .pub { color:var(--accent); }
   #pane-list .ttl { color:var(--muted); overflow:hidden; text-overflow:ellipsis; }
   #pane-list .ag, #agent-list .aname { margin-left:auto; }
@@ -650,7 +659,7 @@
   <aside id="sidebar">
     <div id="brand">cats</div>
     <section><h2>Usage<span class="hctl" id="usage-hctl"></span></h2><ul id="usage-list"><li class="empty">…</li></ul></section>
-    <section><h2>Workspaces<span id="ws-global-todo"></span></h2><ul id="ws-list"></ul></section>
+    <section><h2>Workspaces<span id="ws-global-todo"></span><span class="hctl" id="ws-hctl"></span></h2><ul id="ws-list"></ul></section>
     <section><h2>Panes<span class="hctl" id="pane-hctl"></span></h2><ul id="pane-list"></ul></section>
     <section><h2>Agents</h2><ul id="agent-list"><li class="empty">none</li></ul></section>
   </aside>
@@ -804,6 +813,21 @@
   } catch (e) { /* storage disabled or corrupt — start with everything expanded */ }
   function saveUsageCollapsed() {
     try { localStorage.setItem(UGRP_KEY, JSON.stringify([...usageCollapsed])); } catch (e) { /* not persisted */ }
+  }
+  // And once more for the Workspaces section, whose groups are the two states a
+  // workspace can be in rather than a list of ids: WS_OPEN and WS_LOCKED. Its own
+  // key for the same reason as above — the namespaces don't overlap, and a folded
+  // "locked" shelf says nothing about which provider or which workspace of panes
+  // you last folded.
+  const WGRP_KEY = "cats.workspaces.collapsed";
+  const WS_OPEN = "open", WS_LOCKED = "locked";
+  let wsCollapsed = new Set(), wsGroupIDs = [];
+  try {
+    const raw = JSON.parse(localStorage.getItem(WGRP_KEY));
+    if (Array.isArray(raw)) wsCollapsed = new Set(raw);
+  } catch (e) { /* storage disabled or corrupt — start with everything expanded */ }
+  function saveWsCollapsed() {
+    try { localStorage.setItem(WGRP_KEY, JSON.stringify([...wsCollapsed])); } catch (e) { /* not persisted */ }
   }
 
   function measure() {
@@ -1444,55 +1468,170 @@
       gmark.title = globalTodos === 1 ? "1 unfinished global todo" : globalTodos + " unfinished global todos";
       wsGlobalTodoEl.appendChild(gmark);
     }
-    for (const w of msg.workspaces) {
-      const li = document.createElement("li");
-      li.className = "ws" + (w.active ? " active" : "") + (w.locked ? " locked" : "");
-      const name = document.createElement("span");
-      name.textContent = (w.active ? "● " : "○ ") + w.name;
-      li.appendChild(name);
-      // The lock rides closest to the name, ahead of the todo mark: it qualifies
-      // the workspace itself — what may be started in it — where the todo mark
-      // reports on the project inside.
-      if (w.locked) li.appendChild(lockMark());
-      // The todo mark sits with the name — it says something about the project,
-      // not about a pane — while the agent counts stay pinned to the right edge.
-      const todo = todoMark(todos.get(w.id) || 0);
-      if (todo) li.appendChild(todo);
-      const sum = workspaceSummary(states.get(w.id));
-      if (sum) {
-        const s = document.createElement("span"); s.className = "sum"; s.appendChild(sum);
-        li.appendChild(s);
+    // Two shelves, in the order attention runs: the workspaces still in play,
+    // then the ones set aside. "Locked" is already the strongest statement a
+    // workspace row makes — nothing may be launched into it, and a click won't
+    // even switch to it — so it is the one split worth spending a group header
+    // on, and the one set of rows worth being able to fold out of the way once a
+    // session has collected a few. The active workspace keeps its accent inside
+    // the open shelf rather than being lifted into a shelf of its own: it is
+    // always exactly one row, and a header over a single row is noise.
+    //
+    // Each row remembers its index in the session's order, because grouping
+    // reorders the list on screen while workspace.move still speaks in gaps in
+    // the session's order — see wsDropIndex for the translation back.
+    const groups = [
+      { id: WS_OPEN, label: "open", rows: [] },
+      { id: WS_LOCKED, label: "locked", rows: [] },
+    ];
+    msg.workspaces.forEach((w, i) => groups[w.locked ? 1 : 0].rows.push({ w, idx: i }));
+    // Headers are drawn only when the split is real. With nothing locked (the
+    // common case) one shelf holds everything, and a header reading "open" over
+    // the whole list is a row that says nothing — the section stays the flat list
+    // it has always been, and the heading's ⊞/⊟ have nothing to act on. Which is
+    // also why wsGroupIDs is empty then: collapse-all must not fold rows behind a
+    // header that isn't on screen to unfold them.
+    const drawn = groups.filter((g) => g.rows.length);
+    const split = drawn.length > 1;
+    wsGroupIDs = split ? drawn.map((g) => g.id) : [];
+
+    wsRenderOrder = [];
+    wsRenderTotal = msg.workspaces.length;
+    drawn.forEach((g, gi) => {
+      if (split) wsListEl.appendChild(wsGroupEl(g, gi > 0));
+      if (split && wsCollapsed.has(g.id)) return;
+      for (const ent of g.rows) {
+        const w = ent.w;
+        wsRenderOrder.push(ent.idx);
+        const li = document.createElement("li");
+        li.className = "ws" + (w.active ? " active" : "") + (w.locked ? " locked" : "");
+        const name = document.createElement("span");
+        name.textContent = (w.active ? "● " : "○ ") + w.name;
+        li.appendChild(name);
+        // The lock rides closest to the name, ahead of the todo mark: it qualifies
+        // the workspace itself — what may be started in it — where the todo mark
+        // reports on the project inside.
+        if (w.locked) li.appendChild(lockMark());
+        // The todo mark sits with the name — it says something about the project,
+        // not about a pane — while the agent counts stay pinned to the right edge.
+        const todo = todoMark(todos.get(w.id) || 0);
+        if (todo) li.appendChild(todo);
+        const sum = workspaceSummary(states.get(w.id));
+        if (sum) {
+          const s = document.createElement("span"); s.className = "sum"; s.appendChild(sum);
+          li.appendChild(s);
+        }
+        // A locked workspace does not take a click-to-switch: the lock says "leave
+        // this one alone", and the sidebar is the one place a switch happens by
+        // accident (a click meant for the row's name or its lock). The toast is not
+        // optional — a click that silently does nothing reads as a broken row — and
+        // it names the way out, since the row's own context menu holds the unlock.
+        // Deliberate ways in are left alone: the context menu, the palette and the
+        // keyboard still switch, so this narrows the accident, not the workspace.
+        li.addEventListener("dblclick", () => renameWorkspace(w));
+        li.addEventListener("contextmenu", (e) => { e.preventDefault(); openCtx(e.clientX, e.clientY, wsMenuItems(w)); });
+        // The switch rides the drag helper's own mouseup rather than a "click"
+        // listener on the row: this list is rebuilt on every agents rollup, and a
+        // row replaced between press and release never sees its click (see
+        // beginReorderDrag). Press-and-release on a row is a switch; DRAG_SLOP of
+        // travel makes it a reorder instead.
+        //
+        // itemSel picks li.ws, so the group headers between the shelves are not
+        // counted as drop positions — the gap the helper reports is an index into
+        // the drawn workspace rows alone, which is exactly what wsDropIndex maps.
+        li.addEventListener("mousedown", (e) => beginReorderDrag(e, {
+          el: li, container: wsListEl, itemSel: "li.ws", horizontal: false,
+          onDrop: (gap) => sendCmd("workspace.move", { id: w.id, index: wsDropIndex(gap) }),
+          onClick: () => {
+            if (w.active) return;
+            if (w.locked) { toast((w.name || w.id) + " is locked — unlock it to switch"); return; }
+            sendCmd("workspace.focus", { id: w.id });
+          },
+        }));
+        wsListEl.appendChild(li);
       }
-      // A locked workspace does not take a click-to-switch: the lock says "leave
-      // this one alone", and the sidebar is the one place a switch happens by
-      // accident (a click meant for the row's name or its lock). The toast is not
-      // optional — a click that silently does nothing reads as a broken row — and
-      // it names the way out, since the row's own context menu holds the unlock.
-      // Deliberate ways in are left alone: the context menu, the palette and the
-      // keyboard still switch, so this narrows the accident, not the workspace.
-      li.addEventListener("dblclick", () => renameWorkspace(w));
-      li.addEventListener("contextmenu", (e) => { e.preventDefault(); openCtx(e.clientX, e.clientY, wsMenuItems(w)); });
-      // The switch rides the drag helper's own mouseup rather than a "click"
-      // listener on the row: this list is rebuilt on every agents rollup, and a
-      // row replaced between press and release never sees its click (see
-      // beginReorderDrag). Press-and-release on a row is a switch; DRAG_SLOP of
-      // travel makes it a reorder instead.
-      li.addEventListener("mousedown", (e) => beginReorderDrag(e, {
-        el: li, container: wsListEl, itemSel: "li.ws", horizontal: false,
-        onDrop: (gap) => sendCmd("workspace.move", { id: w.id, index: gap }),
-        onClick: () => {
-          if (w.active) return;
-          if (w.locked) { toast((w.name || w.id) + " is locked — unlock it to switch"); return; }
-          sendCmd("workspace.focus", { id: w.id });
-        },
-      }));
-      wsListEl.appendChild(li);
-    }
+    });
     const add = document.createElement("li");
     add.className = "add"; add.textContent = "+ workspace"; add.title = "new workspace";
     pressActivate(add, () => newWorkspace()); // rebuilt with the rows above it
     wsListEl.appendChild(add);
   }
+
+  // Where the last render put each drawn workspace row in the session's order,
+  // and how many workspaces the session holds. Module-level rather than captured
+  // per render because a mid-drag rebuild replaces every row: the drop then has
+  // to be read against the list on screen at release, not the one that armed the
+  // drag (beginReorderDrag re-queries for the same reason).
+  let wsRenderOrder = [], wsRenderTotal = 0;
+
+  // wsDropIndex turns a drop position in the drawn list into the gap
+  // workspace.move wants. The list is grouped and a shelf can be folded shut, so
+  // the Nth row on screen is not the Nth workspace in the session. For a session
+  // of w0..w3 where w1 and w2 are locked:
+  //
+  //   drawn rows   [open]  w0    w3   [locked]  w1    w2
+  //   drop gap           0    1     2         2    3     4  (beginReorderDrag)
+  //   wsRenderOrder      0    3     1         1    2     —  (indices of the rows)
+  //   sent as            0    3     1         1    2     4  (gap 4 = past the end)
+  //
+  // A gap means "insert ahead of the row drawn there", so the answer is that
+  // row's own session index; past the last drawn row it means the end of the
+  // list. Ungrouped and fully expanded, wsRenderOrder is [0,1,2,…] and this is
+  // the identity mapping the list used before it had shelves.
+  //
+  // Dropping at the foot of one shelf and at the head of the next are the same
+  // gap, and land the row wherever that next row sits in the session order —
+  // the shelves are a view, not a second ordering, so a drag cannot lock or
+  // unlock a workspace by dropping it across the divider.
+  function wsDropIndex(gap) {
+    return gap < wsRenderOrder.length ? wsRenderOrder[gap] : wsRenderTotal;
+  }
+
+  // wsGroupEl builds one shelf's header: what it holds, how many, and the caret
+  // that folds it. The count rides the header in both states for the reason
+  // paneGroupEl's rollup does — folded it stands in for the rows it hides, open
+  // it saves counting them by eye.
+  function wsGroupEl(g, sep) {
+    const collapsed = wsCollapsed.has(g.id);
+    const li = document.createElement("li");
+    li.className = "wsgrp" + (sep ? " sep" : "");
+    const name = document.createElement("span");
+    name.textContent = g.label;
+    li.appendChild(name);
+    const s = document.createElement("span");
+    s.className = "gsum";
+    s.textContent = g.rows.length + (g.rows.length === 1 ? " workspace" : " workspaces");
+    li.appendChild(s);
+    const car = document.createElement("span");
+    car.className = "car"; car.textContent = collapsed ? "▶" : "▼";
+    li.appendChild(car);
+    li.title = (collapsed ? "expand " : "collapse ") + g.label + " workspaces";
+    // On the press, like the rows it folds: this list is rebuilt on every agents
+    // rollup and every layout push, and a header replaced between press and
+    // release never sees its click.
+    pressActivate(li, () => {
+      if (collapsed) wsCollapsed.delete(g.id); else wsCollapsed.add(g.id);
+      saveWsCollapsed();
+      if (layoutMsg) renderWorkspaces(layoutMsg);
+    });
+    return li;
+  }
+
+  // The Workspaces heading's controls: the same pair, in the same right-edge
+  // position, that Usage and Panes carry. They act on the shelves the last render
+  // drew — so with nothing locked, when no headers exist to unfold them again,
+  // ⊟ is a no-op rather than a fold with no way back.
+  (function initWsHeadingCtl() {
+    const el = document.getElementById("ws-hctl");
+    el.appendChild(mkBtn("⊞", "expand all workspace groups", "", () => {
+      wsCollapsed.clear(); saveWsCollapsed();
+      if (layoutMsg) renderWorkspaces(layoutMsg);
+    }));
+    el.appendChild(mkBtn("⊟", "collapse all workspace groups", "", () => {
+      wsCollapsed = new Set(wsGroupIDs); saveWsCollapsed();
+      if (layoutMsg) renderWorkspaces(layoutMsg);
+    }));
+  })();
 
   // The Panes section is the session's whole pane inventory — every workspace and
   // tab, matching the global Agents rollup below it — so its rows come from the
@@ -2016,26 +2155,30 @@
   // markup so the age label lives beside the code that maintains it — and beside
   // the button whose whole purpose is to reset it.
   //
-  // The fold pair leads and the refresh keeps the right edge it already had:
-  // they are the same two marks the Panes heading uses, in the same order, so
-  // the two sections' controls read as one vocabulary. Like Panes', they act on
-  // the groups the last draw emitted, so a provider that stops reporting doesn't
-  // linger in the collapsed set.
+  // Order across the heading: the reading (how old), then the control that
+  // renews it, then the fold pair hard against the right edge. The age and its
+  // refresh belong together — the button's whole job is to reset the number
+  // beside it — so the pair that has nothing to do with either is what moves
+  // outboard rather than splitting them. That also puts the fold pair in the one
+  // place it is the same distance from every section's edge, which is what lets
+  // Usage, Workspaces and Panes each be folded without re-aiming the pointer.
+  // Like Panes', these act on the groups the last draw emitted, so a provider
+  // that stops reporting doesn't linger in the collapsed set.
   let usageAgeEl = null, usageBtnEl = null, usageBusyTimer = null;
   (function initUsageHeadingCtl() {
     const el = document.getElementById("usage-hctl");
+    usageAgeEl = document.createElement("span");
+    usageAgeEl.className = "hage";
+    el.appendChild(usageAgeEl);
+    usageBtnEl = mkBtn("", "read the account's usage now", "uref", refreshUsage);
+    usageBtnEl.appendChild(refreshMark());
+    el.appendChild(usageBtnEl);
     el.appendChild(mkBtn("⊞", "expand all usage groups", "", () => {
       usageCollapsed.clear(); saveUsageCollapsed(); drawUsage();
     }));
     el.appendChild(mkBtn("⊟", "collapse all usage groups", "", () => {
       usageCollapsed = new Set(usageGroupIDs); saveUsageCollapsed(); drawUsage();
     }));
-    usageAgeEl = document.createElement("span");
-    usageAgeEl.className = "hage";
-    el.appendChild(usageAgeEl);
-    usageBtnEl = mkBtn("", "read the account's usage now", "", refreshUsage);
-    usageBtnEl.appendChild(refreshMark());
-    el.appendChild(usageBtnEl);
   })();
 
   // refreshMark: the circular arrow on the refresh control — an arc most of the
