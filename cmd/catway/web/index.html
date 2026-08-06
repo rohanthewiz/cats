@@ -1470,22 +1470,27 @@
       // it names the way out, since the row's own context menu holds the unlock.
       // Deliberate ways in are left alone: the context menu, the palette and the
       // keyboard still switch, so this narrows the accident, not the workspace.
-      li.addEventListener("click", () => {
-        if (dragConsumedClick || w.active) return;
-        if (w.locked) { toast((w.name || w.id) + " is locked — unlock it to switch"); return; }
-        sendCmd("workspace.focus", { id: w.id });
-      });
       li.addEventListener("dblclick", () => renameWorkspace(w));
       li.addEventListener("contextmenu", (e) => { e.preventDefault(); openCtx(e.clientX, e.clientY, wsMenuItems(w)); });
+      // The switch rides the drag helper's own mouseup rather than a "click"
+      // listener on the row: this list is rebuilt on every agents rollup, and a
+      // row replaced between press and release never sees its click (see
+      // beginReorderDrag). Press-and-release on a row is a switch; DRAG_SLOP of
+      // travel makes it a reorder instead.
       li.addEventListener("mousedown", (e) => beginReorderDrag(e, {
         el: li, container: wsListEl, itemSel: "li.ws", horizontal: false,
         onDrop: (gap) => sendCmd("workspace.move", { id: w.id, index: gap }),
+        onClick: () => {
+          if (w.active) return;
+          if (w.locked) { toast((w.name || w.id) + " is locked — unlock it to switch"); return; }
+          sendCmd("workspace.focus", { id: w.id });
+        },
       }));
       wsListEl.appendChild(li);
     }
     const add = document.createElement("li");
     add.className = "add"; add.textContent = "+ workspace"; add.title = "new workspace";
-    add.addEventListener("click", () => newWorkspace());
+    pressActivate(add, () => newWorkspace()); // rebuilt with the rows above it
     wsListEl.appendChild(add);
   }
 
@@ -1571,7 +1576,10 @@
     car.className = "car"; car.textContent = collapsed ? "▶" : "▼";
     li.appendChild(car);
     li.title = (collapsed ? "expand " : "collapse ") + (wsName(g.ws) || "workspace");
-    li.addEventListener("click", () => {
+    // On the press, like the rows it folds: the header is rebuilt on the same
+    // pushes they are, and a fold that has to be clicked twice because a rollup
+    // landed mid-press reads as a stuck group.
+    pressActivate(li, () => {
       if (collapsed) paneCollapsed.delete(g.ws); else paneCollapsed.add(g.ws);
       savePaneCollapsed();
       renderPaneList();
@@ -1594,8 +1602,13 @@
     // A row can name a pane in another workspace or tab, which pane.focus cannot
     // reach (it only moves the focus flag inside the current viewport), so those
     // are revealed the way the agents list reveals its own: agent.focus.
-    li.addEventListener("click", () => {
-      if (dragConsumedClick) return;
+    //
+    // Activated on the press rather than on a click, since this list is rebuilt
+    // on every rollup and pane_title/pane_agent push (pressActivate). The swap
+    // drag below needs no suppressing here: it only begins once the pointer has
+    // travelled DRAG_SLOP, which is the same distance that stops this from
+    // firing, so a press is a reveal or a drag and never both.
+    pressActivate(li, () => {
       if (!row.visible) sendCmd("agent.focus", { pane: row.pane });
       else if (!row.focused) sendCmd("pane.focus", { pane: row.pane });
     });
@@ -1767,27 +1780,37 @@
       el.appendChild(label);
       const mark = tabMarker(attention.get(t.num));
       if (mark) el.appendChild(mark);
-      el.addEventListener("click", () => { if (!dragConsumedClick && !t.active) sendCmd("tab.focus", { num: t.num }); });
       el.addEventListener("dblclick", () => renameTab(t));
       el.addEventListener("contextmenu", (e) => { e.preventDefault(); openCtx(e.clientX, e.clientY, tabMenuItems(t, msg.tabs.length)); });
+      // Focus rides the drag helper's mouseup for the same reason the workspace
+      // rows do — the tab bar is rebuilt on every agents rollup (its attention
+      // markers derive from one), so a "click" listener loses the press that a
+      // rebuild interrupts. The early return keeps the close button from both
+      // dragging and focusing — the tab's focus now hangs off the same guard
+      // its drag does, rather than off the button's stopPropagation.
       el.addEventListener("mousedown", (e) => {
         if (e.target.classList.contains("x")) return; // the close button is not a drag handle
         beginReorderDrag(e, {
           el, container: tabbarEl, itemSel: ".tab:not(.add)", horizontal: true,
           onDrop: (gap) => sendCmd("tab.move", { num: t.num, index: gap }),
+          onClick: () => { if (!t.active) sendCmd("tab.focus", { num: t.num }); },
         });
       });
       if (msg.tabs.length > 1) {
         const x = document.createElement("span");
         x.className = "x"; x.textContent = "✕"; x.title = "close tab";
-        x.addEventListener("click", (e) => { e.stopPropagation(); sendCmd("tab.close", { num: t.num }); });
+        // On the press like everything else in this bar; the mousedown above
+        // already keeps a press here from arming the tab's drag, and the tab's
+        // own activation now hangs off that same guard rather than off this
+        // handler's propagation.
+        pressActivate(x, () => sendCmd("tab.close", { num: t.num }));
         el.appendChild(x);
       }
       tabbarEl.appendChild(el);
     }
     const add = document.createElement("div");
     add.className = "tab add"; add.textContent = "+"; add.title = "new tab";
-    add.addEventListener("click", () => sendCmd("tab.create", {}));
+    pressActivate(add, () => sendCmd("tab.create", {})); // rebuilt with the tabs beside it
     tabbarEl.appendChild(add);
     // Overflow: keep the active tab in view when the bar scrolls horizontally.
     const act = tabbarEl.querySelector(".tab.active");
@@ -1800,17 +1823,78 @@
     tabbarEl.scrollLeft += e.deltaY;
   }, { passive: false });
 
+  // ---- Sidebar activation: presses, not clicks -------------------------------
+  //
+  // Every list in this sidebar is rebuilt wholesale — renderWorkspaces,
+  // renderTabbar, renderPaneList and renderAgents each wipe their container and
+  // re-create every child — and all four run off the agents rollup, which the
+  // server broadcasts on each agent state transition. A busy session therefore
+  // repaints these lists several times a second, while a mouse press is held for
+  // ~100ms.
+  //
+  // That is a lost click. The browser dispatches "click" on the nearest common
+  // ancestor of the mousedown and mouseup targets, so when a rebuild lands
+  // mid-press the old row takes the mousedown, its replacement takes the mouseup,
+  // and the click surfaces on the <ul> — where nothing is listening. The row does
+  // nothing and the press looks ignored, most often exactly when the session is
+  // busy enough for the user to want to switch away from it.
+  //
+  //   mousedown ──► row A ──┐
+  //                          ├── rebuild ──► click lands on <ul>  (dropped)
+  //   mouseup   ──► row A' ─┘
+  //
+  // So activation hangs off the press itself: mousedown remembers where it began
+  // and a window-level mouseup — registered on the window, closing over the row's
+  // own identity — decides what it meant. Neither the listener nor the closure
+  // cares whether the element still exists, so the rebuild is irrelevant.
+  //
+  // DRAG_SLOP is what separates the two readings of a press. Under it, the press
+  // is an activation; at or over it, the rows that can be dragged read it as the
+  // start of a drag instead. One number for both so the two can never both claim
+  // the same press — which is what makes a drag's own release safe to ignore here
+  // without any suppression flag.
+  const DRAG_SLOP = 4;
+
+  // pressActivate: fn runs when a press on el is released without travelling
+  // DRAG_SLOP. For rows that also drag, pass onClick to the drag helper instead —
+  // it already tracks the same threshold.
+  //
+  // The mouseup listener unregisters itself, so no press leaves one behind (a
+  // window listener outlives the element that armed it — see the pane selection
+  // note below for what that leak cost when it was permanent).
+  function pressActivate(el, fn) {
+    el.addEventListener("mousedown", (ev) => {
+      if (ev.button !== 0) return; // right-click belongs to the context menu
+      const sx = ev.clientX, sy = ev.clientY;
+      const up = (e) => {
+        window.removeEventListener("mouseup", up);
+        if (Math.abs(e.clientX - sx) >= DRAG_SLOP || Math.abs(e.clientY - sy) >= DRAG_SLOP) return;
+        fn(e);
+      };
+      window.addEventListener("mouseup", up);
+    });
+  }
+
   // ---- Drag-reorder (WS8): tabs (horizontal) + workspaces (vertical) ----
   //
   // Same shape as beginBorderDrag: mousedown arms a potential drag with
-  // window-level move/up listeners, and only ~4px of travel makes it one — a
-  // plain press stays a click (focus). While dragging, the pointer maps to an
-  // insertion gap (0..=len, the tab.move / workspace.move convention) shown as
-  // a 2px accent bar; drop sends the move and the server's layout rebroadcast
-  // re-renders both lists (the server is the source of truth).
-  // dragConsumedClick suppresses the click that follows a completed drag so it
-  // doesn't also focus; it self-clears on the next tick.
-  let dragConsumedClick = false;
+  // window-level move/up listeners, and only DRAG_SLOP of travel makes it one —
+  // a plain press stays an activation (focus). While dragging, the pointer maps
+  // to an insertion gap (0..=len, the tab.move / workspace.move convention)
+  // shown as a 2px accent bar; drop sends the move and the server's layout
+  // rebroadcast re-renders both lists (the server is the source of truth).
+  //
+  // A press that never became a drag calls cfg.onClick from the same
+  // window-level mouseup, for the reason pressActivate exists: these rows are
+  // rebuilt under the pointer, and a "click" listener on them loses any press a
+  // rebuild interrupts. Rows that can drag take their activation here rather
+  // than through pressActivate, so a press is read exactly once.
+  //
+  // This is also what retired dragConsumedClick, the flag that used to suppress
+  // the click trailing a completed drag: with both readings measured against the
+  // one threshold, a drag's release can no longer reach an activation to
+  // suppress. Drags that end on a foreign target — beginPaneSwapDrag's drop onto
+  // a pane — act on that target directly and never went through a click either.
   function beginReorderDrag(ev, cfg) {
     if (ev.button !== 0) return;
     // A press that may become a drag must not also start a text selection: the
@@ -1825,7 +1909,7 @@
     const items = () => Array.from(cfg.container.querySelectorAll(cfg.itemSel));
     const move = (e) => {
       if (!dragging) {
-        if (Math.abs(e.clientX - sx) < 4 && Math.abs(e.clientY - sy) < 4) return;
+        if (Math.abs(e.clientX - sx) < DRAG_SLOP && Math.abs(e.clientY - sy) < DRAG_SLOP) return;
         dragging = true;
         cfg.el.classList.add("dragging");
         document.body.classList.add("grabbing");
@@ -1856,10 +1940,14 @@
       cfg.el.classList.remove("dragging");
       document.body.classList.remove("grabbing");
       if (bar) bar.remove();
-      if (dragging && gap >= 0) {
-        dragConsumedClick = true;
-        setTimeout(() => { dragConsumedClick = false; }, 0); // the click fires first, synchronously
-        cfg.onDrop(gap);
+      if (dragging) {
+        if (gap >= 0) cfg.onDrop(gap);
+      } else if (cfg.onClick) {
+        // Under DRAG_SLOP this was a plain press, so it means what a click
+        // means. Released anywhere: the pointer travelled at most DRAG_SLOP, so
+        // it is still over the row it started on, whatever the DOM did in
+        // between.
+        cfg.onClick();
       }
     };
     window.addEventListener("mousemove", move);
@@ -1888,7 +1976,7 @@
     };
     const move = (e) => {
       if (!dragging) {
-        if (Math.abs(e.clientX - sx) < 4 && Math.abs(e.clientY - sy) < 4) return;
+        if (Math.abs(e.clientX - sx) < DRAG_SLOP && Math.abs(e.clientY - sy) < DRAG_SLOP) return;
         dragging = true;
         const src = panes.get(srcId);
         if (src) src.el.classList.add("dragging");
@@ -1906,8 +1994,8 @@
       const tgt = target;
       clearTarget();
       if (dragging && tgt) {
-        dragConsumedClick = true;
-        setTimeout(() => { dragConsumedClick = false; }, 0); // the click fires first, synchronously
+        // No click to suppress: dragging means the pointer passed DRAG_SLOP,
+        // which is exactly what stops the row's pressActivate from firing.
         sendCmd("pane.swap_with", { pane: srcId, target: tgt.id });
       }
     };
@@ -2307,7 +2395,11 @@
       // dimmed row the way around the refusal in WORKSPACES. Asked at click time
       // rather than read off the row's class, so a lock lifted a moment ago is
       // honoured without waiting for the row to be rebuilt.
-      li.addEventListener("click", () => {
+      //
+      // On the press (pressActivate): this list is the one most often rebuilt
+      // under the pointer, since it is rendered directly from the rollup whose
+      // arrival used to eat the click.
+      pressActivate(li, () => {
         if (wsLocked(it.workspace)) {
           toast(wsName(it.workspace) + " is locked — unlock it to reach this agent");
           return;
