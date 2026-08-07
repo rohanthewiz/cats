@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
-<title>cats</title>
+<title>Cats Mux</title>
 <style>
   :root {
     /* GoNotes-style dark green theme: warm gray-green surfaces, green accent.
@@ -775,7 +775,7 @@
              length and the nose neither rises nor sinks on the face. -->
         <path d="M14.41 14.05 L15.99 13.76 L15.42 15.09 Z" fill="currentColor" stroke="none"/>
       </g>
-    </svg>cats</div>
+    </svg>Cats Mux</div>
     <section><h2>Usage<span class="hctl" id="usage-hctl"></span></h2><ul id="usage-list"><li class="empty">…</li></ul></section>
     <section><h2>Workspaces<span id="ws-global-todo"></span><span class="hctl" id="ws-hctl"><span class="hcount" id="ws-count"></span></span></h2><ul id="ws-list"></ul></section>
     <section><h2>Panes<span class="hctl" id="pane-hctl"></span></h2><ul id="pane-list"></ul></section>
@@ -3042,7 +3042,7 @@
         try { clipWrite(b64decode(msg.data)).catch(() => {}); } catch (e) {}
         break;
       case "notify": handleNotify(msg); break;
-      case "title": document.title = msg.title ? ("cats · " + msg.title) : "cats"; break;
+      case "title": document.title = msg.title ? ("Cats Mux · " + msg.title) : "Cats Mux"; break;
       case "update_ready":
         updateInfo = { version: msg.version || "", command: msg.command || "" };
         gearEl.classList.add("badge");

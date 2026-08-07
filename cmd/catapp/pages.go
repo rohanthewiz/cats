@@ -17,7 +17,7 @@ const connectPageHTML = `<!DOCTYPE html>
 <html lang="en"><head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>cats · connect</title>
+<title>Cats Mux · connect</title>
 <style>
   html,body{margin:0;height:100%;background:#181818;color:#d4d4d4;
     font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
@@ -59,7 +59,7 @@ func errorPageHTML(title, detail string) string {
 <html lang="en"><head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>cats · error</title>
+<title>Cats Mux · error</title>
 <style>
   html,body{margin:0;height:100%;background:#181818;color:#d4d4d4;
     font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;

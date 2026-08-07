@@ -195,7 +195,7 @@ func loginPage(errMsg string) string {
 <html lang="en"><head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>cats · sign in</title>
+<title>Cats Mux · sign in</title>
 <style>
   html,body{margin:0;height:100%;background:#181818;color:#d4d4d4;
     font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;

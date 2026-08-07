@@ -41,7 +41,7 @@ var defaultMode = "local"
 
 // Window geometry. Roomy default that still fits a laptop; the user can resize.
 const (
-	windowTitle  = "cats"
+	windowTitle  = "Cats Mux"
 	windowWidth  = 1280
 	windowHeight = 820
 )
@@ -217,7 +217,7 @@ func showError(title, detail string) {
 	w := webview.New(false)
 	installMenu()
 	defer w.Destroy()
-	w.SetTitle("cats — error")
+	w.SetTitle("Cats Mux — error")
 	w.SetSize(560, 320, webview.HintFixed)
 	w.SetHtml(errorPageHTML(title, detail))
 	w.Run()
