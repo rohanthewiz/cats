@@ -84,8 +84,20 @@
   #sidebar { background:var(--panel); border-right:1px solid var(--line);
     display:flex; flex-direction:column; overflow-y:auto; min-height:0; }
   #brand { font-size:calc(13px * var(--sb-scale)); font-weight:600; letter-spacing:.5px; color:var(--fg-strong);
-    padding:12px 14px; border-bottom:1px solid var(--line); }
+    padding:12px 14px; border-bottom:1px solid var(--line);
+    /* A line break is allowed either side of the inline mark, so a sidebar
+       dragged to its 150px floor (or a large --sb-scale) could otherwise drop
+       the cat onto its own line above the word. Held on one line, the build
+       badge is the thing that gives way, which is the right thing to lose. */
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   #brand small { color:var(--muted); font-weight:400; margin-left:6px; }
+  /* The mark sits inline and rides the text baseline rather than turning
+     #brand into a flex row: the build badge appended below is a sibling of the
+     wordmark, and a flex context would have re-spaced it. The nudge scales
+     with --sb-scale along with the box so the pairing holds at every zoom.
+     Accent-colored so the logo reads as mark + wordmark, not one run of text. */
+  #brand .mark { width:calc(16px * var(--sb-scale)); height:calc(16px * var(--sb-scale));
+    vertical-align:calc(-3px * var(--sb-scale)); margin-right:6px; color:var(--accent); }
   /* Build badge: the short git hash this catway was built from (trailing '*' =
      built from a modified tree). Its hover card carries the commit subject —
      see initBuildBadge in JS. Mostly it answers "is this install stale?". */
@@ -681,7 +693,47 @@
 <body>
 <div id="app">
   <aside id="sidebar">
-    <div id="brand">cats</div>
+    <div id="brand"><!--
+      A cat's head in three-quarter view, turned toward the cat's own left
+      (so, toward the viewer's right). The feature placement is not eyeballed:
+      it is a front-on face projected through a 45 degree yaw. Taking the head
+      as centered at x=12 with a half-width of ~6.6, a point p on the front of
+      the face lands at 12 + p*cos45 — which puts the muzzle near x=16, the
+      near eye further right still, and the far eye barely past center. Both
+      ears project the same distance either side of center, but the far one
+      (drawn left) has swung toward the viewer and reads full, while the near
+      one has swung away behind the skull and reads narrower. Turning the head:
+
+            far ear          near ear        yaw 45 deg, seen from above:
+              /\               /\              nose  ->  viewer's right
+             /  \             /  \             cat's left ear -> rear
+            (  far eye  near eye  )            cat's right ear -> front
+             \      nose        /
+              \_____chin______/   <- chin also rides right of center
+
+      Drawn on a 24-unit grid with the ink then centered by the translate, and
+      stroked in currentColor so it inherits the accent set in CSS.
+    --><svg class="mark" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+         stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true">
+      <g transform="translate(0.2 1.25)">
+        <!-- Skull and ears as one contour: up the back of the head, out to the
+             far ear tip, across the brow, out to the near ear, then down the
+             foreshortened near cheek to the chin. -->
+        <path d="M6.0 8.3 L5.0 2.8 L10.1 6.1
+                 C11.6 5.2 13.2 5.1 14.6 5.8
+                 L17.9 3.7 L17.2 7.9
+                 C18.3 9.5 18.9 11.3 18.6 13.2
+                 C18.4 14.5 17.9 15.7 17.0 16.6
+                 C16.0 17.7 14.5 18.4 13.0 18.5
+                 C9.6 18.6 6.2 16.4 5.2 13.0
+                 C4.7 11.2 5.1 9.5 6.0 8.3 Z"/>
+        <!-- Far eye, near eye: same almond, the near one compressed by the
+             same foreshortening that moved it out toward the silhouette. -->
+        <path d="M11.5 12.2 Q13.1 10.4 14.7 11.6 Q13.1 13.4 11.5 12.2 Z" fill="currentColor" stroke="none"/>
+        <path d="M15.5 11.8 Q16.5 10.3 17.5 11.2 Q16.5 12.8 15.5 11.8 Z" fill="currentColor" stroke="none"/>
+        <path d="M14.4 13.9 L16.0 13.9 L15.2 15.1 Z" fill="currentColor" stroke="none"/>
+      </g>
+    </svg>cats</div>
     <section><h2>Usage<span class="hctl" id="usage-hctl"></span></h2><ul id="usage-list"><li class="empty">…</li></ul></section>
     <section><h2>Workspaces<span id="ws-global-todo"></span><span class="hctl" id="ws-hctl"><span class="hcount" id="ws-count"></span></span></h2><ul id="ws-list"></ul></section>
     <section><h2>Panes<span class="hctl" id="pane-hctl"></span></h2><ul id="pane-list"></ul></section>
