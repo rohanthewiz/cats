@@ -189,6 +189,17 @@
   #sidebar h2 .hage { color:var(--muted); font-weight:400; text-transform:none;
     letter-spacing:0; font-size:calc(10px * var(--sb-scale));
     font-variant-numeric:tabular-nums; margin-right:3px; }
+  /* The stand-in a folded *section* shows, when the section had no group headers
+     to carry one (see renderWorkspaces). Same register as .hage for the same
+     reason — it is a reading, not a label — and the same right-edge berth just
+     inboard of the fold pair, which is where .gsum sits in the group headers this
+     is standing in for. It carries no box when empty, so the pointer only meets
+     it while there is something folded to unfold. */
+  #sidebar h2 .hcount { color:var(--muted); font-weight:400; text-transform:none;
+    letter-spacing:0; font-size:calc(10px * var(--sb-scale));
+    font-variant-numeric:tabular-nums; margin-right:5px; cursor:pointer;
+    white-space:nowrap; }
+  #sidebar h2 .hcount:hover { color:var(--fg-soft); }
   /* The refresh control carries a drawn mark (see refreshMark), so it is sized
      in pixels and centered on the heading's text rather than stretching to it. */
   #usage-hctl { align-items:center; }
@@ -672,7 +683,7 @@
   <aside id="sidebar">
     <div id="brand">cats</div>
     <section><h2>Usage<span class="hctl" id="usage-hctl"></span></h2><ul id="usage-list"><li class="empty">…</li></ul></section>
-    <section><h2>Workspaces<span id="ws-global-todo"></span><span class="hctl" id="ws-hctl"></span></h2><ul id="ws-list"></ul></section>
+    <section><h2>Workspaces<span id="ws-global-todo"></span><span class="hctl" id="ws-hctl"><span class="hcount" id="ws-count"></span></span></h2><ul id="ws-list"></ul></section>
     <section><h2>Panes<span class="hctl" id="pane-hctl"></span></h2><ul id="pane-list"></ul></section>
     <section><h2>Agents</h2><ul id="agent-list"><li class="empty">none</li></ul></section>
   </aside>
@@ -719,6 +730,7 @@
   const panesEl = document.getElementById("panes");
   const wsListEl = document.getElementById("ws-list");
   const wsGlobalTodoEl = document.getElementById("ws-global-todo");
+  const wsCountEl = document.getElementById("ws-count");
   const paneListEl = document.getElementById("pane-list");
   const agentListEl = document.getElementById("agent-list");
   const usageListEl = document.getElementById("usage-list");
@@ -834,6 +846,14 @@
   // you last folded.
   const WGRP_KEY = "cats.workspaces.collapsed";
   const WS_OPEN = "open", WS_LOCKED = "locked";
+  // The third id is not a shelf. With nothing locked there is only one shelf and
+  // no header is drawn for it (renderWorkspaces), so the fold pair would have
+  // nothing to act on — WS_ALL is what it acts on instead: the section's own list,
+  // folded behind the count that then appears on the Workspaces heading. It shares
+  // the set above because it is the same question ("what is folded in this
+  // section?") and because collapse-all rewrites the whole set from the ids the
+  // last render drew, which keeps the two spellings from ever both being present.
+  const WS_ALL = "all";
   let wsCollapsed = new Set(), wsGroupIDs = [];
   try {
     const raw = JSON.parse(localStorage.getItem(WGRP_KEY));
@@ -1501,18 +1521,41 @@
     // Headers are drawn only when the split is real. With nothing locked (the
     // common case) one shelf holds everything, and a header reading "open" over
     // the whole list is a row that says nothing — the section stays the flat list
-    // it has always been, and the heading's ⊞/⊟ have nothing to act on. Which is
-    // also why wsGroupIDs is empty then: collapse-all must not fold rows behind a
-    // header that isn't on screen to unfold them.
+    // it has always been.
+    //
+    // That used to leave the heading's ⊞/⊟ with nothing to act on, so ⊟ was a
+    // no-op exactly when the list was most likely to be long. A fold does not
+    // actually need a header to fold *into*; it needs somewhere to put the one
+    // thing the fold still has to say. So when the split is absent the pair acts
+    // on WS_ALL — the whole list at once — and the count that a shelf header
+    // would have carried rides the section heading instead:
+    //
+    //   split          WORKSPACES        ⊞ ⊟      ⊟ folds each shelf behind its
+    //                    open   2 workspaces      own header, which is on screen
+    //                    locked 5 workspaces      to unfold it again
+    //
+    //   flat, folded   WORKSPACES            7 ⊞ ⊟    the heading IS the header
+    //
+    // The count only appears while it is standing in for hidden rows: expanded,
+    // the rows are right there to be counted, and a permanent tally on a heading
+    // that already carries the global todo mark and the fold pair is clutter.
     const drawn = groups.filter((g) => g.rows.length);
     const split = drawn.length > 1;
-    wsGroupIDs = split ? drawn.map((g) => g.id) : [];
+    wsGroupIDs = split ? drawn.map((g) => g.id) : [WS_ALL];
+    const flatFolded = !split && wsCollapsed.has(WS_ALL);
+    // The number alone, where a shelf header spells out "3 workspaces": the noun
+    // is already the heading this rides, and the sidebar goes down to 150px wide,
+    // where the spelled-out form wraps the heading onto two lines. The tooltip
+    // carries the words for anyone the bare digit doesn't reach.
+    const n = msg.workspaces.length;
+    wsCountEl.textContent = flatFolded ? String(n) : "";
+    wsCountEl.title = flatFolded ? n + (n === 1 ? " workspace" : " workspaces") + " — click to show them" : "";
 
     wsRenderOrder = [];
     wsRenderTotal = msg.workspaces.length;
     drawn.forEach((g, gi) => {
       if (split) wsListEl.appendChild(wsGroupEl(g, gi > 0));
-      if (split && wsCollapsed.has(g.id)) return;
+      if (split ? wsCollapsed.has(g.id) : flatFolded) return;
       for (const ent of g.rows) {
         const w = ent.w;
         wsRenderOrder.push(ent.idx);
@@ -1564,10 +1607,17 @@
         wsListEl.appendChild(li);
       }
     });
-    const add = document.createElement("li");
-    add.className = "add"; add.textContent = "+ workspace"; add.title = "new workspace";
-    pressActivate(add, () => newWorkspace()); // rebuilt with the rows above it
-    wsListEl.appendChild(add);
+    // The add row goes with the list. Folding a shelf leaves it — the section is
+    // still a list of workspaces, one shelf of it just isn't showing — but folding
+    // the whole list means the section is meant to be one line, and a fold that
+    // leaves a row behind hasn't folded. The way in is still the context menu and
+    // the palette, both of which reach newWorkspace without this row.
+    if (!flatFolded) {
+      const add = document.createElement("li");
+      add.className = "add"; add.textContent = "+ workspace"; add.title = "new workspace";
+      pressActivate(add, () => newWorkspace()); // rebuilt with the rows above it
+      wsListEl.appendChild(add);
+    }
   }
 
   // Where the last render put each drawn workspace row in the session's order,
@@ -1631,16 +1681,32 @@
   }
 
   // The Workspaces heading's controls: the same pair, in the same right-edge
-  // position, that Usage and Panes carry. They act on the shelves the last render
-  // drew — so with nothing locked, when no headers exist to unfold them again,
-  // ⊟ is a no-op rather than a fold with no way back.
+  // position, that Usage and Panes carry. They act on whatever the last render
+  // said was foldable — the shelves when the list is split, the list itself as
+  // WS_ALL when it isn't — so ⊟ always folds something and ⊞ always has it back.
+  //
+  // Rewriting the whole set from wsGroupIDs is what keeps the two spellings apart:
+  // ⊟ over a flat list drops any stale open/locked ids, and ⊟ over a split one
+  // drops WS_ALL, so a set left over from the other shape can never fold rows
+  // behind something that isn't drawn.
+  //
+  // The count itself is the third control, and the only one that appears exactly
+  // when it does something: it is the header for a shelf that was never drawn, so
+  // it unfolds on a press the way wsGroupEl's headers do. Bound once here rather
+  // than per render — the span outlives every redraw, and pressActivate leaves a
+  // mousedown listener behind that a redraw would stack.
   (function initWsHeadingCtl() {
     const el = document.getElementById("ws-hctl");
-    el.appendChild(mkBtn("⊞", "expand all workspace groups", "", () => {
+    pressActivate(wsCountEl, () => {
+      if (!wsCollapsed.has(WS_ALL)) return; // empty chip: nothing folded to open
+      wsCollapsed.delete(WS_ALL); saveWsCollapsed();
+      if (layoutMsg) renderWorkspaces(layoutMsg);
+    });
+    el.appendChild(mkBtn("⊞", "show all workspaces", "", () => {
       wsCollapsed.clear(); saveWsCollapsed();
       if (layoutMsg) renderWorkspaces(layoutMsg);
     }));
-    el.appendChild(mkBtn("⊟", "collapse all workspace groups", "", () => {
+    el.appendChild(mkBtn("⊟", "hide all workspaces", "", () => {
       wsCollapsed = new Set(wsGroupIDs); saveWsCollapsed();
       if (layoutMsg) renderWorkspaces(layoutMsg);
     }));
