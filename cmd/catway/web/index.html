@@ -165,6 +165,19 @@
      so there is no bar to fill — the track is dropped rather than drawn empty,
      which would read as "0% used". */
   #usage-list li.unknown .umeter { display:none; }
+  /* The history strip under a row that has one (host CPU). Full width and
+     stretched by the SVG's own preserveAspectRatio, so nothing in the script has
+     to know the sidebar's width — see usageSpark. It takes the row's warning
+     colors exactly as the meter above it does, so a row that has gone red is red
+     in both of its halves rather than half-warning. */
+  #usage-list .uspark { display:block; width:100%; height:calc(20px * var(--sb-scale));
+                        margin-top:3px; }
+  #usage-list .uspark .sfill { fill:var(--accent); opacity:.16; }
+  #usage-list .uspark .sline { fill:none; stroke:var(--accent); opacity:.85; }
+  #usage-list li.high .uspark .sfill { fill:var(--warn); }
+  #usage-list li.high .uspark .sline { stroke:var(--warn); }
+  #usage-list li.crit .uspark .sfill { fill:var(--err); }
+  #usage-list li.crit .uspark .sline { stroke:var(--err); }
   #usage-list .unote { color:var(--muted); font-size:calc(9px * var(--sb-scale));
                        font-style:italic; padding:1px 8px 3px; }
   /* How old the numbers below are, in the heading beside the control that
@@ -2333,11 +2346,12 @@
   // usageGroupEl builds one provider's header row — the click target that folds
   // and unfolds it, mirroring paneGroupEl.
   //
-  // Folded, it stands in for the meters it hid by carrying the worst of them:
-  // the reason to fold CLAUDE is that its numbers are quiet, and the one thing
-  // worth interrupting that with is a window about to run out. Expanded there is
-  // no summary — the rows say it better, and repeating the peak in the header
-  // would only be the same number twice.
+  // Folded, it stands in for the meters it hid by carrying ONE of them (see
+  // usageHeadline), and its hover carries all of them (usageGroupTitle). That
+  // split is the point: the fold is a request for one number, not for a digest,
+  // and the reading that was folded away is still one hover from being read.
+  // Expanded there is no summary — the rows say it better, and repeating a row
+  // in the header would only be the same number twice.
   function usageGroupEl(g, gid, wins, levelsFor, collapsed, sep) {
     const li = document.createElement("li");
     li.className = "ugrp" + (sep ? " sep" : "");
@@ -2345,38 +2359,97 @@
     name.textContent = g.name || g.id || "—";
     li.appendChild(name);
 
-    // The peak is picked by percentage but graded against ITS OWN row's scale:
-    // 82% of the disk is calm where 82% of a rate window is not, so a group's
-    // worst row is not simply its highest number. Rows with no denominator
-    // (locally counted figures) have no percentage to rank, and are skipped —
-    // a group of only those folds with no summary at all, which is honest.
-    let peak = null, peakLv = null;
-    if (collapsed) {
-      for (const w of wins) {
-        if (typeof w.pct !== "number" || w.pct < 0) continue;
-        if (!peak || w.pct > peak.pct) { peak = w; peakLv = levelsFor(w); }
+    const head = collapsed ? usageHeadline(wins) : null;
+    if (head) {
+      // Graded against the headline row's OWN scale: 82% of the disk is calm
+      // where 82% of a rate window is not, so the chip's color comes from the
+      // scale of the row it is quoting and from nothing else. A row with no
+      // denominator (claude's local estimate) has a figure instead of a
+      // percentage, and shows it — a token count is still the 5-hour answer.
+      const lv = levelsFor(head);
+      const pct = typeof head.pct === "number" ? head.pct : -1;
+      if (pct >= lv.crit) li.classList.add("crit");
+      else if (pct >= lv.high) li.classList.add("high");
+      const text = pct >= 0 ? Math.round(pct) + "%" : (head.detail || "");
+      if (text) {
+        const s = document.createElement("span");
+        s.className = "gsum";
+        s.textContent = text;
+        // No title of its own: the chip sits inside the heading, and a tooltip
+        // here would shadow the heading's — which is the one that lists every
+        // row the fold hid.
+        li.appendChild(s);
       }
-    }
-    if (peak) {
-      if (peak.pct >= peakLv.crit) li.classList.add("crit");
-      else if (peak.pct >= peakLv.high) li.classList.add("high");
-      const s = document.createElement("span");
-      s.className = "gsum";
-      s.textContent = Math.round(peak.pct) + "%";
-      s.title = peak.name + ": " + peak.pct.toFixed(1) + "% " + peakLv.of;
-      li.appendChild(s);
     }
 
     const car = document.createElement("span");
     car.className = "car"; car.textContent = collapsed ? "▶" : "▼";
     li.appendChild(car);
-    li.title = (collapsed ? "expand " : "collapse ") + (g.name || g.id || "group");
+    li.title = usageGroupTitle(g, wins, levelsFor, collapsed);
     li.addEventListener("click", () => {
       if (collapsed) usageCollapsed.delete(gid); else usageCollapsed.add(gid);
       saveUsageCollapsed();
       drawUsage();
     });
     return li;
+  }
+
+  // The row a folded group speaks for.
+  //
+  // The server marks it (window.headline), because which of a provider's meters
+  // answers the group's question is knowledge about the provider: Claude's
+  // 5-hour window is what a long afternoon walks into, where its week is planned
+  // around; the host's memory is what stops a session, where its CPU is usually
+  // just the work. A front-end that picked for itself would have to enumerate
+  // providers, which is the one thing this section is built not to do.
+  //
+  // Nothing marked falls back to the worst row by percentage — what every group
+  // showed before headlines existed, and still the right answer for a provider
+  // that has not said which row matters. Rows with no denominator cannot be
+  // ranked and are skipped there; a group of only those folds with no chip at
+  // all, which is honest.
+  function usageHeadline(wins) {
+    for (const w of wins) if (w.headline) return w;
+    let peak = null;
+    for (const w of wins) {
+      if (typeof w.pct !== "number" || w.pct < 0) continue;
+      if (!peak || w.pct > peak.pct) peak = w;
+    }
+    return peak;
+  }
+
+  // The group heading's hover: every row it holds, on screen or not.
+  //
+  // Folded this is the only way to read what the fold hid, and it is what lets
+  // the chip beside it be a single chosen row rather than a compressed digest of
+  // all of them — CLAUDE folds to its 5-hour number and the hover still has the
+  // week and the per-model week; HOST folds to memory and the hover still has
+  // disk and CPU. Expanded it duplicates the rows below, and is kept anyway: a
+  // heading whose tooltip depended on fold state would be a worse thing to
+  // learn than a few repeated lines.
+  //
+  // Built at draw time, so its countdowns age until the next reading lands —
+  // two minutes at the poll's cadence, against a tooltip nobody holds open that
+  // long. The rows themselves are the ones ticked every 10s.
+  function usageGroupTitle(g, wins, levelsFor, collapsed) {
+    const lines = [];
+    for (const w of wins) {
+      const lv = levelsFor(w);
+      const pct = typeof w.pct === "number" ? w.pct : -1;
+      let line = (w.name || "—") + ": ";
+      if (pct >= 0) {
+        line += pct.toFixed(1) + "% " + lv.of + (w.detail ? " (" + w.detail + ")" : "");
+      } else {
+        line += (w.detail || "unknown") + " (counted locally — no allowance on record)";
+      }
+      const at = w.resets_at ? Date.parse(w.resets_at) : NaN;
+      if (!Number.isNaN(at)) line += " · " + fmtUntil(at - Date.now());
+      lines.push(line);
+    }
+    if (!lines.length) lines.push("nothing to report");
+    if (g.note) lines.push(g.note);
+    lines.push((collapsed ? "click to expand" : "click to collapse"));
+    return lines.join("\n");
   }
 
   // Where a row turns yellow, then red. Each kind of row keeps its own scale
@@ -2389,17 +2462,23 @@
   //   disk    a volume 80% full is unremarkable and stays that way for weeks;
   //           it is the last few percent that end a build mid-write, so the
   //           warning waits and the alarm sits higher than either of the above.
+  //   cpu     a machine at 80% is doing the work it was asked to do, and every
+  //           build and test run touches 100% on the way past. The scale is the
+  //           loosest of the four for that reason: it warns only where the row
+  //           has stopped describing work and started describing a queue, and
+  //           the strip under it is what actually carries the story.
   //
   // Several of the numbers happen to coincide today. The scales stay separate
   // so any of them can move without dragging the others with it.
   const USAGE_LEVELS  = { high: 75, crit: 90, of: "of the window used" };
   const MEMORY_LEVELS = { high: 80, crit: 90, of: "of host memory in use" };
   const DISK_LEVELS   = { high: 85, crit: 95, of: "of the disk in use" };
+  const CPU_LEVELS    = { high: 90, crit: 98, of: "of the host's CPU busy" };
 
   // The HOST group's rows, by the name the server gives each one. An unknown
   // name falls back to the memory scale at the call site — a new host row is far
   // likelier to be another "nothing resets this" resource than a rate window.
-  const HOST_LEVELS = { Memory: MEMORY_LEVELS, Disk: DISK_LEVELS };
+  const HOST_LEVELS = { Memory: MEMORY_LEVELS, CPU: CPU_LEVELS, Disk: DISK_LEVELS };
 
   function usageRow(name, w, levels) {
     w = w || {};
@@ -2446,10 +2525,60 @@
     meter.appendChild(fill);
     li.appendChild(meter);
 
+    // A row the server sent a history for gets it drawn under the meter. Only
+    // the rows whose movement between polls IS the information carry one (host
+    // CPU today), so this is a capability of the row rather than of the section
+    // — nothing here knows or asks which row it is looking at.
+    if (Array.isArray(w.spark) && w.spark.length > 1) li.appendChild(usageSpark(w.spark));
+
     li.title = known
       ? name + ": " + pct.toFixed(1) + "% " + levels.of + (w.detail ? " (" + w.detail + ")" : "")
       : name + ": " + (w.detail || "unknown") + " (counted locally — no allowance on record to measure against)";
     return li;
+  }
+
+  // usageSpark draws a row's recent history as a filled line, oldest at the
+  // left. The meter above it answers "where is it now"; this answers "where has
+  // it been", which for a number that moves in seconds under a poll that fires
+  // every couple of minutes is the only honest thing a single sample could not
+  // have told you.
+  //
+  //   100% ┤       ╭─╮
+  //        │   ╭───╯ ╰──╮        ← ten minutes, one point per sample
+  //     0% ┼───╯        ╰────
+  //        oldest          now
+  //
+  // The geometry is fixed at 100×20 user units and stretched to whatever width
+  // the sidebar happens to be (preserveAspectRatio="none"), so no measurement of
+  // the DOM is needed and a resized sidebar needs no redraw. That stretch is
+  // non-uniform, which would smear a stroke — hence vector-effect, which keeps
+  // the line 1px wide however far the box is pulled. The baseline sits at 20 and
+  // the top of the plot at 1, so a sample at 100% still shows its stroke inside
+  // the box rather than clipped in half by the edge.
+  function usageSpark(samples) {
+    const n = samples.length;
+    const x = (i) => (i / (n - 1)) * 100;
+    const y = (v) => 20 - (Math.min(100, Math.max(0, Number(v) || 0)) / 100) * 19;
+    let d = "";
+    for (let i = 0; i < n; i++) d += (i ? "L" : "M") + x(i).toFixed(2) + " " + y(samples[i]).toFixed(2);
+
+    const svg = document.createElementNS(SVGNS, "svg");
+    svg.setAttribute("class", "uspark");
+    svg.setAttribute("viewBox", "0 0 100 20");
+    svg.setAttribute("preserveAspectRatio", "none");
+    const fill = document.createElementNS(SVGNS, "path");
+    fill.setAttribute("class", "sfill");
+    // Closed down to the baseline at both ends: the area is what makes the shape
+    // legible at 20px, where a bare 1px line reads as noise.
+    fill.setAttribute("d", d + "L100 20L0 20Z");
+    const line = document.createElementNS(SVGNS, "path");
+    line.setAttribute("class", "sline");
+    line.setAttribute("d", d);
+    line.setAttribute("vector-effect", "non-scaling-stroke");
+    line.setAttribute("stroke-width", "1");
+    line.setAttribute("stroke-linejoin", "round");
+    svg.appendChild(fill); svg.appendChild(line);
+    return svg;
   }
 
   // The two labels that move on their own between pushes — the reset countdowns

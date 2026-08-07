@@ -88,11 +88,17 @@ const (
 // every poll, so a manual refresh is followed by a full quiet period instead of
 // a tick that may be seconds away. Nothing here reads from the loop's state, so
 // a nudge costs one goroutine wake-up and no synchronization.
+// The CPU sampler is the exception to "the whole read happens here": utilization
+// is a rate, so it has to be sampled on a cadence of its own rather than read on
+// demand (see hostcpu.go). It is started alongside the poll and read from it —
+// the poll takes whatever history the ring holds at the moment it fires.
 func (o *orch) runUsage() {
 	est := newUsageEstimator(o.claudeProjects)
 	cop := newCopilotEstimator(copilotStateDir())
+	cpu := newCPUSampler()
+	go cpu.run()
 	for {
-		msg := readUsage(est, cop).WithReadAt(time.Now())
+		msg := readUsage(est, cop, cpu).WithReadAt(time.Now())
 		o.post(func() { o.setUsage(msg) })
 
 		tick := time.NewTimer(usageInterval)
@@ -144,13 +150,13 @@ func (o *orch) setUsage(m browserproto.Usage) {
 // The host group does not depend on any account: a machine with no claude login
 // still has a memory ceiling worth watching, and the row should not disappear
 // because a token expired.
-func readUsage(claude *usageEstimator, copilot *copilotEstimator) browserproto.Usage {
+func readUsage(claude *usageEstimator, copilot *copilotEstimator, cpu *cpuSampler) browserproto.Usage {
 	now := time.Now()
 	groups := []browserproto.UsageGroup{claudeUsageGroup(claude, now)}
 	if g, ok := copilot.group(now); ok {
 		groups = append(groups, g)
 	}
-	if g, ok := hostUsageGroup(); ok {
+	if g, ok := hostUsageGroup(cpu); ok {
 		groups = append(groups, g)
 	}
 	return browserproto.NewUsage(groups)
@@ -165,11 +171,17 @@ func readUsage(claude *usageEstimator, copilot *copilotEstimator) browserproto.U
 // the section's reason for existing, and an absent CLAUDE heading would read as
 // a broken sidebar rather than as an unreadable account; the note carries the
 // explanation instead.
+//
+// The 5-hour window is the group's headline — the row that stands in for the
+// rest when the group is folded (UsageWindow.Headline). It is the one that
+// actually stops work: a week runs out once and is planned around, while the
+// 5-hour window is what a long afternoon walks into, and it is the number a
+// folded reader is folding *toward* rather than away from.
 func claudeUsageGroup(est *usageEstimator, now time.Time) browserproto.UsageGroup {
 	g := browserproto.UsageGroup{ID: "claude", Name: "Claude"}
 	report, err := readAccountUsage()
 	if err == nil {
-		report.fiveHour.Name = "5 hr"
+		report.fiveHour.Name, report.fiveHour.Headline = "5 hr", true
 		report.weekly.Name = "Week"
 		g.Windows = []browserproto.UsageWindow{report.fiveHour, report.weekly}
 		// A model with its own weekly allowance on top of the all-models week —
@@ -187,6 +199,11 @@ func claudeUsageGroup(est *usageEstimator, now time.Time) browserproto.UsageGrou
 	logUsageOnce(err.Error())
 	fiveHour, weekly := est.windows(now)
 	fiveHour.Name, weekly.Name = "5 hr", "Week"
+	// The headline holds even for the estimate, where the row carries a token
+	// count and no percentage: folded, the group then stands in for itself with
+	// the figure rather than a bar, which is still the 5-hour answer and still
+	// the one being asked for.
+	fiveHour.Headline = true
 	g.Windows = []browserproto.UsageWindow{fiveHour, weekly}
 	// Only the fallback explains itself. An account reading is the expected case
 	// and needs no caption; an estimate has to say that it is one, and why the
@@ -195,28 +212,43 @@ func claudeUsageGroup(est *usageEstimator, now time.Time) browserproto.UsageGrou
 	return g
 }
 
-// hostUsageGroup is the HOST subsection: the machine's own memory and disk, the
-// windows here with nothing to do with any account. They share the section
-// because they answer the same question the others do ("is something about to
-// stop?") on the same glance, and they share the poll because they are read on
-// the same tick — a laptop runs out of RAM, or out of disk, long before an
-// account runs out of week.
+// hostUsageGroup is the HOST subsection: the machine's own memory, CPU and
+// disk, the windows here with nothing to do with any account. They share the
+// section because they answer the same question the others do ("is something
+// about to stop?") on the same glance, and they share the poll because they are
+// read on the same tick — a laptop runs out of RAM, or out of disk, long before
+// an account runs out of week.
 //
-// The two rows are gathered independently. Each reader reports nothing rather
-// than a guess on a host it cannot ask (see hostMemory, hostDisk), and a reader
-// that came up empty drops its row instead of taking the section down with it:
-// the pair have no host in common where exactly one is expected to fail, but a
-// permission or a synthetic mount can silence either on its own, and the
-// surviving number is still worth showing. Only a group with no rows at all is
-// withheld — an empty heading reads as a broken sidebar.
-func hostUsageGroup() (browserproto.UsageGroup, bool) {
+// The rows are gathered independently. Each reader reports nothing rather than a
+// guess on a host it cannot ask (see hostMemory, cpuSampler.window, hostDisk),
+// and a reader that came up empty drops its row instead of taking the section
+// down with it: they have no host in common where exactly one is expected to
+// fail, but a permission, a synthetic mount or a killed iostat can silence any
+// of them on its own, and the surviving numbers are still worth showing. Only a
+// group with no rows at all is withheld — an empty heading reads as a broken
+// sidebar.
+//
+// Memory is the group's headline (UsageWindow.Headline): the row a folded HOST
+// stands in for the rest with. It is the resource that ends a session soonest
+// and least reversibly — a machine that starts swapping makes every pane treacle
+// and nothing but a process exiting takes it back, where a pegged CPU is usually
+// the work itself and a full disk has been full for a week.
+func hostUsageGroup(cpu *cpuSampler) (browserproto.UsageGroup, bool) {
 	g := browserproto.UsageGroup{ID: "host", Name: "Host"}
 	if mem := hostMemory(); mem.Pct >= 0 {
-		mem.Name = "Memory"
+		mem.Name, mem.Headline = "Memory", true
 		g.Windows = append(g.Windows, mem)
 	}
-	// Memory first: it moves in minutes and is the one that will stop a session
-	// today. Disk moves in weeks and is read second for the same reason.
+	// Reading order is by how fast each one moves against how badly it ends:
+	// memory first (minutes, and it stops the session), CPU second (seconds, and
+	// it is usually the work rather than a problem), disk last (weeks). CPU sits
+	// in the middle rather than first for that reason — it is the row most often
+	// high for a good reason, and leading the group with it would train the eye
+	// to skip the group.
+	if c := cpu.window(); c.Pct >= 0 {
+		c.Name = "CPU"
+		g.Windows = append(g.Windows, c)
+	}
 	if disk := hostDisk(); disk.Pct >= 0 {
 		disk.Name = "Disk"
 		g.Windows = append(g.Windows, disk)

@@ -1930,24 +1930,44 @@ class UsageGroup {
 /// there is no denominator to divide by — a local count fills Detail instead and
 /// leaves Pct at -1, so a missing number reads as missing rather than as zero.
 /// ResetsAt is when the window rolls over (RFC 3339), "" when unknown.
+///
+/// Headline marks the one row that stands in for its whole group when the group
+/// is folded away. It is the server's call rather than the front-end's for the
+/// same reason the row names are: which of a provider's meters answers the
+/// question the section is scanned for — Claude's 5-hour window, not its week;
+/// the host's memory, not its disk — is knowledge about the provider, and the
+/// browser has none. At most one row per group carries it; a group that marks
+/// none leaves the front-end to fall back to whatever it showed before.
+///
+/// Spark is the row's recent history, oldest first, in the same units as Pct: a
+/// front-end may draw it as a small chart beside the current reading. It is sent
+/// only for a row whose movement between polls is itself the information (host
+/// CPU), because a value that a two-minute poll captures faithfully — a weekly
+/// window, a disk — has nothing to plot that the number does not already say.
 class UsageWindow {
   const UsageWindow({
     required this.name,
     required this.pct,
     this.resetsAt = '',
     this.detail = '',
+    this.headline = false,
+    this.spark = const <double>[],
   });
 
   final String name;
   final double pct;
   final String resetsAt;
   final String detail;
+  final bool headline;
+  final List<double> spark;
 
   factory UsageWindow.fromJson(Map<String, Object?> j) => UsageWindow(
         name: asString(j['name']),
         pct: asDouble(j['pct']),
         resetsAt: asString(j['resets_at']),
         detail: asString(j['detail']),
+        headline: asBool(j['headline']),
+        spark: asList(j['spark'], asDouble),
       );
 
   Map<String, Object?> toJson() => {
@@ -1955,6 +1975,8 @@ class UsageWindow {
         'pct': pct,
         if (resetsAt.isNotEmpty) 'resets_at': resetsAt,
         if (detail.isNotEmpty) 'detail': detail,
+        if (headline) 'headline': headline,
+        if (spark.isNotEmpty) 'spark': spark,
       };
 }
 
