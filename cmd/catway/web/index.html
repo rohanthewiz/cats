@@ -107,9 +107,16 @@
     vertical-align:calc(-3.5px * var(--sb-scale)); margin-right:6px; color:var(--accent); }
   /* Build badge: the short git hash this catway was built from (trailing '*' =
      built from a modified tree). Its hover card carries the commit subject —
-     see initBuildBadge in JS. Mostly it answers "is this install stale?". */
-  #brand small.hash { cursor:help; }
-  #brand small.hash:hover { color:var(--accent); }
+     see initBuildBadge in JS. Mostly it answers "is this install stale?".
+
+     It is a build fingerprint, not a label anyone reads on purpose, so it sits
+     below the wordmark's weight: an explicit 9px (rather than <small>'s inherited
+     ~0.83em of the 13px brand) scaled with --sb-scale like every other sidebar
+     length, plus an opacity knock-down on top of --muted — the same recipe the
+     usage-list footnotes use. Hover restores full opacity along with the accent
+     so the thing you're about to read a tooltip from doesn't stay faded. */
+  #brand small.hash { cursor:help; font-size:calc(9px * var(--sb-scale)); opacity:.7; }
+  #brand small.hash:hover { color:var(--accent); opacity:1; }
   #sidebar section { padding:10px 6px 8px; }
   /* Splitter between Workspaces / Panes / Agents — the headings alone read as
      one long list once a workspace has more than a couple of panes. */
