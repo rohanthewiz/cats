@@ -175,6 +175,25 @@ type orch struct {
 	// poll that follows it, which is what a caller asking for "now" wants
 	// anyway. Read only by runUsage, written from the loop goroutine.
 	usageNudge chan struct{}
+	// usageAttention is how closely the USAGE section is being watched, as one
+	// of the usageAttention* tiers. It paces the poll: the account read is a
+	// request to someone else's endpoint, and its only consumer is a sidebar,
+	// so the rate it happens at should follow whether that sidebar is in front
+	// of anybody (see usageWait).
+	//
+	// The one piece of loop state read from outside the loop. runUsage is its
+	// own goroutine — it has to be, the read blocks — and posting a closure to
+	// ask the loop a question would mean the poller waiting on the loop while
+	// the loop may be waiting on nothing at all. An int32 published on every
+	// transition and read on every tick is the whole synchronisation: a tick
+	// that races a transition picks up the previous tier and corrects on the
+	// next one, and the nudge covers the only transition where that lag would
+	// be felt.
+	usageAttention atomic.Int32
+	// lastUsageRead is when the stored reading was taken, kept as the floor
+	// under the refocus nudge: alt-tabbing back and forth should not be able to
+	// buy more readings than the poll would have taken anyway.
+	lastUsageRead time.Time
 	// push is the outbound notification bridge (internal/push), nil when no
 	// webhook is configured — which is the default, and why every use goes
 	// through the nil-safe Send. It reaches a phone whose screen is off, so it
@@ -1083,6 +1102,40 @@ func (o *orch) anyClientFocused() bool {
 	return false
 }
 
+// noteUsageAttention republishes the tier the usage poller paces itself by, and
+// asks for a reading now when the section has just come back into view.
+//
+// The nudge is what makes gating cheap enough to do at all. A backgrounded
+// window's numbers are allowed to go up to usageIdleInterval stale precisely
+// because coming back to the window buys a fresh one immediately — the cost of
+// the slower cadence is paid by nobody, since nobody was reading it. Without it
+// the gate would be a straight downgrade: the first thing you would see on
+// returning is an old number and a long wait.
+//
+// The floor keeps that from becoming a second, faster poll under another name.
+// Alt-tabbing away and back ten times in a minute is ten rising edges, and each
+// one asking for a read would beat the cadence this whole change exists to
+// slow; a reading younger than one normal interval is already the answer.
+//
+// Loop-goroutine only, like everything that touches o.conns.
+func (o *orch) noteUsageAttention() {
+	want := usageAttentionDark
+	if len(o.conns) > 0 {
+		want = usageAttentionIdle
+		if o.anyClientFocused() {
+			want = usageAttentionWatched
+		}
+	}
+	prev := o.usageAttention.Swap(int32(want))
+	if want != usageAttentionWatched || prev == int32(usageAttentionWatched) {
+		return // no rising edge into view; the tier alone is the whole update
+	}
+	if !o.lastUsageRead.IsZero() && time.Since(o.lastUsageRead) < usageInterval {
+		return // what is on screen is no older than a poll would have left it
+	}
+	o.RefreshUsage()
+}
+
 // paneSeen is the focus state a pane's program should believe: it is the
 // session's focused pane and somebody's window is in front to see it. Both
 // halves matter — a focused pane in a backgrounded app is not being watched,
@@ -1100,6 +1153,14 @@ func (o *orch) paneSeen(pid uint32) bool {
 // its caret when the user switches away from the app: the window's blur
 // arrives as a Focus up-message, and the focused pane's program hears CSI O.
 func (o *orch) syncAppFocus() {
+	// The usage poller asks the same question of the same two facts ("is any
+	// window connected, and is any of them in front"), and every caller that
+	// reaches here does so precisely because one of those may have just changed
+	// — a Focus report, or a connection arriving or dying. Publishing from here
+	// means a new call site cannot forget to, which is the failure that would
+	// show up as a poller stuck at the wrong cadence for as long as the session
+	// lasts.
+	o.noteUsageAttention()
 	for pid, rt := range o.panes {
 		want := o.paneSeen(pid)
 		if want == rt.appFocused {

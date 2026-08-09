@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -51,14 +52,45 @@ import (
 // itself refreshes it.
 
 const (
-	// usageInterval paces the poll. The windows move slowly (a 5-hour window
-	// advances 0.3% a minute at full tilt), so this is about keeping a
-	// glanceable number roughly current, not about tracking it live.
+	// usageInterval paces the poll while somebody is looking. The windows move
+	// slowly (a 5-hour window advances 0.3% a minute at full tilt), so this is
+	// about keeping a glanceable number roughly current, not about tracking it
+	// live.
 	usageInterval = 2 * time.Minute
+	// usageIdleInterval paces it while every connected window is in the
+	// background, and usageDarkInterval while there is no browser at all.
+	//
+	// The cadence follows the reader rather than the data because the data has
+	// no reader: this is a request to somebody else's endpoint, taken purely to
+	// paint a sidebar, and a daemon left running overnight with no tab open was
+	// spending 360 of them a night on a section nobody would see. Neither tier
+	// stops outright, for different reasons. A background window is very often
+	// a *visible* one — a second monitor, a tiled half-screen — and freezing a
+	// number the user can plainly read is worse than reading it slowly. With no
+	// client at all nothing is visible, but the stored reading is what the next
+	// browser is handed on connect (serveInit), and half an hour is the most
+	// staleness worth handing someone before their own refresh lands.
+	usageIdleInterval = 10 * time.Minute
+	usageDarkInterval = 30 * time.Minute
 	// usageTimeout bounds one account read. The pacer is a background
 	// goroutine, but a hung dial should not hold a poll slot until the next
 	// tick.
 	usageTimeout = 10 * time.Second
+
+	// usageBackoffFirst is the pause after the SECOND consecutive failure of
+	// the account read, doubling per failure to usageBackoffMax. The first
+	// failure is forgiven at the normal cadence: endpoints hiccup, and a single
+	// dropped read that healed by the next tick should not cost the user ten
+	// minutes of a stale section to find out.
+	//
+	// It bounds the wrong-but-persistent cases instead — an endpoint returning
+	// 429, a revoked credential, a laptop off the network — where the poll was
+	// re-asking a settled question every two minutes and re-answering it the
+	// same way. Doubling reaches the cap in four failures, so a genuine outage
+	// costs a handful of requests rather than one every two minutes for its
+	// whole duration.
+	usageBackoffFirst = 5 * time.Minute
+	usageBackoffMax   = 30 * time.Minute
 
 	usageEndpoint = "https://api.anthropic.com/api/oauth/usage"
 	// usageOAuthBeta gates the OAuth-credentialed endpoints.
@@ -97,17 +129,123 @@ func (o *orch) runUsage() {
 	cop := newCopilotEstimator(copilotStateDir())
 	cpu := newCPUSampler()
 	go cpu.run()
+	// Owned by this goroutine alone, like the estimators beside it: the poll is
+	// the only thing that attempts the account read, so the only thing that can
+	// have a run of failures to remember.
+	var back usageBackoff
 	for {
-		msg := readUsage(est, cop, cpu).WithReadAt(time.Now())
+		msg := readUsage(est, cop, cpu, &back).WithReadAt(time.Now())
 		o.post(func() { o.setUsage(msg) })
 
-		tick := time.NewTimer(usageInterval)
+		tick := time.NewTimer(o.usageWait())
 		select {
 		case <-tick.C:
 		case <-o.usageNudge:
 			tick.Stop()
 		}
 	}
+}
+
+// How closely the USAGE section is being watched, and so how often it is worth
+// re-reading. Ordered by how much a stale number costs the person in front of
+// it, which is what the interval is really pricing.
+const (
+	usageAttentionDark    = iota // no browser connected
+	usageAttentionIdle           // connected, every window in the background
+	usageAttentionWatched        // at least one window in the foreground
+)
+
+// usageWait is how long to sleep before the next poll: the tier the loop
+// goroutine last published (orch.usageAttention), read here without a lock.
+//
+// Called once per poll rather than watched, so a window coming to the front
+// mid-sleep does not shorten the sleep already in progress — the nudge
+// noteUsageAttention sends on that same edge is what cuts it short, and it does
+// so through the select this returns into. A window going to the *back*
+// deliberately has no such interrupt: the current sleep runs out at the old
+// cadence and only the next one is slower, which costs at most one extra read
+// and keeps a glance back at a just-blurred window from finding stale numbers.
+func (o *orch) usageWait() time.Duration {
+	switch o.usageAttention.Load() {
+	case usageAttentionWatched:
+		return usageInterval
+	case usageAttentionIdle:
+		return usageIdleInterval
+	default:
+		return usageDarkInterval
+	}
+}
+
+// usageBackoff is the account read's memory of consecutive failures: how long
+// to stay away from the endpoint, and what to tell the sidebar meanwhile.
+//
+// It paces only the account read, not the poll. The poll keeps its cadence and
+// keeps publishing — the host rows are local reads that have nothing to do with
+// a failing endpoint, and the CLAUDE group falls to the transcript estimate,
+// which is exactly what it does for an unreadable credential today. Backing off
+// the whole poll would have let one endpoint take the memory meter down with
+// it.
+type usageBackoff struct {
+	fails int       // consecutive REMOTE failures; local ones do not count
+	next  time.Time // earliest next attempt; zero = attempt now
+	last  string    // the failure being waited out, for the group's note
+}
+
+// ready reports whether the endpoint may be asked again.
+func (b *usageBackoff) ready(now time.Time) bool {
+	return b.next.IsZero() || !now.Before(b.next)
+}
+
+// reset forgets the run. Called on success, and on a failure that never reached
+// the network (no credential, an expired token): those cost nothing to retry,
+// and stretching the poll for them would only leave the local estimate — the
+// very thing they fall back to — going stale for no saving at all.
+func (b *usageBackoff) reset() {
+	b.fails, b.next, b.last = 0, time.Time{}, ""
+}
+
+// fail records one remote failure and sets the next attempt.
+func (b *usageBackoff) fail(now time.Time, err error) {
+	b.fails++
+	b.last = err.Error()
+	if b.fails < 2 {
+		b.next = time.Time{} // one hiccup is forgiven; retry on the normal tick
+		return
+	}
+	d := usageBackoffFirst
+	// Doubling in a loop rather than by shifting: 1<<n overflows a Duration at
+	// 54 doublings, and a daemon left running against a dead endpoint for a
+	// week gets there.
+	for i := 2; i < b.fails && d < usageBackoffMax; i++ {
+		d *= 2
+	}
+	if d > usageBackoffMax {
+		d = usageBackoffMax
+	}
+	b.next = now.Add(d)
+}
+
+// note is the caption a group shows while it is waiting one out. The endpoint's
+// own complaint is kept in it — "HTTP 429" is the difference between "cats is
+// broken" and "the account is rate-limited" — and the retry time is what says
+// the section is waiting on purpose rather than stuck.
+func (b *usageBackoff) note(now time.Time) string {
+	if b.last == "" {
+		return ""
+	}
+	if d := b.next.Sub(now); d > 0 {
+		return b.last + " · retrying in " + fmtRetry(d)
+	}
+	return b.last
+}
+
+// fmtRetry prints a retry delay one unit deep, in the register the sidebar's
+// other countdowns use.
+func fmtRetry(d time.Duration) string {
+	if d < time.Minute {
+		return strconv.Itoa(int(d.Round(time.Second)/time.Second)) + "s"
+	}
+	return strconv.Itoa(int(d.Round(time.Minute)/time.Minute)) + "m"
 }
 
 // RefreshUsage asks the poller for a reading now (the usage.refresh command,
@@ -134,6 +272,11 @@ func (o *orch) RefreshUsage() {
 // a few hundred bytes, twice an hour per client.
 func (o *orch) setUsage(m browserproto.Usage) {
 	o.usage = &m
+	// Stamped from the loop's own clock rather than parsed back out of the
+	// message: this is only ever compared against time.Now() to decide whether a
+	// refocus has earned a fresh read (noteUsageAttention), and the message's
+	// own ReadAt is a wire format that exists to be printed.
+	o.lastUsageRead = time.Now()
 	o.broadcast(m)
 }
 
@@ -150,9 +293,9 @@ func (o *orch) setUsage(m browserproto.Usage) {
 // The host group does not depend on any account: a machine with no claude login
 // still has a memory ceiling worth watching, and the row should not disappear
 // because a token expired.
-func readUsage(claude *usageEstimator, copilot *copilotEstimator, cpu *cpuSampler) browserproto.Usage {
+func readUsage(claude *usageEstimator, copilot *copilotEstimator, cpu *cpuSampler, back *usageBackoff) browserproto.Usage {
 	now := time.Now()
-	groups := []browserproto.UsageGroup{claudeUsageGroup(claude, now)}
+	groups := []browserproto.UsageGroup{claudeUsageGroup(claude, back, now)}
 	if g, ok := copilot.group(now); ok {
 		groups = append(groups, g)
 	}
@@ -177,26 +320,57 @@ func readUsage(claude *usageEstimator, copilot *copilotEstimator, cpu *cpuSample
 // actually stops work: a week runs out once and is planned around, while the
 // 5-hour window is what a long afternoon walks into, and it is the number a
 // folded reader is folding *toward* rather than away from.
-func claudeUsageGroup(est *usageEstimator, now time.Time) browserproto.UsageGroup {
+func claudeUsageGroup(est *usageEstimator, back *usageBackoff, now time.Time) browserproto.UsageGroup {
 	g := browserproto.UsageGroup{ID: "claude", Name: "Claude"}
-	report, err := readAccountUsage()
-	if err == nil {
-		report.fiveHour.Name, report.fiveHour.Headline = "5 hr", true
-		report.weekly.Name = "Week"
-		g.Windows = []browserproto.UsageWindow{report.fiveHour, report.weekly}
-		// A model with its own weekly allowance on top of the all-models week —
-		// Fable, say. Only the account read knows about it, and only on plans
-		// that meter one, so the row appears when a name came back and not
-		// otherwise: an empty "Week ·" row would read as a broken window rather
-		// than an absent one. The name is the account's own label, printed as
-		// given.
-		if report.weeklyModelName != "" {
-			report.weeklyModel.Name = "Week · " + report.weeklyModelName
-			g.Windows = append(g.Windows, report.weeklyModel)
-		}
-		return g
+	// Inside a backoff window the endpoint is not asked at all, and the note
+	// carries why plus when it will be. Skipping the read is the entire saving:
+	// everything below this point is local.
+	if !back.ready(now) {
+		return claudeEstimateGroup(g, est, now, back.note(now))
 	}
-	logUsageOnce(err.Error())
+	report, err := readAccountUsage()
+	if err != nil {
+		// Only a failure that actually reached out earns a pause. A missing or
+		// expired credential fails before the request is even built
+		// (claudeOAuthToken), so there is nothing there to be gentle with — and
+		// that is exactly the case where the estimate is the permanent answer
+		// rather than a stopgap, so it should keep refreshing on the normal tick.
+		note := err.Error()
+		var remote usageRemoteError
+		if errors.As(err, &remote) {
+			back.fail(now, err)
+			note = back.note(now)
+		} else {
+			back.reset()
+		}
+		logUsageOnce(err.Error())
+		return claudeEstimateGroup(g, est, now, note)
+	}
+	back.reset()
+	report.fiveHour.Name, report.fiveHour.Headline = "5 hr", true
+	report.weekly.Name = "Week"
+	g.Windows = []browserproto.UsageWindow{report.fiveHour, report.weekly}
+	// A model with its own weekly allowance on top of the all-models week —
+	// Fable, say. Only the account read knows about it, and only on plans
+	// that meter one, so the row appears when a name came back and not
+	// otherwise: an empty "Week ·" row would read as a broken window rather
+	// than an absent one. The name is the account's own label, printed as
+	// given.
+	if report.weeklyModelName != "" {
+		report.weeklyModel.Name = "Week · " + report.weeklyModelName
+		g.Windows = append(g.Windows, report.weeklyModel)
+	}
+	return g
+}
+
+// claudeEstimateGroup fills the CLAUDE group from the local transcripts, with
+// why the account was not used as its caption.
+//
+// Split out because there are now three ways to arrive at the estimate — a read
+// that failed, a read that was skipped because a previous one failed, and a
+// machine with no credential to read with — and they differ only in that
+// caption. The rows they produce must not differ at all.
+func claudeEstimateGroup(g browserproto.UsageGroup, est *usageEstimator, now time.Time, why string) browserproto.UsageGroup {
 	fiveHour, weekly := est.windows(now)
 	fiveHour.Name, weekly.Name = "5 hr", "Week"
 	// The headline holds even for the estimate, where the row carries a token
@@ -208,7 +382,7 @@ func claudeUsageGroup(est *usageEstimator, now time.Time) browserproto.UsageGrou
 	// Only the fallback explains itself. An account reading is the expected case
 	// and needs no caption; an estimate has to say that it is one, and why the
 	// real numbers were not available.
-	g.Note = "estimate · " + err.Error()
+	g.Note = "estimate · " + why
 	return g
 }
 
@@ -270,14 +444,29 @@ type accountUsage struct {
 	weeklyModelName string
 }
 
+// usageRemoteError marks a failure that cost a request to the endpoint (or an
+// attempt at one), as against a local one that never left this machine. Only
+// the former is worth backing off — see claudeUsageGroup.
+//
+// It carries the wrapped message unchanged, because that message is what the
+// sidebar prints and it was written to be read there.
+type usageRemoteError struct{ err error }
+
+func (e usageRemoteError) Error() string { return e.err.Error() }
+func (e usageRemoteError) Unwrap() error { return e.err }
+
 func readAccountUsage() (accountUsage, error) {
 	token, err := claudeOAuthToken()
 	if err != nil {
-		return accountUsage{}, err
+		return accountUsage{}, err // local: no request was made, none is owed a pause
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), usageTimeout)
 	defer cancel()
-	return fetchAccountUsage(ctx, http.DefaultClient, usageEndpoint, token)
+	u, err := fetchAccountUsage(ctx, http.DefaultClient, usageEndpoint, token)
+	if err != nil {
+		return accountUsage{}, usageRemoteError{err}
+	}
+	return u, nil
 }
 
 // usageAPIWindow is the endpoint's per-window shape. Utilization is a

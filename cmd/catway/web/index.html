@@ -169,6 +169,13 @@
     color:var(--muted); font-variant-numeric:tabular-nums; }
   #usage-list li.ugrp.high .gsum { color:var(--warn); }
   #usage-list li.ugrp.crit .gsum { color:var(--err); }
+  /* The time left in the quoted window, parenthesised after the reading. It keeps
+     the muted color through .high and .crit — the color in this header means "how
+     much is spent", and a clock that turned red would read as a second alarm for
+     something that is only the window doing what windows do. Sized like .ureset,
+     which is the same fact one line down when the group is unfolded. */
+  #usage-list li.ugrp .gsum .gleft { color:var(--muted);
+    font-size:calc(9px * var(--sb-scale)); opacity:.8; }
   #usage-list li.ugrp .car { font-size:calc(10px * var(--sb-scale)); }
   #usage-list .urow { display:flex; align-items:baseline; gap:6px; }
   /* Body weight and body color: with a genuinely bold heading now above them,
@@ -2430,6 +2437,24 @@
     return h < 24 ? "resets in " + h + "h" : "resets in " + Math.round(h / 24) + "d";
   }
 
+  // The same countdown with no sentence around it, for the folded group's chip —
+  // "3% (2hrs)" — where the percentage has already said what is being counted and
+  // only the horizon is missing. Hours carry the word because hours are the unit
+  // a 5-hour window is actually read in, and "2h" beside "3%" scans as another
+  // measurement rather than as a clock; below the hour the terse register the
+  // rest of the sidebar uses is unambiguous on its own.
+  function fmtLeft(ms) {
+    const s = Math.round(ms / 1000);
+    if (s <= 0) return "resetting";
+    if (s < 60) return s + "s";
+    const m = Math.round(s / 60);
+    if (m < 60) return m + "m";
+    const h = Math.round(m / 60);
+    if (h < 24) return h + (h === 1 ? "hr" : "hrs");
+    const d = Math.round(h / 24);
+    return d + "d";
+  }
+
   // renderUsage takes a new reading: it stores the message, settles the refresh
   // control and the age label, then draws. Folding a group re-draws WITHOUT
   // coming through here — a click is not a reading, and running usageIdle() on
@@ -2543,6 +2568,24 @@
         const s = document.createElement("span");
         s.className = "gsum";
         s.textContent = text;
+        // A percentage of a window is half an answer: 3% spent means one thing
+        // with four hours left in the five and quite another with ten minutes,
+        // because what is left is what the rest of the afternoon has to fit
+        // into. So when the quoted row is a window with a known rollover, the
+        // chip carries both — "3% (2hrs)".
+        //
+        // Keyed off resets_at rather than off the row's name: a row that rolls
+        // over is exactly the row a horizon belongs on, and the HOST rows have
+        // no such instant (nothing resets memory but a process exiting), so
+        // they keep the bare figure without this needing to know they exist.
+        const at = head.resets_at ? Date.parse(head.resets_at) : NaN;
+        if (!Number.isNaN(at)) {
+          const left = document.createElement("span");
+          left.className = "gleft";
+          left.dataset.at = String(at); // absolute, so the tick can recompute it
+          left.textContent = " (" + fmtLeft(at - Date.now()) + ")";
+          s.appendChild(left);
+        }
         // No title of its own: the chip sits inside the heading, and a tooltip
         // here would shadow the heading's — which is the one that lists every
         // row the fold hid.
@@ -2761,6 +2804,13 @@
     // recompute from. [data-at] is what separates the two.
     for (const el of usageListEl.querySelectorAll(".ureset[data-at]")) {
       el.textContent = fmtUntil(Number(el.dataset.at) - Date.now());
+    }
+    // The folded chip's half of the same countdown. It is only in the DOM while
+    // the group is folded, so the query is usually empty — and when it is not,
+    // this is the one number on screen for that provider, which makes it the
+    // last one that should be allowed to age.
+    for (const el of usageListEl.querySelectorAll(".gleft[data-at]")) {
+      el.textContent = " (" + fmtLeft(Number(el.dataset.at) - Date.now()) + ")";
     }
   }, 10000);
 

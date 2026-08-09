@@ -466,3 +466,181 @@ func TestRefreshUsageNudgeCoalesces(t *testing.T) {
 	default:
 	}
 }
+
+// --- Pacing: attention tiers --------------------------------------------------
+
+// The poll's cadence follows whether anyone is looking. The tier is published
+// by the loop and read by the poller, so this exercises the pair together:
+// noteUsageAttention derives it from the connection set, usageWait prices it.
+func TestUsageWaitFollowsAttention(t *testing.T) {
+	o := &orch{conns: map[*client]struct{}{}, usageNudge: make(chan struct{}, 1)}
+
+	// No browser at all: the slowest tier. Nothing is on screen to go stale.
+	o.noteUsageAttention()
+	if got := o.usageWait(); got != usageDarkInterval {
+		t.Errorf("no client: wait = %v, want %v", got, usageDarkInterval)
+	}
+
+	// Connected but every window in the background. Slower, but not stopped —
+	// a background window is very often still a visible one.
+	bg := &client{}
+	o.conns[bg] = struct{}{}
+	o.noteUsageAttention()
+	if got := o.usageWait(); got != usageIdleInterval {
+		t.Errorf("background client: wait = %v, want %v", got, usageIdleInterval)
+	}
+
+	// Somebody is looking: full rate.
+	bg.focused = true
+	o.noteUsageAttention()
+	if got := o.usageWait(); got != usageInterval {
+		t.Errorf("focused client: wait = %v, want %v", got, usageInterval)
+	}
+
+	// A second window in the background does not dilute the first one's focus.
+	o.conns[&client{}] = struct{}{}
+	o.noteUsageAttention()
+	if got := o.usageWait(); got != usageInterval {
+		t.Errorf("one of two focused: wait = %v, want %v", got, usageInterval)
+	}
+
+	// The last focused window leaving is a blur no Focus message ever reports.
+	delete(o.conns, bg)
+	o.noteUsageAttention()
+	if got := o.usageWait(); got != usageIdleInterval {
+		t.Errorf("focused client gone: wait = %v, want %v", got, usageIdleInterval)
+	}
+}
+
+// Coming back to the window asks for a reading now. This is what pays for the
+// slower background tier: the staleness it allows is never actually seen.
+func TestUsageAttentionNudgesOnReturn(t *testing.T) {
+	c := &client{}
+	o := &orch{conns: map[*client]struct{}{c: {}}, usageNudge: make(chan struct{}, 1)}
+	o.lastUsageRead = time.Now().Add(-time.Hour) // older than any interval
+	o.noteUsageAttention()                       // background: no ask
+	if len(o.usageNudge) != 0 {
+		t.Fatal("a backgrounded window asked for a reading")
+	}
+
+	c.focused = true
+	o.noteUsageAttention()
+	if len(o.usageNudge) != 1 {
+		t.Fatal("returning to the window did not ask for a reading")
+	}
+	<-o.usageNudge
+
+	// Still focused, published again (a pane focus change, a client census):
+	// not a rising edge, so not another ask.
+	o.noteUsageAttention()
+	if len(o.usageNudge) != 0 {
+		t.Error("a re-publish at the same tier asked for a reading")
+	}
+}
+
+// Alt-tabbing must not become a faster poll under another name: a reading
+// younger than one normal interval is already the answer the return would get.
+func TestUsageAttentionNudgeFloor(t *testing.T) {
+	c := &client{}
+	o := &orch{conns: map[*client]struct{}{c: {}}, usageNudge: make(chan struct{}, 1)}
+	o.lastUsageRead = time.Now().Add(-usageInterval / 2)
+	o.noteUsageAttention() // background
+
+	c.focused = true
+	o.noteUsageAttention()
+	if len(o.usageNudge) != 0 {
+		t.Error("a fresh reading was re-fetched on refocus")
+	}
+}
+
+// --- Pacing: backoff ----------------------------------------------------------
+
+// One failure is forgiven; a run of them stretches, doubling to the cap. Only
+// the account read is paced — the poll itself keeps its cadence, which is why
+// this is a property of the backoff and not of the loop.
+func TestUsageBackoffStretchesThenCaps(t *testing.T) {
+	now := time.Date(2026, 8, 8, 9, 0, 0, 0, time.UTC)
+	var b usageBackoff
+	err := errors.New("usage endpoint: HTTP 429")
+
+	if !b.ready(now) {
+		t.Fatal("a fresh backoff must allow the first read")
+	}
+
+	// First failure: no pause. Endpoints hiccup.
+	b.fail(now, err)
+	if !b.ready(now) {
+		t.Error("the first failure paused the read")
+	}
+
+	// Then 5m, 10m, 20m, capped at 30m.
+	for _, want := range []time.Duration{
+		usageBackoffFirst, 2 * usageBackoffFirst, 4 * usageBackoffFirst,
+		usageBackoffMax, usageBackoffMax, usageBackoffMax,
+	} {
+		b.fail(now, err)
+		if b.ready(now) {
+			t.Fatalf("fails=%d: not paused at all", b.fails)
+		}
+		if b.ready(now.Add(want - time.Second)) {
+			t.Errorf("fails=%d: ready before %v", b.fails, want)
+		}
+		if !b.ready(now.Add(want)) {
+			t.Errorf("fails=%d: still paused at %v, want %v", b.fails, want, want)
+		}
+	}
+
+	// A success clears the run: the next failure is a first failure again.
+	b.reset()
+	if !b.ready(now) || b.note(now) != "" {
+		t.Fatalf("reset left a pause: ready=%v note=%q", b.ready(now), b.note(now))
+	}
+	b.fail(now, err)
+	if !b.ready(now) {
+		t.Error("the first failure after a success paused the read")
+	}
+}
+
+// The caption says what went wrong and that the wait is deliberate. "HTTP 429"
+// is the difference between a broken sidebar and a rate-limited account.
+func TestUsageBackoffNote(t *testing.T) {
+	now := time.Date(2026, 8, 8, 9, 0, 0, 0, time.UTC)
+	var b usageBackoff
+	err := errors.New("usage endpoint: HTTP 500")
+
+	b.fail(now, err) // forgiven: the reason, but no countdown to report
+	if got := b.note(now); got != "usage endpoint: HTTP 500" {
+		t.Errorf("note = %q, want the bare reason", got)
+	}
+	b.fail(now, err)
+	if got, want := b.note(now), "usage endpoint: HTTP 500 · retrying in 5m"; got != want {
+		t.Errorf("note = %q, want %q", got, want)
+	}
+	// It counts down with the clock rather than restating the delay.
+	if got, want := b.note(now.Add(3*time.Minute)), "usage endpoint: HTTP 500 · retrying in 2m"; got != want {
+		t.Errorf("note = %q, want %q", got, want)
+	}
+}
+
+// A failure that never reached the network is not worth backing off: retrying
+// costs nothing, and the estimate it falls back to is the permanent answer on a
+// machine with no credential, so it should keep being refreshed.
+func TestUsageRemoteErrorClassification(t *testing.T) {
+	local := errors.New("no claude credential")
+	wrapped := error(usageRemoteError{local})
+
+	var remote usageRemoteError
+	if errors.As(local, &remote) {
+		t.Error("a credential failure classified as remote")
+	}
+	if !errors.As(wrapped, &remote) {
+		t.Error("a fetch failure did not classify as remote")
+	}
+	// The message is what the sidebar prints, so wrapping must not touch it.
+	if got := wrapped.Error(); got != "no claude credential" {
+		t.Errorf("wrapping changed the sidebar's message: %q", got)
+	}
+	if !errors.Is(wrapped, local) {
+		t.Error("the wrapped cause is not reachable")
+	}
+}
