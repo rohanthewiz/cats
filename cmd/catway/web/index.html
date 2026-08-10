@@ -162,7 +162,17 @@
        dragged to its 150px floor (or a large --sb-scale) could otherwise drop
        the cat onto its own line above the word. Held on one line, the build
        badge is the thing that gives way, which is the right thing to lose. */
-    white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+    /* Both halves of this are load-bearing on a short window, and the reason is
+       the line above: a flex item's automatic minimum size is only its content
+       height while overflow is `visible`. The `overflow:hidden` we need for the
+       ellipsis drops that floor to zero, so when the sidebar's sections overflow
+       a short viewport the brand is the one child that CAN give way — it gets
+       squeezed to a sliver and clips its own logo, instead of #sidebar's
+       overflow-y:auto scrolling. flex:0 0 auto puts the floor back explicitly,
+       which is what we wanted from `auto` anyway. Every other #sidebar child
+       leaves overflow visible, so they keep the automatic floor for free. */
+    flex:0 0 auto; }
   #brand small { color:var(--muted); font-weight:400; margin-left:6px; }
   /* The mark sits inline and rides the text baseline rather than turning
      #brand into a flex row: the build badge appended below is a sibling of the
