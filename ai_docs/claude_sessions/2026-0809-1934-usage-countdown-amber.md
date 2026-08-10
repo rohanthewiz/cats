@@ -128,12 +128,17 @@ label two different ways. Named once.
 
 ## Open
 
-- **`cats-mobile` is not updated.** The generator's own instruction is to copy
-  the output into `cats-mobile/packages/catsproto/lib/src/generated`. That repo
-  is at `~/projs/go/cats-mobile`, outside this session's working directories, and
-  was left alone. It was already a field pair behind from the previous session;
-  it is now `soon_secs` behind as well. The Dart side reads unknown fields
-  tolerantly, so this is drift rather than breakage.
+- ~~**`cats-mobile` is not updated.**~~ **Done in a follow-up** —
+  `cats-mobile@6d774a3`, regenerated with that repo's own `tool/regen.sh` rather
+  than by hand, which also re-pins `CATS_REV` to `25415a2`. It closes more drift
+  than this session created: `headline` and `spark` landed in cats a session ago
+  and had never been copied, so `UsageWindow` gained three fields, not one.
+  `FLUTTER_ROOT` unset leaves `keys.g.dart` as committed, which is the intended
+  common case. `dart analyze` clean; `dart test` is `+71 -1`, the one failure
+  (`viewer_mode_test.dart`, "no source under lib/ constructs a Resize or declares
+  a grid") confirmed pre-existing by re-running against a stash and left alone.
+  Nothing under `lib/` reads any of the three fields — the wire caught up with
+  the server, no mobile feature followed.
 - **Not seen in the MacApp.** `make macapp` not run. The colour was reasoned
   about and the code checked; nobody has watched a five-hour window actually
   cross 30 minutes and go amber. This thread keeps carrying this one.
