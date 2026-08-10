@@ -80,6 +80,32 @@
      text cursors and selections; this shuts both off for the duration. */
   body.splitting { cursor:col-resize; user-select:none; }
 
+  /* ---- Folded sidebar ----
+     The column goes to nothing rather than merely narrow: --sidebar-w is
+     re-declared on <body>, which beats the inline value setSidebarWidth writes
+     on :root for everything inside it (the #app grid track, and #banner's left
+     edge, both of which read the same variable) while leaving that stored width
+     untouched for the reveal. #sidebar itself leaves the flow so its content
+     cannot paint through a zero-width track.
+
+     Nothing new is added to reveal it: the splitter gutter is already a
+     full-height strip in its own grid column, and it costs zero vertical space —
+     a reveal handle along the top would take a terminal row away from every pane
+     in the window, permanently, for a control used twice a day. Folded, the
+     gutter stops being invisible (it is the only thing left to aim at) and takes
+     a plain click as "bring it back". */
+  body.sb-hidden { --sidebar-w:0px; }
+  body.sb-hidden #sidebar { display:none; }
+  body.sb-hidden #splitter { background:var(--line); }
+  /* Folded, the gutter is also the only surface an agent's state can reach, so
+     it carries the strongest one waiting (paintSplitterAttention). This covers
+     the one case the auto-reveal cannot: the column was folded again *while* an
+     agent was already blocked or already done, so no state change is coming to
+     re-open it. Ordered ahead of :hover so pointing at the gutter still answers. */
+  body.sb-hidden #splitter.attn-done { background:var(--done); }
+  body.sb-hidden #splitter.attn-blocked { background:var(--err); }
+  body.sb-hidden #splitter:hover, body.sb-hidden #splitter.drag { background:var(--accent); }
+
   /* ---- Sidebar ---- */
   #sidebar { background:var(--panel); border-right:1px solid var(--line);
     display:flex; flex-direction:column; overflow-y:auto; min-height:0; }
@@ -2898,8 +2924,45 @@
     }
   }, 5000);
 
+  // ---- Auto-reveal (pairs with setSidebarHidden) ----
+  // Folding the column away is meant as a temporary "get out of my way", not as
+  // a way to miss the two agent states that are actually addressed to the user:
+  // blocked (it is waiting on an answer and nothing moves until it gets one) and
+  // done-unseen (it finished while the eye was elsewhere). Either one arriving
+  // brings the sidebar back on its own.
+  //
+  // Edge-triggered against the previous rollup, per pane: an agent that is
+  // merely *still* blocked must not re-open a column the user has deliberately
+  // folded away since, so only the transition into the state counts, never the
+  // state itself. agentAttn starts null and the first rollup seeds it without
+  // firing — otherwise every already-finished-unseen agent would read as a fresh
+  // transition on page load and a hidden sidebar could never survive a reload.
+  // The map outlives a dropped socket, so a reconnect's rollup doesn't re-fire
+  // for states the user has already seen.
+  let agentAttn = null;
+  function agentAttentionSweep(items) {
+    const next = new Map();
+    let pop = null;
+    for (const it of items) {
+      const st = markerState(it);
+      next.set(it.pane, st);
+      if (!pop && agentAttn && (st === "blocked" || st === "done") && agentAttn.get(it.pane) !== st) {
+        pop = { it, st };  // first one wins; the list is already in the server's order
+      }
+    }
+    agentAttn = next;
+    if (!pop) { if (sidebarHidden()) paintSplitterAttention(); return; }
+    if (!sidebarHidden()) return;
+    setSidebarHidden(false);
+    // A column that reappears by itself is a surprise unless it says why, and
+    // the row that caused it is about to be one of several in AGENTS.
+    toast(agentLabel(pop.it.agent, pop.it.model) +
+      (pop.st === "blocked" ? " is blocked" : " finished") + " — sidebar reopened");
+  }
+
   function renderAgents(items) {
     agentItems = items || [];
+    agentAttentionSweep(agentItems);
     if (layoutMsg) { renderWorkspaces(layoutMsg); renderTabbar(layoutMsg); } // ws badges + tab markers derive from the rollup
     agentListEl.innerHTML = "";
     if (!items || !items.length) {
@@ -3232,6 +3295,13 @@
     if (e.type === "keydown" && e.code === "KeyK" &&
         ((e.metaKey && !e.ctrlKey) || (e.ctrlKey && e.altKey))) {
       e.preventDefault(); openPalette(); return;
+    }
+    // ⌘B (mac) / Ctrl+Alt+B folds the left column away and back. Same modifier
+    // pair as the palette above, so the window-chrome toggles are learned once;
+    // matched on e.code so a non-QWERTY layout still gets the physical key.
+    if (e.type === "keydown" && e.code === "KeyB" &&
+        ((e.metaKey && !e.ctrlKey) || (e.ctrlKey && e.altKey))) {
+      e.preventDefault(); setSidebarHidden(!sidebarHidden()); return;
     }
     const isV = e.key === "v" || e.key === "V";
     if (e.type === "keydown" && e.metaKey && !e.ctrlKey && isV) { e.preventDefault(); pasteText(); return; }
@@ -4531,6 +4601,7 @@
       { label: "new worktree", fn: openNewWorktreeDialog },
       { label: "open worktree", fn: openWorktreeOpenDialog },
       { label: "plugins", fn: openPluginsDialog },
+      { label: sidebarHidden() ? "show sidebar" : "hide sidebar", fn: () => setSidebarHidden(!sidebarHidden()) },
       { label: "settings", fn: openSettings },
       { label: "reload config", fn: () => sendCmd("server.reload_config", {}) },
       { label: "keyboard shortcuts", fn: openHelp },
@@ -4695,6 +4766,7 @@
       const left = document.createElement("div");
       left.appendChild(helpSection("global", [
         ["command palette", ["⌘K", "Ctrl+Alt+K"]],
+        ["hide / show the sidebar", ["⌘B", "Ctrl+Alt+B"]],
         ["paste", ["⌘V", "Ctrl+Shift+V*"]],
         ["bigger / smaller font", ["⌘+", "⌘-"]],
         ["reset font size", ["⌘0"]],
@@ -4713,6 +4785,8 @@
         ["rectangular selection", ["Alt+drag"]],
         ["pane / tab / workspace menu", ["right-click"]],
         ["resize splits", ["drag the border"]],
+        ["hide the sidebar", ["drag its gutter to the left edge"]],
+        ["show it again", ["click the gutter at the left edge"]],
         ["swap panes", ["drag a pane header or sidebar row onto a pane"]],
         ["reorder tabs / workspaces", ["drag"]],
         ["rename pane / tab / workspace", ["double-click its title"]],
@@ -5167,6 +5241,60 @@
     const fire = () => { gridSize(); sendMsg({ t: "resize", cols, rows }); };
     if (now) fire(); else sbwTimer = setTimeout(fire, 120);
   }
+  // ---- Folding the sidebar away ----
+  // Hidden/shown is a per-browser display preference like the width above and
+  // the chat panel below, so it lives in localStorage, not in the
+  // server-persisted session. The stored *width* is deliberately left alone
+  // while folded: revealing has to land back on the column the user last sized,
+  // not on the stylesheet default.
+  const SBH_KEY = "cats.sidebar_hidden";
+  // Dragging the gutter this far left of the column's 150px floor folds it
+  // outright — the fold happens live, under the pointer, and dragging back past
+  // the same mark brings the column straight back. Done as a preview rather than
+  // as a decision taken on release, the gesture explains itself: the column you
+  // dragged into nothing is the column that stays gone.
+  const SBW_FOLD = Math.round(SBW_MIN * 0.55);
+  function sidebarHidden() { return document.body.classList.contains("sb-hidden"); }
+  function setSidebarHidden(hide) {
+    if (hide === sidebarHidden()) return;
+    document.body.classList.toggle("sb-hidden", hide);
+    try {
+      if (hide) localStorage.setItem(SBH_KEY, "1"); else localStorage.removeItem(SBH_KEY);
+    } catch (e) { /* not persisted */ }
+    if (hide) paintSplitterAttention();
+    else splitterEl.classList.remove("attn-blocked", "attn-done");
+    syncSplitterTitle();
+    // Folding changes #main's width exactly as a drag does, so the pane grid has
+    // to be re-derived and the server told. At once, not debounced: this is one
+    // discrete step, not a stream of pointer moves.
+    sidebarResized(true);
+  }
+  function syncSplitterTitle() {
+    splitterEl.title = sidebarHidden()
+      ? "click to show the sidebar (⌘B / Ctrl+Alt+B)"
+      : "drag to resize the sidebar (double-click to reset, ⌘B to hide)";
+  }
+  // The strongest attention state among the agents, painted onto the folded
+  // gutter. Only the top two tiers of attentionRank earn a mark: "working" is
+  // the ordinary case and would leave the gutter permanently lit, which would
+  // make the two states that are actually addressed to the user invisible again.
+  function paintSplitterAttention() {
+    let best = "";
+    for (const it of agentItems) {
+      const st = markerState(it);
+      if (st === "blocked") { best = "blocked"; break; }
+      if (st === "done") best = "done";
+    }
+    splitterEl.classList.toggle("attn-blocked", best === "blocked");
+    splitterEl.classList.toggle("attn-done", best === "done");
+  }
+  try { if (localStorage.getItem(SBH_KEY)) document.body.classList.add("sb-hidden"); } catch (e) { /* shown */ }
+  syncSplitterTitle();
+
+  // A click that only revealed the column must not have its second half land on
+  // the width-reset below: the pair would read as one gesture that both restored
+  // and re-defaulted the sidebar.
+  let revealedAt = 0;
   splitterEl.addEventListener("pointerdown", (e) => {
     if (e.button !== 0) return;
     e.preventDefault();
@@ -5176,11 +5304,23 @@
     // Where in the gutter it was grabbed, so the splitter stays under the
     // cursor instead of jumping its own width on the first move.
     const grabDx = e.clientX - splitterEl.getBoundingClientRect().left;
-    const move = (ev) => { setSidebarWidth(ev.clientX - grabDx); sidebarResized(false); };
+    const startHidden = sidebarHidden(), startX = e.clientX;
+    let moved = false;
+    const move = (ev) => {
+      if (Math.abs(ev.clientX - startX) > 3) moved = true;
+      const want = ev.clientX - grabDx;
+      if (want < SBW_FOLD) { setSidebarHidden(true); return; }
+      setSidebarHidden(false);      // dragged back out of the fold zone
+      setSidebarWidth(want);
+      sidebarResized(false);
+    };
     const up = () => {
       splitterEl.removeEventListener("pointermove", move);
       splitterEl.classList.remove("drag");
       document.body.classList.remove("splitting");
+      // A press on the folded gutter that never became a drag is a click, and
+      // the only thing a click there can mean is "show it again".
+      if (startHidden && !moved) { setSidebarHidden(false); revealedAt = Date.now(); }
       sidebarResized(true);
     };
     splitterEl.addEventListener("pointermove", move);
@@ -5189,6 +5329,7 @@
   });
   // Double-click hands the column back to the stylesheet's --sb-scale default.
   splitterEl.addEventListener("dblclick", () => {
+    if (Date.now() - revealedAt < 600) return;   // this was the reveal click, twice
     document.documentElement.style.removeProperty("--sidebar-w");
     try { localStorage.removeItem(SBW_KEY); } catch (e) { /* nothing to clear */ }
     sidebarResized(true);
