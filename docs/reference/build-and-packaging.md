@@ -227,3 +227,10 @@ so `catctl reload` applies them with no rebuild and no restart.
 
 `scripts/gen-icon.sh` produces `scripts/AppIcon.icns` from the sources in
 `scripts/icon/`. Both bundles copy it into `Resources/`.
+
+Those sources paint their background across the whole 1024 canvas, square, with
+no corner radius, and they must stay that way. macOS 26 composites a legacy
+`.icns` over a light plate and masks the result to the system's own shape, so any
+transparency in the artwork comes back as a white ring around a shrunken icon —
+the rounding is the system's to apply, not the artwork's to bake in. The two
+drawings and the rest of the reasoning are in `scripts/icon/gen-trace/README.md`.

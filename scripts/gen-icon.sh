@@ -4,12 +4,17 @@
 # one-time (or on-design-change) step, not part of every build.
 #
 # Two source drawings, not one. cats-icon.svg is the real mark: a fine-line
-# tracing whose head outline is about 2% of the head's width. That is correct
-# from 64px up and hopeless below it — at 16px the stroke lands near a fifth of
-# a pixel and renders as a smudge. cats-icon-small.svg is the same silhouette
-# with the outline thickened, and it is used for the 16 and 32px slices only.
-# An .icns is a family, so carrying different art per size is the intended fix
-# rather than a workaround.
+# tracing whose lines are about 2.2% of the head's width. That is correct from
+# 64px up and hopeless below it — at 16px the line lands near a quarter of a
+# pixel and renders as a smudge. cats-icon-small.svg is the same drawing with
+# the lines stroked to a weight a pixel grid can show, and it is used for the 16
+# and 32px slices only. An .icns is a family, so carrying different art per size
+# is the intended fix rather than a workaround.
+#
+# Both sources paint their background across the whole 1024 canvas, square, with
+# no corner radius. macOS 26 composites a legacy .icns over a light plate and
+# masks the result to its own shape, so any transparency in the artwork comes
+# back as a white ring around a shrunken icon. Keep them full-bleed.
 #
 # Requires: iconutil (macOS, .iconset -> .icns) plus something that can raster
 # an SVG. Tries rsvg-convert, then magick, then QuickLook — the last needs

@@ -24,10 +24,12 @@
 package main
 
 import (
+	"encoding/xml"
 	"flag"
 	"fmt"
 	"image"
 	_ "image/png"
+	"io"
 	"math"
 	"os"
 	"path/filepath"
@@ -297,93 +299,26 @@ func traceCell(img image.Image, x0, y0, x1, y1 int, tol, cornerDeg float64) (str
 	return strings.TrimSpace(d.String()), lo, hi
 }
 
-// centroid returns a polygon's area centroid, falling back to the vertex mean
-// for a degenerate ring.
-func centroid(p []Pt) Pt {
-	var a, cx, cy float64
-	n := len(p)
-	for i := 0; i < n; i++ {
-		j := (i + 1) % n
-		cross := p[i].X*p[j].Y - p[j].X*p[i].Y
-		a += cross
-		cx += (p[i].X + p[j].X) * cross
-		cy += (p[i].Y + p[j].Y) * cross
-	}
-	if math.Abs(a) < 1e-9 {
-		var sx, sy float64
-		for _, q := range p {
-			sx, sy = sx+q.X, sy+q.Y
+// writeSVG writes one emitted file after checking it is actually parseable.
+//
+// The check exists because of a specific silent failure: XML forbids a double
+// hyphen inside a comment, and these files carry long prose comments about the
+// app's CSS custom properties, whose names all begin with two hyphens. Writing
+// one produces a file that every renderer refuses, and nothing downstream
+// notices until somebody looks at a blank glyph. Failing here instead costs one
+// parse per file.
+func writeSVG(path, content string) {
+	dec := xml.NewDecoder(strings.NewReader(content))
+	for {
+		_, err := dec.Token()
+		if err == io.EOF {
+			break
 		}
-		return Pt{sx / float64(n), sy / float64(n)}
-	}
-	return Pt{cx / (3 * a), cy / (3 * a)}
-}
-
-func scaleAbout(p []Pt, c Pt, k float64) []Pt {
-	out := make([]Pt, len(p))
-	for i, q := range p {
-		out[i] = Pt{c.X + (q.X-c.X)*k, c.Y + (q.Y-c.Y)*k}
-	}
-	return out
-}
-
-// smallMark builds the bold reduction used for the 16 and 32px icon slices.
-//
-// The verbatim artwork is a hairline drawing: its head outline is a ribbon
-// about 2.65 units wide on a 127-unit head, so at 16px it lands near a fifth of
-// a pixel and disappears into a smudge. This keeps the mark's actual silhouette
-// and thickens it, rather than substituting some other drawing:
-//
-//   - take the outer edge of the head outline (the largest contour),
-//   - shrink a copy of it toward its own centroid and fill between the two
-//     even-odd, which turns a hairline ring into a heavy one,
-//   - keep the cursor bar, which is already solid.
-//
-// Scaling about the centroid is a crude offset, not a true one — thickness ends
-// up proportional to how far each point sits from the centre, so the ears come
-// out heavier than the cheeks. On a roughly star-shaped head that reads as
-// deliberate weight rather than as an error, and it avoids pulling in a polygon
-// offsetting library for one glyph. The interior details (eyes, chevron, muzzle)
-// are dropped: at 16px they are sub-pixel and only add mud.
-func smallMark(loops [][]Pt, k, cornerDeg float64) (string, Pt, Pt) {
-	if len(loops) == 0 {
-		return "", Pt{}, Pt{}
-	}
-	area := func(l []Pt) float64 {
-		lo, hi := bboxOf([][]Pt{l})
-		return (hi.X - lo.X) * (hi.Y - lo.Y)
-	}
-	head := loops[0]
-	lowest := loops[0]
-	for _, l := range loops {
-		if area(l) > area(head) {
-			head = l
-		}
-		_, hiL := bboxOf([][]Pt{l})
-		_, hiLow := bboxOf([][]Pt{lowest})
-		if hiL.Y > hiLow.Y {
-			lowest = l
+		if err != nil {
+			must(fmt.Errorf("%s is not well-formed XML: %w", filepath.Base(path), err))
 		}
 	}
-
-	// k <= 0 means fill the head solid rather than ringing it. At 16px an
-	// outline spends most of its pixels on the hole in the middle, where a
-	// silhouette spends all of them on shape — the ear points and the chin
-	// taper survive, which is what makes it read as a cat rather than a blob.
-	keep := [][]Pt{head}
-	if k > 0 {
-		keep = append(keep, scaleAbout(head, centroid(head), k))
-	}
-	if area(lowest) < area(head)/8 { // the cursor bar, not part of the head
-		keep = append(keep, lowest)
-	}
-
-	var d strings.Builder
-	for _, l := range keep {
-		d.WriteString(path(toNodes(l, cornerDeg), true) + " ")
-	}
-	lo, hi := bboxOf(keep)
-	return strings.TrimSpace(d.String()), lo, hi
+	must(os.WriteFile(path, []byte(content), 0644))
 }
 
 // Cell boxes were read off the reference's own ink profile: two bands of
@@ -395,9 +330,17 @@ type cell struct {
 	colour         string // default render colour; empty means take the source's
 }
 
-// brandGreen is the app's ok-green pulled down in lightness and saturation, so
-// it reads as a line colour rather than a status LED.
-const brandGreen = "#5FA070"
+// The palette is the app's own, not a separate brand one: themeAccent is
+// --accent from cmd/catway/web/index.html and the tile is that theme's two
+// darkest surfaces (--panel2 over a step below --bg). The sidebar glyph follows
+// a live theme switch because it inherits currentColor from var(--accent); an
+// .icns cannot, so it bakes in the default theme's value and these constants
+// have to be moved by hand if that theme's accent moves.
+const (
+	themeAccent = "#4db380"
+	tileTop     = "#2b322c"
+	tileBottom  = "#12160f"
+)
 
 func main() {
 	var (
@@ -411,9 +354,11 @@ func main() {
 		// costs nothing visible below ~26px and cuts the path data from 28KB to
 		// under 7KB, which matters because it is inlined into index.html.
 		uiTol = flag.Float64("uitol", 1.0, "tolerance for the small in-app glyph")
-		// How far the inner edge is pulled toward the centroid to thicken the
-		// head outline for the tiny icon slices. Lower is heavier.
-		smallK = flag.Float64("smallk", 0.80, "inner-edge scale for the small icon mark")
+		// Weight added to every line of the small-size icon art, as a fraction
+		// of the drawing's long side. See the small-icon section below for why
+		// it has to be this large.
+		smallW   = flag.Float64("smallw", 0.075, "extra line weight for the small icon mark, fraction of its long side")
+		smallTol = flag.Float64("smalltol", 0.6, "Douglas-Peucker tolerance for the small icon mark")
 	)
 	flag.Parse()
 
@@ -423,15 +368,25 @@ func main() {
 	img, _, err := image.Decode(fh)
 	must(err)
 
+	// The mark the product actually wears. Everything the app ships — the
+	// .icns, its small-size sibling and the sidebar glyph — is cut from this
+	// one cell, so moving to another mark on the board is a one-line edit.
+	//
+	// Mark 06 rather than 10: it is the same hairline weight (both sit near
+	// 2.2% of their cell width) but carries a tenth of the interior detail, so
+	// it survives being shrunk. 10's chevron eye, muzzle and cheek lines all
+	// land sub-pixel below about 48px and turn the face into noise.
+	logo := cell{"trace", "trace.svg", 35, 281, 169, 418, themeAccent}
+
 	cells := []cell{
-		// 05 and 06 keep the reference's cream; the logo takes the brand green.
+		// Everything that is not the logo keeps the reference's own cream.
 		{"rest", "rest.svg", 812, 32, 957, 196, ""},
-		{"trace", "trace.svg", 35, 281, 169, 418, ""},
-		{"prompt", "prompt.svg", 819, 282, 951, 417, brandGreen},
+		logo,
+		{"prompt", "prompt.svg", 819, 282, 951, 417, ""},
 	}
 
-	var promptPath string
-	var promptLo, promptHi Pt
+	var logoPath string
+	var logoLo, logoHi Pt
 
 	for _, c := range cells {
 		d, lo, hi := traceCell(img, c.x0, c.y0, c.x1, c.y1, *tol, *corn)
@@ -453,7 +408,7 @@ func main() {
   <path d="%s" fill="currentColor" fill-rule="evenodd"/>
 </svg>
 `, int(512*(h+2*pad)/(w+2*pad)), lo.X-pad, lo.Y-pad, w+2*pad, h+2*pad, colour, c.name, c.name, d)
-		must(os.WriteFile(filepath.Join(*out, c.out), []byte(svg), 0644))
+		writeSVG(filepath.Join(*out, c.out), svg)
 
 		// Pixel match: rasterise the emitted path back onto the source grid and
 		// compare ink masks. Anything below ~0.95 means the trace has drifted.
@@ -468,57 +423,70 @@ func main() {
 		}
 		reportMatch(c.name, d, srcMask, c.x0, c.y0, mw, mh)
 
-		if c.name == "prompt" {
-			promptPath, promptLo, promptHi = d, lo, hi
+		if c.name == logo.name {
+			logoPath, logoLo, logoHi = d, lo, hi
 		}
 	}
 
 	// ---- the app icon ---------------------------------------------------
-	// macOS canvas is 1024 with the squircle inset to 96..928. The art is
-	// placed from its INK box rather than a nominal viewBox, then scaled to
-	// cover fillFrac of the tile and centred on the tile's true centre.
+	// The background covers the WHOLE 1024 canvas, square, with no corner
+	// radius of its own. That is not a style choice, it is what macOS 26
+	// requires. Tahoe no longer draws a legacy .icns as authored: it composites
+	// the artwork over a light plate and masks the result to the system's own
+	// squircle. Anywhere the art is transparent, the plate shows through — so
+	// the previous drawing (a 96..928 squircle floating on a transparent 1024
+	// canvas) came back as a thick white ring around a shrunken tile. Painting
+	// to the edges leaves the plate nowhere to show, and the system mask
+	// supplies the rounding that used to be baked in.
 	//
-	// fillFrac is high for a thin-line mark on purpose: art size is the only
-	// lever on apparent stroke weight in a verbatim trace, since thickening the
-	// strokes would mean offsetting every outline and the result would no
-	// longer be the reference artwork.
+	// The art is placed from its INK box rather than a nominal viewBox, then
+	// scaled to span fillFrac of the canvas and centred. fillFrac is measured
+	// against the full canvas now rather than the old inset tile, and it is
+	// generous for a thin-line mark on purpose: art size is the only lever on
+	// apparent stroke weight in a verbatim trace, since thickening the strokes
+	// would mean offsetting every outline and the result would no longer be the
+	// reference artwork. It still has to clear the system mask's corners, which
+	// bite further in than the old baked radius did — 0.62 was picked by
+	// rendering the icon through Icon Services and looking at it, not derived.
 	const (
 		canvas   = 1024.0
-		tileFrom = 96.0
-		tileTo   = 928.0
-		fillFrac = 0.78
+		fillFrac = 0.62
 	)
-	inkW, inkH := promptHi.X-promptLo.X, promptHi.Y-promptLo.Y
-	scale := (tileTo - tileFrom) * fillFrac / math.Max(inkW, inkH)
-	tx := canvas/2 - (promptLo.X+promptHi.X)/2*scale
-	ty := canvas/2 - (promptLo.Y+promptHi.Y)/2*scale
+	inkW, inkH := logoHi.X-logoLo.X, logoHi.Y-logoLo.Y
+	scale := canvas * fillFrac / math.Max(inkW, inkH)
+	tx := canvas/2 - (logoLo.X+logoHi.X)/2*scale
+	ty := canvas/2 - (logoLo.Y+logoHi.Y)/2*scale
 
 	icon := fmt.Sprintf(`<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024"
      viewBox="0 0 1024 1024" role="img" aria-label="cats">
   <title>cats</title>
-  <!-- cats app mark: mark 10 of the reference exploration, traced from the
-       artwork itself and drawn in a dimmed brand green on the app's dark
-       squircle tile. Regenerate with scripts/icon/gen-trace; the path data is
-       machine-produced and should not be hand-edited.
+  <!-- cats app mark: mark 06 of the reference exploration, traced from the
+       artwork itself and drawn in the app theme's accent on that theme's two
+       darkest surfaces. Regenerate with scripts/icon/gen-trace; the path data
+       is machine-produced and should not be hand-edited.
 
-       Sizing follows the macOS slot: 1024 canvas, squircle inset to 96..928,
-       and the art scaled from its ink box to span %d%% of that tile, centred,
-       so it clears the corner radius at every .icns slice. The mark is a
-       thin-line design drawn deliberately large — art size is the only lever
-       on apparent stroke weight in a verbatim trace. -->
+       The tile is deliberately a full-bleed SQUARE with no corner radius.
+       macOS 26 masks app icons to its own shape and paints a light plate
+       behind them, so a baked-in squircle on a transparent canvas renders as a
+       white ring around a shrunken icon. Do not re-inset this rect.
+
+       The art spans %d%% of the canvas from its ink box, centred, which keeps
+       the ears and chin clear of the system mask's corners. It is a thin-line
+       design drawn large — art size is the only lever on apparent stroke
+       weight in a verbatim trace. -->
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#2a3346"/>
-      <stop offset="1" stop-color="#12151c"/>
+      <stop offset="0" stop-color="%s"/>
+      <stop offset="1" stop-color="%s"/>
     </linearGradient>
   </defs>
-  <rect x="96" y="96" width="832" height="832" rx="188" fill="url(#bg)"/>
+  <rect x="0" y="0" width="1024" height="1024" fill="url(#bg)"/>
   <g transform="translate(%.2f %.2f) scale(%.5f)">
     <path d="%s" fill="%s" fill-rule="evenodd"/>
   </g>
 </svg>
-`, int(fillFrac*100), tx, ty, scale, promptPath, brandGreen)
-	must(os.WriteFile(filepath.Join(*out, "cats-icon.svg"), []byte(icon), 0644))
+`, int(fillFrac*100), tileTop, tileBottom, tx, ty, scale, logoPath, themeAccent)
+	writeSVG(filepath.Join(*out, "cats-icon.svg"), icon)
 
 	// ---- the small in-app glyph -----------------------------------------
 	// The sidebar mark in cmd/catway/web/index.html is this path, inlined. It
@@ -529,26 +497,65 @@ func main() {
 	// The viewBox is left tight around the ink, which is what the sidebar CSS
 	// derives its baseline nudge from — see the note beside #brand .mark. Move
 	// the crop and that nudge has to be re-derived.
-	uiPath, uiLo, uiHi := traceCell(img, 819, 282, 951, 417, *uiTol, *corn)
+	uiPath, uiLo, uiHi := traceCell(img, logo.x0, logo.y0, logo.x1, logo.y1, *uiTol, *corn)
 	const uiPad = 2.0
+	uiOut := logo.name + "-compact.svg"
 	glyph := fmt.Sprintf(`<svg xmlns="http://www.w3.org/2000/svg"
      viewBox="%.2f %.2f %.2f %.2f" role="img" aria-label="cats">
   <title>cats</title>
-  <!-- The sidebar glyph: mark 10 traced from the reference and simplified for
-       small sizes. Generated by scripts/icon/gen-trace; if it is regenerated,
-       the copy inlined in cmd/catway/web/index.html must be replaced too. -->
+  <!-- The sidebar glyph: mark 06 traced from the reference and simplified for
+       small sizes. It fills with currentColor so the sidebar's accent custom
+       property reaches it and it follows a live theme switch. Generated by
+       scripts/icon/gen-trace; if it is regenerated, the copy inlined in
+       cmd/catway/web/index.html must be replaced too.
+
+       (No double hyphen may appear in this comment or any other emitted here:
+       it terminates an XML comment early and every renderer rejects the file.) -->
   <path d="%s" fill="currentColor" fill-rule="evenodd"/>
 </svg>
 `, uiLo.X-uiPad, uiLo.Y-uiPad, uiHi.X-uiLo.X+2*uiPad, uiHi.Y-uiLo.Y+2*uiPad, uiPath)
-	must(os.WriteFile(filepath.Join(*out, "prompt-compact.svg"), []byte(glyph), 0644))
+	writeSVG(filepath.Join(*out, uiOut), glyph)
 
 	// ---- the bold reduction for the 16 and 32px icon slices --------------
-	// Drawn larger in its tile than the full mark: with the interior detail
-	// gone there is no crowding, and at these sizes every extra pixel of art
-	// is another pixel of stroke.
-	smallD, sLo, sHi := smallMark(traceLoops(img, 819, 282, 951, 417, 1.4), *smallK, *corn)
-	const smallFill = 0.82
-	sScale := (tileTo - tileFrom) * smallFill / math.Max(sHi.X-sLo.X, sHi.Y-sLo.Y)
+	// The verbatim mark is a hairline drawing: its lines are ribbons about 3
+	// source units wide on a 131-unit head, or 2.2%. At 16px that lands near a
+	// quarter of a pixel and renders as a smudge rather than as a cat, so the
+	// small slices get their own drawing.
+	//
+	// It is the SAME drawing, given weight by stroking it in its own colour.
+	// Every loop the tracer emits is a closed ribbon, so a stroke of width w
+	// grows each one by w/2 on both edges — a true, uniform offset. That is
+	// worth spelling out because the obvious cheap alternative (fill between
+	// the outline and a copy shrunk toward its centroid) is not uniform: it
+	// makes weight proportional to distance from the centre, so ears come out
+	// heavier than cheeks. Stroking costs one attribute and is exact.
+	//
+	// The weight needed is large in relative terms — the default takes a 2.2%
+	// line to nearly 10% of the drawing — because a 16px icon has no room to
+	// negotiate: below about one whole pixel a line is grey, not a line. The
+	// eye slits close up into solid marks at this weight, which is the right
+	// outcome at these sizes.
+	//
+	// Simplified harder than the icon too (-smalltol): under a stroke this
+	// heavy, a tenth of a source pixel of contour detail is invisible.
+	smallLoops := traceLoops(img, logo.x0, logo.y0, logo.x1, logo.y1, *smallTol)
+	var smallD strings.Builder
+	for _, l := range smallLoops {
+		smallD.WriteString(path(toNodes(l, *corn), true) + " ")
+	}
+	sLo, sHi := bboxOf(smallLoops)
+	// Stroke width is set from the drawing's long side so the weight is a
+	// property of the design rather than of whatever crop it came from, and the
+	// box is grown by half of it on every side before fitting — the stroke is
+	// ink, and fitting the unstroked box would push it under the system mask.
+	sw := *smallW * math.Max(sHi.X-sLo.X, sHi.Y-sLo.Y)
+	sLo, sHi = Pt{sLo.X - sw/2, sLo.Y - sw/2}, Pt{sHi.X + sw/2, sHi.Y + sw/2}
+
+	// Drawn larger than the full mark: with the lines this heavy the interior
+	// no longer reads as detail to crowd, and at these sizes every extra pixel
+	// of art is another pixel of stroke.
+	const smallFill = 0.68
+	sScale := canvas * smallFill / math.Max(sHi.X-sLo.X, sHi.Y-sLo.Y)
 	sTx := canvas/2 - (sLo.X+sHi.X)/2*sScale
 	sTy := canvas/2 - (sLo.Y+sHi.Y)/2*sScale
 
@@ -558,29 +565,35 @@ func main() {
   <!-- The small-size app mark, used ONLY for the 16 and 32px .icns slices;
        everything from 64px up uses cats-icon.svg, which is the verbatim trace.
 
-       Same silhouette, thickened. The verbatim head outline is a ribbon about
-       2.65 units wide on a 127-unit head, which at 16px is roughly a fifth of a
-       pixel — it renders as a smudge rather than a cat. Here the outer edge of
-       that outline is kept and a copy shrunk toward its centroid is filled
-       against it even-odd, turning the hairline into a heavy ring. Interior
-       detail is dropped because at 16px it is sub-pixel and only adds mud.
+       Same drawing, given weight by stroking it in its own colour. Each traced
+       loop is a closed ribbon, so a stroke grows it by half the stroke width on
+       both edges — a uniform offset, which scaling a copy toward the centroid
+       is not. The verbatim lines are 2.2%% of the head's width, about a quarter
+       of a pixel at 16px; the stroke takes them to something a pixel grid can
+       actually show.
 
-       Regenerate with scripts/icon/gen-trace; -smallk controls the weight. -->
+       Full-bleed square background for the same reason as cats-icon.svg: macOS
+       26 masks the icon itself and shows a light plate through any transparency.
+
+       Regenerate with scripts/icon/gen-trace; -smallw controls the weight. -->
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#2a3346"/>
-      <stop offset="1" stop-color="#12151c"/>
+      <stop offset="0" stop-color="%s"/>
+      <stop offset="1" stop-color="%s"/>
     </linearGradient>
   </defs>
-  <rect x="96" y="96" width="832" height="832" rx="188" fill="url(#bg)"/>
+  <rect x="0" y="0" width="1024" height="1024" fill="url(#bg)"/>
   <g transform="translate(%.2f %.2f) scale(%.5f)">
-    <path d="%s" fill="%s" fill-rule="evenodd"/>
+    <path d="%s" fill="%s" fill-rule="evenodd"
+          stroke="%s" stroke-width="%.3f" stroke-linejoin="round" stroke-linecap="round"/>
   </g>
 </svg>
-`, sTx, sTy, sScale, smallD, brandGreen)
-	must(os.WriteFile(filepath.Join(*out, "cats-icon-small.svg"), []byte(small), 0644))
+`, tileTop, tileBottom, sTx, sTy, sScale, strings.TrimSpace(smallD.String()), themeAccent, themeAccent, sw)
+	writeSVG(filepath.Join(*out, "cats-icon-small.svg"), small)
 
-	fmt.Printf("wrote rest.svg trace.svg prompt.svg prompt-compact.svg cats-icon.svg to %s\n", *out)
+	fmt.Printf("wrote rest.svg trace.svg prompt.svg %s cats-icon.svg cats-icon-small.svg to %s\n", uiOut, *out)
 	fmt.Printf("glyph viewBox %.2f %.2f %.2f %.2f, path %d bytes\n",
 		uiLo.X-uiPad, uiLo.Y-uiPad, uiHi.X-uiLo.X+2*uiPad, uiHi.Y-uiLo.Y+2*uiPad, len(uiPath))
+	fmt.Printf("small mark: %d loops, stroke %.2f source units (%.1f%% of long side)\n",
+		len(smallLoops), sw, *smallW*100)
 }
