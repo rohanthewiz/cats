@@ -320,6 +320,23 @@ func readUsage(claude *usageEstimator, copilot *copilotEstimator, cpu *cpuSample
 // actually stops work: a week runs out once and is planned around, while the
 // 5-hour window is what a long afternoon walks into, and it is the number a
 // folded reader is folding *toward* rather than away from.
+// How close to a rollover each of Claude's windows starts to matter, sent to the
+// browser as UsageWindow.SoonSecs and shown there as a warning-coloured
+// countdown. Both are roughly "one working stretch left", which is the span in
+// which the answer changes a decision — whatever is left in the window either
+// gets spent now or waits for the reset, and a long task started inside it
+// straddles the boundary.
+//
+// They are not the same fraction of their windows and should not be: a tenth of
+// the five-hour window is half an hour, while a tenth of a week is most of a day
+// and would leave the row shouting through every Friday. Two hours is where a
+// week becomes something you can still act on and not yet something you can
+// ignore.
+const (
+	usageSoonFiveHour = 30 * time.Minute
+	usageSoonWeek     = 2 * time.Hour
+)
+
 func claudeUsageGroup(est *usageEstimator, back *usageBackoff, now time.Time) browserproto.UsageGroup {
 	g := browserproto.UsageGroup{ID: "claude", Name: "Claude"}
 	// Inside a backoff window the endpoint is not asked at all, and the note
@@ -348,7 +365,9 @@ func claudeUsageGroup(est *usageEstimator, back *usageBackoff, now time.Time) br
 	}
 	back.reset()
 	report.fiveHour.Name, report.fiveHour.Headline = "5 hr", true
+	report.fiveHour.SoonSecs = int(usageSoonFiveHour / time.Second)
 	report.weekly.Name = "Week"
+	report.weekly.SoonSecs = int(usageSoonWeek / time.Second)
 	g.Windows = []browserproto.UsageWindow{report.fiveHour, report.weekly}
 	// A model with its own weekly allowance on top of the all-models week —
 	// Fable, say. Only the account read knows about it, and only on plans
@@ -358,6 +377,9 @@ func claudeUsageGroup(est *usageEstimator, back *usageBackoff, now time.Time) br
 	// given.
 	if report.weeklyModelName != "" {
 		report.weeklyModel.Name = "Week · " + report.weeklyModelName
+		// A week is a week whichever allowance it meters, so it takes the same
+		// horizon as the all-models row above it.
+		report.weeklyModel.SoonSecs = int(usageSoonWeek / time.Second)
 		g.Windows = append(g.Windows, report.weeklyModel)
 	}
 	return g

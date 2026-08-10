@@ -176,6 +176,16 @@
      which is the same fact one line down when the group is unfolded. */
   #usage-list li.ugrp .gsum .gleft { color:var(--muted);
     font-size:calc(9px * var(--sb-scale)); opacity:.8; }
+  /* ...with one exception, a window near its rollover — half an hour out on the
+     5-hour, two on a week, each row carrying its own horizon (see usageSoonMs).
+     That is the one time the clock stops being background: whatever is left in
+     the window has to be spent, or planned around, before it rolls. Amber and
+     not red, and only ever amber — this axis is "how long", the .high/.crit
+     axis beside it is "how much", and two things shouting the same color would
+     make it impossible to tell which one is speaking. Specificity carries it
+     over the muted rule above and over .high/.crit, both of which paint .gsum
+     rather than this span. */
+  #usage-list li.ugrp .gsum .gleft.soon { color:var(--warn); opacity:1; }
   #usage-list li.ugrp .car { font-size:calc(10px * var(--sb-scale)); }
   #usage-list .urow { display:flex; align-items:baseline; gap:6px; }
   /* Body weight and body color: with a genuinely bold heading now above them,
@@ -188,6 +198,12 @@
   #usage-list li.high .uval { color:var(--warn); }
   #usage-list li.crit .uval { color:var(--err); }
   #usage-list .ureset { color:var(--muted); font-size:calc(9px * var(--sb-scale)); opacity:.8; }
+  /* The unfolded half of the same warning: a countdown inside its row's horizon
+     lifts out of the muted register. It sits left of .uval, which carries
+     the spent-color, so a row can legitimately show an amber clock beside a
+     calm percentage — that pairing ("barely used, nearly over") is exactly the
+     one the color exists to catch. */
+  #usage-list .ureset.soon { color:var(--warn); opacity:1; }
   #usage-list .umeter { margin-top:3px; height:4px; border-radius:2px; background:var(--panel2);
                         overflow:hidden; }
   #usage-list .umeter > i { display:block; height:100%; width:0; background:var(--accent);
@@ -2455,6 +2471,47 @@
     return d + "d";
   }
 
+  // The chip's exact form, named once so the draw and the tick cannot drift into
+  // rendering it two different ways.
+  function fmtLeftParen(ms) { return " (" + fmtLeft(ms) + ")"; }
+
+  // How close to a rollover counts as close, when the row has not said.
+  //
+  // A row that knows its own length sends soon_secs (UsageWindow.SoonSecs) and
+  // that wins — CLAUDE's 5-hour window asks for half an hour, its weeks for two,
+  // which is the same "one working stretch left" measured against very different
+  // spans. Half an hour is the fallback because it is the tighter of the two: a
+  // row whose length is unknown is likelier to be short, and warning late on a
+  // long window is a smaller error than warning through the last day of one.
+  //
+  // Either way the countdown is keyed off resets_at, like the text it colors, so
+  // it lands on exactly the rows that have a rollover to be near. The HOST rows
+  // have no such instant and cannot reach it at all.
+  const USAGE_SOON_MS = 30 * 60 * 1000;
+
+  function usageSoonMs(w) {
+    const secs = Number(w && w.soon_secs);
+    return secs > 0 ? secs * 1000 : USAGE_SOON_MS;
+  }
+
+  // Write a countdown into its span and color it for how near the rollover is.
+  //
+  // One function for both the row and the folded chip, and for both the draw and
+  // the 10s tick, because the class has to be re-decided every time the text is:
+  // a row drawn with 35 minutes left crosses its threshold with no push behind
+  // it, and a label that only took its color at draw time would sit muted
+  // through the whole stretch it is meant to mark. The threshold rides on the
+  // element for that reason — the tick walks the DOM and has no window object to
+  // ask a second time.
+  function setUsageLeft(el, ms, soonMs, fmt) {
+    el.dataset.soon = String(soonMs);
+    el.textContent = fmt(ms);
+    // <= rather than <: a window at or past its instant (fmtUntil's "resetting")
+    // is the extreme of the same state, not a return to calm — and it stays
+    // stamped that way until the next reading brings a fresh resets_at.
+    el.classList.toggle("soon", ms <= soonMs);
+  }
+
   // renderUsage takes a new reading: it stores the message, settles the refresh
   // control and the age label, then draws. Folding a group re-draws WITHOUT
   // coming through here — a click is not a reading, and running usageIdle() on
@@ -2583,7 +2640,10 @@
           const left = document.createElement("span");
           left.className = "gleft";
           left.dataset.at = String(at); // absolute, so the tick can recompute it
-          left.textContent = " (" + fmtLeft(at - Date.now()) + ")";
+          // The chip quotes one row, so it takes that row's horizon too: folded,
+          // CLAUDE is its 5-hour window and warns on the half hour, not on the
+          // week's two.
+          setUsageLeft(left, at - Date.now(), usageSoonMs(head), fmtLeftParen);
           s.appendChild(left);
         }
         // No title of its own: the chip sits inside the heading, and a tooltip
@@ -2713,7 +2773,7 @@
     if (!Number.isNaN(at)) {
       const r = document.createElement("span"); r.className = "ureset";
       r.dataset.at = String(at); // absolute: the push won't come again until the number moves
-      r.textContent = fmtUntil(at - Date.now());
+      setUsageLeft(r, at - Date.now(), usageSoonMs(w), fmtUntil);
       row.appendChild(r);
     } else if (known && w.detail) {
       // A row with both a percentage and a figure — host memory's "16.7G/24.0G"
@@ -2803,14 +2863,16 @@
     // figures, which are facts rather than countdowns and have no instant to
     // recompute from. [data-at] is what separates the two.
     for (const el of usageListEl.querySelectorAll(".ureset[data-at]")) {
-      el.textContent = fmtUntil(Number(el.dataset.at) - Date.now());
+      // data-soon was stamped at draw from the row's own horizon; re-reading it
+      // keeps the tick free of any knowledge of which row it is rewriting.
+      setUsageLeft(el, Number(el.dataset.at) - Date.now(), Number(el.dataset.soon), fmtUntil);
     }
     // The folded chip's half of the same countdown. It is only in the DOM while
     // the group is folded, so the query is usually empty — and when it is not,
     // this is the one number on screen for that provider, which makes it the
     // last one that should be allowed to age.
     for (const el of usageListEl.querySelectorAll(".gleft[data-at]")) {
-      el.textContent = " (" + fmtLeft(Number(el.dataset.at) - Date.now()) + ")";
+      setUsageLeft(el, Number(el.dataset.at) - Date.now(), Number(el.dataset.soon), fmtLeftParen);
     }
   }, 10000);
 
