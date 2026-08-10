@@ -63,18 +63,38 @@
     /* Chat column width. 0 keeps the grid math identical to the pre-chat
        layout when the panel is closed; body.chat-open widens it. */
     --chat-w:0px;
+    /* Splitter column width. Its own variable because the folded sidebar widens
+       it (body.sb-hidden) to carry a visible reveal handle, and #banner has to
+       clear both tracks to sit flush against the terminals. */
+    --gutter-w:5px;
   }
   body.chat-open { --chat-w:340px; }
   html,body { margin:0; height:100%; background:var(--bg); color:var(--fg);
     font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; overflow:hidden; }
-  #app { position:fixed; inset:0; display:grid; grid-template-columns:var(--sidebar-w) 5px 1fr var(--chat-w); }
+  #app { position:fixed; inset:0; display:grid; grid-template-columns:var(--sidebar-w) var(--gutter-w) 1fr var(--chat-w); }
+  /* Each column is nailed to its child by hand rather than left to auto-placement.
+     Auto-placement fills tracks in DOM order from the grid items that exist, so a
+     child that goes display:none (body.sb-hidden #sidebar) does not leave a hole —
+     it drops out of the sequence and every later child slides one track left. That
+     put the splitter in the 0px sidebar track (nothing left to click to reveal) and
+     #main in the 5px gutter track (the terminals squeezed to a sliver), which is
+     unrecoverable without the keyboard. Explicit placement is immune: a hidden
+     child's track simply stays empty. */
+  #sidebar  { grid-column:1; }
+  #splitter { grid-column:2; }
+  #main     { grid-column:3; }
+  #chat     { grid-column:4; }
 
   /* ---- Splitter ----
      A five-pixel gutter between the sidebar and the terminals. It sits in its
      own grid column rather than straddling the border, so dragging it never
      lands on a pane's edge, and it keeps the sidebar's own hairline as the
-     visible seam until you actually reach for it. */
-  #splitter { cursor:col-resize; background:transparent; }
+     visible seam until you actually reach for it.
+
+     Laid out as a centering flex box purely so the folded state's reveal handle
+     (#splitter::after) can sit at the vertical middle without measuring anything;
+     unfolded, the pseudo-element has no content and this costs nothing. */
+  #splitter { cursor:col-resize; background:transparent; display:flex; align-items:center; }
   #splitter:hover, #splitter.drag { background:var(--accent-dim); }
   /* While dragging, the pointer is captured but the panes below still hand out
      text cursors and selections; this shuts both off for the duration. */
@@ -88,23 +108,50 @@
      untouched for the reveal. #sidebar itself leaves the flow so its content
      cannot paint through a zero-width track.
 
-     Nothing new is added to reveal it: the splitter gutter is already a
-     full-height strip in its own grid column, and it costs zero vertical space —
-     a reveal handle along the top would take a terminal row away from every pane
-     in the window, permanently, for a control used twice a day. Folded, the
-     gutter stops being invisible (it is the only thing left to aim at) and takes
-     a plain click as "bring it back". */
-  body.sb-hidden { --sidebar-w:0px; }
+     The reveal handle rides in the splitter's own grid column, which is the one
+     place in the window that can carry a visible control for *zero* vertical
+     cost: it is already a full-height strip, so a tab drawn in it steals no
+     terminal row. A handle along the top of #main would have taken one row from
+     every pane, permanently, for a control used twice a day; a floating overlay
+     would have sat on top of terminal text and swallowed clicks and selections
+     near the left edge. This does neither — it is in the layout, and the layout
+     already had room for it in the one axis that was free.
+
+     Folded, the gutter widens from 5px to 14px. That is the whole price, it is
+     horizontal, and it is paid only while folded — the sidebar it replaces was
+     ~290px, so the terminals still gain nearly all of the column back. */
+  body.sb-hidden { --sidebar-w:0px; --gutter-w:14px; }
   body.sb-hidden #sidebar { display:none; }
-  body.sb-hidden #splitter { background:var(--line); }
-  /* Folded, the gutter is also the only surface an agent's state can reach, so
+  /* The strip itself stays unpainted so the handle reads as one distinct object
+     rather than as a lit-up edge of the window; the full 14px column remains the
+     click target regardless of where in it the pointer lands. */
+  body.sb-hidden #splitter { background:transparent; cursor:pointer; }
+  /* The handle: a tab flush with the window's left edge, rounded on the side it
+     opens toward, with a chevron pointing the way the column will come back.
+     46px tall is enough to read as a grab handle at a glance and to hit without
+     aiming, and it is centered, so it never collides with the banner (which
+     overlaps the top of this column when it is up). */
+  body.sb-hidden #splitter::after {
+    content:"\203A"; width:100%; height:46px; box-sizing:border-box;
+    display:flex; align-items:center; justify-content:center;
+    background:var(--panel2); color:var(--fg-soft);
+    border:1px solid var(--line); border-left:none; border-radius:0 5px 5px 0;
+    font-size:14px; line-height:1; }
+  /* Folded, the handle is also the only surface an agent's state can reach, so
      it carries the strongest one waiting (paintSplitterAttention). This covers
      the one case the auto-reveal cannot: the column was folded again *while* an
      agent was already blocked or already done, so no state change is coming to
-     re-open it. Ordered ahead of :hover so pointing at the gutter still answers. */
-  body.sb-hidden #splitter.attn-done { background:var(--done); }
-  body.sb-hidden #splitter.attn-blocked { background:var(--err); }
-  body.sb-hidden #splitter:hover, body.sb-hidden #splitter.drag { background:var(--accent); }
+     re-open it. The state colors the tab's border and chevron rather than
+     flooding the strip — a 14px full-height bar of --err is a fire alarm for
+     what is a "someone is waiting on you" hint, and coloring the object the eye
+     already goes to says the same thing without repainting the window's edge. */
+  body.sb-hidden #splitter.attn-done::after {
+    border-color:var(--done); color:var(--done); }
+  body.sb-hidden #splitter.attn-blocked::after {
+    border-color:var(--err); color:var(--err); }
+  /* Last, so pointing at the handle still answers under either attention state. */
+  body.sb-hidden #splitter:hover::after, body.sb-hidden #splitter.drag::after {
+    background:var(--accent-dim); border-color:var(--accent); color:var(--fg-bright); }
 
   /* ---- Sidebar ---- */
   #sidebar { background:var(--panel); border-right:1px solid var(--line);
@@ -4735,7 +4782,7 @@
         ["pane / tab / workspace menu", ["right-click"]],
         ["resize splits", ["drag the border"]],
         ["hide the sidebar", ["drag its gutter to the left edge"]],
-        ["show it again", ["click the gutter at the left edge"]],
+        ["show it again", ["click the handle at the left edge"]],
         ["swap panes", ["drag a pane header or sidebar row onto a pane"]],
         ["reorder tabs / workspaces", ["drag"]],
         ["rename pane / tab / workspace", ["double-click its title"]],
