@@ -172,8 +172,40 @@
        overflow-y:auto scrolling. flex:0 0 auto puts the floor back explicitly,
        which is what we wanted from `auto` anyway. Every other #sidebar child
        leaves overflow visible, so they keep the automatic floor for free. */
-    flex:0 0 auto; }
+    flex:0 0 auto;
+    /* Anchor for the fold button below, plus the gutter it sits in. The right
+       pad is reserved rather than left to chance: the wordmark and its build
+       badge are a nowrap run that ellipsises, and without the reservation a
+       narrow column would run that text under the button instead of clipping
+       short of it. The two lengths are coupled — see #sb-fold. */
+    position:relative; padding-right:calc(10px + 18px * var(--sb-scale)); }
   #brand small { color:var(--muted); font-weight:400; margin-left:6px; }
+  /* The fold button: the pointer's way to put the column away, paired with the
+     reveal handle that takes its place (body.sb-hidden #splitter::after). It is
+     the mirrored glyph of that handle — '‹' here, '›' there — so the pair reads
+     as one control that moves with the column rather than as two unrelated
+     buttons.
+
+     Absolutely positioned rather than laid out. #brand is a nowrap inline run
+     (mark, wordmark, build badge) and the note above it explains why that has
+     to stay inline; a flex row would have re-spaced the badge. Taking the
+     button out of flow leaves that run exactly as it was and costs the column
+     no height — it sits in the padding the rule above reserves for it.
+
+     No tab stop. The window-level keydown handler routes the keyboard to the
+     focused pane and preventDefaults nearly everything, so a focused button
+     could never be activated by Enter or Space — leaving it tab-focusable would
+     build a stop that swallows focus and does nothing. ⌘B is the keyboard path,
+     and the title says so. */
+  #sb-fold { position:absolute; top:50%; right:8px; transform:translateY(-50%);
+    width:calc(18px * var(--sb-scale)); height:calc(20px * var(--sb-scale));
+    display:flex; align-items:center; justify-content:center; padding:0;
+    background:none; border:1px solid transparent; border-radius:4px;
+    color:var(--muted); font-family:inherit; font-size:calc(14px * var(--sb-scale));
+    line-height:1; cursor:pointer; }
+  /* Lit the same way the reveal handle lights on hover, for the same reason:
+     the two are one control, so they answer the pointer identically. */
+  #sb-fold:hover { background:var(--accent-dim); border-color:var(--accent); color:var(--fg-bright); }
   /* The mark sits inline and rides the text baseline rather than turning
      #brand into a flex row: the build badge appended below is a sibling of the
      wordmark, and a flex context would have re-spaced it. The nudge scales
@@ -848,7 +880,14 @@
       The viewBox is cropped tight to the ink; the baseline nudge in the CSS
       above is derived from that crop, so the two move together.
     --><svg class="mark" viewBox="36.47 282.34 130.77 133.93" fill="currentColor" fill-rule="evenodd"
-         aria-hidden="true"><path d="M48.00,284.73 C46.65,285.43 42.59,288.53 41.00,291.35 C39.23,294.48 38.58,299.47 38.47,303.00 C38.38,305.91 38.85,307.79 39.71,311.00 C41.12,316.23 46.00,323.69 47.52,331.00 C49.23,339.20 47.42,351.25 48.58,358.00 C49.31,362.20 49.63,364.35 51.70,368.00 C55.02,373.85 65.01,381.56 69.58,388.00 C73.24,393.15 75.19,399.46 77.88,403.00 C79.62,405.29 80.78,406.43 83.00,408.04 C86.04,410.25 90.64,413.22 95.00,414.27 C99.60,415.37 106.01,415.00 110.00,414.17 C112.84,413.58 114.69,412.58 117.00,411.18 C119.69,409.56 122.46,407.64 125.00,404.66 C128.48,400.60 130.81,393.15 134.74,388.00 C138.77,382.71 145.81,377.43 149.00,373.42 C150.95,370.96 151.98,369.47 153.11,367.00 C154.43,364.11 155.45,361.14 156.09,357.00 C157.09,350.59 155.02,340.03 156.56,332.00 C158.09,324.04 164.20,316.08 165.24,309.00 C166.07,303.28 165.52,296.91 164.10,293.00 C163.13,290.34 161.62,288.45 159.76,287.00 C157.92,285.57 155.36,284.40 153.00,284.34 C150.46,284.27 148.10,285.62 145.03,287.00 C140.32,289.12 134.38,295.77 128.00,296.84 C120.88,298.02 110.48,292.55 104.00,292.13 C99.65,291.85 96.98,292.21 93.00,292.84 C88.13,293.61 82.61,297.60 77.00,296.89 C70.09,296.03 60.15,286.46 55.00,284.96 C52.48,284.22 50.16,284.46 49.00,284.53 C48.52,284.56 48.44,284.51 48.00,284.73 Z M48.00,287.94 C46.88,288.84 43.86,291.47 42.73,294.00 C41.40,296.97 40.87,300.66 41.33,305.00 C42.03,311.71 48.53,321.63 50.08,330.00 C51.55,337.97 49.86,347.41 50.75,354.00 C51.39,358.73 52.11,362.53 53.70,366.00 C55.12,369.09 56.99,371.14 59.41,374.00 C62.67,377.86 68.87,382.27 72.00,386.63 C74.65,390.31 75.39,394.67 77.66,398.00 C79.77,401.08 81.94,403.79 85.00,406.05 C88.52,408.66 93.97,411.33 98.00,412.21 C101.19,412.90 104.13,412.60 107.00,412.07 C109.79,411.56 112.31,410.76 115.00,409.16 C118.43,407.13 122.59,403.62 125.41,400.00 C128.29,396.30 128.93,391.43 132.00,387.12 C135.81,381.77 144.20,375.45 147.46,371.00 C149.42,368.34 150.32,366.62 151.30,364.00 C152.42,361.03 153.05,358.01 153.52,354.00 C154.19,348.12 152.46,339.67 153.76,332.00 C155.27,323.12 162.78,311.43 163.17,304.00 C163.42,299.21 161.94,294.75 160.50,292.00 C159.56,290.22 158.42,289.03 157.00,288.24 C155.59,287.46 154.18,286.93 152.00,287.26 C147.17,288.00 135.15,297.87 130.00,299.23 C127.48,299.90 126.17,299.67 124.00,299.35 C121.27,298.96 118.31,297.20 115.00,296.48 C111.10,295.63 107.07,294.80 102.00,294.93 C94.81,295.12 83.89,300.76 76.00,299.43 C68.66,298.18 61.08,290.02 56.00,288.34 C53.18,287.40 50.26,287.17 49.00,287.40 C48.49,287.49 48.42,287.60 48.00,287.94 Z M67.00,337.32 L66.79,339.00 C67.75,339.33 68.81,339.26 69.68,340.00 C70.99,341.11 71.49,344.59 73.00,346.11 C74.39,347.52 76.22,348.30 78.19,349.00 C80.47,349.81 83.40,349.94 86.00,350.41 L88.00,356.34 C88.44,355.89 89.07,355.66 89.32,355.00 C89.73,353.92 89.51,351.81 89.04,350.00 C88.41,347.59 87.07,344.02 85.18,342.00 C83.35,340.06 80.56,338.81 78.00,337.97 C75.43,337.14 71.05,337.09 69.77,337.00 C69.38,336.97 69.31,336.96 69.00,336.98 C68.49,337.02 67.67,337.21 67.00,337.32 Z M115.24,354.00 L117.00,356.35 L118.94,350.00 C122.63,349.11 127.30,349.22 130.00,347.32 C132.37,345.66 133.20,341.26 134.85,340.00 C135.84,339.24 136.86,339.33 137.86,339.00 L137.00,337.20 C134.00,337.37 129.50,337.57 128.00,337.71 C127.50,337.75 127.46,337.71 127.00,337.84 C125.83,338.17 122.61,339.39 121.00,340.53 C119.63,341.51 118.62,342.40 117.74,344.00 C116.45,346.36 116.07,350.67 115.24,354.00 Z M73.00,339.62 C73.52,341.08 73.59,342.88 74.55,344.00 C75.55,345.16 77.36,345.81 79.00,346.37 C80.81,346.99 83.00,347.07 85.00,347.41 C84.71,346.61 84.69,345.79 84.13,345.00 C83.32,343.86 81.60,342.47 80.00,341.63 C78.26,340.72 75.16,340.24 74.00,339.90 C73.53,339.77 73.33,339.71 73.00,339.62 Z M119.51,346.00 L120.00,347.48 C122.67,346.80 126.01,346.84 128.00,345.45 C129.78,344.21 130.48,341.82 131.72,340.00 C131.48,339.90 131.37,339.71 131.00,339.70 C129.77,339.65 125.01,341.09 123.00,342.36 C121.45,343.34 120.68,344.79 119.51,346.00 Z"/></svg>Cats Mux</div>
+         aria-hidden="true"><path d="M48.00,284.73 C46.65,285.43 42.59,288.53 41.00,291.35 C39.23,294.48 38.58,299.47 38.47,303.00 C38.38,305.91 38.85,307.79 39.71,311.00 C41.12,316.23 46.00,323.69 47.52,331.00 C49.23,339.20 47.42,351.25 48.58,358.00 C49.31,362.20 49.63,364.35 51.70,368.00 C55.02,373.85 65.01,381.56 69.58,388.00 C73.24,393.15 75.19,399.46 77.88,403.00 C79.62,405.29 80.78,406.43 83.00,408.04 C86.04,410.25 90.64,413.22 95.00,414.27 C99.60,415.37 106.01,415.00 110.00,414.17 C112.84,413.58 114.69,412.58 117.00,411.18 C119.69,409.56 122.46,407.64 125.00,404.66 C128.48,400.60 130.81,393.15 134.74,388.00 C138.77,382.71 145.81,377.43 149.00,373.42 C150.95,370.96 151.98,369.47 153.11,367.00 C154.43,364.11 155.45,361.14 156.09,357.00 C157.09,350.59 155.02,340.03 156.56,332.00 C158.09,324.04 164.20,316.08 165.24,309.00 C166.07,303.28 165.52,296.91 164.10,293.00 C163.13,290.34 161.62,288.45 159.76,287.00 C157.92,285.57 155.36,284.40 153.00,284.34 C150.46,284.27 148.10,285.62 145.03,287.00 C140.32,289.12 134.38,295.77 128.00,296.84 C120.88,298.02 110.48,292.55 104.00,292.13 C99.65,291.85 96.98,292.21 93.00,292.84 C88.13,293.61 82.61,297.60 77.00,296.89 C70.09,296.03 60.15,286.46 55.00,284.96 C52.48,284.22 50.16,284.46 49.00,284.53 C48.52,284.56 48.44,284.51 48.00,284.73 Z M48.00,287.94 C46.88,288.84 43.86,291.47 42.73,294.00 C41.40,296.97 40.87,300.66 41.33,305.00 C42.03,311.71 48.53,321.63 50.08,330.00 C51.55,337.97 49.86,347.41 50.75,354.00 C51.39,358.73 52.11,362.53 53.70,366.00 C55.12,369.09 56.99,371.14 59.41,374.00 C62.67,377.86 68.87,382.27 72.00,386.63 C74.65,390.31 75.39,394.67 77.66,398.00 C79.77,401.08 81.94,403.79 85.00,406.05 C88.52,408.66 93.97,411.33 98.00,412.21 C101.19,412.90 104.13,412.60 107.00,412.07 C109.79,411.56 112.31,410.76 115.00,409.16 C118.43,407.13 122.59,403.62 125.41,400.00 C128.29,396.30 128.93,391.43 132.00,387.12 C135.81,381.77 144.20,375.45 147.46,371.00 C149.42,368.34 150.32,366.62 151.30,364.00 C152.42,361.03 153.05,358.01 153.52,354.00 C154.19,348.12 152.46,339.67 153.76,332.00 C155.27,323.12 162.78,311.43 163.17,304.00 C163.42,299.21 161.94,294.75 160.50,292.00 C159.56,290.22 158.42,289.03 157.00,288.24 C155.59,287.46 154.18,286.93 152.00,287.26 C147.17,288.00 135.15,297.87 130.00,299.23 C127.48,299.90 126.17,299.67 124.00,299.35 C121.27,298.96 118.31,297.20 115.00,296.48 C111.10,295.63 107.07,294.80 102.00,294.93 C94.81,295.12 83.89,300.76 76.00,299.43 C68.66,298.18 61.08,290.02 56.00,288.34 C53.18,287.40 50.26,287.17 49.00,287.40 C48.49,287.49 48.42,287.60 48.00,287.94 Z M67.00,337.32 L66.79,339.00 C67.75,339.33 68.81,339.26 69.68,340.00 C70.99,341.11 71.49,344.59 73.00,346.11 C74.39,347.52 76.22,348.30 78.19,349.00 C80.47,349.81 83.40,349.94 86.00,350.41 L88.00,356.34 C88.44,355.89 89.07,355.66 89.32,355.00 C89.73,353.92 89.51,351.81 89.04,350.00 C88.41,347.59 87.07,344.02 85.18,342.00 C83.35,340.06 80.56,338.81 78.00,337.97 C75.43,337.14 71.05,337.09 69.77,337.00 C69.38,336.97 69.31,336.96 69.00,336.98 C68.49,337.02 67.67,337.21 67.00,337.32 Z M115.24,354.00 L117.00,356.35 L118.94,350.00 C122.63,349.11 127.30,349.22 130.00,347.32 C132.37,345.66 133.20,341.26 134.85,340.00 C135.84,339.24 136.86,339.33 137.86,339.00 L137.00,337.20 C134.00,337.37 129.50,337.57 128.00,337.71 C127.50,337.75 127.46,337.71 127.00,337.84 C125.83,338.17 122.61,339.39 121.00,340.53 C119.63,341.51 118.62,342.40 117.74,344.00 C116.45,346.36 116.07,350.67 115.24,354.00 Z M73.00,339.62 C73.52,341.08 73.59,342.88 74.55,344.00 C75.55,345.16 77.36,345.81 79.00,346.37 C80.81,346.99 83.00,347.07 85.00,347.41 C84.71,346.61 84.69,345.79 84.13,345.00 C83.32,343.86 81.60,342.47 80.00,341.63 C78.26,340.72 75.16,340.24 74.00,339.90 C73.53,339.77 73.33,339.71 73.00,339.62 Z M119.51,346.00 L120.00,347.48 C122.67,346.80 126.01,346.84 128.00,345.45 C129.78,344.21 130.48,341.82 131.72,340.00 C131.48,339.90 131.37,339.71 131.00,339.70 C129.77,339.65 125.01,341.09 123.00,342.36 C121.45,343.34 120.68,344.79 119.51,346.00 Z"/></svg>Cats Mux<!--
+      Folds the column away; the reveal handle in the gutter brings it back.
+      tabindex="-1" is deliberate — see the CSS note beside #sb-fold. The build
+      badge is appended into #brand after this at runtime, which is why the
+      button being out of flow matters: DOM order stops deciding what shows up
+      where, so the badge still lands right after the wordmark.
+    --><button id="sb-fold" type="button" tabindex="-1"
+        title="hide the sidebar (⌘B)" aria-label="Hide the sidebar">&#x2039;</button></div>
     <section><h2>Usage<span class="hctl" id="usage-hctl"></span></h2><ul id="usage-list"><li class="empty">…</li></ul></section>
     <section><h2>Workspaces<span id="ws-global-todo"></span><span class="hctl" id="ws-hctl"><span class="hcount" id="ws-count"></span></span></h2><ul id="ws-list"></ul></section>
     <section><h2>Panes<span class="hctl" id="pane-hctl"></span></h2><ul id="pane-list"></ul></section>
@@ -5373,6 +5412,18 @@
   }
   try { if (localStorage.getItem(SBH_KEY)) document.body.classList.add("sb-hidden"); } catch (e) { /* shown */ }
   syncSplitterTitle();
+
+  // The fold button in the brand row. One direction only — it lives *in* the
+  // column, so it is gone the moment it has acted, and the reveal handle in the
+  // gutter is what comes back. mousedown is swallowed so the press cannot also
+  // read as the start of a gesture on anything behind it, the same guard the
+  // pane-chrome buttons use (mkBtn).
+  const sbFoldEl = document.getElementById("sb-fold");
+  sbFoldEl.addEventListener("mousedown", (e) => e.stopPropagation());
+  sbFoldEl.addEventListener("click", (e) => {
+    e.stopPropagation(); e.preventDefault();
+    setSidebarHidden(true);
+  });
 
   // A click that only revealed the column must not have its second half land on
   // the width-reset below: the pair would read as one gesture that both restored
