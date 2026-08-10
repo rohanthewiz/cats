@@ -439,6 +439,13 @@ same fallback value in `:root`) in the stylesheet. The canvas-side colors
 (`term-fg/bg`, `sel-fill`, `cm-cursor`, `scroll-thumb*`) are re-read from the
 CSS custom properties by `readThemeVars()` in the page script.
 
+## License
+
+MIT — see [`LICENSE`](LICENSE). Third-party code carried in this repository
+(notably the vendored Ghostty sources under
+[`third_party/libghostty-vt/`](third_party/libghostty-vt/)) keeps its own
+license; see [`NOTICE`](NOTICE) for attributions.
+
 ## History
 
 This codebase replaced the Rust/ratatui cats through a phased migration:

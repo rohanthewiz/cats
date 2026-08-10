@@ -1,6 +1,14 @@
 cats
 Copyright (c) 2026 Rohan Allison
 
+This software is released under the MIT License; the full text is in the
+LICENSE file at the root of this repository.
+
+The vendored sources under third_party/libghostty-vt/ are from Ghostty
+(https://github.com/ghostty-org/ghostty), Copyright (c) 2024 Mitchell
+Hashimoto, Ghostty contributors, used under the MIT License. Their license
+text is in third_party/libghostty-vt/LICENSE.
+
 The cats-todo tool (since moved to its own repository,
 https://github.com/rohanthewiz/cats-todo) is ported from herdr-todo
 (https://github.com/rohanthewiz/herdr-todo), Copyright (c) 2026 Rohan
