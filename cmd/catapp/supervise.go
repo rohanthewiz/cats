@@ -154,17 +154,60 @@ func resolveBinary(name string) (string, error) {
 	return "", fmt.Errorf("cannot find %q next to the launcher or on PATH", name)
 }
 
-// pickPort reserves a free loopback TCP port by binding :0 and reading back the
-// assigned port. There is an inherent race — the port is free now but could be
-// taken before the catway binds — but on loopback for a desktop app that window
-// is negligible, and it avoids colliding with a hardcoded port already in use.
+// The band of loopback ports local mode prefers, in order.
+//
+// The port is not a free choice: the UI is served from http://127.0.0.1:<port>,
+// and a browser scopes localStorage by *origin* — scheme, host AND port. A
+// kernel-assigned ephemeral port (:0) is therefore a brand-new origin on every
+// launch, which handed the webview an empty store each time and silently reset
+// every per-browser preference the page keeps there (sidebar fold state, column
+// width, font size, chat panel). Preferring a fixed port keeps the origin — and
+// with it the store — stable across restarts.
+//
+//	launch 1  ->  127.0.0.1:8422  ─┐
+//	launch 2  ->  127.0.0.1:8422  ─┴─ same origin, same localStorage
+//
+// 8422 rather than the catway's own :8421 default because a hand-launched catway
+// owns that one, and local mode must not fight it for the port. Concurrent
+// launches walk the band in a fixed order, so a second instance lands on 8423
+// every time rather than somewhere new — its preferences persist too.
+const (
+	appPortBase = 8422
+	appPortSpan = 10
+)
+
+// pickPort reserves a free loopback TCP port for the catway, preferring the
+// stable band above so the UI's origin survives a restart (see appPortBase).
+// Falls back to a kernel-assigned ephemeral port when the whole band is taken:
+// preferences are lost in that case, but serving the UI at all matters more.
+//
+// Every branch carries the same inherent race — the port is free now but could
+// be taken before the catway binds it. On loopback for a desktop app that window
+// is negligible, and probing first is what avoids a port already in use.
 func pickPort() (int, error) {
+	for p := appPortBase; p < appPortBase+appPortSpan; p++ {
+		if portFree(p) {
+			return p, nil
+		}
+	}
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return 0, fmt.Errorf("reserve loopback port: %w", err)
 	}
 	defer l.Close()
 	return l.Addr().(*net.TCPAddr).Port, nil
+}
+
+// portFree reports whether the given loopback port can be bound right now. The
+// listener is closed immediately — this is a probe, not a reservation; the
+// catway is what actually binds it a moment later.
+func portFree(port int) bool {
+	l, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
+	if err != nil {
+		return false
+	}
+	_ = l.Close()
+	return true
 }
 
 // socketPath returns a per-user, private unix socket path under $TMPDIR for the
