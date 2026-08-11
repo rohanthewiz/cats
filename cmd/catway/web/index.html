@@ -542,7 +542,13 @@
      label carries a centered floor width. Longer names outgrow it and are unaffected. */
   #tabbar .tab .tname { min-width:2em; text-align:center; }
   #tabbar .tab.active { color:var(--fg-strong); border-bottom-color:var(--accent); }
-  #tabbar .tab .x { color:var(--muted); font-size:10px; }
+  /* 11px keeps the ✕ a step below the 12px label so it still reads as secondary,
+     but 10px was a speck. The target is grown independently of the glyph: stretching to the
+     row's full height and paying the horizontal padding back as negative margin
+     gives a click area of the whole 30px column without moving the tab's width or
+     the 6px gap ahead of it. */
+  #tabbar .tab .x { color:var(--muted); font-size:11px; align-self:stretch;
+    display:flex; align-items:center; padding:0 3px; margin:0 -3px; }
   #tabbar .tab .x:hover { color:var(--err); }
   #tabbar .tab .tmark { font-size:8px; }
   #tabbar .tab.add { color:var(--muted); font-weight:600; padding:0 12px; }
