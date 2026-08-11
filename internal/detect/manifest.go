@@ -147,10 +147,25 @@ func ensureManifests() map[string]*compiledManifest {
 }
 
 // loadManifests builds the store: every embedded manifest, each replaced by its
-// committed remote overlay when one parses and passes validation. A broken
-// remote file falls back to the bundled manifest — never a missing agent.
+// committed remote overlay when one parses, passes validation, and is at least
+// as new as the bundled manifest. A broken remote file falls back to the bundled
+// manifest — never a missing agent.
+//
+// The version comparison matters as much as the parse check. The overlay is a
+// hotfix channel: it exists so a detection rule can be corrected between
+// releases, not so an old file can outrank the binary forever. Without the
+// comparison, a manifest committed months ago permanently shadows a fix shipped
+// in the build — an agent whose on-screen or title vocabulary has since changed
+// then reports the "no rule matched" fallback (idle) no matter what it is doing,
+// and no amount of rebuilding corrects it. Whichever side carries the newer
+// version wins, so both channels can lead.
 func loadManifests(remoteRoot string) map[string]*compiledManifest {
 	m := make(map[string]*compiledManifest)
+	// Parsed versions of the bundled manifests, keyed by agent id, for the
+	// overlay comparison below. An unparseable/absent version leaves the agent
+	// out of the map, which lets any valid overlay win (the pre-version
+	// behaviour).
+	embedded := make(map[string][]uint64)
 	entries, err := manifestFS.ReadDir("manifests")
 	if err != nil {
 		return m
@@ -169,10 +184,15 @@ func loadManifests(remoteRoot string) map[string]*compiledManifest {
 			continue
 		}
 		m[rm.ID] = cm
+		if v, err := parseManifestVersion(rm.Version); err == nil {
+			embedded[rm.ID] = v
+		}
 	}
 	if remoteRoot == "" {
 		return m
 	}
+	// Assigning to existing keys while ranging is defined behaviour (no key is
+	// added here — every id already came from the embedded set).
 	for id := range m {
 		data, err := os.ReadFile(remoteManifestPath(remoteRoot, id))
 		if err != nil {
@@ -182,6 +202,14 @@ func loadManifests(remoteRoot string) map[string]*compiledManifest {
 		if err != nil {
 			log.Printf("detect: ignoring remote manifest for %s: %v", id, err)
 			continue
+		}
+		if base, ok := embedded[id]; ok {
+			rv, err := parseManifestVersion(rm.Version)
+			if err != nil || compareManifestVersions(rv, base) < 0 {
+				log.Printf("detect: bundled manifest for %s (%s) is newer than the cached remote overlay (%s); using the bundled one",
+					id, versionString(base), rm.Version)
+				continue
+			}
 		}
 		cm, err := compileManifest(rm)
 		if err != nil {
