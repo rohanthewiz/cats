@@ -228,17 +228,33 @@
      viewBox maps straight onto the box, so that pad lands as 1.32/133.93 x 16
      = 0.16px under the chin — and the 2.4-unit stroke the tag adds spends 1.2
      of those units growing the chin downward, leaving 0.12 units, i.e. 0.01px.
-     The nudge is therefore zero now: the stroked chin already sits on the
-     baseline. It is spelled out rather than deleted because the number is
+     The geometric nudge is therefore zero: the stroked chin already sits on
+     the baseline. It is spelled out rather than deleted because the number is
      derived, not absent — re-crop the artwork, change the height, or change
      the stroke, and it has to be re-derived.
+
+     What ships is 1.5px *below* that zero, and the difference is optical, not
+     geometric. Sitting the chin exactly on the baseline aligns the mark with
+     where the letters end, but the wordmark is set in caps and figures whose
+     mass fills the whole cap height, while the mark's mass — the eyes and the
+     brow — clusters in its upper half. Matched at the baseline the mark reads
+     as riding high against that block of type. Dropping it a hair re-centers
+     the two masses against each other. The chin then hangs 1.5px under the
+     baseline, which is what overflow:visible above already permits.
+
+     The gap to the wordmark is 9px rather than the 6px it was. The mark is an
+     open outline, so its right edge is a thin curve with air behind it, and it
+     needs more clearance than a solid glyph would to keep from reading as a
+     letter of the word it precedes. Both lengths scale with --sb-scale, like
+     the box itself, so the pairing survives zoom.
 
      overflow:visible is the guard rail on that last point. 1.32 units of pad
      means any stroke past ~2.6 units puts the chin outside the viewBox, and an
      outermost svg clips to its viewport by default — the chin would flatten
      silently. Letting it paint outside costs nothing (the mark is inline with
-     6px of margin and the row has 12px of padding) and turns a silent clip
-     into a harmless overhang.
+     9px of margin and the row has 12px of padding) and turns a silent clip
+     into a harmless overhang. It is also what makes the optical nudge below
+     free: the 1.5px the chin drops is overhang the box no longer clips.
 
      The lowest ink is the chin: mark 06 is a head with no ground line under it,
      so the chin is what sits on the text baseline. (Mark 10, which this
@@ -246,7 +262,8 @@
      if a mark with a bar ever comes back, align the bar, or it hangs below the
      wordmark like a descender.) */
   #brand .mark { width:calc(19px * var(--sb-scale)); height:calc(16px * var(--sb-scale));
-    vertical-align:0; overflow:visible; margin-right:6px; color:var(--accent); }
+    vertical-align:calc(-1.5px * var(--sb-scale)); overflow:visible;
+    margin-right:calc(9px * var(--sb-scale)); color:var(--accent); }
   /* Build badge: the short git hash this catway was built from (trailing '*' =
      built from a modified tree). Its hover card carries the commit subject —
      see initBuildBadge in JS. Mostly it answers "is this install stale?".
