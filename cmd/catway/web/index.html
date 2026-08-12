@@ -226,12 +226,17 @@
      133.93-unit box (the simplification pulls the extreme point in a little,
      which is why it is not a clean 2). With preserveAspectRatio="none" the
      viewBox maps straight onto the box, so that pad lands as 1.32/133.93 x 16
-     = 0.16px under the chin — and the 2.4-unit stroke the tag adds spends 1.2
-     of those units growing the chin downward, leaving 0.12 units, i.e. 0.01px.
-     The geometric nudge is therefore zero: the stroked chin already sits on
-     the baseline. It is spelled out rather than deleted because the number is
-     derived, not absent — re-crop the artwork, change the height, or change
-     the stroke, and it has to be re-derived.
+     = 0.16px under the chin — and the 3.6-unit stroke the tag adds spends 1.8
+     of those units growing the chin downward, which is 0.48 units MORE than
+     there was room for. The chin therefore ends up 0.48/133.93 x 16 = 0.06px
+     below the box rather than inside it, so the geometric nudge is +0.06px:
+     under a tenth of a pixel, and the wrong way round from the optical drop
+     below, which is why it is recorded and not applied. It is spelled out
+     rather than deleted because the number is derived, not absent — re-crop
+     the artwork, change the height, or change the stroke, and it has to be
+     re-derived. (Rasterised, the overhang measures 0.51 units rather than the
+     arithmetic's 0.48: the round cap on the chin's own segment ends adds the
+     difference.)
 
      What ships is 1.5px *below* that zero, and the difference is optical, not
      geometric. Sitting the chin exactly on the baseline aligns the mark with
@@ -248,13 +253,15 @@
      letter of the word it precedes. Both lengths scale with --sb-scale, like
      the box itself, so the pairing survives zoom.
 
-     overflow:visible is the guard rail on that last point. 1.32 units of pad
-     means any stroke past ~2.6 units puts the chin outside the viewBox, and an
+     overflow:visible is what makes both of those legal. 1.32 units of pad means
+     any stroke past ~2.6 units puts the chin outside the viewBox, and an
      outermost svg clips to its viewport by default — the chin would flatten
-     silently. Letting it paint outside costs nothing (the mark is inline with
-     9px of margin and the row has 12px of padding) and turns a silent clip
-     into a harmless overhang. It is also what makes the optical nudge below
-     free: the 1.5px the chin drops is overhang the box no longer clips.
+     silently. The stroke IS past that now, so this is load-bearing rather than
+     precautionary: without it the 3.6-unit weight would cut the bottom of the
+     chin off flat. Letting it paint outside costs nothing (the mark is inline
+     with 9px of margin and the row has 12px of padding), and it is also what
+     makes the optical nudge above free: the 1.5px the chin drops is overhang
+     the box no longer clips.
 
      The lowest ink is the chin: mark 06 is a head with no ground line under it,
      so the chin is what sits on the text baseline. (Mark 10, which this
@@ -930,31 +937,46 @@
           would letterbox — scale to the box's height and centre — and the
           shorter box would just make a smaller square mark.
 
-        stroke-width="2.4"  thickens the lines. This artwork has no strokes: the
+        stroke-width="3.6"  thickens the lines. This artwork has no strokes: the
           "lines" are closed filled ribbons about 3.2 units wide, so a stroke on
           the same path is what widens them — half a stroke-width steps outward
           off the outer contour and half steps inward off the inner one, so the
-          ribbon grows by the full 2.4 units, to 5.6. That matters because the
+          ribbon grows by the full 3.6 units, to 6.8. That matters because the
           squash thins the horizontal runs (they scale with the height, which
-          just shrank): at 19px square the ribbon rendered 0.52px, under one
-          device pixel on a 2x display, which is why the mark read as a faint
-          hairline. At 19x16 with this stroke the horizontal runs come back to
-          ~0.77px and the vertical runs to ~0.94px.
+          shrank at 19x16): unstroked, the ribbon renders 0.44px wide there,
+          well under one device pixel on a 2x display, which is why the mark
+          read as a faint hairline rather than as accent-colored ink. With this
+          stroke the horizontal runs are ~0.93px and the vertical ~1.14px, or
+          1.87 and 2.27 device px on a 2x panel — both clear of the one-device-
+          pixel floor, which is the whole point of the weight. (Those are css px
+          at --sb-scale 1.15, the default; every length here scales with it.)
 
           Round joins are not cosmetic: the trace is hundreds of near-collinear
           segments and a miter join on any of them throws a spike once there is
           a stroke to miter.
 
-          2.6 units is the ceiling — past that the chin leaves the viewBox (see
-          the overflow note in the CSS above), and past ~3.5 the eye slits'
-          counters close and the cat goes blind.
+          Two ceilings, both measured on the shipping path rather than guessed
+          (rasterise it and sweep the width — the eyes in particular are not
+          predictable from the path data):
+
+            ~2.6u  the chin leaves the viewBox. Passed deliberately; see the
+                   overflow:visible note in the CSS above, which is what keeps
+                   the overhang from being clipped flat.
+            ~4.8u  the eye slits' counters close and the cat goes blind. Each
+                   slit is a ribbon like everything else, so the stroke eats
+                   its hole from both sides at once — the counters lose a full
+                   stroke-width of width, and at 3.6 they are down to about a
+                   third of the open area they have unstroked. That is still
+                   legible at 19x16 on a 2x panel, checked by magnifying the
+                   real device pixels, but it is the reason this is the last
+                   step up rather than one of several.
 
       The viewBox is cropped tight to the ink; the baseline nudge in the CSS
       above is derived from that crop AND from the stroke above, so all three
       move together.
     --><svg class="mark" viewBox="36.47 282.34 130.77 133.93" preserveAspectRatio="none"
          fill="currentColor" fill-rule="evenodd"
-         stroke="currentColor" stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round"
+         stroke="currentColor" stroke-width="3.6" stroke-linejoin="round" stroke-linecap="round"
          aria-hidden="true"><path d="M48.00,284.73 C46.65,285.43 42.59,288.53 41.00,291.35 C39.23,294.48 38.58,299.47 38.47,303.00 C38.38,305.91 38.85,307.79 39.71,311.00 C41.12,316.23 46.00,323.69 47.52,331.00 C49.23,339.20 47.42,351.25 48.58,358.00 C49.31,362.20 49.63,364.35 51.70,368.00 C55.02,373.85 65.01,381.56 69.58,388.00 C73.24,393.15 75.19,399.46 77.88,403.00 C79.62,405.29 80.78,406.43 83.00,408.04 C86.04,410.25 90.64,413.22 95.00,414.27 C99.60,415.37 106.01,415.00 110.00,414.17 C112.84,413.58 114.69,412.58 117.00,411.18 C119.69,409.56 122.46,407.64 125.00,404.66 C128.48,400.60 130.81,393.15 134.74,388.00 C138.77,382.71 145.81,377.43 149.00,373.42 C150.95,370.96 151.98,369.47 153.11,367.00 C154.43,364.11 155.45,361.14 156.09,357.00 C157.09,350.59 155.02,340.03 156.56,332.00 C158.09,324.04 164.20,316.08 165.24,309.00 C166.07,303.28 165.52,296.91 164.10,293.00 C163.13,290.34 161.62,288.45 159.76,287.00 C157.92,285.57 155.36,284.40 153.00,284.34 C150.46,284.27 148.10,285.62 145.03,287.00 C140.32,289.12 134.38,295.77 128.00,296.84 C120.88,298.02 110.48,292.55 104.00,292.13 C99.65,291.85 96.98,292.21 93.00,292.84 C88.13,293.61 82.61,297.60 77.00,296.89 C70.09,296.03 60.15,286.46 55.00,284.96 C52.48,284.22 50.16,284.46 49.00,284.53 C48.52,284.56 48.44,284.51 48.00,284.73 Z M48.00,287.94 C46.88,288.84 43.86,291.47 42.73,294.00 C41.40,296.97 40.87,300.66 41.33,305.00 C42.03,311.71 48.53,321.63 50.08,330.00 C51.55,337.97 49.86,347.41 50.75,354.00 C51.39,358.73 52.11,362.53 53.70,366.00 C55.12,369.09 56.99,371.14 59.41,374.00 C62.67,377.86 68.87,382.27 72.00,386.63 C74.65,390.31 75.39,394.67 77.66,398.00 C79.77,401.08 81.94,403.79 85.00,406.05 C88.52,408.66 93.97,411.33 98.00,412.21 C101.19,412.90 104.13,412.60 107.00,412.07 C109.79,411.56 112.31,410.76 115.00,409.16 C118.43,407.13 122.59,403.62 125.41,400.00 C128.29,396.30 128.93,391.43 132.00,387.12 C135.81,381.77 144.20,375.45 147.46,371.00 C149.42,368.34 150.32,366.62 151.30,364.00 C152.42,361.03 153.05,358.01 153.52,354.00 C154.19,348.12 152.46,339.67 153.76,332.00 C155.27,323.12 162.78,311.43 163.17,304.00 C163.42,299.21 161.94,294.75 160.50,292.00 C159.56,290.22 158.42,289.03 157.00,288.24 C155.59,287.46 154.18,286.93 152.00,287.26 C147.17,288.00 135.15,297.87 130.00,299.23 C127.48,299.90 126.17,299.67 124.00,299.35 C121.27,298.96 118.31,297.20 115.00,296.48 C111.10,295.63 107.07,294.80 102.00,294.93 C94.81,295.12 83.89,300.76 76.00,299.43 C68.66,298.18 61.08,290.02 56.00,288.34 C53.18,287.40 50.26,287.17 49.00,287.40 C48.49,287.49 48.42,287.60 48.00,287.94 Z M67.00,337.32 L66.79,339.00 C67.75,339.33 68.81,339.26 69.68,340.00 C70.99,341.11 71.49,344.59 73.00,346.11 C74.39,347.52 76.22,348.30 78.19,349.00 C80.47,349.81 83.40,349.94 86.00,350.41 L88.00,356.34 C88.44,355.89 89.07,355.66 89.32,355.00 C89.73,353.92 89.51,351.81 89.04,350.00 C88.41,347.59 87.07,344.02 85.18,342.00 C83.35,340.06 80.56,338.81 78.00,337.97 C75.43,337.14 71.05,337.09 69.77,337.00 C69.38,336.97 69.31,336.96 69.00,336.98 C68.49,337.02 67.67,337.21 67.00,337.32 Z M115.24,354.00 L117.00,356.35 L118.94,350.00 C122.63,349.11 127.30,349.22 130.00,347.32 C132.37,345.66 133.20,341.26 134.85,340.00 C135.84,339.24 136.86,339.33 137.86,339.00 L137.00,337.20 C134.00,337.37 129.50,337.57 128.00,337.71 C127.50,337.75 127.46,337.71 127.00,337.84 C125.83,338.17 122.61,339.39 121.00,340.53 C119.63,341.51 118.62,342.40 117.74,344.00 C116.45,346.36 116.07,350.67 115.24,354.00 Z M73.00,339.62 C73.52,341.08 73.59,342.88 74.55,344.00 C75.55,345.16 77.36,345.81 79.00,346.37 C80.81,346.99 83.00,347.07 85.00,347.41 C84.71,346.61 84.69,345.79 84.13,345.00 C83.32,343.86 81.60,342.47 80.00,341.63 C78.26,340.72 75.16,340.24 74.00,339.90 C73.53,339.77 73.33,339.71 73.00,339.62 Z M119.51,346.00 L120.00,347.48 C122.67,346.80 126.01,346.84 128.00,345.45 C129.78,344.21 130.48,341.82 131.72,340.00 C131.48,339.90 131.37,339.71 131.00,339.70 C129.77,339.65 125.01,341.09 123.00,342.36 C121.45,343.34 120.68,344.79 119.51,346.00 Z"/></svg>Cats Mux<!--
       Folds the column away; the reveal handle in the gutter brings it back.
       tabindex="-1" is deliberate — see the CSS note beside #sb-fold. The build
