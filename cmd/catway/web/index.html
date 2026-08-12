@@ -539,6 +539,22 @@
   /* Time since the last state change, dimmer than the state it precedes: the
      state is the fact, the age only qualifies how stale that fact is. */
   #agent-list .aage { opacity:.75; }
+  /* ...until the fact the age qualifies is itself the news. An agent's prompt
+     cache lives about an hour, so a settled state that has sat for 45 minutes is
+     one whose next turn is about to be re-read from scratch. Past that mark the
+     age stops being a footnote: full opacity, and the figure alone in bold — the
+     trailing "ago" is grammar, not a number, and bolding it only blurs which
+     part is the reading. The two settled states get different colors because the
+     user's move differs: idle is still warm and can be answered (caution), while
+     done-unseen already finished unattended (maroon — the loss, not the warning).
+     Both derive from theme colors so a light or high-contrast theme keeps them:
+     the maroon is the theme's red pulled down toward a dark oxblood, with a
+     literal fallback for engines without color-mix. */
+  #agent-list .aage.stale { opacity:1; }
+  #agent-list .aage.stale .anum { font-weight:700; }
+  #agent-list .aage.stale-idle { color:var(--warn); }
+  #agent-list .aage.stale-done { color:#b04a4a; }
+  #agent-list .aage.stale-done { color:color-mix(in srgb, var(--err) 65%, #6b0f10); }
   /* An agent whose workspace is locked steps back the same way its workspace row
      does, and by the same amount: the two sections then agree at a glance about
      which work is set aside. Clicking it reveals nothing either — the row loses
@@ -3116,22 +3132,60 @@
   // ---- Agents rollup (WS8): the `agents` message, previously dropped ----
 
   // Coarse age of a state, one unit deep — the row is a glance, not a stopwatch.
-  function fmtAge(ms) {
+  // Split in two because the agents rows emphasize the figure without the word:
+  // fmtAgeNum is the reading, fmtAge the whole phrase everything else wants.
+  function fmtAgeNum(ms) {
     const s = Math.max(0, Math.round(ms / 1000));
-    if (s < 60) return s + "s ago";
+    if (s < 60) return s + "s";
     const m = Math.round(s / 60);
-    if (m < 60) return m + "m ago";
+    if (m < 60) return m + "m";
     const h = Math.round(m / 60);
-    return h < 24 ? h + "h ago" : Math.round(h / 24) + "d ago";
+    return h < 24 ? h + "h" : Math.round(h / 24) + "d";
+  }
+  function fmtAge(ms) { return fmtAgeNum(ms) + " ago"; }
+
+  // An agent's prompt cache expires roughly an hour after its last turn, and a
+  // state that hasn't moved is a proxy for a turn that hasn't happened. 45
+  // minutes is the point where saying so is still actionable: enough of the hour
+  // left to go answer the agent, rather than a post-mortem.
+  const CACHE_WARN_MIN = 45;
+
+  // paintAge (re)writes one row's age label, in the two pieces the warning needs
+  // — the figure, then " ago · " leading into the state text.
+  //
+  // Only the two *settled* states can warn. Idle and done-unseen are both an
+  // agent that stopped and is waiting on the user, so their age is dead time and
+  // measures the cache draining. A working agent's identical-looking age is
+  // run-time — it is spending the cache, not losing it — and a blocked one is
+  // mid-turn as well, so colouring either would say the opposite of the truth.
+  //
+  // Measured against the *rounded* reading, not the raw age: the label rounds to
+  // whole minutes, so a raw-ms threshold would leave a plain "45m" on screen for
+  // up to half a minute before it bolted — two rows both reading 45m, one bold,
+  // looks like a bug. Any hour- or day-scale reading clears 45 minutes trivially.
+  function paintAge(el, ms, st) {
+    const warn = Math.round(ms / 60000) >= CACHE_WARN_MIN && (st === "idle" || st === "done");
+    el.className = "aage" + (warn ? " stale stale-" + st : "");
+    const num = document.createElement("span");
+    num.className = "anum";
+    num.textContent = fmtAgeNum(ms);
+    el.textContent = "";
+    el.appendChild(num);
+    el.appendChild(document.createTextNode(" ago · "));
   }
 
   // The rollup only arrives when a state moves, so the ages it stamped would sit
   // frozen in between. One shared tick re-reads each row's absolute instant —
   // every 5s, not every second: the label is a glance at staleness, and it is
   // cheaper to let it lag a few seconds than to touch every row that often.
+  //
+  // This tick is also the only thing that can raise the 45-minute warning: a row
+  // crosses that line precisely because nothing happened, so there is no rollup
+  // coming to redraw it. Hence the state travels on the element (data-st) rather
+  // than being closed over at render time.
   setInterval(() => {
     for (const el of agentListEl.querySelectorAll(".aage")) {
-      el.textContent = fmtAge(Date.now() - Number(el.dataset.at)) + " · ";
+      paintAge(el, Date.now() - Number(el.dataset.at), el.dataset.st);
     }
   }, 5000);
 
@@ -3205,9 +3259,10 @@
       // means run-time there, and a long-running "5m ago · working" is the row
       // most worth a glance. since_ms < 0 is the rollup's "no instant known".
       if (it.since_ms >= 0) {
-        const age = document.createElement("span"); age.className = "aage";
+        const age = document.createElement("span");
         age.dataset.at = String(Date.now() - it.since_ms); // absolute: the rollup won't come again until the state moves
-        age.textContent = fmtAge(it.since_ms) + " · ";
+        age.dataset.st = st; // the displayed state, so the 5s tick can warn without one
+        paintAge(age, it.since_ms, st);
         meta.appendChild(age);
       }
       meta.appendChild(document.createTextNode(st));
