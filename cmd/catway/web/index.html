@@ -3560,7 +3560,12 @@
   //
   // Shift is NOT part of the key: the pane receives the modifiers and
   // decides, so ⌘F and ⌘⇧F are one entry here and two chords there.
-  const CMD_TO_PANE = new Set(["KeyS", "KeyP", "KeyF", "KeyD", "KeyG", "Slash"]);
+  //
+  // ⌘E was added after the fact, on the same test: Safari and Chrome spend
+  // it on "use selection for find", which asks a CANVAS for a text
+  // selection it cannot have, so the browser gives up nothing at all —
+  // while on the other side it is the editor's recent-files switcher.
+  const CMD_TO_PANE = new Set(["KeyS", "KeyP", "KeyE", "KeyF", "KeyD", "KeyG", "Slash"]);
 
   // cmdGoesToPane answers "does the focused pane want this ⌘ chord?" —
   // and the answer is no unless that pane ASKED for the kitty keyboard
