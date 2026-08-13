@@ -1207,27 +1207,82 @@ class SessionInfoResult {
       };
 }
 
-/// SplitParams: pane.split. Pane nil = the focused pane. The new pane spawns in
-/// the split pane's live working directory (Dispatcher.inheritedSplitCwd).
+/// SplitParams: pane.split. Pane nil = the focused pane. With no spawn fields the
+/// new pane runs a shell in the split pane's live working directory
+/// (Dispatcher.inheritedSplitCwd).
+///
+/// Cwd/Command/Env mirror TabCreateParams field for field, and for the same
+/// reason: a client that wants a program in the new pane says so in the one round
+/// trip that creates it, instead of splitting and then typing a command line at
+/// whatever shell happened to start there. That difference is not cosmetic —
+/// typing into a shell means quoting, a bracketed-paste assumption, and a race
+/// against the shell's own startup, while an argv is exec'd as the pane's process,
+/// so its exit closes the pane and no prompt noise precedes it.
+///
+///   - Cwd overrides the inherited spawn directory.
+///   - Command is an argv to exec as the pane's process instead of a shell.
+///   - Env adds environment variables to the spawned process.
+///
+/// Cwd/Env without Command still apply to the default shell spawn.
 class SplitParams {
   const SplitParams({
     this.pane,
     required this.direction,
+    this.cwd = '',
+    this.command = const <String>[],
+    this.env = const <String, String>{},
   });
 
   final int? pane;
 
   /// SplitH | SplitV
   final String direction;
+  final String cwd;
+  final List<String> command;
+  final Map<String, String> env;
 
   factory SplitParams.fromJson(Map<String, Object?> j) => SplitParams(
         pane: asIntOrNull(j['pane']),
         direction: asString(j['direction']),
+        cwd: asString(j['cwd']),
+        command: asList(j['command'], asString),
+        env: asMap(j['env'], asString),
       );
 
   Map<String, Object?> toJson() => {
         if (pane != null) 'pane': pane,
         'direction': direction,
+        if (cwd.isNotEmpty) 'cwd': cwd,
+        if (command.isNotEmpty) 'command': command,
+        if (env.isNotEmpty) 'env': env,
+      };
+}
+
+/// SplitResult is CmdResult.Data for pane.split: the id of the pane the split
+/// created. SplitPane focuses the new pane, so a client can chain straight into
+/// pane.send_input / wait_for_output on it.
+///
+/// It exists because the alternative is diffing pane.list before and after, which
+/// is racy by construction — the dispatcher has the id in hand and any other
+/// client's split landing in the same window makes the diff ambiguous, so a
+/// caller that guessed wrong would type into someone else's pane.
+///
+/// Unlike TabCreateResult there is no tab number: a split happens inside the tab
+/// the caller is already in, so naming it would report something the caller told
+/// us.
+class SplitResult {
+  const SplitResult({
+    required this.pane,
+  });
+
+  final int pane;
+
+  factory SplitResult.fromJson(Map<String, Object?> j) => SplitResult(
+        pane: asInt(j['pane']),
+      );
+
+  Map<String, Object?> toJson() => {
+        'pane': pane,
       };
 }
 
@@ -2048,9 +2103,8 @@ abstract interface class CatsCommandTransport {
 /// The §7 vocabulary as typed methods. Mix into a CatsCommandTransport.
 mixin CatsCommands implements CatsCommandTransport {
   /// `pane.split`
-  Future<void> paneSplit(SplitParams params) async {
-    await invoke(CmdName.paneSplit, params.toJson());
-  }
+  Future<SplitResult> paneSplit(SplitParams params) async =>
+      SplitResult.fromJson(asObj(await invoke(CmdName.paneSplit, params.toJson())));
 
   /// `pane.close`
   ///

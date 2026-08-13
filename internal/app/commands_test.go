@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -1374,6 +1375,103 @@ func TestDispatchPaneSplitInheritsCwd(t *testing.T) {
 	after, _ := h.s.FocusedPane()
 	if _, ok := h.b.staged[uint32(after)]; ok {
 		t.Fatalf("split staged an override for pane %d with no cwd to inherit", after)
+	}
+}
+
+// pane.split hands back the pane it created. This is the whole point of the
+// result: the alternative is diffing pane.list around the call, and the id the
+// dispatcher already holds is the only unambiguous answer.
+func TestDispatchPaneSplitReturnsItsPane(t *testing.T) {
+	h := newCmdHarness(t)
+	src, _ := h.s.FocusedPane()
+	r := h.resp()
+
+	h.d.Dispatch(CmdPaneSplit, params(t, SplitParams{Direction: SplitH}), r)
+
+	got := okData[SplitResult](t, r)
+	if got.Pane == uint32(src) {
+		t.Fatalf("split reported the pane it split (%d), not the new one", got.Pane)
+	}
+	// The split focuses the new pane, which is what makes the id usable straight
+	// away — a caller can send_input to it without focusing first.
+	focused, _ := h.s.FocusedPane()
+	if got.Pane != uint32(focused) {
+		t.Fatalf("split reported pane %d but focused %d", got.Pane, focused)
+	}
+	if !slices.Contains(h.s.VisiblePaneIDs(), layout.PaneID(got.Pane)) {
+		t.Fatalf("reported pane %d is not in the session, panes=%v", got.Pane, h.s.VisiblePaneIDs())
+	}
+}
+
+// pane.split's spawn params stage an override for the new pane, exactly as
+// tab.create's do — same fields, same precedence over an inherited cwd, same
+// ordering against applyModel (which is what creates the PTY).
+func TestDispatchPaneSplitSpawn(t *testing.T) {
+	h := newCmdHarness(t)
+	src, _ := h.s.FocusedPane()
+	// A cwd to inherit, so the explicit one has something to beat.
+	h.b.paneMeta = map[uint32]PaneMeta{uint32(src): {Cwd: "/srv/app"}}
+	r := h.resp()
+
+	p := SplitParams{
+		Direction: SplitV,
+		Cwd:       "/tmp/proj",
+		Command:   []string{"ced", "--remote", "main.go"},
+		Env:       map[string]string{"CED_PANE": "1"},
+	}
+	h.d.Dispatch(CmdPaneSplit, params(t, p), r)
+
+	got := okData[SplitResult](t, r)
+	if lg := *h.log; len(lg) != 3 || lg[0] != "stageSpawn" || lg[1] != "applyModel" || lg[2] != "ok" {
+		t.Fatalf("pane.split effects = %v, want [stageSpawn applyModel ok]", lg)
+	}
+	ov, ok := h.b.staged[got.Pane]
+	if !ok {
+		t.Fatalf("no spawn override staged for pane %d", got.Pane)
+	}
+	if ov.Cwd != "/tmp/proj" {
+		t.Fatalf("staged cwd = %q, want the explicit %q (not the inherited one)", ov.Cwd, "/tmp/proj")
+	}
+	if len(ov.Command) != 3 || ov.Command[0] != "ced" || ov.Env["CED_PANE"] != "1" {
+		t.Fatalf("staged override = %+v, want %+v", ov, p)
+	}
+
+	// An empty argv slot is rejected before the session is touched — the same
+	// rule tab.create applies, which is the point of sharing the validator.
+	before := len(h.s.VisiblePaneIDs())
+	r = h.resp()
+	h.d.Dispatch(CmdPaneSplit, params(t, SplitParams{Direction: SplitH, Command: []string{""}}), r)
+	if !r.failCall || !strings.Contains(r.errMsg, "bad params") {
+		t.Fatalf("empty command[0]: fail=%v msg=%q", r.failCall, r.errMsg)
+	}
+	if now := len(h.s.VisiblePaneIDs()); now != before {
+		t.Fatalf("a refused split changed the pane set: %d → %d", before, now)
+	}
+}
+
+// A locked workspace refuses a split that carries a command, and for the same
+// reason it refuses tab.create with one: both are ways to start a process there.
+// A bare split is still the user asking for a shell and goes through.
+func TestDispatchPaneSplitWorkspaceLock(t *testing.T) {
+	h := newCmdHarness(t)
+	lock(t, h)
+
+	r := h.resp()
+	h.d.Dispatch(CmdPaneSplit, params(t, SplitParams{Direction: SplitH, Command: []string{"/opt/plug/bin/tool"}}), r)
+	if !r.failCall || !strings.Contains(r.errMsg, "is locked") {
+		t.Fatalf("split-with-command into a locked workspace: fail=%v msg=%q", r.failCall, r.errMsg)
+	}
+	if lg := *h.log; len(lg) != 1 || lg[0] != "fail" {
+		t.Fatalf("a refused split must run no effects, log=%v", lg)
+	}
+	if n := len(h.s.VisiblePaneIDs()); n != 1 {
+		t.Fatalf("a refused split must not create a pane, panes=%d", n)
+	}
+
+	r = h.resp()
+	h.d.Dispatch(CmdPaneSplit, params(t, SplitParams{Direction: SplitH}), r)
+	if !r.okCall {
+		t.Fatalf("plain split in a locked workspace: fail=%v msg=%q", r.failCall, r.errMsg)
 	}
 }
 

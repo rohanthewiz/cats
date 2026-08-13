@@ -30,6 +30,14 @@ const (
 	EventPaneAdded    = "pane_added"    // a pane entered the session (split / new tab / new workspace)
 	EventPaneRemoved  = "pane_removed"  // a pane left the session (close pane / tab / workspace)
 	EventFocusChanged = "focus_changed" // the globally-focused pane changed
+
+	// EventThemeChanged is the first SESSION-scoped event: it names no pane, so
+	// it is emitted with pane 0 and a pane-scoped subscription
+	// (EventsSubscribeParams.Pane) will not see it. That follows from the filter's
+	// contract rather than working around it — a client that asked about one pane
+	// asked about one pane — so a subscriber that wants both takes two streams, or
+	// one unfiltered stream and does its own pane matching.
+	EventThemeChanged = "theme_changed" // the effective theme changed (config.set / theme.save / theme.delete)
 )
 
 // EventNames returns every event name events.subscribe can emit, in a stable
@@ -38,6 +46,7 @@ func EventNames() []string {
 	return []string{
 		EventPaneExited, EventPaneAgent, EventPaneTitle, EventPaneCwd, EventPaneNotify,
 		EventPaneAdded, EventPaneRemoved, EventFocusChanged,
+		EventThemeChanged,
 	}
 }
 
@@ -87,6 +96,22 @@ type PaneRefEvent struct {
 	Pane   uint32 `json:"pane"`
 	Handle string `json:"handle,omitempty"`
 }
+
+// ThemeChangedEvent is the payload for EventThemeChanged: the EFFECTIVE
+// appearance after the change — exactly the ConfigTheme a config.get would
+// return, fully resolved (named theme + the user's per-key overrides already
+// applied), so a subscriber restyles from the event alone.
+//
+// It is an alias rather than a struct of its own because the two must never
+// drift: an automation client that already parses config.get's theme section
+// parses this with the same code, and a new color key added to the resolved
+// palette reaches the stream without a second edit. The name exists to give the
+// event vocabulary its own word for the payload.
+//
+// This is the event that retires the poll-on-focus_changed workaround: without
+// it a client watching the theme had to re-issue config.get whenever anything
+// happened and diff the answer.
+type ThemeChangedEvent = ConfigTheme
 
 // EventsSubscribeParams is the params object for events.subscribe. Both fields are
 // optional: an absent Pane matches every pane, an empty Events matches every event

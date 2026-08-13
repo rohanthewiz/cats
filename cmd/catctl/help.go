@@ -114,9 +114,15 @@ func runHelp(args []string) int {
 		printVerbHelp(sc)
 		return 0
 	}
-	if topic == ctlproto.MethodPing || topic == ctlproto.MethodEventsSubscribe ||
-		slices.Contains(app.CommandNames(), topic) {
-		fmt.Fprintf(os.Stderr, "%s — a raw §7 command\n\n  catctl %s [--params '<json>']\n\n", topic, topic)
+	if ctlproto.IsTransportMethod(topic) || slices.Contains(app.CommandNames(), topic) {
+		kind := "a raw §7 command"
+		if ctlproto.IsTransportMethod(topic) {
+			// Worth saying: a transport method is answered by the control server
+			// itself and is absent from `catctl commands`, so a reader who went
+			// looking for it there and found nothing is not misreading the list.
+			kind = "a control-transport method (not on the §7 table)"
+		}
+		fmt.Fprintf(os.Stderr, "%s — %s\n\n  catctl %s [--params '<json>']\n\n", topic, kind, topic)
 		if verb, ok := verbForMethod(topic); ok {
 			fmt.Fprintf(os.Stderr, "The ergonomic verb `catctl %s` builds its params for you (catctl help %s).\n", verb, verb)
 		}

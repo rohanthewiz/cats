@@ -162,10 +162,44 @@ func (o *orch) saveConfig(cfg config.Config) string {
 	return ""
 }
 
-// broadcastTheme pushes the effective theme to every connected browser.
+// broadcastTheme pushes the effective theme to every connected browser and, when
+// the appearance actually changed, emits theme_changed to the control-API
+// subscribers.
+//
+// It is the single funnel for "the look just changed" — config.set, theme.save
+// and theme.delete all end here — which is why the event is emitted from this
+// one place rather than from each of the three commands. The dedupe is against
+// the RESOLVED theme, not the config, because that is what a subscriber renders:
+// a config edit that leaves the effective palette identical (re-saving the same
+// override, deleting a shadowed theme whose colors matched) is not a change to
+// anyone downstream.
 func (o *orch) broadcastTheme() {
 	res := resolveTheme(o.cfg)
 	o.broadcast(browserproto.NewTheme(res.Name, res.Colors, res.Font))
+
+	next := app.ConfigTheme{Name: res.Name, Colors: res.Colors, Font: res.Font}
+	if sameTheme(o.lastTheme, next) {
+		return
+	}
+	o.lastTheme = next
+	// Pane 0: theme_changed is session-scoped and names no pane (see
+	// app.EventThemeChanged).
+	o.emitEvent(app.EventThemeChanged, 0, app.ThemeChangedEvent(next))
+}
+
+// seedTheme records the starting appearance without emitting, so a subscriber
+// that connects later never receives a retroactive theme_changed for the theme
+// it already sees. The structural-event seed's twin (seedStructure).
+func (o *orch) seedTheme() {
+	res := resolveTheme(o.cfg)
+	o.lastTheme = app.ConfigTheme{Name: res.Name, Colors: res.Colors, Font: res.Font}
+}
+
+// sameTheme reports whether two resolved appearances are identical. Colors is a
+// map, so this cannot be ==; resolveTheme builds a fresh map every call, and
+// comparing the pointers would make every save look like a change.
+func sameTheme(a, b app.ConfigTheme) bool {
+	return a.Name == b.Name && a.Font == b.Font && maps.Equal(a.Colors, b.Colors)
 }
 
 // themeInfos builds the wire view of the theme registry: normalized palettes

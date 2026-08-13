@@ -40,6 +40,11 @@
 //	catctl new-tab        → tab.create
 //	catctl stop           → server.stop
 //
+// `catctl clipboard` prints the HOST system clipboard's text — the machine the
+// server runs on, read with pbpaste/wl-paste/xclip. It is a control-socket
+// method rather than a §7 command precisely so that a browser client cannot ask
+// (cmd/catway/clipboard.go); it prints raw text so it can be piped.
+//
 // `catctl pair` is how a phone gets in. It mints a single-use grant that expires
 // in minutes and prints it as a QR code; the device redeems it for a session
 // credential. The shared password never appears — see internal/gwauth/pair.go.
@@ -81,6 +86,7 @@ import (
 	"time"
 
 	"github.com/rohanthewiz/cats/internal/app"
+	"github.com/rohanthewiz/cats/internal/clipboard"
 	"github.com/rohanthewiz/cats/internal/ctlproto"
 )
 
@@ -178,10 +184,9 @@ func run() int {
 	} else {
 		// Validate the method locally so a typo lists the vocabulary instead of a
 		// round trip to the server's "not supported yet" default. ping, the
-		// streaming events.subscribe and pair are transport methods outside the
-		// §7 table.
-		if method != ctlproto.MethodPing && method != ctlproto.MethodEventsSubscribe &&
-			method != ctlproto.MethodPair && !slices.Contains(app.CommandNames(), method) {
+		// streaming events.subscribe, pair and clipboard.read are transport
+		// methods outside the §7 table (ctlproto.TransportMethods).
+		if !ctlproto.IsTransportMethod(method) && !slices.Contains(app.CommandNames(), method) {
 			fmt.Fprintf(os.Stderr, "catctl: unknown command %q (try `catctl help`)\n", method)
 			return 2
 		}
@@ -230,10 +235,18 @@ func run() int {
 		return 2
 	}
 
-	if *rawJSON {
+	switch {
+	case *rawJSON:
 		b, _ := json.Marshal(resp)
 		fmt.Println(string(b))
-	} else {
+	case method == ctlproto.MethodClipboardRead && resp.OK:
+		// The clipboard owns its output for the same reason pair does: the useful
+		// form is the payload itself. `catctl clipboard | diff - file` only works
+		// if what comes out is the text, not a JSON object wrapping it — and the
+		// text is reproduced byte for byte, with no added newline, because a
+		// clipboard that did not end in one did not end in one.
+		printClipboard(resp)
+	default:
 		printResult(resp)
 	}
 	if !resp.OK {
@@ -259,6 +272,24 @@ func printResult(resp ctlproto.Response) {
 		return
 	}
 	fmt.Println(buf.String())
+}
+
+// printClipboard writes a clipboard.read payload to stdout as raw text. A
+// truncation notice goes to stderr so it never contaminates a pipe.
+//
+// An undecodable payload falls back to the generic renderer rather than printing
+// nothing: better a JSON blob the caller can read than silence that looks like an
+// empty clipboard.
+func printClipboard(resp ctlproto.Response) {
+	var data ctlproto.ClipboardData
+	if err := json.Unmarshal(resp.Data, &data); err != nil {
+		printResult(resp)
+		return
+	}
+	fmt.Print(data.Text)
+	if data.Truncated {
+		fmt.Fprintf(os.Stderr, "\ncatctl: clipboard truncated at %d bytes\n", clipboard.MaxBytes)
+	}
 }
 
 // runEvents opens an events.subscribe stream and prints each event as one line of

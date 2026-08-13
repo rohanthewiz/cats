@@ -342,6 +342,21 @@ func (d *Dispatcher) Dispatch(name string, dec ParamDecoder, r Responder) {
 			r.Fail(fmt.Sprintf("bad split direction %q", sp.Direction))
 			return
 		}
+		if err := sp.Validate(); err != nil {
+			bad(err)
+			return
+		}
+		// Same lock rule as tab.create, and it has to be here rather than only
+		// there: a split carrying a command is the second way to start a process
+		// in a workspace, so leaving it open would make the lock a matter of which
+		// verb the automation happened to pick. A bare split is a shell the user
+		// asked for by hand and goes through.
+		if len(sp.Command) > 0 {
+			if ws := d.session.ActiveWorkspace(); ws != nil && ws.Locked {
+				r.Fail(workspaceLockedErr(ws.ID, "run a command in"))
+				return
+			}
+		}
 		// Resolve the source pane's cwd before the split, for the same reason a new
 		// tab takes its neighbor's: the new pane is another shell in the work the
 		// user is already doing.
@@ -351,12 +366,18 @@ func (d *Dispatcher) Dispatch(name string, dec ParamDecoder, r Responder) {
 			r.Fail(err.Error())
 			return
 		}
-		// Before ApplyModel, which is what creates the new pane's PTY.
-		if inherited != "" {
-			d.backend.StageSpawn(uint32(np), SpawnOverride{Cwd: inherited})
+		// Stage before ApplyModel, which is what creates the new pane's PTY. An
+		// explicit cwd always wins over the inherited one — same precedence
+		// tab.create gives its params over the neighbor tab's directory.
+		ov, stage := sp.spawnOverride()
+		if ov.Cwd == "" && inherited != "" {
+			ov.Cwd, stage = inherited, true
+		}
+		if stage {
+			d.backend.StageSpawn(uint32(np), ov)
 		}
 		d.backend.ApplyModel()
-		r.OK(nil)
+		r.OK(SplitResult{Pane: uint32(np)})
 
 	case CmdPaneClose:
 		var cp OptPaneParams

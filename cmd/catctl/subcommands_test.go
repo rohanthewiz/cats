@@ -218,8 +218,7 @@ func TestSubcommandRegistryIntegrity(t *testing.T) {
 		if sc.build == nil {
 			t.Errorf("verb %q has no builder", sc.verb)
 		}
-		if sc.method != ctlproto.MethodPing && sc.method != ctlproto.MethodEventsSubscribe &&
-			!slices.Contains(names, sc.method) {
+		if !ctlproto.IsTransportMethod(sc.method) && !slices.Contains(names, sc.method) {
 			t.Errorf("verb %q maps to unknown method %q", sc.verb, sc.method)
 		}
 		if sc.synopsis == "" || sc.summary == "" {

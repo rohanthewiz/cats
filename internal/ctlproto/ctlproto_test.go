@@ -160,3 +160,59 @@ func TestCallDialError(t *testing.T) {
 		t.Fatalf("expected dial error for absent socket")
 	}
 }
+
+// The transport methods are the ones the control server answers itself, and the
+// list is what four call sites now consult instead of growing their own `!=`
+// chain. Each entry has to actually be off the §7 table for that to mean
+// anything, so that claim is asserted here too rather than only in the client
+// (cmd/catctl's TestTransportMethodsDoNotShadowCommands): a method the server
+// answers itself AND the dispatcher routes would make the §7 command silently
+// unreachable from the control socket.
+func TestTransportMethods(t *testing.T) {
+	want := []string{MethodPing, MethodEventsSubscribe, MethodPair, MethodClipboardRead}
+	for _, n := range app.CommandNames() {
+		if IsTransportMethod(n) {
+			t.Fatalf("§7 command %q collides with a transport-level method", n)
+		}
+	}
+	got := TransportMethods()
+	if len(got) != len(want) {
+		t.Fatalf("TransportMethods() = %v, want %v", got, want)
+	}
+	for i, m := range want {
+		if got[i] != m {
+			t.Errorf("TransportMethods()[%d] = %q, want %q", i, got[i], m)
+		}
+		if !IsTransportMethod(m) {
+			t.Errorf("IsTransportMethod(%q) = false", m)
+		}
+	}
+	if IsTransportMethod("pane.list") || IsTransportMethod("") {
+		t.Error("IsTransportMethod accepted a §7 command or an empty name")
+	}
+}
+
+// ClipboardData round-trips through the Response envelope: an empty clipboard is
+// a successful answer with an empty text, which must stay distinguishable from a
+// command that returned no data at all.
+func TestClipboardDataRoundTrip(t *testing.T) {
+	resp := newResponse("c1", true, "", ClipboardData{Text: "", Truncated: false})
+	if len(resp.Data) == 0 {
+		t.Fatal("an empty clipboard encoded as no data at all")
+	}
+	var back ClipboardData
+	if err := json.Unmarshal(resp.Data, &back); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if back.Text != "" || back.Truncated {
+		t.Fatalf("round trip = %+v, want the zero value", back)
+	}
+
+	resp = newResponse("c2", true, "", ClipboardData{Text: "hello", Truncated: true})
+	if err := json.Unmarshal(resp.Data, &back); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if back.Text != "hello" || !back.Truncated {
+		t.Fatalf("round trip = %+v, want {hello true}", back)
+	}
+}

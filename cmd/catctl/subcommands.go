@@ -69,6 +69,7 @@ var subcommands = []subcommand{
 	{"panes", app.CmdPaneList, "panes", nil, "list all panes", noParams},
 	{"pane", app.CmdPaneGet, "pane [pane]", []argKind{argPane}, "describe one pane (focused by default)", buildOptPane},
 	{"events", ctlproto.MethodEventsSubscribe, "events [pane]", []argKind{argPane}, "stream pane events until interrupted (Ctrl-C)", buildEvents},
+	{"clipboard", ctlproto.MethodClipboardRead, "clipboard", nil, "print the host system clipboard's text", noParams},
 
 	// Pane commands.
 	{"split", app.CmdPaneSplit, "split [h|v] [pane]", []argKind{argSplitDir, argPane}, "split a pane (h by default)", buildSplit},

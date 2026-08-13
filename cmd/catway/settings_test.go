@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/rohanthewiz/cats/internal/app"
 	"github.com/rohanthewiz/cats/internal/browserproto"
 	"github.com/rohanthewiz/cats/internal/config"
 	"github.com/rohanthewiz/cats/internal/theme"
@@ -193,5 +194,121 @@ func TestConfigSetRejectsInvalid(t *testing.T) {
 	}
 	if _, ok := o.cfg.Keybindings.CopyMode["teleport"]; ok {
 		t.Fatal("a rejected config.set must not mutate the live config")
+	}
+}
+
+// themeSubscriber wires a recording control-API subscriber onto a bare harness
+// and seeds the appearance the way newOrch does, so a test asserts on real
+// changes rather than on the seed.
+func themeSubscriber(o *orch) *recSub {
+	o.subs = map[*ctlSubscriber]struct{}{}
+	sub := &recSub{}
+	o.subs[&ctlSubscriber{sub: sub}] = struct{}{}
+	o.seedTheme()
+	return sub
+}
+
+// The theme_changed event is what retires a client's poll-on-focus_changed
+// workaround, so it has to fire on every route that changes the look — and only
+// on those. config.set is the route; a copy-mode-only save is the counterexample
+// that a naive "emit from broadcastTheme" would get wrong, because that funnel
+// runs after every config.set whatever it touched.
+func TestThemeChangedEvent(t *testing.T) {
+	o, c := newPendingHarness()
+	o.cfg = config.Default()
+	o.cfgPath = filepath.Join(t.TempDir(), "config.yaml")
+	sub := themeSubscriber(o)
+
+	o.handleCmd(c, cmd(t, "c1", browserproto.CmdConfigSet, browserproto.ConfigSetParams{
+		Theme: &browserproto.ConfigTheme{Name: "tokyo-night"},
+	}))
+	expectOK(t, c, "config.set")
+	expectThemePush(t, c)
+
+	if len(sub.names) != 1 || sub.names[0] != app.EventThemeChanged {
+		t.Fatalf("events after a theme switch = %v, want one %s", sub.names, app.EventThemeChanged)
+	}
+	ev, ok := sub.datas[0].(app.ThemeChangedEvent)
+	if !ok {
+		t.Fatalf("payload is %T, want app.ThemeChangedEvent", sub.datas[0])
+	}
+	// The payload is the EFFECTIVE appearance — resolved, not the raw config —
+	// so a subscriber restyles from the event alone with no follow-up config.get.
+	if ev.Name != "tokyo-night" || ev.Colors["bg"] != "#1a1b26" || ev.Font == "" {
+		t.Fatalf("payload = %+v, want the resolved tokyo-night appearance", ev)
+	}
+
+	// A save that leaves the look identical emits nothing: broadcastTheme still
+	// runs (the browser push is idempotent and cheap), but a subscriber ACTS on
+	// an event, and rebinding a copy-mode key is not a reason to rebuild a palette.
+	o.handleCmd(c, cmd(t, "c2", browserproto.CmdConfigSet, browserproto.ConfigSetParams{
+		CopyMode: map[string][]string{"yank": {"y", "c"}},
+	}))
+	expectOK(t, c, "config.set")
+	expectThemePush(t, c)
+	if len(sub.names) != 1 {
+		t.Fatalf("a copy-mode-only save emitted %v; the appearance did not change", sub.names)
+	}
+}
+
+// theme.save and theme.delete reach the same funnel, so they emit too — the
+// reason the event lives in broadcastTheme rather than in each command.
+func TestThemeChangedEventFromThemeLibrary(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	o, c := newPendingHarness()
+	o.cfg = config.Default()
+	o.cfgPath = filepath.Join(t.TempDir(), "config.yaml")
+	sub := themeSubscriber(o)
+
+	o.handleCmd(c, cmd(t, "c1", browserproto.CmdThemeSave, browserproto.ThemeSaveParams{
+		Name: "midnight",
+		Colors: map[string]string{
+			"bg": "#101020", "fg": "#e0e0f0", "muted": "#8888aa", "line": "#333355",
+			"accent": "#66aaff", "ok": "#44cc88", "warn": "#ccaa44", "err": "#cc5555",
+		},
+		Activate: true,
+	}))
+	expectOK(t, c, "theme.save")
+	expectThemePush(t, c)
+	if len(sub.names) != 1 || sub.names[0] != app.EventThemeChanged {
+		t.Fatalf("events after theme.save = %v, want one %s", sub.names, app.EventThemeChanged)
+	}
+
+	o.handleCmd(c, cmd(t, "c2", browserproto.CmdThemeDelete, browserproto.ThemeDeleteParams{Name: "midnight"}))
+	expectOK(t, c, "theme.delete")
+	expectThemePush(t, c)
+	if len(sub.names) != 2 {
+		t.Fatalf("events after theme.delete = %v, want a second %s", sub.names, app.EventThemeChanged)
+	}
+}
+
+// theme_changed names no pane, so it is emitted with pane 0 and a pane-scoped
+// subscription does not see it. That follows from the filter's contract rather
+// than working around it, and it is the first event for which the distinction
+// exists — worth pinning so a later "make it reach everyone" change is a
+// deliberate one.
+func TestThemeChangedIsSessionScoped(t *testing.T) {
+	o, c := newPendingHarness()
+	o.cfg = config.Default()
+	o.cfgPath = filepath.Join(t.TempDir(), "config.yaml")
+	o.subs = map[*ctlSubscriber]struct{}{}
+	pane1 := uint32(1)
+	scoped := &recSub{}
+	all := &recSub{}
+	o.subs[&ctlSubscriber{sub: scoped, filter: app.EventsSubscribeParams{Pane: &pane1}}] = struct{}{}
+	o.subs[&ctlSubscriber{sub: all}] = struct{}{}
+	o.seedTheme()
+
+	o.handleCmd(c, cmd(t, "c1", browserproto.CmdConfigSet, browserproto.ConfigSetParams{
+		Theme: &browserproto.ConfigTheme{Name: "tokyo-night"},
+	}))
+	expectOK(t, c, "config.set")
+	expectThemePush(t, c)
+
+	if len(scoped.names) != 0 {
+		t.Fatalf("a pane-scoped subscription received %v", scoped.names)
+	}
+	if len(all.names) != 1 {
+		t.Fatalf("an unfiltered subscription received %v, want one event", all.names)
 	}
 }

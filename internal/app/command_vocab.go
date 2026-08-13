@@ -163,9 +163,12 @@ type CommandSpec struct {
 // listed (invisible to `catctl commands`, and missing from every generated
 // client) fails the build the same way a listed-but-unrouted one does.
 var commandSpecs = []CommandSpec{
-	// Panes. Only read/capture/wait return data — the rest are effects, whose
-	// outcome a client sees in the layout/frame stream rather than in a reply.
-	{Name: CmdPaneSplit, Params: SplitParams{}, ParamsRequired: true},
+	// Panes. Only split/read/capture/wait return data — the rest are effects,
+	// whose outcome a client sees in the layout/frame stream rather than in a
+	// reply. pane.split is not reply-gated: like tab.create the split is worth
+	// performing for a caller that never listens (the browser's own split button
+	// sends no id), and its result is a handle, not the point of the call.
+	{Name: CmdPaneSplit, Params: SplitParams{}, Result: SplitResult{}, ParamsRequired: true},
 	{Name: CmdPaneClose, Params: OptPaneParams{}},
 	{Name: CmdPaneFocus, Params: PaneParams{}, ParamsRequired: true},
 	{Name: CmdPaneFocusDirection, Params: DirParams{}, ParamsRequired: true},
@@ -329,11 +332,55 @@ func BorderPath(id string) ([]bool, bool) {
 	return path, true
 }
 
-// SplitParams: pane.split. Pane nil = the focused pane. The new pane spawns in
-// the split pane's live working directory (Dispatcher.inheritedSplitCwd).
+// SplitParams: pane.split. Pane nil = the focused pane. With no spawn fields the
+// new pane runs a shell in the split pane's live working directory
+// (Dispatcher.inheritedSplitCwd).
+//
+// Cwd/Command/Env mirror TabCreateParams field for field, and for the same
+// reason: a client that wants a program in the new pane says so in the one round
+// trip that creates it, instead of splitting and then typing a command line at
+// whatever shell happened to start there. That difference is not cosmetic —
+// typing into a shell means quoting, a bracketed-paste assumption, and a race
+// against the shell's own startup, while an argv is exec'd as the pane's process,
+// so its exit closes the pane and no prompt noise precedes it.
+//
+//   - Cwd overrides the inherited spawn directory.
+//   - Command is an argv to exec as the pane's process instead of a shell.
+//   - Env adds environment variables to the spawned process.
+//
+// Cwd/Env without Command still apply to the default shell spawn.
 type SplitParams struct {
-	Pane      *uint32 `json:"pane,omitempty"`
-	Direction string  `json:"direction"` // SplitH | SplitV
+	Pane      *uint32           `json:"pane,omitempty"`
+	Direction string            `json:"direction"` // SplitH | SplitV
+	Cwd       string            `json:"cwd,omitempty"`
+	Command   []string          `json:"command,omitempty"`
+	Env       map[string]string `json:"env,omitempty"`
+}
+
+// Validate rejects a present-but-unusable Command, the same rule tab.create
+// applies (see validateSpawnCommand).
+func (p SplitParams) Validate() error { return validateSpawnCommand(p.Command) }
+
+// spawnOverride extracts the runtime-relevant fields; the zero flag tells the
+// dispatcher whether staging is needed at all.
+func (p SplitParams) spawnOverride() (SpawnOverride, bool) {
+	return newSpawnOverride(p.Cwd, p.Command, p.Env)
+}
+
+// SplitResult is CmdResult.Data for pane.split: the id of the pane the split
+// created. SplitPane focuses the new pane, so a client can chain straight into
+// pane.send_input / wait_for_output on it.
+//
+// It exists because the alternative is diffing pane.list before and after, which
+// is racy by construction — the dispatcher has the id in hand and any other
+// client's split landing in the same window makes the diff ambiguous, so a
+// caller that guessed wrong would type into someone else's pane.
+//
+// Unlike TabCreateResult there is no tab number: a split happens inside the tab
+// the caller is already in, so naming it would report something the caller told
+// us.
+type SplitResult struct {
+	Pane uint32 `json:"pane"`
 }
 
 // PaneParams: pane.focus, agent.focus — commands addressing a specific pane.
@@ -729,11 +776,28 @@ type TabCreateParams struct {
 
 // Validate rejects a present-but-unusable Command (an empty argv slot cannot be
 // exec'd; an absent Command is the normal shell case and always fine).
-func (p TabCreateParams) Validate() error {
-	if len(p.Command) > 0 && strings.TrimSpace(p.Command[0]) == "" {
+func (p TabCreateParams) Validate() error { return validateSpawnCommand(p.Command) }
+
+// validateSpawnCommand is the Command rule tab.create and pane.split share. It
+// is one function rather than two identical bodies because the two commands take
+// the same argv to the same StageSpawn — a divergence here would mean one of them
+// accepting a spawn the other rejects, which a caller would read as a bug in
+// whichever one it hit second.
+func validateSpawnCommand(command []string) error {
+	if len(command) > 0 && strings.TrimSpace(command[0]) == "" {
 		return errors.New("command[0] must be a program name")
 	}
 	return nil
+}
+
+// newSpawnOverride packs the spawn-shaping trio into the Backend's override,
+// reporting false when all three are absent (nothing to stage). Shared by
+// tab.create and pane.split for the same reason as validateSpawnCommand.
+func newSpawnOverride(cwd string, command []string, env map[string]string) (SpawnOverride, bool) {
+	if cwd == "" && len(command) == 0 && len(env) == 0 {
+		return SpawnOverride{}, false
+	}
+	return SpawnOverride{Cwd: cwd, Command: command, Env: env}, true
 }
 
 // ChatSendParams is one user turn for the chat panel. Text is required — a
@@ -783,10 +847,7 @@ type SpawnOverride struct {
 // spawnOverride extracts the runtime-relevant fields; the zero flag tells the
 // dispatcher whether staging is needed at all.
 func (p TabCreateParams) spawnOverride() (SpawnOverride, bool) {
-	if p.Cwd == "" && len(p.Command) == 0 && len(p.Env) == 0 {
-		return SpawnOverride{}, false
-	}
-	return SpawnOverride{Cwd: p.Cwd, Command: p.Command, Env: p.Env}, true
+	return newSpawnOverride(p.Cwd, p.Command, p.Env)
 }
 
 // TabCreateResult is CmdResult.Data for tab.create: the new tab's public number

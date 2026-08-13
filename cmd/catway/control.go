@@ -35,11 +35,16 @@ const controlTimeout = reqTimeout + 3*time.Second
 // path posts the same app.Dispatcher the same way — which is the whole point of
 // the seam.
 func (o *orch) controlDispatch(method string, params json.RawMessage, r app.Responder) {
-	// Device pairing is answered here and never reaches the dispatcher — the §7
-	// table is shared with the browser, and minting credentials must stay behind
-	// the owner-only socket. See pair.go for the full argument.
-	if method == ctlproto.MethodPair {
+	// Two methods are answered here and never reach the dispatcher, because the
+	// §7 table is shared with the browser and these must stay behind the
+	// owner-only socket: minting credentials (pair.go) and reading the user's
+	// system clipboard (clipboard.go). Each file carries the full argument.
+	switch method {
+	case ctlproto.MethodPair:
 		o.handlePair(r)
+		return
+	case ctlproto.MethodClipboardRead:
+		o.handleClipboardRead(r)
 		return
 	}
 	o.post(func() {

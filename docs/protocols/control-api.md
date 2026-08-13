@@ -44,8 +44,9 @@ rather than pointing panes at a socket nobody serves.
 structs the browser's params decode into, so the wire shape cannot drift between
 the two front ends.
 
-`method` is an `app.Cmd*` name, or one of the three **transport-level** methods
-below — `ping`, `pair` and `events.subscribe`. Those three are answered before
+`method` is an `app.Cmd*` name, or one of the four **transport-level** methods
+below — `ping`, `pair`, `clipboard.read` and `events.subscribe`
+(`ctlproto.TransportMethods()`). Those four are answered before
 `app.Dispatcher` ever sees the name, so they are deliberately absent from
 `app.CommandNames()`; a §7 command taking one of their names would be silently
 unreachable from this socket, which `TestTransportMethodsDoNotShadowCommands`
@@ -126,6 +127,50 @@ process. Set `--session-ttl` to choose how often a phone re-pairs.
 
 Under `--auth none` there is nothing to pair with and the method fails saying so.
 
+### `clipboard.read`
+
+Returns the **host** system clipboard's text — the machine the server runs on,
+read with `pbpaste` on macOS and `wl-paste` / `xclip` / `xsel` on Linux/BSD
+(`internal/clipboard`). Its `data` is a `ctlproto.ClipboardData`.
+
+```bash
+catctl clipboard              # raw text on stdout, so it pipes
+catctl --json clipboard       # {"text":"…","truncated":false}
+```
+
+```json
+{ "text": "func main() {\n", "truncated": false }
+```
+
+An empty clipboard is `{"text":""}` and a **successful** answer — "nothing has
+been copied yet" is a normal state, and reporting it as a failure would have a
+consumer show an error for it. `truncated` marks a clipboard larger than
+`clipboard.MaxBytes` (4 MiB): the text is the leading portion, cut on a whole-rune
+boundary. A host with no reader on `PATH` fails with a message naming the tools
+to install, which a client should read as "this host will never answer" rather
+than as a transient error.
+
+**Why this is not a §7 command.** The same reason as `pair`, applied to a
+different asset. The §7 table is shared with the network-facing browser front
+end; the clipboard is the *user's* rather than the session's — it holds whatever
+they last copied in any application, which on a work machine is as likely to be a
+password as a paragraph. A remote client holding a session cookie must not be
+able to ask for it. Keeping the method off that table is what confines it to the
+owner-only socket.
+
+**Why there is no config flag on top of that.** A caller already holding this
+socket can `pane.send_input` `pbpaste` into any shell pane and `capture` the
+answer. A switch here would gate nothing it does not already have — it would only
+make the honest path look more privileged than the dishonest one. The socket's
+`0600` owner-only mode is the boundary; see the security note at the end.
+
+**Why read-only, and only here.** OSC 52 already gives a program running inside a
+pane a working clipboard *write* path, and it is write-only by design: a terminal
+that answered clipboard reads would let anything that can print bytes exfiltrate
+the clipboard. The read path therefore stays off the terminal stream entirely.
+The browser needs none of this either — it has `navigator.clipboard`, and in the
+mac app catapp's native bridge, for its own machine's clipboard.
+
 ## Two methods that do not return immediately
 
 ```mermaid
@@ -185,6 +230,20 @@ slow-connection drop.
 | `pane_added` | a pane entered the session (split / new tab / new workspace) |
 | `pane_removed` | a pane left the session |
 | `focus_changed` | the globally-focused pane changed |
+| `theme_changed` | the effective appearance changed (`config.set` / `theme.save` / `theme.delete`) |
+
+Every event but the last names a pane. `theme_changed` is **session-scoped**: it
+is emitted with pane 0, so a subscription that filters on a pane will not see it.
+That follows from the filter's contract — a client that asked about one pane
+asked about one pane — so a client wanting both takes two streams, or one
+unfiltered stream and matches panes itself.
+
+Its payload is the fully **resolved** appearance (`app.ConfigTheme`: the named
+theme with the user's per-key overrides already applied, and a concrete font), so
+a subscriber restyles from the event alone with no follow-up `config.get`. It is
+emitted only when the effective look actually changed — a `config.set` that only
+rebound a copy-mode key is silent, even though the browser still gets its
+(idempotent, cheap) theme push.
 
 ```bash
 catctl events            # everything
@@ -229,6 +288,24 @@ channel, since a result with nowhere to go is not worth producing.
 
 `send` stages text without submitting; `run` types it and presses Enter. Both map
 to `pane.send_input` — the difference is one flag.
+
+`pane.split` returns `{"pane": N}`: the id of the pane it created, which it also
+focuses. Take it rather than diffing `pane.list` around the call — that diff is
+racy by construction, since another client's split can land in the same window,
+and a caller that guessed wrong types into someone else's pane.
+
+It also takes the same optional spawn params as `tab.create` — `cwd`, `command`
+(an argv exec'd as the pane's process instead of a shell), and `env` — so "open a
+split running X" is one round trip with no shell in the middle: no quoting, no
+bracketed-paste assumption, no race against the shell's startup. Without them the
+new pane inherits the split pane's live working directory. A `command` is refused
+in a locked workspace, exactly as `tab.create`'s is; a bare split is the user
+asking for a shell and goes through.
+
+```bash
+catctl pane.split --params '{"direction":"v","command":["ced","main.go"]}'
+# {"pane": 7}
+```
 
 ### Tabs and workspaces
 
@@ -367,3 +444,9 @@ socket can run any command" is already true, and pairing does not widen it — b
 a command that *returned the password* would, because a command's blast radius
 ends when the process does, while a leaked password's does not. Hence a grant
 that expires in five minutes and works once.
+
+`clipboard.read` is drawn against the same boundary from the other side: it does
+not widen it either — the socket already grants `pane.send_input` plus `capture`,
+which is `pbpaste` by a longer road — so it needs no flag of its own. What it
+must never become is a §7 command, because that table is reachable from the
+network-facing browser front end, where none of the above is true.

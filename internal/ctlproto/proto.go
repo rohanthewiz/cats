@@ -21,6 +21,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"io"
+	"slices"
 )
 
 // ProtocolVersion is bumped on any breaking change to the envelope shapes. It is
@@ -47,6 +48,38 @@ const MethodEventsSubscribe = "events.subscribe"
 // ever sees the method name.
 const MethodPair = "pair"
 
+// MethodClipboardRead returns the host system clipboard's text; its
+// Response.Data is a ClipboardData. Like MethodPair it is deliberately NOT an app
+// §7 command, and for the same structural reason: the §7 table is shared with the
+// browser front end, so anything on it is reachable from a network-facing client
+// holding a session cookie. The clipboard is the user's, not the session's — it
+// holds whatever they last copied anywhere on the machine, in any application —
+// and a remote client that could ask for it would be reading over their shoulder.
+// Keeping the method off that table is what confines it to the owner-only control
+// socket; the server answers it before app.Dispatcher ever sees the name.
+//
+// There is no config flag gating it beyond that. A caller already holding this
+// socket can run `pane.send_input` to type `pbpaste` into any shell pane and read
+// the answer back with `capture`, so a switch here would gate nothing it does not
+// already have — it would only make the honest path look more privileged than the
+// dishonest one. The socket's 0600 owner-only mode is the boundary.
+//
+// The browser needs none of this: it has navigator.clipboard (and, in the mac
+// app, catapp's native bridge) for its own clipboard already.
+const MethodClipboardRead = "clipboard.read"
+
+// ClipboardData is the Response.Data for MethodClipboardRead.
+//
+// An empty Text with no error is an empty clipboard — an ordinary answer, since
+// "nothing has been copied yet" is a normal state and not a fault the caller
+// should report as one. Truncated marks a clipboard larger than
+// clipboard.MaxBytes: the text is the leading portion, cut on a whole-rune
+// boundary, so a consumer can still use it while telling the user it is partial.
+type ClipboardData struct {
+	Text      string `json:"text"`
+	Truncated bool   `json:"truncated,omitempty"`
+}
+
 // PairInfo is the Response.Data for MethodPair: everything a new device needs to
 // reach this catway, and nothing it does not.
 //
@@ -71,6 +104,25 @@ type PairInfo struct {
 	// fresh key on every regeneration — SPKI pinning would survive nothing that
 	// DER pinning does not.
 	Fingerprint string `json:"fingerprint,omitempty"`
+}
+
+// TransportMethods returns every method answered by the control layer itself
+// rather than routed through app.Dispatcher, in a stable order.
+//
+// It exists because these names are the exception to "a method is an app §7
+// command" and three separate places had grown their own `m != MethodPing && m
+// != …` chain to say so — a client validating a typed method name, the help
+// topic lookup, and the tests that assert a §7 command never shadows one of
+// these. A fourth member (clipboard.read) is what made the drift a real risk:
+// a list nobody updates silently rejects the new method as unknown.
+func TransportMethods() []string {
+	return []string{MethodPing, MethodEventsSubscribe, MethodPair, MethodClipboardRead}
+}
+
+// IsTransportMethod reports whether m is answered by the transport rather than by
+// the §7 command table (app.CommandNames).
+func IsTransportMethod(m string) bool {
+	return slices.Contains(TransportMethods(), m)
 }
 
 // Request is one control command. Method is an app §7 command name (app.Cmd*) or

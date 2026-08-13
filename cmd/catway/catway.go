@@ -204,6 +204,16 @@ type orch struct {
 	// broadcastTitle dedupes against it so focus/title churn doesn't spam every
 	// connection with identical title messages.
 	lastTitle string
+	// lastTheme is the effective appearance as the control-API event stream last
+	// reported it; broadcastTheme dedupes theme_changed against it.
+	//
+	// The browser push is deliberately NOT deduped — it is idempotent restyling
+	// and cheap. An event is different, because a subscriber ACTS on it, and
+	// broadcastTheme runs after every config.set including one that only touched
+	// copy-mode keys; without this a client would rebuild its palette because
+	// someone rebound a key. Seeded in newOrch from the starting config, so that
+	// first no-op save is silent too.
+	lastTheme app.ConfigTheme
 	// lastTabNames is the active workspace's derived tab names as last put on
 	// the wire (viewportLayout records it). Tab auto-naming depends on pane
 	// meta, so the meta ingest paths call refreshTabNames, which diffs against
@@ -379,6 +389,7 @@ func newOrchWith(socket, cwd string, sess *app.Session) *orch {
 	o.syncDaemon()      // desired sizes; no daemon/conns yet, sends are dropped
 	o.refreshViewport() // seed the visible set
 	o.seedStructure()   // snapshot the initial pane set/focus (no retroactive events)
+	o.seedTheme()       // ditto for the appearance: no retroactive theme_changed
 	return o
 }
 

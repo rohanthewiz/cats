@@ -2,7 +2,6 @@ package main
 
 import (
 	"net/url"
-	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -169,17 +168,20 @@ func TestExpiresIn(t *testing.T) {
 	}
 }
 
-// The three transport-level methods are answered before app.Dispatcher ever
-// sees the name, so a §7 command that took one of them would be unreachable from
-// the control socket — silently, with no error anywhere. Assert the collision
-// does not exist rather than trusting that nobody picks the name.
+// The transport-level methods are answered before app.Dispatcher ever sees the
+// name, so a §7 command that took one of them would be unreachable from the
+// control socket — silently, with no error anywhere. Assert the collision does
+// not exist rather than trusting that nobody picks the name.
 //
-// pair is the one that would matter most: it is off the §7 table on purpose, so
-// that the browser front end cannot mint credentials.
+// pair and clipboard.read are the two that would matter most: both are off the
+// §7 table on purpose, so that the browser front end can neither mint credentials
+// nor read the user's system clipboard. A §7 command shadowing either would not
+// grant the browser anything (the control layer answers first), but it would take
+// the §7 command off the control socket, which is where the shadowed one is most
+// likely to be used.
 func TestTransportMethodsDoNotShadowCommands(t *testing.T) {
-	transport := []string{ctlproto.MethodPing, ctlproto.MethodEventsSubscribe, ctlproto.MethodPair}
 	for _, n := range app.CommandNames() {
-		if slices.Contains(transport, n) {
+		if ctlproto.IsTransportMethod(n) {
 			t.Fatalf("§7 command %q collides with a transport-level method", n)
 		}
 	}
