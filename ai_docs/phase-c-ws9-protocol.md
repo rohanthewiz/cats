@@ -130,10 +130,15 @@ panes, but agent chrome is global):
   also patches the `agents` rollup client-side). `model` is the LLM the agent is currently
   running under, read from the agent's own transcript server-side (catway's
   `agentmodel.go`) — omitted whenever it is unknown, which is every agent but claude.
-- `{t:"pane_modes", pane, mouse:bool, alt_screen:bool}` — the **display-relevant subset**
-  of β `PaneModes` (`:332`): `mouse` gates pointer capture vs native text selection;
-  `alt_screen` gates the scrollbar. The full mode state stays server-side where the input
-  encoder (D4) consumes it. Extend only when WS8 demonstrates a need.
+- `{t:"pane_modes", pane, mouse:bool, alt_screen:bool, kitty?:int}` — the
+  **display-relevant subset** of β `PaneModes` (`:332`): `mouse` gates pointer capture vs
+  native text selection; `alt_screen` gates the scrollbar. `kitty` is the pane's live
+  kitty-keyboard-protocol flags (omitted when 0, i.e. a legacy keyboard) and gates one
+  decision the browser cannot make without it: whether a ⌘ chord in `CMD_TO_PANE` is
+  handed to the pane or left to the browser — a pane that asked for the protocol can
+  receive a super chord, a legacy pane cannot, and forwarding one there would swallow the
+  user's browser shortcut and send nothing. The full mode state stays server-side where
+  the input encoder (D4) consumes it. Extend only when WS8 demonstrates a need.
 - `{t:"pane_exited", pane, code}` (β `:364`)
 
 ## 4. Down — pane content

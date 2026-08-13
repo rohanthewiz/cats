@@ -1254,7 +1254,7 @@
     const p = { id, el, chrome, chromeInfo: info, canvas, ctx: canvas.getContext("2d", { alpha: false }),
       pub: "", info: null, W: 0, H: 0, cells: [], links: [], cur: null,
       gs: 1, ox: 0, oy: 0,   // grid inset: scale + centring offsets (setInset)
-      defFg: THEME_FG, defBg: THEME_BG, modes: { mouse: false, alt: false },
+      defFg: THEME_FG, defBg: THEME_BG, modes: { mouse: false, alt: false, kitty: 0 },
       title: "", cwd: "", branch: "", agent: "", agentState: "", agentModel: "", exited: null,
       pressed: -1, lastCell: "", dirty: false, scroll: null, sel: null, cm: null };
     // Clicking the header (not its buttons) focuses the pane; double-click
@@ -3481,7 +3481,7 @@
         renderChrome(p); refreshPaneList(); break;
       }
       case "pane_modes": {
-        const p = pane(msg.pane); p.modes = { mouse: !!msg.mouse, alt: !!msg.alt_screen };
+        const p = pane(msg.pane); p.modes = { mouse: !!msg.mouse, alt: !!msg.alt_screen, kitty: msg.kitty | 0 };
         break;
       }
       case "pane_exited": { const p = pane(msg.pane); p.exited = msg.code; renderChrome(p); refreshPaneList(); break; }
@@ -3540,6 +3540,44 @@
     return (e.shiftKey ? 1 : 0) | (e.altKey ? 2 : 0) | (e.ctrlKey ? 4 : 0) | (e.metaKey ? 8 : 0);
   }
 
+  // CMD_TO_PANE is the curated set of ⌘ chords cats hands DOWN to a pane
+  // instead of leaving them to the browser — the accelerators a terminal
+  // app wants and a browser can spare, matched on e.code so a non-QWERTY
+  // layout still gets the physical key (same rule as ⌘K / ⌘B above).
+  //
+  // Chosen by what the browser loses. ⌘W ⌘T ⌘L ⌘R ⌘N ⌘Q are the window's
+  // own and are deliberately absent: swallowing "close the tab" to give a
+  // pane a shortcut is a bad trade, and a user who cannot close a tab
+  // blames cats, correctly. The set below costs a page that draws its
+  // panes into a CANVAS almost nothing — ⌘F's find bar cannot see canvas
+  // text, ⌘P would print a screenshot of a terminal, ⌘S would save this
+  // page's HTML, ⌘D bookmarks a URL that is already the only one — while
+  // on the other side of the wire they are save, find, print-free
+  // navigation and duplicate-line in an editor. Note ⌘P also takes ⌘⇧P
+  // with it (e.code ignores Shift), which is Firefox's private-window
+  // chord; that is the one real cost, and it is paid only while a
+  // kitty-protocol pane has focus.
+  //
+  // Shift is NOT part of the key: the pane receives the modifiers and
+  // decides, so ⌘F and ⌘⇧F are one entry here and two chords there.
+  const CMD_TO_PANE = new Set(["KeyS", "KeyP", "KeyF", "KeyD", "KeyG", "Slash"]);
+
+  // cmdGoesToPane answers "does the focused pane want this ⌘ chord?" —
+  // and the answer is no unless that pane ASKED for the kitty keyboard
+  // protocol. That gate is what keeps this from being a regression for
+  // shells: a legacy pane cannot receive a super chord at all (the input
+  // encoder emits no bytes for one, same as Ghostty), so forwarding it
+  // there would eat the user's browser shortcut and send nothing in its
+  // place. An app that turned the protocol on is an app with its own
+  // keymap, which is exactly who this is for.
+  function cmdGoesToPane(e) {
+    if (!CMD_TO_PANE.has(e.code)) return false;
+    const id = focusedPaneId();
+    if (id === null) return false;
+    const p = panes.get(id);
+    return !!(p && p.modes && p.modes.kitty);
+  }
+
   function onKey(e) {
     // The chat panel owns the keyboard while focus is inside it: composed
     // text must never reach a PTY, and terminal shortcuts (⌘V paste-to-pane,
@@ -3590,7 +3628,12 @@
     // nothing, same as Ghostty. cats' own copy paths (drag, copy-mode)
     // already copied by the time ⌘C could be pressed, so nothing here
     // competes with them.
-    if (e.metaKey && !e.ctrlKey && e.code !== "KeyC" && e.code !== "KeyZ") return;  // leave other Cmd shortcuts to the browser
+    //
+    // Everything else with Meta is decided by CMD_TO_PANE + the focused
+    // pane's keyboard mode (see the table above): an editor that asked for
+    // the kitty protocol gets its accelerator, a shell does not and keeps
+    // the browser's.
+    if (e.metaKey && !e.ctrlKey && e.code !== "KeyC" && e.code !== "KeyZ" && !cmdGoesToPane(e)) return;
     if (e.code === "F12") return;         // devtools
     e.preventDefault();
     // Typing to the terminal dismisses a lingering (stale) copy wash.
@@ -5037,6 +5080,10 @@
         ["bigger / smaller font", ["⌘+", "⌘-"]],
         ["reset font size", ["⌘0"]],
         ["this help", ["⌘K → keyboard shortcuts"]],
+        // Not a cats shortcut — a statement about who gets the key, and
+        // the only place a user can find out why ⌘S stopped opening the
+        // browser's save dialog over an editor pane.
+        ["sent to an editor pane, not the browser", ["⌘C", "⌘Z", "⌘S", "⌘P", "⌘F", "⌘D", "⌘G", "⌘/"]],
       ]));
       left.appendChild(helpSection("start-path picker (new workspace)", [
         ["move through directories", ["↑", "↓", "Ctrl+n", "Ctrl+p"]],

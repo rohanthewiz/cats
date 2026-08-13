@@ -145,13 +145,15 @@ func dominant(counts map[uint32]int) uint32 {
 
 // ModesFrom reduces β's full mode report to the display-relevant subset the
 // browser needs (§3): mouse capture gating pointer handling vs native text
-// selection, and alt-screen gating the scrollbar. The rest stays server-side
-// with the input encoder (D4).
+// selection, alt-screen gating the scrollbar, and the kitty keyboard flags
+// gating ⌘-chord forwarding (see PaneModes.Kitty). The rest stays
+// server-side with the input encoder (D4).
 func ModesFrom(m orchestration.PaneModes) PaneModes {
 	return PaneModes{
 		T:         MsgPaneModes,
 		Pane:      m.PaneID,
 		Mouse:     m.MouseMode != 0,
 		AltScreen: m.AlternateScreen,
+		Kitty:     m.KittyKeyboardFlags,
 	}
 }

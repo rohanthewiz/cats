@@ -1,7 +1,9 @@
 package browserproto
 
 import (
+	"encoding/json"
 	"math/rand"
+	"strings"
 	"testing"
 
 	"github.com/rohanthewiz/cats/internal/orchestration"
@@ -182,6 +184,33 @@ func TestModesFrom(t *testing.T) {
 	m = ModesFrom(orchestration.NewPaneModes(9, terminal.InputModes{}))
 	if m.Mouse || m.AltScreen {
 		t.Fatalf("plain shell modes = %+v", m)
+	}
+}
+
+// The kitty flags reach the browser, because one decision there depends on
+// them: whether a ⌘ chord is handed to the pane or left to the browser.
+// The legacy case must stay OFF THE WIRE — an older client with no field to
+// decode is then indistinguishable from a new one seeing 0, and both mean
+// "don't forward", which is the behavior that shipped before this existed.
+func TestModesFromCarriesKittyFlags(t *testing.T) {
+	m := ModesFrom(orchestration.NewPaneModes(9, terminal.InputModes{KittyKeyboardFlags: 5}))
+	if m.Kitty != 5 {
+		t.Fatalf("kitty flags = %d, want 5", m.Kitty)
+	}
+	enc, err := json.Marshal(m)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !strings.Contains(string(enc), `"kitty":5`) {
+		t.Fatalf("kitty flags missing from the wire: %s", enc)
+	}
+
+	legacy, err := json.Marshal(ModesFrom(orchestration.NewPaneModes(9, terminal.InputModes{})))
+	if err != nil {
+		t.Fatalf("marshal legacy: %v", err)
+	}
+	if strings.Contains(string(legacy), "kitty") {
+		t.Fatalf("a legacy pane put kitty on the wire: %s", legacy)
 	}
 }
 

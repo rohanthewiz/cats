@@ -1404,7 +1404,8 @@ func (o *orch) broadcastPaneChrome(pid uint32) {
 		return
 	}
 	o.broadcast(browserproto.PaneModes{T: browserproto.MsgPaneModes, Pane: pid,
-		Mouse: rt.modes.MouseMode != terminal.MouseNone, AltScreen: rt.modes.AlternateScreen})
+		Mouse: rt.modes.MouseMode != terminal.MouseNone, AltScreen: rt.modes.AlternateScreen,
+		Kitty: rt.modes.KittyKeyboardFlags})
 	if t := o.effectiveTitle(pid); t != "" {
 		o.broadcast(browserproto.NewPaneTitle(pid, t))
 	}
@@ -1720,7 +1721,8 @@ func (o *orch) registerConn(c *client, init *browserproto.Init) {
 			continue
 		}
 		o.send(c, browserproto.PaneModes{T: browserproto.MsgPaneModes, Pane: pid,
-			Mouse: rt.modes.MouseMode != terminal.MouseNone, AltScreen: rt.modes.AlternateScreen})
+			Mouse: rt.modes.MouseMode != terminal.MouseNone, AltScreen: rt.modes.AlternateScreen,
+			Kitty: rt.modes.KittyKeyboardFlags})
 		// Effective title, not rt.title: a pane.rename custom name must survive
 		// a page reload just like it survives a viewport switch.
 		if t := o.effectiveTitle(pid); t != "" {

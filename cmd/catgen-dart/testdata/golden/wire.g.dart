@@ -1491,6 +1491,7 @@ class PaneModes {
     required this.pane,
     required this.mouse,
     required this.altScreen,
+    this.kitty = 0,
   });
 
   /// The `t` discriminator this class always carries. It is a property of
@@ -1501,10 +1502,27 @@ class PaneModes {
   final bool mouse;
   final bool altScreen;
 
+  /// Kitty is the pane's live kitty-keyboard-protocol flags (0 = legacy
+  /// keyboard). It is here for one decision the browser cannot make
+  /// without it: whether to hand a ⌘ chord to the pane or leave it to
+  /// the browser. A pane that asked for the protocol can RECEIVE super
+  /// chords, so forwarding one is giving an app its own keybinding; a
+  /// legacy pane cannot, so the same forward would swallow the user's
+  /// browser shortcut and send nothing (the encoder emits no bytes for
+  /// a super chord in legacy mode). Sent as the raw flags rather than a
+  /// bool because bit 2 (report-event-types) already decides elsewhere
+  /// whether key RELEASES are worth sending.
+  ///
+  /// omitempty keeps the legacy case off the wire entirely, which is
+  /// also what an older client sees: absent → 0 → nothing forwarded,
+  /// i.e. exactly today's behavior.
+  final int kitty;
+
   factory PaneModes.fromJson(Map<String, Object?> j) => PaneModes(
         pane: asInt(j['pane']),
         mouse: asBool(j['mouse']),
         altScreen: asBool(j['alt_screen']),
+        kitty: asInt(j['kitty']),
       );
 
   Map<String, Object?> toJson() => {
@@ -1512,6 +1530,7 @@ class PaneModes {
         'pane': pane,
         'mouse': mouse,
         'alt_screen': altScreen,
+        if (kitty != 0) 'kitty': kitty,
       };
 }
 

@@ -242,6 +242,22 @@ type PaneModes struct {
 	Pane      uint32 `json:"pane"`
 	Mouse     bool   `json:"mouse"`
 	AltScreen bool   `json:"alt_screen"`
+
+	// Kitty is the pane's live kitty-keyboard-protocol flags (0 = legacy
+	// keyboard). It is here for one decision the browser cannot make
+	// without it: whether to hand a ⌘ chord to the pane or leave it to
+	// the browser. A pane that asked for the protocol can RECEIVE super
+	// chords, so forwarding one is giving an app its own keybinding; a
+	// legacy pane cannot, so the same forward would swallow the user's
+	// browser shortcut and send nothing (the encoder emits no bytes for
+	// a super chord in legacy mode). Sent as the raw flags rather than a
+	// bool because bit 2 (report-event-types) already decides elsewhere
+	// whether key RELEASES are worth sending.
+	//
+	// omitempty keeps the legacy case off the wire entirely, which is
+	// also what an older client sees: absent → 0 → nothing forwarded,
+	// i.e. exactly today's behavior.
+	Kitty uint16 `json:"kitty,omitempty"`
 }
 
 // PaneExited reports a pane's child exit.
