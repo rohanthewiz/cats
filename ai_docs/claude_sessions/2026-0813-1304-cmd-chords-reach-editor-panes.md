@@ -2,10 +2,13 @@
 
 - Session id: `ed2482f7-91e8-4d6d-a0aa-1600345c3302`
 - Date: 2026-08-13
-- Branch: `main`
-- Companion work in ced (`~/projs/go/ced`, commit `684c95d`): the editor
-  side of this — its ⌘ accelerator table, plan Phase 5.2. This change is
-  what lets those chords arrive.
+- Branch: `main`, commit `77285f9` (+ this doc)
+- Companion work in ced (`~/projs/go/ced`, commits `684c95d`, `4d10f88`):
+  the editor side of this — its ⌘ accelerator table, plan Phase 5.2. This
+  change is what lets those chords arrive.
+- Downstream: `cats-mobile fdd7b1e` re-pins its generated Dart wire layer
+  at this commit (a protocol field was added, so `tool/regen.sh` had to
+  run; `dart test` green, 72).
 
 ## What was asked
 
@@ -123,3 +126,6 @@ for chords that collide with a menu item" — which today is none of them.
   halves meet with no further ced change.
 - The obvious follow-up if this feels good: ⌘E, once ced grows the
   recent-files picker it would open.
+- Two hand-checks worth doing after the next catway restart, both listed
+  above: the chords end to end in a browser over a ced pane, and whether
+  the mac app got this for free.
