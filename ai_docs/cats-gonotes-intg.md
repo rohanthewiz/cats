@@ -315,6 +315,24 @@ peers exist. The 134 `note_changes` rows in the old DB are inert local history
 and were deliberately not carried across (neither are `sync_state`,
 `sync_conflicts`, `invite_tokens`).
 
+**Verified live in the MacApp**: all notes present, and a deliberate logout /
+login round trip succeeded with the *original* password. The first launch did
+not ask for sign-in at all, which is its own confirmation — the JWT's subject
+is the user GUID, not the row id (`models/token.go:31`, "Using UserGUID
+instead of ID allows tokens to work across sync scenarios"), so the surviving
+WebKit session only resolved because migrate preserved that GUID. The import
+path would have invalidated it.
+
+That said, the session surviving is *partly* an accident worth naming:
+`InitJWT` falls back to the literal string
+`development-only-secret-do-not-use-in-production` when `GONOTES_JWT_SECRET`
+is unset (`models/token.go:42-49`), and it is unset here — no env var, and
+`~/.gonotes/config/cfg_files/.env` does not exist, same as the encryption key
+in Phase 0. Every token this instance issues is signed with a publicly known
+constant. Pre-existing and unrelated to the migration, but it becomes load
+bearing at Phase 5, when hooks and phone push start carrying gonotes auth off
+this machine. Set a real secret before then.
+
 Remaining: if the cats-mobile rev pin matters, run its `tool/regen.sh` flow.
 
 ### Phase 2 — Bubble Tea v2 migration (mechanical, behavior-identical)
