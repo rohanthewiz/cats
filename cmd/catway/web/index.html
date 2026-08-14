@@ -29,6 +29,14 @@
        the green agent-state dots so it reads as a reminder, not as a state. */
     --todo:#f0dfa0;
     --ok:#6ac47a; --warn:#e0b64e; --err:#e57373; --done:#00ccf5;
+    /* Agent identity hues. AGENTS hands each tool name one of these six slots
+       (AGENT_HUE below), so claude and ced in the same list are told apart
+       without reading. Six fixed slots rather than a colour per agent: the
+       label space is open-ended, so agents share slots and the map decides who
+       collides. Kept clear of the state colours directly above — those mean
+       "working / blocked / finished" in the same row, one span over. */
+    --agent-1:#6cbf8d; --agent-2:#7fb3ff; --agent-3:#c99bf0;
+    --agent-4:#e6a0c4; --agent-5:#e0955e; --agent-6:#79cfc4;
     /* Accent desaturated most of the way to gray: the focused pane's outline
        sits right next to terminal text all day, so it reads as a gray-green
        hairline just above --line rather than a green marker. */
@@ -550,6 +558,19 @@
      is — the two sections then read as one selection, not two. */
   #agent-list li.focused { background:var(--chrome-focus); color:var(--fg-strong); }
   #agent-list .aname { color:var(--fg-strong); margin-left:0; }
+  /* The tool name carries its identity hue; the model beside it stays neutral,
+     one step under the name. Both live inside .aname so the row's flex gap
+     still sees a single item — the pair reads as one field ("ced main"), and
+     splitting them for colour must not split them for layout.
+
+     Colour only, no bold: the row is 11px monospace, the focused row already
+     claims weight and a background, and the age can go bold when it turns
+     stale. A fourth emphasis channel here would be competing with three that
+     already mean something. */
+  #agent-list .amodel { color:var(--fg-soft); }
+  .ah1 { color:var(--agent-1); } .ah2 { color:var(--agent-2); }
+  .ah3 { color:var(--agent-3); } .ah4 { color:var(--agent-4); }
+  .ah5 { color:var(--agent-5); } .ah6 { color:var(--agent-6); }
   #agent-list .ameta { color:var(--muted); font-size:calc(10px * var(--sb-scale)); margin-left:auto; }
   /* Time since the last state change, dimmer than the state it precedes: the
      state is the fact, the age only qualifies how stale that fact is. */
@@ -1627,6 +1648,44 @@
     const m = modelLabel(model);
     if (!agent) return m;
     return m ? agent + " " + m : agent;
+  }
+
+  // AGENT_HUE assigns each known agent one of the six --agent-N identity slots
+  // (see the :root block). Six slots, ~18 known labels, so the map is a seating
+  // chart rather than a lookup: the first six entries are the agents most likely
+  // to share a sidebar, and they take the six slots outright. Everything after
+  // wraps, so a collision only happens between agents further down the list.
+  //
+  // The labels are detect.IdentifyAgent's canonical vocabulary
+  // (internal/detect/detect.go) plus ced, which reaches the rollup through the
+  // hook path as a custom source rather than through binary detection. That is
+  // the normal case, not the exception: any tool can report any label it likes,
+  // which is why the fallback below matters more than this table does.
+  const AGENT_HUE = {
+    claude: 1, ced: 2, codex: 3, copilot: 4, cursor: 5, gemini: 6,
+    droid: 1, amp: 2, pi: 3, kimi: 4, opencode: 5, hermes: 6,
+    kilo: 1, kiro: 2, agy: 3, cline: 4, grok: 5, qodercli: 6,
+  };
+
+  // hueClass answers for labels the map has never seen — the ced case before
+  // anyone edits AGENT_HUE, and every tool that ships after this build. Hashing
+  // the label is what makes an unknown agent *consistent* rather than merely
+  // coloured: the same tool lands on the same hue in every row, every render and
+  // every restart, which is the whole property the colour is being read for. The
+  // alternative (falling back to plain --fg-strong) would have left exactly the
+  // agents the user is still learning to recognise as the undifferentiated ones.
+  //
+  // FNV-1a, 32-bit, kept in integer range by Math.imul — any stable hash does,
+  // and this one is short enough to read.
+  function hueClass(agent) {
+    if (!agent) return "";
+    const slot = AGENT_HUE[agent];
+    if (slot) return "ah" + slot;
+    let h = 0x811c9dc5;
+    for (let i = 0; i < agent.length; i++) {
+      h = Math.imul(h ^ agent.charCodeAt(i), 0x01000193);
+    }
+    return "ah" + ((h >>> 0) % 6 + 1);
   }
 
   // HOME is the server's home directory, baked into the page at render time
@@ -3320,6 +3379,7 @@
       li.dataset.pane = it.pane; // markFocusedAgent re-marks rows without a re-render
       li.dataset.ws = it.workspace; // ditto markLockedAgents, when a lock flips
       li.dataset.model = it.model || ""; // the untrimmed string the row's tooltip shows
+      li.dataset.agent = it.agent || ""; // identity, for CSS/debug reach without re-deriving it
       if (it.pane === foc) li.classList.add("focused");
       setAgentLocked(li, wsLocked(it.workspace));
       const dot = document.createElement("span"); dot.className = "adot " + stClass(markerState(it)); dot.textContent = "●";
@@ -3328,8 +3388,25 @@
       // likely to hold two different agents at once, and the pair is what tells
       // those rows apart. The agent's own name stands alone when no model
       // resolved (an agent with no resolver, or one before its first answer).
+      //
+      // The two halves are separate spans here — everywhere else prints
+      // agentLabel()'s single string — because only the agent half takes the
+      // identity hue. Tinting the pair would colour "claude opus 5" entire, and
+      // the model is the half that changes under a stable identity. They stay
+      // nested inside one .aname so the row's flex gap still sees one item.
       const name = document.createElement("span"); name.className = "aname";
-      name.textContent = agentLabel(it.agent, it.model);
+      const tool = document.createElement("span");
+      tool.className = "atool " + hueClass(it.agent);
+      // Agentless rows keep agentLabel's shape: the model alone, and hueClass
+      // returns "" for it, so a shell pane is not handed some agent's colour.
+      tool.textContent = it.agent || modelLabel(it.model);
+      name.appendChild(tool);
+      const mdl = it.agent ? modelLabel(it.model) : "";
+      if (mdl) {
+        const mo = document.createElement("span"); mo.className = "amodel";
+        mo.textContent = " " + mdl; // the separator agentLabel used to join with
+        name.appendChild(mo);
+      }
       const meta = document.createElement("span"); meta.className = "ameta";
       const st = it.seen ? it.state : "done";
       meta.textContent = paneRef(it.pub, it.pane) + " · ";

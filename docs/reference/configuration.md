@@ -210,6 +210,7 @@ required in a custom theme — every other key is derived from them when absent
 | `ws-heading` | the per-workspace group headers inside the sidebar's Panes list (defaults to `muted`) |
 | `branch` | the git branch in a pane's header strip (defaults to `ws-heading`) |
 | `fg-strong` / `fg-soft` / `fg-bright` | the text-emphasis ladder (active labels / hover lift / loudest hover) |
+| `agent-1` … `agent-6` | the identity hues the sidebar's Agents list gives tool names, so two agents on screen are told apart by colour (default to `accent`, `done`, `branch`, `heading`, `ok`, `todo`) |
 | `todo` | the workspace to-do reminder mark |
 | `done` | the unseen-completion marker on a pane whose agent finished while you were elsewhere |
 | `err-bg` / `err-fg` | the link-error banner's surface and text |

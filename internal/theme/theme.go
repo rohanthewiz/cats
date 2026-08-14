@@ -70,6 +70,7 @@ var requiredKeys = []string{"bg", "fg", "muted", "line", "accent", "ok", "warn",
 //	                                            └─ hover/scroll-thumb-idle (α)
 //	muted ── ws-heading ── branch
 //	 accent ─ heading · accent-dim(α) · done · sel-fill(α) · cm-cursor(α) · scroll-thumb(α)
+//	 agent-1..6 ← accent · done · branch · heading · ok · todo (the palette's own hues)
 var derivations = []struct {
 	key   string
 	from  string
@@ -95,6 +96,27 @@ var derivations = []struct {
 	{"accent-fg", "bg", 0},
 	{"todo", "warn", 0},
 	{"done", "accent", 0},
+	// The agent identity slots: six hues the sidebar's AGENTS list hands out to
+	// tool names, so two agents on screen at once are told apart by colour and
+	// not by reading. Six rather than one-per-agent because the agent label
+	// space is open-ended — detect knows ~17 binaries and the hook path accepts
+	// any label a tool cares to report (see catway's normalizeAgentLabel), so a
+	// key per agent would be a theme vocabulary that grows with other people's
+	// software. A fixed palette collides instead, which is a legibility cost the
+	// user can see, rather than a rendering gap they can't.
+	//
+	// The fallbacks map the slots onto the hues a sparse theme already authors.
+	// Deliberately skipping warn/err: those two carry "needs you" and "broke"
+	// everywhere else in the UI, and an identity that borrows them reads as an
+	// alarm on a perfectly healthy agent. That leaves the six below, which is
+	// most of the distinct hue a small palette has. They must be listed after
+	// heading/branch/todo/done so those are resolved by the time they're read.
+	{"agent-1", "accent", 0},
+	{"agent-2", "done", 0},
+	{"agent-3", "branch", 0},
+	{"agent-4", "heading", 0},
+	{"agent-5", "ok", 0},
+	{"agent-6", "todo", 0},
 	{"fg-strong", "fg", 0},
 	{"fg-soft", "fg", 0},
 	{"fg-bright", "fg-strong", 0},

@@ -33,6 +33,22 @@ func builtins() []Theme {
 				"branch": "#a09a62",
 				"todo":   "#f0dfa0", "ok": "#6ac47a", "warn": "#e0b64e", "err": "#e57373",
 				"done": "#00ccf5",
+				// The six agent identity hues, hand-picked rather than derived:
+				// this is the one theme required to author the full key set, and
+				// identity colours only do their job if they're separated on the
+				// colour wheel. Walking green → blue → lilac → rose → amber →
+				// teal keeps adjacent slots distinguishable even for a red-green
+				// colour-blind reader, since the run crosses blue/purple rather
+				// than sitting in the green-to-red arc.
+				//
+				// All six are held back from the state colours they sit beside
+				// (ok #6ac47a, warn #e0b64e, err #e57373, done #00ccf5): the
+				// amber is browner than warn, the teal duller than done. They
+				// never share a span — state lives in the row's ● — but they do
+				// share a row, and a name that matches a state colour invites
+				// reading it as one.
+				"agent-1": "#6cbf8d", "agent-2": "#7fb3ff", "agent-3": "#c99bf0",
+				"agent-4": "#e6a0c4", "agent-5": "#e0955e", "agent-6": "#79cfc4",
 				// The formerly-hardcoded stylesheet colors, preserved exactly.
 				"fg-strong": "#e8e8e8", "fg-soft": "#dddddd", "fg-bright": "#ffffff",
 				"chrome-fg": "#e6efe7", "chrome-fg-dim": "#cfe0d3", "accent-fg": "#0e1a13",
