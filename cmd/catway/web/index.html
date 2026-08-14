@@ -302,6 +302,21 @@
   #sidebar h2 .hctl button { background:none; border:0; padding:0 3px; cursor:pointer;
     font:inherit; font-size:calc(11px * var(--sb-scale)); line-height:1; color:var(--muted); }
   #sidebar h2 .hctl button:hover { color:var(--accent); }
+  /* The section fold — the arrow outboard of everything else in the heading,
+     which hides the section's whole list rather than one group inside it. It
+     takes the same clearance the usage refresh does, and for the same reason:
+     glyph buttons at this size touching read as one smudged mark. */
+  #sidebar h2 .hctl button.secfold { margin-left:4px; }
+  /* Folded, a section is its title and that arrow and nothing else. No count, no
+     age stamp, no per-group fold pair, no backlog mark — a bar whose only job is
+     to say "this section is here, closed" has nothing to summarize, and a
+     summary there is a second thing to read on the way past it.
+     Two rules cover the lot because the title is the heading's only text node:
+     everything else in an h2 is an element, so :not() reaches all of it. */
+  #sidebar section.folded > ul { display:none; }
+  #sidebar section.folded h2 { margin-bottom:0; }
+  #sidebar section.folded h2 > :not(.hctl) { display:none; }
+  #sidebar section.folded h2 .hctl > :not(.secfold) { display:none; }
   #sidebar ul { list-style:none; margin:0; padding:0; }
   /* Rows sit one step under their section title and level with the group
      subtitles — a subtitle separates itself by case, weight and colour rather
@@ -1001,10 +1016,15 @@
       where, so the badge still lands right after the wordmark.
     --><button id="sb-fold" type="button" tabindex="-1"
         title="hide the sidebar (⌘B)" aria-label="Hide the sidebar">&#x2039;</button></div>
-    <section><h2>Usage<span class="hctl" id="usage-hctl"></span></h2><ul id="usage-list"><li class="empty">…</li></ul></section>
-    <section><h2>Workspaces<span id="ws-global-todo"></span><span class="hctl" id="ws-hctl"><span class="hcount" id="ws-count"></span></span></h2><ul id="ws-list"></ul></section>
-    <section><h2>Panes<span class="hctl" id="pane-hctl"></span></h2><ul id="pane-list"></ul></section>
-    <section><h2>Agents</h2><ul id="agent-list"><li class="empty">none</li></ul></section>
+    <!--
+      Every section carries an id so its heading's fold arrow has something to
+      hang the .folded class on (initSectionFold), and Agents grows an .hctl of
+      its own — it has no groups to fold, but the arrow that hides the whole
+      section rides the same right-edge berth in all four headings.
+    --><section id="sec-usage"><h2>Usage<span class="hctl" id="usage-hctl"></span></h2><ul id="usage-list"><li class="empty">…</li></ul></section>
+    <section id="sec-workspaces"><h2>Workspaces<span id="ws-global-todo"></span><span class="hctl" id="ws-hctl"><span class="hcount" id="ws-count"></span></span></h2><ul id="ws-list"></ul></section>
+    <section id="sec-panes"><h2>Panes<span class="hctl" id="pane-hctl"></span></h2><ul id="pane-list"></ul></section>
+    <section id="sec-agents"><h2>Agents<span class="hctl" id="agent-hctl"></span></h2><ul id="agent-list"><li class="empty">none</li></ul></section>
   </aside>
   <div id="splitter" title="drag to resize the sidebar (double-click to reset)"></div>
   <div id="main">
@@ -1181,6 +1201,22 @@
   function saveWsCollapsed() {
     try { localStorage.setItem(WGRP_KEY, JSON.stringify([...wsCollapsed])); } catch (e) { /* not persisted */ }
   }
+  // And, one tier up from all three: which whole sidebar *sections* are folded
+  // shut, by section element id. This one set covers all four sections rather
+  // than splitting per section like the group sets above, because here the ids
+  // do share a namespace — they are the sections themselves — and nothing ever
+  // folds them in bulk, so there is no collapse-all to keep the spellings apart.
+  // Same localStorage reasoning as the rest: which parts of the sidebar you keep
+  // open is a per-browser display preference, not session state the server owns.
+  const SECT_KEY = "cats.sections.collapsed";
+  let sectCollapsed = new Set();
+  try {
+    const raw = JSON.parse(localStorage.getItem(SECT_KEY));
+    if (Array.isArray(raw)) sectCollapsed = new Set(raw);
+  } catch (e) { /* storage disabled or corrupt — start with every section open */ }
+  function saveSectCollapsed() {
+    try { localStorage.setItem(SECT_KEY, JSON.stringify([...sectCollapsed])); } catch (e) { /* not persisted */ }
+  }
 
   function measure() {
     measureCtx.font = `${FONT_PX}px ui-monospace, Menlo, monospace`;
@@ -1279,6 +1315,42 @@
     b.addEventListener("mousedown", (e) => e.stopPropagation());
     b.addEventListener("click", (e) => { e.stopPropagation(); e.preventDefault(); fn(); });
     return b;
+  }
+
+  // initSectionFold hangs the section-level fold arrow on one sidebar heading:
+  // the third control, outboard of whatever pair that section already carries,
+  // which hides the section's entire list instead of one group within it.
+  //
+  //   PANES                    ⊞ ⊟ ▼      open: the section's own controls, then
+  //     ws-a          3 panes              the arrow hard against the right edge
+  //     α  vim
+  //   PANES                        ▶      folded: the arrow, alone
+  //
+  // Called last in each heading's setup so the arrow is appended after that
+  // section's other buttons — DOM order is the visual order inside .hctl.
+  //
+  // The arrow glyphs are the ones the group headers already fold with (▼ open,
+  // ▶ shut), so one mark means one thing everywhere in the sidebar; only its
+  // scope changes with where it sits. Hiding is CSS (see #sidebar section.folded)
+  // rather than a render-time skip: the lists keep rebuilding behind the fold,
+  // which costs a hidden section's rows but means unfolding is instant and every
+  // renderer stays free of a "am I visible?" branch it would otherwise need in
+  // each of its own draw paths.
+  function initSectionFold(secID, hctlID, noun) {
+    const sec = document.getElementById(secID);
+    const btn = mkBtn("", "", "secfold", () => {
+      if (sectCollapsed.has(secID)) sectCollapsed.delete(secID); else sectCollapsed.add(secID);
+      saveSectCollapsed(); apply();
+    });
+    function apply() {
+      const folded = sectCollapsed.has(secID);
+      sec.classList.toggle("folded", folded);
+      btn.textContent = folded ? "▶" : "▼";
+      btn.title = (folded ? "show " : "hide all ") + noun;
+      btn.setAttribute("aria-expanded", folded ? "false" : "true");
+    }
+    document.getElementById(hctlID).appendChild(btn);
+    apply(); // adopt whatever the last session left folded
   }
 
   function pane(id) { return panes.get(id) || newPane(id); }
@@ -2088,6 +2160,7 @@
       wsCollapsed = new Set(wsGroupIDs); saveWsCollapsed();
       if (layoutMsg) renderWorkspaces(layoutMsg);
     }));
+    initSectionFold("sec-workspaces", "ws-hctl", "workspaces");
   })();
 
   // The Panes section is the session's whole pane inventory — every workspace and
@@ -2238,6 +2311,7 @@
     el.appendChild(mkBtn("⊟", "collapse all workspaces", "", () => {
       paneCollapsed = new Set(paneGroupIDs); savePaneCollapsed(); renderPaneList();
     }));
+    initSectionFold("sec-panes", "pane-hctl", "panes");
   })();
 
   // refreshPaneList redraws the section now from what the browser already knows,
@@ -2636,6 +2710,7 @@
     el.appendChild(mkBtn("⊟", "collapse all usage groups", "", () => {
       usageCollapsed = new Set(usageGroupIDs); saveUsageCollapsed(); drawUsage();
     }));
+    initSectionFold("sec-usage", "usage-hctl", "usage");
   })();
 
   // refreshMark: the circular arrow on the refresh control — an arc most of the
@@ -3224,6 +3299,11 @@
     toast(agentLabel(pop.it.agent, pop.it.model) +
       (pop.st === "blocked" ? " is blocked" : " finished") + " — sidebar reopened");
   }
+
+  // Agents has no groups to fold, so its heading carries the section arrow and
+  // nothing else — the one control every section now has, in the one position it
+  // is the same distance from every heading's right edge.
+  initSectionFold("sec-agents", "agent-hctl", "agents");
 
   function renderAgents(items) {
     agentItems = items || [];
