@@ -192,8 +192,11 @@ dbc's nice-to-have list).
   which records no change entries, and there are no peers. See Phase 1.
 - **Probe false-positive**: some other service on 8444 — the health probe
   requires the gonotes envelope shape, not just a 200.
-- bubbles v2 list/textarea behavioral nuances were audited by signature
-  only — the Phase 2 teatest suite is the net.
+- ~~bubbles v2 list/textarea behavioral nuances were audited by signature
+  only — the Phase 2 teatest suite is the net.~~ Settled in Phase 2. The
+  nuance that mattered was not behavioral but stylistic: every bubbles v2
+  widget hardcodes a dark default style set and copies it in at
+  construction. See Phase 2.
 - Two-pane preview re-render cost — render from a cache keyed by note id,
   only on selection settle.
 
@@ -335,19 +338,82 @@ this machine. Set a real secret before then.
 
 Remaining: if the cats-mobile rev pin matters, run its `tool/regen.sh` flow.
 
-### Phase 2 — Bubble Tea v2 migration (mechanical, behavior-identical)
-- `go.mod`: drop the four charm v1 deps, add the four `charm.land/*/v2`
-  (comment the import-path gotcha). Edits across all 9 `tui/` files:
-  `KeyMsg`→`KeyPressMsg`, `" "`→`"space"`, root `View() tea.View{Content,
-  AltScreen: true}` (drop `tea.WithAltScreen()`), viewport
-  `New(WithWidth,WithHeight)` + `SetWidth/SetHeight`, textinput `SetWidth`,
-  glamour `WithStyles(styles.DarkStyleConfig)` interim (palette-driven in
-  Phase 3).
-- New `tui/tui_test.go` — the TUI's first tests, teatest/v2
-  (`NewTestModel` + `WithInitialTermSize`): boot → login renders; seeded
-  temp DB → browse renders; **a key-name regression test pinning every
-  binding string the six files use** (makes future key-name drift visible).
-- ~150-line diff + ~150 test lines.
+### Phase 2 — ✅ Bubble Tea v2 migration — done 2026-08-14 (gonotes `c00daee`)
+Versions landed: bubbletea v2.0.8, bubbles v2.1.1, lipgloss v2.0.6, glamour
+v2.0.1, teatest `v2.0.0-20260813141921`. 578 insertions / 159 deletions.
+`go build`, `go vet`, all four test packages green; TUI suite stable over 5
+consecutive runs.
+
+**The import-path trap runs both ways.** The four libraries are
+`charm.land/*/v2`, but teatest is **not** — it is still
+`github.com/charmbracelet/x/exp/teatest/v2`, and requiring the charm.land
+form fails with `module declares its path as ...`. Each module's own go.mod
+is the only authority; assuming either convention is uniform costs a
+resolution error.
+
+**What the port actually cost, in order of how quietly it fails:**
+
+1. **`" "` → `"space"`.** Nothing catches it — the private-note checkbox
+   would just stop toggling. `Key.String()` returns `Text` when non-empty
+   *except* for space, the one printable character with an invisible literal,
+   which falls through to `Keystroke()`. Every other binding (letters,
+   `esc`, `ctrl+s`, `shift+tab`, `Y`/`N`) stringifies unchanged.
+2. **`View() string` → `View() tea.View`, root model only.** Screens still
+   return strings. `tea.WithAltScreen()` is gone from the program options;
+   `AltScreen` is a field on the returned view, so losing it yields a program
+   that runs happily and paints nothing.
+3. **`KeyMsg` → `KeyPressMsg`.** `KeyMsg` survives as an *interface* over
+   press and release, so `case tea.KeyMsg:` still compiles — and would
+   double-fire every binding the moment release reporting is enabled, which
+   is exactly what Phase 5's kitty work would turn on.
+4. viewport `New(WithWidth, WithHeight)` + `SetWidth/SetHeight`; textinput
+   `SetWidth`. Mechanical.
+
+**The plan's one wrong call: `WithStyles(styles.DarkStyleConfig)` as an
+interim.** lipgloss v2 deleted `AdaptiveColor`, which forces the palette
+question *now*, not in Phase 3 — hardcoding dark is a live regression on
+light terminals, and glamour v2 also dropped `WithAutoStyle()`. So
+`styles.go` grew `setPalette(dark bool)` (both glamour configs exist:
+`styles.DarkStyleConfig` / `LightStyleConfig`).
+
+Placing the detection is the subtle part, and the two obvious spots are both
+wrong: `lipgloss.HasDarkBackground` blocks on an OSC 11 reply for 2s **per
+fd, and tries both**, so a terminal that ignores the query costs ~4s of black
+screen; and a package-var initializer would run it during `gonotes serve`
+too, since main imports `tui` unconditionally. The answer is v2's own
+mechanism — `tea.RequestBackgroundColor` from `Init()`, `setPalette` on
+`tea.BackgroundColorMsg`. Non-blocking; a silent terminal simply stays dark.
+(It is passed **uncalled**: its signature is `func() tea.Msg`, i.e. already a
+`tea.Cmd`. Its own doc comment shows it invoked, which does not compile.)
+
+**bubbles v2 compounds this**: `list.NewDefaultDelegate()`,
+`textinput.New()` and `textarea.New()` all bake in a hardcoded *dark* style
+set — its source flags that as temporary — and copy it in at construction.
+So each construction site re-applies `DefaultStyles(isDark)`, and
+`loginScreen` (built before the program starts, hence the only screen alive
+when the reply lands) implements a one-method `restyler` interface. Phase 3
+inherits both seams and broadcasts to the whole stack.
+
+**Tests — `tui/tui_test.go`, the package's first (249 lines).** A key-name
+table pinning every binding string the six screens dispatch on, so upstream
+renames fail here instead of silently disabling a feature; teatest boot flows
+for login and a seeded browse list; an altscreen-requested assertion.
+
+Two harness gotchas worth keeping:
+- **`tm.Output()` is one consumable stream.** A second `WaitFor` accumulates
+  from wherever the first stopped reading, so text already pulled into the
+  first call's buffer is gone. It reads exactly like a rendering bug. One
+  `WaitFor` per program, with a condition over all the substrings.
+- `WithInitialTermSize` races any message injected at startup; the browse
+  test re-sends `WindowSizeMsg` after `loggedInMsg` or the list sizes to 0x0.
+
+**Verified past the suite, on a real pty.** `script -q /dev/null` is useless
+here — it inherits a 0x0 winsize when the parent isn't a tty, so the program
+correctly renders nothing and looks broken. A small python `pty.fork` +
+`TIOCSWINSZ` harness that also *answers* the OSC 11 query showed the full
+login card, and flipping the answer from `rgb:1c1c…` to `rgb:ffff…` showed
+clean separation: dark truecolor (`#7D79F6`) through byte 2063, light
+(`#5A56E0`) from 2237 on — the async palette swap working end to end.
 
 ### Phase 3 — conformance revamp
 - New `tui/keymap.go` — `key.Binding` keymap replacing the string switches;
