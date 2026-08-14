@@ -288,3 +288,30 @@ updated, run its `tool/regen.sh` flow after pushing cats.)
   "finished" notification; theme change in cats → dbc repaints; `y` with atotto
   forced to fail → clipboard via OSC 52; Ctrl+G → agent rows; ⌘E/⌘P/⌘G from
   browser-cats (kitty-flag gate) and a bare kitty/Ghostty.
+
+### What was actually verified, 2026-08-14
+
+`go vet` and `go test -race ./...` green in both repos; the headless query
+path re-run by hand against the sqlite demo.
+
+Beyond the suite, the REAL BINARY was launched on a pty inside a fake cats
+environment — a scripted hook socket and control socket standing in for
+catway. That is what caught the one bug the tests could not: pre-creating
+the screen made `EnableMouse` panic on a terminal whose `Init` failed,
+because a `SimulationScreen` is usable the instant it exists and a real one
+is not. The same run confirmed the pane is claimed at startup and released
+on exit *even when dbc fails to start*, which is the case that would
+otherwise leave a stale `dbc` badge on a pane forever.
+
+`TestCatsInitCompletesTheTier1Handshake` now pins the whole startup
+conversation (probe → resolve our pane → subscribe → prime the cache)
+against one fake socket, because the per-piece tests each mocked the step
+before them.
+
+**Still needs a live catway** — a running session is the one thing a test
+cannot stand in for: the sidebar actually showing `dbc`, a real "finished"
+push on the working→idle edge, a real `theme_changed` repaint, and the ⌘
+chords arriving from browser-cats and from a bare kitty/Ghostty. Note the
+pty harness cannot substitute here: under `script` the startup conversation
+stopped after `pane.list`, which the Go test proves is the harness rather
+than dbc, and chasing it further would be measuring the harness.
