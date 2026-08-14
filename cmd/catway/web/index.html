@@ -3645,6 +3645,22 @@
   // it on "use selection for find", which asks a CANVAS for a text
   // selection it cannot have, so the browser gives up nothing at all —
   // while on the other side it is the editor's recent-files switcher.
+  //
+  // Confirmed by hand 2026-08-14, and it corrects the test above: in
+  // CHROME ⌘E never reaches this page. The chord is a native menu item,
+  // resolved before the keydown is dispatched, so there is no event to
+  // preventDefault and this set has no say in the matter. The entry stays
+  // because the MAC APP — which has no ⌘E menu item, so the chord falls
+  // through the responder chain to the WebView — does deliver it, and the
+  // mac app is where this is actually used.
+  //
+  // The general lesson, worth applying before the next chord is added:
+  // this set was curated by what the browser LOSES, and the operative
+  // question is what the browser will HAND OVER. Those are different
+  // lists, and the second one is per-host. The failure is benign either
+  // way — a chord the host keeps is simply inert here, never a chord that
+  // does the wrong thing — but "it is on the allowlist" does not mean
+  // "it arrives". The rest of the set is unverified per browser.
   const CMD_TO_PANE = new Set(["KeyS", "KeyP", "KeyE", "KeyF", "KeyD", "KeyG", "Slash"]);
 
   // cmdGoesToPane answers "does the focused pane want this ⌘ chord?" —
@@ -5168,7 +5184,7 @@
         // Not a cats shortcut — a statement about who gets the key, and
         // the only place a user can find out why ⌘S stopped opening the
         // browser's save dialog over an editor pane.
-        ["sent to an editor pane, not the browser", ["⌘C", "⌘Z", "⌘S", "⌘P", "⌘E", "⌘F", "⌘D", "⌘G", "⌘/"]],
+        ["sent to an editor pane, not the browser", ["⌘C", "⌘Z", "⌘S", "⌘P", "⌘E†", "⌘F", "⌘D", "⌘G", "⌘/"]],
       ]));
       left.appendChild(helpSection("start-path picker (new workspace)", [
         ["move through directories", ["↑", "↓", "Ctrl+n", "Ctrl+p"]],
@@ -5218,7 +5234,13 @@
       body.appendChild(cols);
       const note = document.createElement("p");
       note.className = "hint";
-      note.textContent = "* browser paste shortcuts vary; the ⌘V path asks for clipboard permission once. Everything else is typed straight into the focused terminal.";
+      // The † caveat is the honest half of the row above it: a chord on the
+      // allowlist still only arrives if the HOST hands it over, and Chrome
+      // resolves ⌘E for a menu of its own before this page is offered the
+      // keydown at all — so the row would otherwise promise something the
+      // browser never lets cats deliver. The mac app has no ⌘E menu item
+      // and does deliver it, which is why the entry stays.
+      note.textContent = "* browser paste shortcuts vary; the ⌘V path asks for clipboard permission once. Everything else is typed straight into the focused terminal. † ⌘E reaches a pane in the mac app, but Chrome keeps it for a menu of its own and never offers it to this page.";
       body.appendChild(note);
       m.appendChild(body);
       const btns = document.createElement("div"); btns.className = "btns";
