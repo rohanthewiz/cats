@@ -538,6 +538,27 @@
   /* The caret tracks its header's size — a step under it, as before, so the
      fold marker stays subordinate to the name it folds. */
   #pane-list li.wsgrp .car, #ws-list li.wsgrp .car { font-size:calc(10px * var(--sb-scale)); }
+  /* The workspace whose panes are the ones on screen, marked the way the
+     Workspaces list marks the same workspace: ● and the accent. The Panes
+     section pins it to the top regardless of what is running in it, so the mark
+     is what stops the top row reading as "busiest". */
+  #pane-list li.wsgrp.cur { color:var(--accent); }
+  /* The shelf the quiet workspaces fold into, at the foot of the list. Muted and
+     italic — the two marks this sidebar already uses for a row that is a
+     stand-in rather than a thing (#ws-list li.add, #agent-list li.empty) — so a
+     column of workspace names never reads as containing one called "more
+     workspaces". It borrows .wsgrp's caret and hairline because it folds like a
+     header, but drops the uppercase, the tracking and the weight that say "this
+     names a group": it names an absence, and the shouted form of a phrase that
+     long is the loudest thing in the section for the least reason. */
+  #pane-list li.wsgrp.more { color:var(--muted); font-style:italic;
+    text-transform:none; letter-spacing:0; font-weight:400; }
+  #pane-list li.wsgrp.more:hover { color:var(--fg-soft); }
+  /* Narrow sidebar: the label gives way first. The count and the caret are the
+     row's whole function — how much is hidden, and the way to see it — so they
+     hold their width and the phrase ellipses into whatever is left. */
+  #pane-list li.wsgrp.more > span:first-child { min-width:0; overflow:hidden; text-overflow:ellipsis; }
+  #pane-list li.wsgrp.more .gsum, #pane-list li.wsgrp.more .car { flex:0 0 auto; }
   #pane-list .pub { color:var(--accent); }
   #pane-list .ttl { color:var(--muted); overflow:hidden; text-overflow:ellipsis; }
   #pane-list .ag, #agent-list .aname { margin-left:auto; }
@@ -1185,6 +1206,20 @@
   } catch (e) { /* storage disabled or corrupt — start with everything expanded */ }
   function savePaneCollapsed() {
     try { localStorage.setItem(PGRP_KEY, JSON.stringify([...paneCollapsed])); } catch (e) { /* not persisted */ }
+  }
+  // Is the "more workspaces…" shelf at the foot of the Panes section open? That
+  // shelf holds the workspaces with nothing running in them (renderPaneList), and
+  // it is a flag rather than another id in the set above for one reason: it
+  // defaults the other way. A set of collapsed ids says "everything is open until
+  // you fold it", which is right for a group you chose to fold and wrong here —
+  // the whole point of the shelf is that a session's idle workspaces are out of
+  // the way before anyone touches anything. Stored as its own key so that default
+  // survives a browser that has never seen the section.
+  const PMORE_KEY = "cats.panes.moreopen";
+  let paneMoreOpen = false;
+  try { paneMoreOpen = localStorage.getItem(PMORE_KEY) === "1"; } catch (e) { /* storage disabled — shelf starts shut */ }
+  function savePaneMoreOpen() {
+    try { localStorage.setItem(PMORE_KEY, paneMoreOpen ? "1" : "0"); } catch (e) { /* not persisted */ }
   }
   // The same arrangement for the Usage section's provider groups, kept separate
   // from the pane groups rather than merged into one map: the two sections'
@@ -2275,30 +2310,79 @@
       groups[groups.length - 1].rows.push(row);
     }
 
-    paneGroupIDs = groups.map((g) => g.ws);
-    groups.forEach((g, i) => {
-      paneListEl.appendChild(paneGroupEl(g, i > 0));
+    // Two shelves, by whether the workspace is doing anything: the ones with work
+    // in them stay up top, and the rest fold behind a single "more workspaces…"
+    // row at the foot of the section. The inventory arrives in the session's
+    // workspace order, which is the order the *Workspaces* section wants — a list
+    // you reorder by hand and then read positionally — but Panes is read by
+    // attention, and a session that has collected a dozen workspaces buries the
+    // two you are actually running behind ten headers you never open.
+    //
+    // Active means "at least one pane here has a detected agent", in any state.
+    // Not "an agent that wants something" (blocked/done/working): a workspace
+    // would then drop through the floor the moment its agent went idle, which is
+    // exactly when you are about to type into it. The test is deliberately about
+    // the workspace as a whole rather than the pane — one row per workspace moves,
+    // so the group you were reading does not reshuffle its own rows underneath
+    // you as states change.
+    //
+    // The current workspace is pinned first whatever it holds. Its panes are the
+    // ones on screen, so the group naming them is not something the user should
+    // have to go looking for, and a shell-only workspace you are sitting in is
+    // still the workspace you are sitting in.
+    const aw = activeWorkspace();
+    const curWS = aw ? aw.id : "";
+    const hot = [], cold = [];
+    for (const g of groups) ((g.ws === curWS || g.rows.some((r) => r.agent)) ? hot : cold).push(g);
+    // Stable sort (ES2019+), so this pins the current workspace to the head and
+    // leaves every other pair reading 0 — i.e. in the session's own order.
+    hot.sort((a, b) => (b.ws === curWS) - (a.ws === curWS));
+
+    // Collapse-all/expand-all act on every group, folded shelf or not: the pair
+    // means "the whole section", and a set that quietly skipped the shelf would
+    // leave groups half-folded the next time it was opened.
+    paneGroupIDs = hot.concat(cold).map((g) => g.ws);
+    const emit = (g, sep) => {
+      paneListEl.appendChild(paneGroupEl(g, sep, g.ws === curWS));
       if (!paneCollapsed.has(g.ws)) for (const row of g.rows) paneListEl.appendChild(paneRowEl(row));
-    });
+    };
+    hot.forEach((g, i) => emit(g, i > 0));
+    if (cold.length) {
+      // The shelf row draws the hairline that separates it from the live
+      // workspaces above, so the first group it reveals must not draw a second
+      // one directly beneath it.
+      paneListEl.appendChild(paneMoreEl(cold, hot.length > 0));
+      if (paneMoreOpen) cold.forEach((g, i) => emit(g, i > 0));
+    }
   }
+
+  // Count with its noun, singular or plural — "1 agent", "3 panes". Shared by the
+  // group headers and the shelf row below them so the two read as one register.
+  function nOf(c, w) { return c + " " + w + (c === 1 ? "" : "s"); }
 
   // paneGroupEl builds one workspace's header row: how many of the group's panes
   // are running an agent, out of how many panes. The rollup rides the header in
   // both states — collapsed it stands in for the rows it hides, and expanded it
   // saves counting them by eye, since the agent count is a property of the group
   // that no single row reports.
-  function paneGroupEl(g, sep) {
+  //
+  // cur marks the workspace whose panes are the ones on screen. It earns a mark
+  // because the section is no longer in session order: the current workspace is
+  // pinned to the top (renderPaneList) and can sit above workspaces that are
+  // busier than it is, so the first row has to say why it is first. Same ●/accent
+  // the Workspaces section marks the same workspace with, since it is the same
+  // fact being reported twice.
+  function paneGroupEl(g, sep, cur) {
     const collapsed = paneCollapsed.has(g.ws);
     const li = document.createElement("li");
-    li.className = "wsgrp" + (sep ? " sep" : "");
+    li.className = "wsgrp" + (sep ? " sep" : "") + (cur ? " cur" : "");
     const name = document.createElement("span");
-    name.textContent = wsName(g.ws) || "—";
+    name.textContent = (cur ? "● " : "") + (wsName(g.ws) || "—");
     li.appendChild(name);
     const agents = g.rows.filter((r) => r.agent).length;
     const s = document.createElement("span");
     s.className = "gsum";
-    const n = (c, w) => c + " " + w + (c === 1 ? "" : "s");
-    s.textContent = n(agents, "agent") + " / " + n(g.rows.length, "pane");
+    s.textContent = nOf(agents, "agent") + " / " + nOf(g.rows.length, "pane");
     li.appendChild(s);
     const car = document.createElement("span");
     car.className = "car"; car.textContent = collapsed ? "▶" : "▼";
@@ -2310,6 +2394,54 @@
     pressActivate(li, () => {
       if (collapsed) paneCollapsed.delete(g.ws); else paneCollapsed.add(g.ws);
       savePaneCollapsed();
+      renderPaneList();
+    });
+    return li;
+  }
+
+  // paneMoreEl builds the one row the idle workspaces fold into: a shelf, not a
+  // group. It is built as a .wsgrp because it does a group header's job at the
+  // tier above — it names what is behind it, counts it, and folds it with the
+  // same caret — and it is set in italics so a list of workspace names is never
+  // mistaken for holding one called "more workspaces".
+  //
+  //   PANES              ⊞ ⊟ ▼
+  //     ● cats   2 agents / 4 panes     the current workspace, pinned
+  //       cats:p2  build   claude
+  //     api      1 agent / 3 panes      still working
+  //   ─────────────────────────────
+  //     more workspaces…  3 workspaces / 7 panes  ▶
+  //
+  // The tally is the bare number of workspaces behind the row. Not agents: every
+  // workspace here is here precisely because it has none, so that column would be
+  // zeroes. Not "2 workspaces / 3 panes" either — the noun is already in the
+  // label this rides, and spelled out twice the row outgrows a sidebar that goes
+  // down to 150px wide, which is the same trade the Workspaces heading makes with
+  // its own folded count. The words are in the tooltip for anyone the digit
+  // doesn't reach. It rides both states for the reason the group rollups do —
+  // shut, it stands in for what is hidden; open, it saves counting headers.
+  function paneMoreEl(cold, sep) {
+    const li = document.createElement("li");
+    li.className = "wsgrp more" + (sep ? " sep" : "");
+    const name = document.createElement("span");
+    name.textContent = "more workspaces…";
+    li.appendChild(name);
+    const panesN = cold.reduce((t, g) => t + g.rows.length, 0);
+    const s = document.createElement("span");
+    s.className = "gsum";
+    s.textContent = String(cold.length);
+    li.appendChild(s);
+    const car = document.createElement("span");
+    car.className = "car"; car.textContent = paneMoreOpen ? "▼" : "▶";
+    li.appendChild(car);
+    li.title = (paneMoreOpen ? "hide " : "show ") + nOf(cold.length, "workspace")
+      + " with no agent running (" + nOf(panesN, "pane") + ")";
+    // On the press, for the same reason every other fold in this list is: the row
+    // is rebuilt on every rollup and title push, and a press that a rebuild
+    // interrupts never becomes a click.
+    pressActivate(li, () => {
+      paneMoreOpen = !paneMoreOpen;
+      savePaneMoreOpen();
       renderPaneList();
     });
     return li;
@@ -2362,13 +2494,22 @@
   // The Panes heading's own controls: fold or unfold every workspace group at
   // once. They act on the groups the last render drew, so a workspace that no
   // longer has panes doesn't linger in the collapsed set.
+  //
+  // The "more workspaces…" shelf moves with them. ⊞ means "show me everything in
+  // this section", and a shelf still holding half the session's workspaces shut
+  // would make that a lie; ⊟ means the reverse, and leaving the shelf hanging
+  // open over a list of folded headers is the same lie the other way round.
   (function initPaneHeadingCtl() {
     const el = document.getElementById("pane-hctl");
     el.appendChild(mkBtn("⊞", "expand all workspaces", "", () => {
-      paneCollapsed.clear(); savePaneCollapsed(); renderPaneList();
+      paneCollapsed.clear(); savePaneCollapsed();
+      paneMoreOpen = true; savePaneMoreOpen();
+      renderPaneList();
     }));
     el.appendChild(mkBtn("⊟", "collapse all workspaces", "", () => {
-      paneCollapsed = new Set(paneGroupIDs); savePaneCollapsed(); renderPaneList();
+      paneCollapsed = new Set(paneGroupIDs); savePaneCollapsed();
+      paneMoreOpen = false; savePaneMoreOpen();
+      renderPaneList();
     }));
     initSectionFold("sec-panes", "pane-hctl", "panes");
   })();
