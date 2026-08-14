@@ -3654,13 +3654,22 @@
   // through the responder chain to the WebView — does deliver it, and the
   // mac app is where this is actually used.
   //
-  // The general lesson, worth applying before the next chord is added:
-  // this set was curated by what the browser LOSES, and the operative
-  // question is what the browser will HAND OVER. Those are different
-  // lists, and the second one is per-host. The failure is benign either
-  // way — a chord the host keeps is simply inert here, never a chord that
-  // does the wrong thing — but "it is on the allowlist" does not mean
-  // "it arrives". The rest of the set is unverified per browser.
+  // ⌘E is the ONLY one, and the rest of the set was checked the same day
+  // to establish that: ⌘S ⌘P ⌘F ⌘D ⌘G all reach an editor pane in Chrome
+  // AND in the mac app. Each of those is a Chrome menu item too (Save
+  // Page As, Print, Find, Bookmark, Find Next), so a menu binding is not
+  // by itself disqualifying — Chrome dispatches the keydown first and
+  // honours preventDefault, which is the same courtesy that lets any web
+  // editor claim ⌘S. ⌘E is the exception to that rule, not an example of
+  // it. ⌘/ has no menu binding anywhere and was never in doubt.
+  //
+  // The lesson is narrow, then, but keep it in mind when adding a chord:
+  // this set was curated by what the browser LOSES, which is a proxy for
+  // the question that actually decides delivery — will the host HAND IT
+  // OVER. The proxy holds for every chord here but one. Test a new entry
+  // in a real browser rather than reasoning it in; the failure is benign
+  // (a chord the host keeps is inert here, never a chord that does the
+  // wrong thing) but silent, and silent is how ⌘E sat wrong for a day.
   const CMD_TO_PANE = new Set(["KeyS", "KeyP", "KeyE", "KeyF", "KeyD", "KeyG", "Slash"]);
 
   // cmdGoesToPane answers "does the focused pane want this ⌘ chord?" —
@@ -5239,7 +5248,9 @@
       // resolves ⌘E for a menu of its own before this page is offered the
       // keydown at all — so the row would otherwise promise something the
       // browser never lets cats deliver. The mac app has no ⌘E menu item
-      // and does deliver it, which is why the entry stays.
+      // and does deliver it, which is why the entry stays. ⌘E is the only
+      // row needing the mark: every other forwarded chord was hand-checked
+      // in Chrome and the mac app and arrives in both.
       note.textContent = "* browser paste shortcuts vary; the ⌘V path asks for clipboard permission once. Everything else is typed straight into the focused terminal. † ⌘E reaches a pane in the mac app, but Chrome keeps it for a menu of its own and never offers it to this page.";
       body.appendChild(note);
       m.appendChild(body);
