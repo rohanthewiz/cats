@@ -212,7 +212,7 @@ What it completes:
 | `integration install\|uninstall` | agent targets, each showing its install state |
 | `plugin run\|update\|uninstall` | installed plugin ids, then that plugin's action ids |
 | `plugin link` | directories |
-| flags | the global flags, plus a family's own (`--ref`, probe's `--url`, …) |
+| flags | the global flags, plus a family's own (`--ref`, `plugin run --all`, probe's `--url`, …) |
 
 The live rows come from a read-only query over the control socket, capped at
 half a second: with no server running you simply get no candidates, never a
@@ -298,10 +298,30 @@ catctl plugin link ./cats-todo                  # symlink a local checkout
 catctl plugin update <id>                        # re-fetch + rebuild
 catctl plugin list
 catctl plugin run <id>                           # launch in a new tab
+catctl plugin run <id> [action] --all            # ... in every workspace
 catctl plugin uninstall <id>
 ```
 
 Only `run` needs a running `catway`.
+
+`--all` is the CLI twin of the plugins dialog's **run all** button: one
+`tab.create` per workspace, each naming its target, so nothing is focused and
+nothing is switched to. It differs from the plain launch in two ways. It sends no
+cwd — the plain form sends the invoking directory because "here" is what you
+meant, while a fan-out has no single "here", so each tab inherits its own
+workspace's directory and a per-project plugin scopes to the project it landed
+in. And locked workspaces are skipped rather than attempted, a lock meaning "no
+automation lands here". The report is one line per workspace in session order:
+
+```
+$ catctl plugin run rohanthewiz.cats-todo --all
+w1   tab 3 (pane 7)
+w2   skipped (locked)
+w3   tab 2 (pane 9)
+```
+
+Exit is 1 if any launch failed, or if nothing started at all — a command with no
+effect should not read as success to a script.
 
 ### `catctl probe`
 

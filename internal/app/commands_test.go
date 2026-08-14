@@ -1342,6 +1342,133 @@ func TestDispatchTabCreateInheritsCwd(t *testing.T) {
 	}
 }
 
+// tab.create can name a workspace other than the one on screen — the fan-out
+// the browser's "start in all workspaces" plugin launch sends, one call per
+// workspace. Everything the command touches has to follow the target: the tab
+// itself, the title (tab numbers are per workspace), the returned root pane,
+// the inherited cwd, and the lock.
+func TestDispatchTabCreateInWorkspace(t *testing.T) {
+	// twoWorkspaces returns a harness whose session holds the original
+	// workspace plus a second, active one — the layout a fan-out runs against,
+	// with a target that is deliberately not the viewport.
+	twoWorkspaces := func(t *testing.T) (cmdHarness, string) {
+		t.Helper()
+		h := newCmdHarness(t)
+		away := h.s.ActiveWorkspace().ID
+		if _, err := h.s.CreateWorkspace(); err != nil { // switches to the new one
+			t.Fatalf("CreateWorkspace: %v", err)
+		}
+		if h.s.ActiveWorkspace().ID == away {
+			t.Fatal("CreateWorkspace did not switch to the new workspace")
+		}
+		return h, away
+	}
+
+	t.Run("lands in the named workspace, not the viewport", func(t *testing.T) {
+		h, away := twoWorkspaces(t)
+		active := h.s.ActiveWorkspace()
+		r := h.resp()
+
+		h.d.Dispatch(CmdTabCreate, params(t, TabCreateParams{Workspace: away, Title: "todo"}), r)
+
+		got := okData[TabCreateResult](t, r)
+		target := h.s.WorkspaceByID(away)
+		if len(target.Tabs) != 2 {
+			t.Fatalf("target workspace tabs = %d, want 2", len(target.Tabs))
+		}
+		if len(active.Tabs) != 1 {
+			t.Fatalf("the viewport's workspace grew a tab: tabs=%d", len(active.Tabs))
+		}
+		// The viewport does not move: a fan-out that switched workspaces would
+		// leave the user wherever the last launch landed.
+		if h.s.ActiveWorkspace().ID != active.ID {
+			t.Fatalf("active workspace = %s, want %s", h.s.ActiveWorkspace().ID, active.ID)
+		}
+		// The returned pane is the new tab's root, which is *not* the focused
+		// pane — that still belongs to the workspace on screen.
+		if root := target.Tabs[1].RootPane; got.Pane != uint32(root) {
+			t.Fatalf("result pane = %d, want the target's new root pane %d", got.Pane, root)
+		}
+		if focused, _ := h.s.FocusedPane(); got.Pane == uint32(focused) {
+			t.Fatal("result pane must not be the viewport's focused pane")
+		}
+		// The title has to be applied against the target: tab numbers restart
+		// per workspace, so an unscoped rename would hit the viewport's tab of
+		// the same number.
+		if name := target.Tabs[1].DisplayName(); name != "todo" {
+			t.Fatalf("target tab name = %q, want %q", name, "todo")
+		}
+		if name := active.Tabs[0].DisplayName(); name == "todo" {
+			t.Fatal("the title was applied to the viewport's tab")
+		}
+	})
+
+	t.Run("inherits the target's cwd, not the viewport's", func(t *testing.T) {
+		h, away := twoWorkspaces(t)
+		target := h.s.WorkspaceByID(away)
+		h.b.paneMeta = map[uint32]PaneMeta{
+			uint32(target.Tabs[0].RootPane):                {Cwd: "/tmp/away"},
+			uint32(h.s.ActiveWorkspace().Tabs[0].RootPane): {Cwd: "/tmp/onscreen"},
+		}
+		r := h.resp()
+
+		h.d.Dispatch(CmdTabCreate, params(t, TabCreateParams{Workspace: away}), r)
+
+		got := okData[TabCreateResult](t, r)
+		if ov := h.b.staged[got.Pane]; ov.Cwd != "/tmp/away" {
+			t.Fatalf("inherited cwd = %q, want the target's %q", ov.Cwd, "/tmp/away")
+		}
+	})
+
+	t.Run("the target's lock is the one that decides", func(t *testing.T) {
+		h, away := twoWorkspaces(t)
+		if _, err := h.s.SetWorkspaceLock(away, true); err != nil {
+			t.Fatalf("lock %s: %v", away, err)
+		}
+		*h.log = nil
+		r := h.resp()
+
+		// The viewport's workspace is unlocked; the target is not, and the
+		// target is where the process would run.
+		h.d.Dispatch(CmdTabCreate, params(t, TabCreateParams{Workspace: away, Command: []string{"/opt/plug/bin/tool"}}), r)
+
+		if !r.failCall || !strings.Contains(r.errMsg, "is locked") {
+			t.Fatalf("launch into a locked target: fail=%v msg=%q", r.failCall, r.errMsg)
+		}
+		if lg := *h.log; len(lg) != 1 || lg[0] != "fail" {
+			t.Fatalf("a refused launch must run no effects, log=%v", lg)
+		}
+		if n := len(h.s.WorkspaceByID(away).Tabs); n != 1 {
+			t.Fatalf("a refused launch must not create a tab, tabs=%d", n)
+		}
+		// A bare tab is still the user asking for a shell, target or not.
+		r = h.resp()
+		h.d.Dispatch(CmdTabCreate, params(t, TabCreateParams{Workspace: away}), r)
+		if !r.okCall {
+			t.Fatalf("plain tab.create into a locked target: fail=%v msg=%q", r.failCall, r.errMsg)
+		}
+	})
+
+	t.Run("unknown workspace fails before anything is created", func(t *testing.T) {
+		h, _ := twoWorkspaces(t)
+		before := len(h.s.AllPaneIDs())
+		*h.log = nil
+		r := h.resp()
+
+		h.d.Dispatch(CmdTabCreate, params(t, TabCreateParams{Workspace: "w404"}), r)
+
+		if !r.failCall || !strings.Contains(r.errMsg, "unknown workspace") {
+			t.Fatalf("unknown workspace: fail=%v msg=%q", r.failCall, r.errMsg)
+		}
+		if lg := *h.log; len(lg) != 1 || lg[0] != "fail" {
+			t.Fatalf("a refused create must run no effects, log=%v", lg)
+		}
+		if after := len(h.s.AllPaneIDs()); after != before {
+			t.Fatalf("pane count = %d, want %d — nothing should have been created", after, before)
+		}
+	})
+}
+
 // A split opens where the pane it came from is working — the tab-level rule
 // applied to the one pane a split unambiguously descends from.
 func TestDispatchPaneSplitInheritsCwd(t *testing.T) {

@@ -282,10 +282,19 @@ func integrationTargets() []candidate {
 
 // pluginFlags are the plugin family's own flags, kept apart from globalFlags so
 // slot counting skips `--ref <value>` instead of mistaking the value for the
-// plugin id.
-var pluginFlags = append([]flagSpec{
-	{"--ref", "branch or tag to install", true, dirNoFiles},
-}, globalFlags...)
+// plugin id — and so `--all`, which takes none, is skipped without eating the
+// word after it.
+//
+// Each is also named on its own because they belong to different subcommands
+// (--ref to install, --all to run) and only that subcommand should offer it.
+// Naming them beats slicing pluginFlags by index, which silently offers the
+// wrong flag the moment another one is added.
+var (
+	pluginRefFlag = flagSpec{"--ref", "branch or tag to install", true, dirNoFiles}
+	pluginAllFlag = flagSpec{"--all", "start the action in every unlocked workspace", false, dirNoFiles}
+)
+
+var pluginFlags = append([]flagSpec{pluginRefFlag, pluginAllFlag}, globalFlags...)
 
 // completePlugin completes the plugin family.
 func completePlugin(rest []string, cur string) ([]candidate, string) {
@@ -307,7 +316,7 @@ func completePlugin(rest []string, cur string) ([]candidate, string) {
 	switch pos[0] {
 	case "install":
 		if strings.HasPrefix(cur, "-") {
-			return filter(flagCandidates(pluginFlags[:1]), cur), dirNoFiles
+			return filter(flagCandidates([]flagSpec{pluginRefFlag}), cur), dirNoFiles
 		}
 		return nil, dirNoFiles // owner/repo or a URL — nothing local to offer
 	case "link":
@@ -319,6 +328,11 @@ func completePlugin(rest []string, cur string) ([]candidate, string) {
 			return filter(installedPlugins(), cur), dirNoFiles
 		}
 	case "run":
+		// --all is offered at every slot: it is positionless, so a user who
+		// reaches for it after typing the id should still find it.
+		if strings.HasPrefix(cur, "-") {
+			return filter(flagCandidates([]flagSpec{pluginAllFlag}), cur), dirNoFiles
+		}
 		switch len(pos) {
 		case 1:
 			return filter(installedPlugins(), cur), dirNoFiles

@@ -323,6 +323,16 @@ catctl pane.split --params '{"direction":"v","command":["ced","main.go"]}'
 | `workspace.move` | — |
 | `workspace.lock` | `lock-ws [id]` / `unlock-ws [id]` |
 
+`tab.create` opens the tab in the active workspace unless it names one:
+`{"workspace":"w2"}` puts the tab there instead, without moving the viewport. It
+exists for fan-out — the browser's "start in all workspaces" plugin launch sends
+one `tab.create` per workspace — where focusing each workspace in turn would
+scroll the user through the session as a side effect and leave them wherever the
+last call landed. Everything else follows the named workspace too: `title` is
+applied there (tab numbers restart per workspace), the returned `pane` is the new
+tab's root pane rather than whatever the viewport has focused, an omitted `cwd` is
+inherited from *that* workspace's last tab, and the lock consulted is its own.
+
 `workspace.lock` sets a workspace aside for hand work: while it is locked, two
 commands refuse it — `tab.create` **carrying a `command`** (the path a plugin
 action and an agent launch both arrive on) and `pane.send_input` into any of its

@@ -371,7 +371,30 @@ func (s *Session) ClosePane(target *layout.PaneID) (layout.PaneID, error) {
 	return id, nil
 }
 
-// --- Tab commands (§7) — operate on the active workspace ---------------------
+// --- Tab commands (§7) — the active workspace unless one is named ------------
+//
+// The tab verbs default to the active workspace because that is what a user
+// driving the UI means by "a new tab". The …In variants take an explicit
+// workspace id so a caller can put a tab somewhere it is not looking — the
+// fan-out an "in all workspaces" plugin launch needs, which would otherwise
+// have to focus each workspace in turn and leave the viewport wherever the
+// loop ended. Passing "" is the active-workspace case, so the two forms are
+// the same code path and cannot drift.
+
+// WorkspaceByID resolves a workspace from its public id ("w2"); "" means the
+// active one. nil when no workspace carries that id — callers turn that into
+// their own error, since the phrasing differs (a refused command vs. a skipped
+// element of a fan-out).
+func (s *Session) WorkspaceByID(id string) *workspace.Workspace {
+	if id == "" {
+		return s.ActiveWorkspace()
+	}
+	i, ok := s.workspaceIndexByID(id)
+	if !ok {
+		return nil
+	}
+	return s.workspaces[i]
+}
 
 // NewTabNeighborPane returns the pane a tab created right now would land next
 // to: the root pane of the active workspace's last tab, since CreateTab appends
@@ -379,30 +402,54 @@ func (s *Session) ClosePane(target *layout.PaneID) (layout.PaneID, error) {
 // the new tab opens where its left-hand neighbor is working (the dispatcher's
 // inheritedTabCwd). False when the workspace somehow holds no tabs.
 func (s *Session) NewTabNeighborPane() (layout.PaneID, bool) {
-	tabs := s.ActiveWorkspace().Tabs
-	if len(tabs) == 0 {
+	return s.NewTabNeighborPaneIn("")
+}
+
+// NewTabNeighborPaneIn is NewTabNeighborPane for a named workspace ("" = the
+// active one). False for an unknown workspace as well as an empty one: both
+// mean "no neighbor to inherit from", which is exactly what the caller does
+// with it.
+func (s *Session) NewTabNeighborPaneIn(wsID string) (layout.PaneID, bool) {
+	ws := s.WorkspaceByID(wsID)
+	if ws == nil || len(ws.Tabs) == 0 {
 		return 0, false
 	}
-	return tabs[len(tabs)-1].RootPane, true
+	return ws.Tabs[len(ws.Tabs)-1].RootPane, true
 }
 
 // CreateTab appends a tab to the active workspace and switches to it. Returns
-// the new tab's public number. The tab spawns in the workspace's identity cwd
-// (a worktree workspace's checkout), falling back to the session cwd — the
-// dispatcher layers the neighbor tab's live cwd over that when it knows one.
+// the new tab's public number.
 func (s *Session) CreateTab() (int, error) {
-	ws := s.ActiveWorkspace()
+	num, _, err := s.CreateTabIn("")
+	return num, err
+}
+
+// CreateTabIn appends a tab to the named workspace ("" = the active one) and
+// makes it that workspace's active tab. Returns the new tab's public number and
+// its root pane. The tab spawns in the workspace's identity cwd (a worktree
+// workspace's checkout), falling back to the session cwd — the dispatcher layers
+// the neighbor tab's live cwd over that when it knows one.
+//
+// The root pane is returned rather than left to the caller to look up, because
+// FocusedPane — how the dispatcher used to find it — reports the *viewport's*
+// pane, which is the new one only when the target workspace happens to be the
+// active one. Returning it here keeps the answer right for both cases.
+func (s *Session) CreateTabIn(wsID string) (int, layout.PaneID, error) {
+	ws := s.WorkspaceByID(wsID)
+	if ws == nil {
+		return 0, 0, fmt.Errorf("unknown workspace %s", wsID)
+	}
 	cwd := ws.IdentityCwd
 	if cwd == "" {
 		cwd = s.cwd
 	}
 	idx, err := ws.CreateTab(cwd, workspace.SpawnSpec{})
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 	ws.SwitchTab(idx)
 	num, _ := ws.PublicTabNumber(idx)
-	return num, nil
+	return num, ws.Tabs[idx].RootPane, nil
 }
 
 // CloseTab closes a tab (the active tab if num is nil) of the active workspace.
@@ -442,7 +489,18 @@ func (s *Session) FocusTab(num int) error {
 
 // RenameTab pins (or clears, with "") a tab's display name.
 func (s *Session) RenameTab(num int, name string) error {
-	ws := s.ActiveWorkspace()
+	return s.RenameTabIn("", num, name)
+}
+
+// RenameTabIn is RenameTab scoped to a named workspace ("" = the active one).
+// tab.create's title has to travel with its workspace: tab numbers are per
+// workspace, so renaming "tab 2" against the viewport after creating tab 2
+// somewhere else would rename the wrong tab — or, worse, silently succeed.
+func (s *Session) RenameTabIn(wsID string, num int, name string) error {
+	ws := s.WorkspaceByID(wsID)
+	if ws == nil {
+		return fmt.Errorf("unknown workspace %s", wsID)
+	}
 	idx, ok := s.tabIndexByNumber(ws, num)
 	if !ok {
 		return fmt.Errorf("unknown tab %d", num)

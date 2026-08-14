@@ -111,6 +111,11 @@ func TestCompleteFamilies(t *testing.T) {
 	if got, _ := complete("plugin", "install", "--"); !slices.Equal(got, []string{"--ref"}) {
 		t.Errorf("plugin install flags = %v, want [--ref]", got)
 	}
+	// Each subcommand offers only its own flag: --all belongs to run, --ref to
+	// install, and neither should surface on the other.
+	if got, _ := complete("plugin", "run", "--"); !slices.Equal(got, []string{"--all"}) {
+		t.Errorf("plugin run flags = %v, want [--all]", got)
+	}
 	if got, _ := complete("integration", "install", ""); !slices.Contains(got, "claude") {
 		t.Errorf("integration targets = %v, want to include claude", got)
 	}
@@ -221,6 +226,45 @@ func TestSanitizeDesc(t *testing.T) {
 	long := sanitizeDesc(strings.Repeat("é", 200))
 	if r := []rune(long); len(r) != 72 || r[71] != '…' {
 		t.Errorf("sanitizeDesc truncation = %d runes ending %q", len(r), string(r[len(r)-1]))
+	}
+}
+
+// --all is positionless and must not be counted as an operand: after it, the
+// next word is still the plugin id and the one after is still the action. This
+// is the whole reason the flag is declared in pluginFlags rather than merely
+// parsed in plugin.go — a flag the completer does not know about eats the slot
+// it sits in, and `plugin run --all <TAB>` would then offer the *actions* of a
+// plugin named "--all".
+func TestCompletePluginRunAll(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "plugins")
+	t.Setenv(plugin.DirEnvVar, root)
+	dir := filepath.Join(root, "acme.demo")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `
+id = "acme.demo"
+version = "0.1.0"
+
+[[actions]]
+id = "ui"
+title = "open the UI"
+command = ["./bin/demo"]
+`
+	if err := os.WriteFile(filepath.Join(dir, plugin.ManifestName), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Slot 1 with the flag ahead of it: still the plugin id.
+	if got, _ := complete("plugin", "run", "--all", ""); !slices.Contains(got, "acme.demo") {
+		t.Errorf("id slot after --all = %v, want to include acme.demo", got)
+	}
+	// Slot 2: still the action, and the flag may trail as well as lead.
+	if got, _ := complete("plugin", "run", "--all", "acme.demo", ""); !slices.Contains(got, "ui") {
+		t.Errorf("action slot after --all = %v, want to include ui", got)
+	}
+	if got, _ := complete("plugin", "run", "acme.demo", "--all", ""); !slices.Contains(got, "ui") {
+		t.Errorf("action slot with a trailing --all = %v, want to include ui", got)
 	}
 }
 

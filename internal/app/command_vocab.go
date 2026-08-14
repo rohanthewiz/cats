@@ -765,13 +765,23 @@ type PaneMeta struct {
 //     the pane runs the program directly, so its exit closes the pane and no
 //     shell history/prompt noise precedes it (same mechanism as agent resume).
 //   - Env adds environment variables to the spawned process.
+//   - Workspace puts the tab in a workspace other than the active one.
 //
 // Cwd/Env without Command still apply to the default shell spawn.
+//
+// Workspace ("w2") exists so a caller can open a tab where it is not looking.
+// The browser's "start in all workspaces" plugin launch sends one tab.create
+// per workspace with this field set; without it the only way there is to focus
+// each workspace in turn, which moves the viewport as a side effect of an
+// operation that is not about the viewport at all. Empty — the ordinary case —
+// means the active workspace, and the viewport does not move either way: the
+// new tab becomes its *own* workspace's active tab, nothing more.
 type TabCreateParams struct {
-	Title   string            `json:"title,omitempty"`
-	Cwd     string            `json:"cwd,omitempty"`
-	Command []string          `json:"command,omitempty"`
-	Env     map[string]string `json:"env,omitempty"`
+	Title     string            `json:"title,omitempty"`
+	Cwd       string            `json:"cwd,omitempty"`
+	Command   []string          `json:"command,omitempty"`
+	Env       map[string]string `json:"env,omitempty"`
+	Workspace string            `json:"workspace,omitempty"`
 }
 
 // Validate rejects a present-but-unusable Command (an empty argv slot cannot be

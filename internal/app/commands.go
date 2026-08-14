@@ -508,37 +508,47 @@ func (d *Dispatcher) Dispatch(name string, dec ParamDecoder, r Responder) {
 			bad(err)
 			return
 		}
+		// Resolve the target up front: everything below is scoped to it, and an
+		// unknown id has to fail before the create rather than silently landing
+		// the tab in the viewport instead of where the caller aimed it.
+		ws := d.session.WorkspaceByID(p.Workspace)
+		if ws == nil {
+			r.Fail(fmt.Sprintf("unknown workspace %s", p.Workspace))
+			return
+		}
 		// A locked workspace takes no supplied command line — this is the path a
 		// plugin action and an agent launch both come in on (the browser's
 		// pluginRunAction, `catctl plugin run`). A bare tab.create is a shell the
 		// user asked for by hand, so it goes through: the lock keeps automation
 		// out, it does not put the workspace behind glass.
-		if len(p.Command) > 0 {
-			if ws := d.session.ActiveWorkspace(); ws != nil && ws.Locked {
-				r.Fail(workspaceLockedErr(ws.ID, "run a command in"))
-				return
-			}
+		//
+		// The lock consulted is the *target's*, not the viewport's. With an
+		// explicit workspace those differ, and it is the workspace the process
+		// lands in that was set aside for hand work — a fan-out across every
+		// workspace has to be refused by exactly the locked ones.
+		if len(p.Command) > 0 && ws.Locked {
+			r.Fail(workspaceLockedErr(ws.ID, "run a command in"))
+			return
 		}
 		// Resolve the left-hand neighbor before the create, while it is still the
 		// workspace's last tab.
-		inherited := d.inheritedTabCwd()
-		num, err := d.session.CreateTab()
+		inherited := d.inheritedTabCwd(p.Workspace)
+		num, root, err := d.session.CreateTabIn(p.Workspace)
 		if err != nil {
 			r.Fail(err.Error())
 			return
 		}
-		// CreateTab switches to the new tab, so the globally focused pane is its
-		// root pane — returned so an automation client can drive the fresh pane
-		// (send_input / wait_for_output) without diffing pane.list.
-		res := TabCreateResult{Num: num}
-		if id, ok := d.session.FocusedPane(); ok {
-			res.Pane = uint32(id)
-		}
+		// The new tab's root pane — returned so an automation client can drive it
+		// (send_input / wait_for_output) without diffing pane.list. It comes back
+		// from CreateTabIn rather than from FocusedPane because the latter reads
+		// the viewport, which is not the target when a workspace was named.
+		res := TabCreateResult{Num: num, Pane: uint32(root)}
 		if p.Title != "" {
 			// Same session mutation as tab.rename; the tab was just created, so
 			// the only failure would be a vanished tab — not worth failing the
-			// whole create over.
-			_ = d.session.RenameTab(num, p.Title)
+			// whole create over. Scoped to the same workspace: tab numbers are
+			// per workspace, so an unscoped rename would find a different tab.
+			_ = d.session.RenameTabIn(p.Workspace, num, p.Title)
 		}
 		// Stage the spawn override before ApplyModel: that call reconciles the
 		// daemon's PTY set and is what actually creates the pane's process. An
@@ -952,8 +962,14 @@ func (d *Dispatcher) Dispatch(name string, dec ParamDecoder, r Responder) {
 // yields the directory it was launched in, and the chain of inheritance holds.
 // "" (no neighbor, or a pane the backend does not know) leaves Session.CreateTab's
 // own default in place.
-func (d *Dispatcher) inheritedTabCwd() string {
-	pane, ok := d.session.NewTabNeighborPane()
+//
+// wsID scopes the neighbor to the workspace the tab is actually going into ("" =
+// the active one). Inheriting from the viewport's last tab when the tab lands
+// elsewhere is the one way this can go quietly wrong: the pane would open in a
+// directory belonging to a different project, which is precisely the mistake a
+// per-workspace plugin launch exists to avoid.
+func (d *Dispatcher) inheritedTabCwd(wsID string) string {
+	pane, ok := d.session.NewTabNeighborPaneIn(wsID)
 	if !ok {
 		return ""
 	}

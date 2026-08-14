@@ -339,7 +339,10 @@ catctl plugin uninstall rohanthewiz.cats-todo
 ```
 
 Install, link, list, update and uninstall are **offline** — they need no running
-`catway`. Only `run` dials the control socket, and only to issue `tab.create`.
+`catway`. Only `run` dials the control socket, and only to issue `tab.create` —
+plus one `workspace.list` first when it is given `--all`, the CLI twin of the
+plugins dialog's **run all** button (see [Where an action starts](#where-an-action-starts)
+for the semantics both share).
 
 Every one of these completes: `plugin run <TAB>` offers installed ids with their
 names and versions, and a second `<TAB>` offers that plugin's action ids with
@@ -371,6 +374,36 @@ somewhere unusual.
 Linked rows show their checkout path and swap **update** (there is no remote to
 pull from) for **rebuild** — a re-link that re-runs the build steps to pick up
 local edits. **unlink** removes only the link, never the checkout.
+
+### Where an action starts
+
+**run** launches into the workspace on screen. **run all** — a second button,
+present only once the session holds more than one workspace — starts the same
+action everywhere. Either one launches straight away for a single-action plugin
+and opens an action picker for the rest; the two buttons differ only in where the
+tabs land, so the fan-out never costs the common launch an extra click.
+
+**run** roots the tab in the focused pane's live cwd, because plugins scope
+per-project state off the directory they wake up in and "here" is what a user
+means by the project on screen. **run all** sends one `tab.create` per workspace,
+each naming its target, so nothing is focused and nothing is switched to — the
+tabs are simply open when you arrive.
+Those launches send **no** cwd: each tab inherits its own workspace's directory,
+so every copy scopes to the project it landed in rather than to the one that
+happened to be on screen when the menu opened. Locked workspaces are skipped
+before the send, not refused by the server — a lock means "no automation lands
+here", and a fan-out is the automation it was written for, so the toast reports
+the skip as a count rather than as an error.
+
+`catctl plugin run <id> [action] --all` is the same fan-out from the CLI, with
+the same no-cwd and skip-locked rules — see
+[`catctl plugin`](../reference/cli.md#catctl-plugin).
+
+A third way in: the **new workspace** dialog's *start plugin* field starts an
+action in the workspace as it opens, against the start path chosen in the same
+dialog. The roster comes from one `plugin.list` before the dialog opens; a failed
+or empty list drops the field rather than the dialog, since creating a workspace
+must not depend on the plugin host being healthy.
 
 ## Environment a plugin gets
 

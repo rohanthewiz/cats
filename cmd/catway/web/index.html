@@ -821,9 +821,18 @@
   .modal header { padding:10px 14px; font-weight:600; color:var(--fg-strong); border-bottom:1px solid var(--line); font-size:12px; }
   .modal .body { padding:12px 14px; }
   .modal .body p { margin:0 0 10px; color:var(--fg); line-height:1.45; }
-  .modal input[type=text] { width:100%; box-sizing:border-box; background:var(--bg); color:var(--fg);
+  /* A choice field is styled as its text sibling, so a dialog that mixes the two
+     (new workspace: name, start path, plugin) reads as one column of fields
+     rather than two controls that happen to be stacked. appearance:none drops
+     the platform chrome for the same reason; the ▾ is drawn back on by the rule
+     below, since a select with no affordance at all reads as a disabled input. */
+  .modal input[type=text], .modal select { width:100%; box-sizing:border-box; background:var(--bg); color:var(--fg);
     border:1px solid var(--line); border-radius:5px; padding:6px 8px; font:inherit; outline:none; }
-  .modal input[type=text]:focus { border-color:var(--accent); }
+  .modal input[type=text]:focus, .modal select:focus { border-color:var(--accent); }
+  .modal select { appearance:none; cursor:pointer; padding-right:24px;
+    background-image:linear-gradient(45deg,transparent 50%,var(--muted) 50%),linear-gradient(135deg,var(--muted) 50%,transparent 50%);
+    background-size:5px 5px,5px 5px; background-position:calc(100% - 13px) 52%,calc(100% - 8px) 52%;
+    background-repeat:no-repeat; }
   .modal .field + .field { margin-top:10px; } /* multi-field dialogs (new workspace) */
   .modal .field label { display:block; color:var(--muted); font-size:11px; margin-bottom:4px; }
   .modal .hint { color:var(--muted); font-size:11px; margin-top:8px; }
@@ -4558,14 +4567,32 @@
       const h = document.createElement("header"); h.textContent = opts.title; m.appendChild(h);
       const body = document.createElement("div"); body.className = "body";
       const pickers = new Map(); // input -> picker api
+      // A field is a text input unless it carries `choices`, in which case it is
+      // a <select> over [{value,label}]. Both expose .value, so submit still
+      // reads the row uniformly and callers stay unaware of which kind they got
+      // — the point of putting the choice here rather than hand-rolling a
+      // second dialog for the one prompt that needs a list (new workspace's
+      // plugin). A choice field takes no path picker and no placeholder: the
+      // first option is the empty/default one and says what "nothing" means.
       const inputs = opts.fields.map((f) => {
         const wrap = document.createElement("div"); wrap.className = "field" + (f.pick ? " pick" : "");
         if (f.label) { const l = document.createElement("label"); l.textContent = f.label; wrap.appendChild(l); }
-        const input = document.createElement("input");
-        input.type = "text"; input.value = f.value || ""; input.spellcheck = false;
-        if (f.placeholder) input.placeholder = f.placeholder;
+        let input;
+        if (f.choices) {
+          input = document.createElement("select");
+          for (const c of f.choices) {
+            const o = document.createElement("option");
+            o.value = c.value; o.textContent = c.label;
+            input.appendChild(o);
+          }
+          input.value = f.value || "";
+        } else {
+          input = document.createElement("input");
+          input.type = "text"; input.value = f.value || ""; input.spellcheck = false;
+          if (f.placeholder) input.placeholder = f.placeholder;
+        }
         wrap.appendChild(input); body.appendChild(wrap);
-        if (f.pick) pickers.set(input, attachPathPicker(input, wrap));
+        if (f.pick && !f.choices) pickers.set(input, attachPathPicker(input, wrap));
         return input;
       });
       if (opts.hint) { const t = document.createElement("div"); t.className = "hint"; t.textContent = opts.hint; body.appendChild(t); }
@@ -4588,7 +4615,8 @@
         });
       }
       ov.appendChild(m);
-      requestAnimationFrame(() => { inputs[0].focus(); inputs[0].select(); });
+      // select() is an <input> method; a choice field in slot 0 would throw.
+      requestAnimationFrame(() => { inputs[0].focus(); if (inputs[0].select) inputs[0].select(); });
     });
   }
 
@@ -4658,16 +4686,72 @@
   // and the field is a picker (attachPathPicker) for every case that is not:
   // recent directories and real subdirectory completion, so choosing where a
   // workspace lives never means typing a path from memory.
+  //
+  // The third field starts a plugin in the workspace as it opens. A workspace is
+  // usually opened *to do something* — the same reflex that has the user reach
+  // for the plugins dialog immediately after — and the plugin's own scoping makes
+  // the pairing more than a keystroke saved: a plugin like cats-todo keys its
+  // state off the directory it wakes up in, so starting it from here (with the
+  // workspace's start path already chosen above) is the only way to launch it
+  // against the new project without first switching to the workspace and waiting
+  // for a pane cwd to report.
+  //
+  // The roster comes from plugin.list, one round trip before the dialog opens,
+  // for the same reason openPluginsDialog takes one: the browser holds no plugin
+  // state, and a stale list would offer actions that no longer resolve. A failed
+  // or empty list drops the field rather than the dialog — plugins are an extra
+  // here, and creating a workspace must not depend on the plugin host being
+  // healthy.
   function newWorkspace() {
+    sendCmdAwait("plugin.list", {}, (res) => {
+      const runners = res.ok ? pluginRunners((res.data || {}).plugins || []) : [];
+      openNewWorkspaceDialog(runners);
+    });
+  }
+
+  // pluginRunners flattens the plugin list into the one-line choices a picker
+  // offers: every action of every working plugin, labelled by plugin when that
+  // is the whole story and by plugin + action when a plugin ships more than one.
+  // Broken plugins are left out — their argv did not resolve, so offering them
+  // is offering a tab that fails on spawn.
+  function pluginRunners(plugins) {
+    const runners = [];
+    for (const p of plugins) {
+      if (p.broken) continue;
+      const actions = p.actions || [];
+      for (const a of actions) {
+        const label = actions.length === 1 ? p.id : p.id + " — " + (a.title || a.id);
+        runners.push({ label, plugin: p, action: a });
+      }
+    }
+    return runners;
+  }
+
+  function openNewWorkspaceDialog(runners) {
+    const fields = [
+      { label: "name", value: "", placeholder: "optional — auto-named after the start directory" },
+      { label: "start path", value: focusedPaneCwd(), placeholder: "empty starts in your home directory", pick: true },
+    ];
+    // The runner is passed by index, dialogFields carrying strings only. "" is
+    // the default option, so an untouched dialog behaves exactly as before.
+    if (runners.length) {
+      fields.push({
+        label: "start plugin",
+        value: "",
+        choices: [{ value: "", label: "none" }].concat(
+          runners.map((r, i) => ({ value: String(i), label: r.label })),
+        ),
+      });
+    }
     dialogFields({
       title: "new workspace",
-      fields: [
-        { label: "name", value: "", placeholder: "optional — auto-named after the start directory" },
-        { label: "start path", value: focusedPaneCwd(), placeholder: "empty starts in your home directory", pick: true },
-      ],
+      fields,
       hint: "↑↓ picks a directory · tab drills in · enter creates · esc cancels",
       submitLabel: "create",
-      onSubmit: createWorkspace,
+      // sel is "" for "none" and undefined when the field was dropped; the
+      // truthiness test covers both, and "0" — a real index — is a truthy
+      // string, so the first plugin in the list is not swallowed by it.
+      onSubmit: (name, path, sel) => createWorkspace(name, path, sel ? runners[Number(sel)] : null),
     });
   }
 
@@ -4678,9 +4762,17 @@
   // escalation shape as confirmRemoveWorktree — the first attempt never carries
   // the side effect, and the server keys the offer by its "no such directory"
   // error rather than the UI guessing at the disk from a stale picker cache.
-  function createWorkspace(name, path) {
+  // runner (optional) is a {plugin, action} from the dialog's plugin field,
+  // started in the workspace once it exists — see startPluginInWorkspace. It
+  // rides both attempts because the mkdir retry is the *same* create: a user who
+  // asked for a plugin and then confirmed the folder still asked for the plugin.
+  function createWorkspace(name, path, runner) {
+    const created = (res) => {
+      if (!runner) return;
+      startPluginInWorkspace(runner, (res.data || {}).id);
+    };
     sendCmdAwait("workspace.create", { name, path }, (res) => {
-      if (res.ok) return;
+      if (res.ok) { created(res); return; }
       const err = res.error || "";
       if (err.startsWith("no such directory: ")) {
         dialogConfirm({
@@ -4689,12 +4781,33 @@
             " does not exist — create it and start the workspace there?",
           confirmLabel: "create folder",
           onConfirm: () => sendCmdAwait("workspace.create", { name, path, mkdir: true }, (r2) => {
-            if (!r2.ok) toast("new workspace: " + (r2.error || "unknown"));
+            if (!r2.ok) { toast("new workspace: " + (r2.error || "unknown")); return; }
+            created(r2);
           }),
         });
       } else {
         toast("new workspace: " + (err || "unknown"));
       }
+    });
+  }
+
+  // startPluginInWorkspace launches an action in a workspace named by id — the
+  // one workspace.create just returned, which is why the result's id is read
+  // here at all (the browser otherwise ignores it and follows the layout
+  // broadcast). Sending the id rather than relying on "the new workspace is now
+  // active" keeps the launch correct if anything focuses elsewhere in between.
+  //
+  // Deliberately no cwd, where pluginRunAction sends the focused pane's: the
+  // point of this launch is the workspace that was just created, so the tab
+  // should inherit *that* workspace's directory. tab.create does exactly that on
+  // its own — the new workspace's root pane is the neighbor it inherits from —
+  // and the focused pane's cwd would be the old workspace's, the one directory
+  // this must not use.
+  function startPluginInWorkspace(runner, wsID) {
+    const params = { command: runner.action.argv, env: runner.plugin.env || {} };
+    if (wsID) params.workspace = wsID;
+    sendCmdAwait("tab.create", params, (res) => {
+      if (!res.ok) toast("plugin run failed: " + (res.error || "unknown"));
     });
   }
   function renameWorkspace(w) {
@@ -5071,6 +5184,67 @@
     });
   }
 
+  // pluginRunActionAll starts one action in every workspace at once — the
+  // "open my todo list / my dev server / my log tail everywhere" case, which
+  // otherwise costs a switch and a menu per workspace and leaves the viewport
+  // wherever the last one landed. Nothing is focused and nothing is switched to:
+  // each launch names its workspace (tab.create's workspace param), so the user
+  // stays exactly where they were and finds the tabs already open when they
+  // arrive.
+  //
+  // Locked workspaces are filtered out here rather than left to be refused by
+  // the server. The lock means "no automation lands in this one", and a fan-out
+  // is the automation it was written for — so a skip is the *expected* outcome,
+  // not a failure, and reporting six launches and one error would read as
+  // something having gone wrong. The count says so instead.
+  //
+  // No cwd, for the same reason as startPluginInWorkspace: each tab inherits its
+  // own workspace's directory, so a per-project plugin scopes to the project it
+  // landed in. Sending the focused pane's cwd would start every copy against the
+  // one project the user happens to be looking at, which is the opposite of what
+  // "in all workspaces" asks for.
+  function pluginRunActionAll(p, a) {
+    closeModal();
+    const wss = (layoutMsg && layoutMsg.workspaces) || [];
+    const targets = wss.filter((w) => !w.locked);
+    const label = a.title || a.id;
+    if (!targets.length) {
+      toast(label + ": every workspace is locked");
+      return;
+    }
+    // One reply per launch, summarised once at the end: N in-flight commands
+    // would otherwise raise N toasts, and the useful fact is the tally.
+    let ok = 0, failed = 0;
+    const locked = wss.length - targets.length;
+    const settle = () => {
+      if (ok + failed < targets.length) return;
+      const parts = [label + " started in " + ok + (ok === 1 ? " workspace" : " workspaces")];
+      if (locked) parts.push(locked + " locked, skipped");
+      if (failed) parts.push(failed + " failed");
+      toast(parts.join(" · "));
+    };
+    for (const w of targets) {
+      sendCmdAwait("tab.create", { workspace: w.id, command: a.argv, env: p.env || {} }, (res) => {
+        if (res.ok) ok++; else failed++;
+        settle();
+      });
+    }
+  }
+
+  // pluginPickAction is the run buttons' shared "which action?" step: one action
+  // launches straight away (the catctl default), several open a picker at the
+  // button — the ctx menu coexists with the modal. run and run-all differ only
+  // in what they do with the answer, so the choosing lives here once and the two
+  // buttons cannot drift into asking it differently.
+  function pluginPickAction(p, e, launch) {
+    if (p.actions.length === 1) { launch(p.actions[0]); return; }
+    const r = e.target.getBoundingClientRect();
+    openCtx(r.left, r.bottom + 4, p.actions.map((a) => (
+      { label: a.title || a.id, fn: () => launch(a) }
+    )));
+    e.stopPropagation();
+  }
+
   // pluginCatctlTab spawns `catctl plugin <args…>` in a fresh tab. The pane
   // stays on screen after exit (exited chrome), so the git/build output — or
   // the failure — remains readable until the user closes it. cwd is optional
@@ -5165,23 +5339,25 @@
             row.appendChild(sub);
           }
           const acts = document.createElement("div"); acts.className = "acts";
-          const actBtn = (label, cls, fn) => {
+          const actBtn = (label, cls, fn, tip) => {
             const b = document.createElement("button");
             b.textContent = label; if (cls) b.className = cls;
+            if (tip) b.title = tip;
             b.addEventListener("click", fn);
             acts.appendChild(b);
           };
           if (!p.broken && (p.actions || []).length) {
-            actBtn("run", "", (e) => {
-              // One action launches directly (the catctl default); more open a
-              // picker at the button — the ctx menu coexists with the modal.
-              if (p.actions.length === 1) { pluginRunAction(p, p.actions[0]); return; }
-              const r = e.target.getBoundingClientRect();
-              openCtx(r.left, r.bottom + 4, p.actions.map((a) => (
-                { label: a.title || a.id, fn: () => pluginRunAction(p, a) }
-              )));
-              e.stopPropagation();
-            });
+            actBtn("run", "", (e) => pluginPickAction(p, e, (a) => pluginRunAction(p, a)));
+            // The fan-out is its own button rather than a row in run's menu:
+            // launching here is by far the common case, and folding both targets
+            // into one menu would charge every multi-workspace session an extra
+            // click for it. It appears only when there is more than one
+            // workspace — with a single workspace it is the same launch under a
+            // longer name, and offering it would be inventing a decision.
+            if (((layoutMsg && layoutMsg.workspaces) || []).length > 1) {
+              actBtn("run all", "", (e) => pluginPickAction(p, e, (a) => pluginRunActionAll(p, a)),
+                "start in all workspaces (locked ones are skipped)");
+            }
           }
           if (!p.broken && !p.linked) {
             actBtn("update", "", () => pluginCatctlTab(info.catctl, "update " + p.id, ["update", p.id]));
