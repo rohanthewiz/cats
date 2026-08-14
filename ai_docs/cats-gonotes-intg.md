@@ -186,9 +186,10 @@ dbc's nice-to-have list).
 - **Server-side decryption over the API**: whether GET note decrypts private
   bodies when the server holds the key (web UI implies yes). If not, HTTP
   mode shows ciphertext for private notes and must say so (Phase 4).
-- **Sync hub caution** (Phase 1): md import records fresh change entries for
+- ~~**Sync hub caution** (Phase 1): md import records fresh change entries for
   every note; a live hub will receive a full push, reconciled by GUID
-  (delete-wins then LWW). Verify on a peer before letting it run long.
+  (delete-wins then LWW).~~ Moot — the cutover went via `scripts/migrate`,
+  which records no change entries, and there are no peers. See Phase 1.
 - **Probe false-positive**: some other service on 8444 — the health probe
   requires the gonotes envelope shape, not just a 200.
 - bubbles v2 list/textarea behavioral nuances were audited by signature
@@ -247,14 +248,74 @@ The server was restarted exactly as found (same stale `~/bin/gonotes`,
 after Phase 1 is pushed, `mac-install.sh` hard-resets `~/.gonotes-src` to
 origin/master, so the MacApp rebuilds itself onto bytdb on its next run.
 
-### Phase 1 — merge migrate-to-bytdb + import
-- `git merge origin/migrate-to-bytdb` into master (only `.gitignore`
-  overlaps); `go build ./... && go vet ./... && go test ./...`.
-- Fresh bytdb data dir; `gonotes import-md` per user; verify counts and
-  spot-check one private + one categorized note.
-- Cross-check: `scripts/migrate -src <backup>.ddb -dest <scratch>`; compare
-  counts against the import. Old `.ddb` retained untouched.
-- Push. If the cats-mobile rev pin matters, run its `tool/regen.sh` flow.
+### Phase 1 — ✅ merge migrate-to-bytdb + cut over — done 2026-08-14
+
+Merged as `bdc0796` (gonotes master, pushed). The merge itself was the easy
+part: `.gitignore` was the only overlap and auto-merged, and the six Monaco
+commits master had gained never touch `models/`, so `go build`, `go vet` and
+all three test packages passed on the first try.
+
+**The plan had the two data paths backwards.** It named `import-md` the
+migration and `scripts/migrate` the cross-check. Running both into scratch
+dirs and exporting each *back* to markdown for a byte-diff against the Phase 0
+export inverted that:
+
+| | `scripts/migrate` | `import-md` |
+|---|---|---|
+| notes | 31 (incl. the soft-deleted one) | 30 |
+| re-export vs Phase 0 export | **byte-identical, 30/30** | 6 files differ |
+| private-note timestamps | preserved | **reset to import time** (5 notes) |
+| trailing whitespace | preserved | trimmed (1 description, 2 bodies) |
+| user identity | **original GUID + bcrypt hash** | new GUID, new password |
+| categories / links | 28 / 42 | 28 / 42 |
+
+None of the import path's losses are accidental — they are in the code.
+`md_import.go:196-205` routes private notes through `CreateNote` rather than
+`CreateNoteWithTimestamps`, so their `created`/`updated` become the moment of
+import; body and description trimming costs a single trailing newline on two
+notes. And `import-md --user` requires the user to *already exist*, which a
+fresh data dir has no way to provide — the scratch run needed a registration
+through the HTTP API first, minting a new user GUID. For a hub-and-spoke sync
+design that GUID is identity, so the import path silently changes who you are.
+
+So `scripts/migrate` produced the live database and the markdown import became
+what it is actually good at: an independent witness. Its 30 files re-exported
+byte-identical from the migrated DB, which is a much stronger statement than
+any count.
+
+**Verification that mattered more than counting.** The migrate output
+(1 user, 28 categories, 31 notes, 42 links) matches the *old* server's own
+startup log — `notes_count=31, categories_count=28, relationships_count=42` —
+so two independent readers agree. Password-hash preservation was confirmed by
+pulling the bcrypt string from DuckDB and finding it in `notes_public.bytdb`;
+note that this needs `grep -aF`, since an unescaped `$2a$12$…` as a regex
+quietly fails to match and reads as data loss.
+
+**The live file had drifted from the Phase 0 backup.** After the clean stop,
+`~/.gonotes/data/notes.ddb` was the same 22,556,672 bytes as the 17:39 backup
+but a *different* SHA-256. Row counts and `max(updated_at)` were unchanged, so
+it was DuckDB checkpoint churn rather than edits — but the lesson holds: take
+a fresh copy at cutover time and migrate from that, not from the archival
+backup. Both copies are kept (`backup-premigration-` and `backup-cutover-`).
+
+**Cutover, in the order it has to happen:** stop the server → fresh copy →
+migrate from the copy → verify by round-trip export → drop the two `.bytdb`
+files into `~/.gonotes/data` → replace `~/bin/gonotes` (the April DuckDB build
+is kept as `~/bin/gonotes-duckdb-2026-0422`) → restart → `./mac-install.sh`.
+
+That last step is not optional housekeeping. `notes.ddb` is still sitting in
+the data dir, and the MacApp only starts its bundled binary when nothing is
+already healthy on 8444 — so a stale DuckDB binary in the app bundle would
+have opened the old database and served notes that are no longer the source of
+truth, with no error anywhere. The bundle now reports `bdc0796`.
+
+**The sync-hub caution in §Risks turned out moot**: `scripts/migrate` records
+no change entries at all, sync is disabled, and `sync_state` is empty — no
+peers exist. The 134 `note_changes` rows in the old DB are inert local history
+and were deliberately not carried across (neither are `sync_state`,
+`sync_conflicts`, `invite_tokens`).
+
+Remaining: if the cats-mobile rev pin matters, run its `tool/regen.sh` flow.
 
 ### Phase 2 — Bubble Tea v2 migration (mechanical, behavior-identical)
 - `go.mod`: drop the four charm v1 deps, add the four `charm.land/*/v2`
