@@ -133,9 +133,73 @@ resolved colors.
   goroutine (ui/modals.go:32-54) — a huge export freezes the TUI; the reporter
   deliberately does not claim `working` for it (it can't — the loop is blocked).
 
+## Status — all seven phases landed 2026-08-14
+
+Every phase below is done, one commit each (dbc `c4be386`, `3e0db4b`,
+`ad3d249`, `4cc0311`, `681bd8a`, `0682e3b`; cats `137976d`). `go vet` and
+`go test -race ./...` are green in both repos, and dbc's pre-existing suite
+was not modified — the zero-value `catsState` being inert Tier 0 is what let
+it keep passing untouched.
+
+**Nine findings from building it, in the order they cost time.** Each one is
+a thing the plan above got wrong or did not know:
+
+1. **The ⌘ layer needed no enabling at all.** tcell v2.13 already emits the
+   kitty CSI-u push for XTermLike terminals, and cats sets
+   `TERM=xterm-256color`, so every dbc pane already registered non-zero kitty
+   flags with cats' emulator — the exact gate `cmdGoesToPane` checks. The
+   chords were arriving all along and nothing was reading them.
+2. **hostident shrank to a third of ced's.** tcell saves and restores the
+   terminal's own title itself (`\x1b[22;2t` / `\x1b[23;2t`), and tview's
+   `Application.SetTitle` reaches tcell's OSC 2 emitter. Emitting either
+   again would push a second copy onto that stack and leave one behind. OSC 7
+   is the only sequence dbc spells out.
+3. **A clock-seeded seq cannot be read back as float64.** `UnixNano()` is
+   ~1.8e18, past float64's 53-bit mantissa, so two consecutive seq values
+   decode EQUAL through `map[string]any`. The test harness needs
+   `Decoder.UseNumber`; the real server parses uint64 and was never affected.
+4. **`t.TempDir()` cannot hold a unix socket on macOS.** It embeds the test
+   name, and `sun_path` is 104 bytes — a descriptive test name plus the
+   system TMPDIR overruns it and fails with `bind: invalid argument`, which
+   reads like a permissions problem. Tests use a short `os.MkdirTemp("", "d")`.
+5. **Making the palette a runtime value broke `go vet`.** A concatenated
+   color tag is no longer a constant format string, so the seven `logf` calls
+   that passed a finished message became "non-constant format string". They
+   go to a new non-formatting `log()`.
+6. **Two places kept colors that no longer followed the palette**, and only
+   one was obvious. The layout containers between the panes were expected.
+   The other was not: a `TextView` keeps a SECOND style for its text area,
+   captured from `tview.Styles` at construction, and `pane()` never reaches
+   it because it takes a `*Box`. The log pane's interior had therefore always
+   been the deep surface rather than the panel its border wears — set
+   explicitly now to exactly that color, so nothing looks different and
+   everything follows a theme.
+7. **`QueueUpdateDraw` runs the draw AFTER the closure returns.** A test that
+   reads cells as soon as its closure finishes is looking at the frame before
+   the change; it needs a second sync queued behind the draw.
+8. **`Release()` blocks on the write, not on the server's bookkeeping.** A
+   test asserting the request had been RECORDED by the time Release returned
+   was asserting something Release does not promise.
+9. **The AGENT_HUE seating chart was already full** (18 labels, 6 slots), so
+   `dbc: 3` shares with codex — which is what every entry past the first six
+   does. Verified rather than assumed: FNV would have put `dbc` on 5, beside
+   cursor.
+
+Two decisions worth recording because they are the kind that get quietly
+reversed later:
+
+- **Sending to an agent pane FOCUSES that pane.** The text is staged and
+  unsubmitted, so it is inert until somebody presses Enter there; sending
+  without focusing would leave the user hunting for where their question
+  went.
+- **Only agent panes are offered as destinations.** A fenced SQL block typed
+  at a plain shell prompt is junk, so a pane cats has not identified as an
+  agent is not a destination; cats' own chat panel is the other one, and the
+  one that remains when there are no sibling agents.
+
 ## Phases (each shippable alone; commit per phase)
 
-### Phase 1 — transport + detect + hooks (the phone-push win)
+### Phase 1 — ✅ transport + detect + hooks (the phone-push win)
 New in dbc (each with a `_test.go` sibling):
 - `cats/detect.go` — port of `ced/internal/cats/detect.go` near-verbatim: env
   consts (`CATS_ENV`, `CATS_PANE_ID`, `CATS_CONTROL_SOCKET`,
@@ -161,13 +225,13 @@ Edits to `dbc/ui/app.go`: App struct gains `cats catsState` (~:84); `Run` calls
 (~:407); `endRun` tail likewise (~:427); `quit()` closes `a.cats.stopping`
 before `app.Stop()` (~:464).
 
-### Phase 2 — hostident
+### Phase 2 — ✅ hostident
 New `ui/hostident.go` (+test): `hostIdentSync` (change-key → `SetTitle`), the
 title builder, control-byte strip, OSC 7 subset port (`fileURLPath`, hostname),
 `ttyWrite` field. Hooked into `catsAfterTransition` and `setActive`'s
 completion closure (app.go:373-381); one OSC 7 emission at startup.
 
-### Phase 3 — host theme
+### Phase 3 — ✅ host theme
 New `cats/events.go` (+test) — Stream port: one decoder for ack+events (two
 decoders eat frames), no read deadline post-subscribe, 500 ms→30 s backoff
 (clean end resets), `closeOnce` + `<-done`; payloads `theme_changed`,
@@ -179,24 +243,24 @@ subscription started in the Tier-1-ready handler (unfiltered).
 Edits: `ui/theme.go` tags const→var + `setPalette`; `ui/app.go` `build()`
 styling extracted to `restyle()`.
 
-### Phase 4 — remote-safe clipboard
+### Phase 4 — ✅ remote-safe clipboard
 Edits: `ui/app.go` `Run` creates the screen explicitly, stores `a.scr` (the
 test harness already does `SetScreen`). New `ui/clip.go` (+test) with
 `clipWrite`. Rewire `copySelection` (app.go:293) and `doExport`'s clipboard
 branch (modals.go:44).
 
-### Phase 5 — agent collaboration
+### Phase 5 — ✅ agent collaboration
 New `ui/catsagents.go` (+test): pane cache + rate limit, `showAgentModal`
 (rows, rank, own-pane exclusion), payload composer, staged sends on goroutines
 via `catsPost`. Edits `ui/app.go`: `KeyCtrlG` case (~:252), `lastRunErr` field
 set in the run-completion closure, one Tier-1-up log hint advertising Ctrl+G.
 
-### Phase 6 — ⌘ accelerators
+### Phase 6 — ✅ ⌘ accelerators
 New `ui/metakeys.go` (+test): `metaChord`, `metaKittyHost`, the armed gate,
 table {e, p, g}, the reserved pass-through set, swallow-unclaimed. Wired first
 in both branches of the input capture (app.go:216/:233).
 
-### Phase 7 — cats-side polish
+### Phase 7 — ✅ cats-side polish
 Edit `cmd/catway/web/index.html` `AGENT_HUE` (~:1708): add `dbc: 3,` with a
 one-line comment. (Follow-up consideration: if cats-mobile needs the rev pin
 updated, run its `tool/regen.sh` flow after pushing cats.)
