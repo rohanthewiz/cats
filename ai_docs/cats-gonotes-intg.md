@@ -695,7 +695,68 @@ Original spec:
   Tier-0 inertness proven by the untouched Phase 2-4 suites. ~1,900 lines
   (mostly copied tests).
 
-### Phase 6 — host theme sync
+### Phase 6 — ✅ host theme sync — done 2026-08-14
+
+Landed as specified, plus one guard the plan did not anticipate. `tui/catstheme.go`
+(209) and `tui/catstheme_test.go` (416) new; 50 insertions / 9 deletions across
+`tui/tui.go`, `tui/cats_glue.go`, `tui/catsinit_test.go`, `go.mod`. `go build`,
+`go vet`, `go test -race ./...` green; TUI suite stable over three consecutive
+runs.
+
+**The terminal's own background report would have undone the sync, on the first
+repaint.** Phase 3's `tea.BackgroundColorMsg` handler installs
+`DefaultPalette(msg.IsDark())` — and inside cats the OSC 11 answer comes from
+cats' own emulator, reporting the background the host theme just supplied. So
+the reply to a query the program itself issues at startup would trade the full
+host palette for the built-in one chosen by a single bit derived from that same
+background. `hostThemed` (set on any successful synthesis, read through
+`hostOwnsThePalette`) makes the host outrank the terminal. This is a
+gonotes-specific hazard — dbc has no equivalent because tview never asks.
+
+**`Palette.Dark` is derived from the background's luminance, not read.**
+`config.get`'s theme registry does carry a per-theme dark flag, but
+`theme_changed`'s payload is the effective appearance alone — no flag, no
+registry. Reading the authoritative value on the one path that has it would let
+a live theme change and a fresh launch on the same theme disagree, and the
+symptom would be widget style sets that depend on how the session reached its
+current theme. Rec. 709 luma on the sRGB values as they come, midpoint
+threshold — the same non-linear arithmetic `blendHex` already uses, for the
+same reason.
+
+**The startup fetch runs before `newAppModel`, not before `NewProgram`.** Bubbles
+widgets copy their style set in at construction and `newAppModel` builds the
+login screen, so a palette that landed even one step later would repaint rather
+than paint. That is why `catsThemeAtStartup` repeats the env sniff instead of
+reading `catsState`: the state does not exist yet, which is the whole point. It
+does not ping first — a `config.get` that fails is already the negative answer.
+
+**Seven keys, all required, all hex.** `accent→Primary  fg→Fg  bg→Bg
+muted→Subtle  ok→Success  warn→Warn  err→Danger`, with `Sel` blended at the
+same 0.30 the default palette uses. cats' eighth core key, `line`, is
+deliberately *not* required: GoNotes draws its rules in `Subtle` and its focus
+borders in `Primary`, and rejecting a theme over a key nothing reads would
+refuse usable palettes for nothing. Anything non-hex (cats emits `rgba()` for
+its translucent keys) abandons the whole synthesis — half the host's colors and
+half ours reads as a rendering fault.
+
+**The glamour half cost nothing**, which is Phase 3 paying out: the markdown
+renderer and its output cache are both keyed on `paletteGen`, so a host theme
+invalidates them by the same increment a terminal background change does. The
+spec's "glamour style regenerated from the palette" needed no code.
+
+**Verified past the suite, on a real pty**, against a scripted cats answering
+`config.get` with a dark green theme and later pushing a light violet one on the
+stream. Seven checks, all passing:
+
+| | |
+|---|---|
+| `config.get` was the **first** control call | before `ping` — one round trip, not two |
+| host green on screen at byte 325 | the first frame is already the host's |
+| GoNotes' own dark accent — **never** | no flash of the built-in palette |
+| its light accent — **never** | the white OSC 11 answer did not clobber |
+| violet at byte 2200, 10ms after the frame | live retheme, and a Dark flip with it |
+
+Original spec:
 - New `tui/catstheme.go` (+test) — host colors → `Palette` (hex gate,
   fallbacks, sel blend), the synchronous startup fetch pre-first-frame when
   `DetectEnv().InCats`, `theme_changed` → `catsThemeMsg` → same-palette
