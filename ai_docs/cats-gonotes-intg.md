@@ -197,8 +197,13 @@ dbc's nice-to-have list).
   nuance that mattered was not behavioral but stylistic: every bubbles v2
   widget hardcodes a dark default style set and copies it in at
   construction. See Phase 2.
-- Two-pane preview re-render cost — render from a cache keyed by note id,
-  only on selection settle.
+- ~~Two-pane preview re-render cost — render from a cache keyed by note id,
+  only on selection settle.~~ Settled in Phase 3: two caches (renderer on
+  width+palette generation, output on note id + updated timestamp), no debounce
+  needed since a re-render of an unchanged selection is a cache hit.
+- **bubbles v2.1.1 `help.shouldAddItem` stops truncating** once the ellipsis no
+  longer fits, appending every remaining item. Worked around locally with
+  `clampPane`; an upstream ask if it survives a version bump. See Phase 3.
 
 ## Phases (each shippable alone; commit per phase; gonotes commits on master, cats on main)
 
@@ -415,19 +420,79 @@ login card, and flipping the answer from `rgb:1c1c…` to `rgb:ffff…` showed
 clean separation: dark truecolor (`#7D79F6`) through byte 2063, light
 (`#5A56E0`) from 2237 on — the async palette swap working end to end.
 
-### Phase 3 — conformance revamp
-- New `tui/keymap.go` — `key.Binding` keymap replacing the string switches;
-  list help footers feed from it. New `tui/palette.go` — `Palette`,
-  `Default(isDark)`, `setPalette`; root handles `tea.BackgroundColorMsg`.
-  New `tui/markdown.go` — glamour renderer cached on (width, palette).
-- Edits: `styles.go` (vars from palette), `form.go` (measure chrome with
-  `lipgloss.Height` instead of `height-14`), `browse.go` (rune-safe
-  `FilterValue`; **two-pane wide layout** — at width ≥ 100 the right pane
-  renders the selected note's markdown preview; bodies are already loaded),
-  `detail.go` (cached renderer), `tui.go` (`paletteChangedMsg` broadcast +
-  `restyler` interface).
-- Tests: goldens narrow/wide; palette-swap asserting delegate restyle;
-  tiny-size form layout. ~450 lines.
+### Phase 3 — ✅ conformance revamp — done 2026-08-14
+Landed as specified: `tui/keymap.go` (207), `tui/palette.go` (169),
+`tui/markdown.go` (235) new; 441 insertions / 212 deletions across the eight
+existing files; 984 lines of tests in three files plus two goldens. `go build`,
+`go vet`, `go test -race ./...` green; TUI suite stable over repeated runs.
+
+**The palette is hex strings, not `color.Color`.** Three reasons converge:
+glamour's `ansi.StylePrimitive.Color` is a `*string` and takes nothing else; a
+struct of strings is comparable with `==`, which is what lets `setPalette`
+return "nothing changed" and skip the broadcast; and the cats host theme
+(Phase 6) *arrives* as hex, so the mapping becomes assignment plus a validation
+gate rather than a conversion layer. `Sel` is derived — `blendHex(Primary, Bg,
+0.30)`, cats' own sel-fill recipe — because a host supplies an accent and a
+background but never a selection color.
+
+**`setPalette` returns whether it changed anything**, and `paletteGen`
+increments only then. `tea.BackgroundColorMsg` is not a once-per-program event
+(repaints, focus re-announcements), and each spurious accept would rebuild every
+widget and flush the markdown cache for no visual difference. The broadcast is a
+`paletteChangedMsg` rather than a direct loop specifically so Phase 6's
+socket-goroutine theme change lands on the event loop.
+
+**The renderer cache turned out to be load-bearing, not an optimization.** The
+wide layout re-renders the selected note's markdown on every frame — every arrow
+key, every cursor blink — and a `TermRenderer` builds a goldmark chain and a
+chroma formatter at construction. Two caches: the renderer on (wrap width,
+palette generation), the rendered output on (note id + updated timestamp, width,
+generation). The timestamp in the key is what makes an edit invalidate its own
+entry. Verified safe without a lock: all three `p.render(model)` call sites in
+bubbletea v2.0.8 are on `Run()`'s goroutine, immediately after `Update`. The
+rule that must hold is that nothing in `markdown.go` is ever called from a
+`tea.Cmd`.
+
+**A bubbles bug the wide layout exposed.** `help.shouldAddItem` appends the
+ellipsis when an item overflows — but only if the ellipsis itself still fits;
+otherwise it falls through to "ok" and appends the item *and every one after
+it*. At 48 columns the browse footer truncates correctly; at 80 it renders 111
+columns wide and the terminal wraps it, shearing the layout. Fixed at the pane
+boundary with `clampPane` (ANSI-aware truncate + pad), which is the right place
+regardless: the screen is what promises the panes total the terminal width.
+Upstream-ask candidate; not filed.
+
+**`keys.Scroll` carries `up`/`down` it never matches on.** A `key.Binding` with
+an empty key set reports `Enabled() == false`, so a help-only row renders as
+nothing. The detail screen's ↑/↓ hint needs keys to exist even though the
+viewport is what consumes them.
+
+Also: `form.go`'s `height-14` is gone — `chrome()` returns the blocks above and
+below the textarea and `layout` measures them with `lipgloss.Height`, which is
+exact and survives a wrapped heading or an added field. `FilterValue` truncates
+in runes. Every screen now implements `restyler`; `confirmScreen` deliberately
+does not, holding no widget.
+
+**Tests.** `keymap_test.go` pins every binding's key strings and asserts no
+footer advertises a key its screen does not handle (the handled sets are written
+out by hand, not derived, or the test would be tautological).
+`palette_test.go` covers parse/blend, the no-change early return, and the
+broadcast reach via a spy screen. `layout_test.go` carries the narrow/wide
+goldens, a fits-the-terminal check at four widths, the markdown cache
+behavior, and the form's measured chrome including a wrapping heading.
+
+One finding worth carrying: **bubbles v2.1.1's `textinput.DefaultStyles(true)`
+and `(false)` render a focused, empty input identically** (they differ in the
+blurred and cursor styles). So the form/login restyle tests assert on the style
+sets, not on `View()` — a rendered-output test there passes whether or not
+restyle ran. The list delegate does differ visibly, which is what
+`TestRestyleRebuildsListDelegate` uses.
+
+Verified past the suite on a real pty at 120×40 and 80×24 against the shipped
+binary: the two-pane preview renders live markdown, and flipping the OSC 11
+answer shows dark accent `#7D79F6` through byte 1470 then light `#5A56E0` from
+1644 on, with the derived selection fill swapping alongside it (`#39385D` → 6
+occurrences dark, `#CECCF6` → 6 light).
 
 ### Phase 4 — hybrid data access (store seam + HTTP mode)
 - New `tui/store.go` (interface), `tui/store_local.go`, `tui/store_http.go`
