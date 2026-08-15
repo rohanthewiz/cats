@@ -183,9 +183,17 @@ dbc's nice-to-have list).
   tcell used `CSI > 1 u`. cats' emulator handled tcell's; the set form is
   equally standard, but `modes.kitty` registering must be confirmed live
   (Phase 5 manual pass). High confidence; dbc precedent one encoding away.
-- **Server-side decryption over the API**: whether GET note decrypts private
+- ~~**Server-side decryption over the API**: whether GET note decrypts private
   bodies when the server holds the key (web UI implies yes). If not, HTTP
-  mode shows ciphertext for private notes and must say so (Phase 4).
+  mode shows ciphertext for private notes and must say so (Phase 4).~~
+  **Resolved in Phase 4: it decrypts, and the question was framed on the old
+  architecture.** Per-note AES died with the bytdb merge — `Note.EncryptionIV`
+  is retained for transport compatibility but no longer persisted. bytdb
+  encrypts the *whole private database* at rest, so a server that opened it
+  with the key reads plaintext and every handler serializes plaintext. Proven
+  live, not inferred: a private note seeded with the body
+  `CLEARTEXT-MARKER-9931` renders that marker in the HTTP-mode preview pane.
+  No warning banner is needed.
 - ~~**Sync hub caution** (Phase 1): md import records fresh change entries for
   every note; a live hub will receive a full push, reconciled by GUID
   (delete-wins then LWW).~~ Moot — the cutover went via `scripts/migrate`,
@@ -494,16 +502,83 @@ answer shows dark accent `#7D79F6` through byte 1470 then light `#5A56E0` from
 1644 on, with the derived selection fill swapping alongside it (`#39385D` → 6
 occurrences dark, `#CECCF6` → 6 light).
 
-### Phase 4 — hybrid data access (store seam + HTTP mode)
-- New `tui/store.go` (interface), `tui/store_local.go`, `tui/store_http.go`
-  (+ tests against an `httptest.Server` speaking the envelope; token-cache
-  tests under a temp HOME).
-- Edits: `tui/commands.go` (`models.*` → `sess.store.*`; `syncNoteCategories`
-  logic unchanged), `tui/tui.go` (`Run(st Store)`), `tui/login.go`
-  (HTTP-mode degradations: env prefill, cached-token skip straight to
-  browse), `main.go` `runTui` (health probe, conditional `InitDB`).
-- The seam is the test win: all teatest flows rerun against a `fakeStore`
-  with no DB. ~700 lines incl. tests.
+### Phase 4 — ✅ hybrid data access (store seam + HTTP mode) — done 2026-08-14
+
+Landed as specified: `tui/store.go` (103), `tui/store_local.go` (103),
+`tui/store_http.go` (736) new, plus 1,247 lines of tests in two new files;
+321 insertions / 123 deletions across the eight existing files. `go build`,
+`go vet`, `go test -race ./...` green; 130 test results in `tui/`.
+
+**The interface is 18 methods and every one mirrors a models function the TUI
+already called, with the arguments it already had.** That is what keeps
+`store_local.go` a file of one-line pass-throughs with nothing to get wrong —
+the seam only pays off if the default path stays trivially correct. Two
+methods exist that models has no analog for:
+
+- `ResumeSession() (*models.User, error)` — the store's chance to get past the
+  login screen without a password. Local always declines.
+- `ListUsernames` returning the new `ErrNoUserList` sentinel. `httpStore`
+  returns it always, because "list every account" is an endpoint a shared hub
+  must not have. The distinction from an *empty* list is load-bearing: an
+  empty list is what puts the login screen into first-run registration mode,
+  and greeting a returning user with an account-creation form against a server
+  that already holds their notes is the worst available failure.
+
+**`userGUID` is dead weight in `store_http.go` and stays anyway.** The server
+scopes every query from the JWT, so all eleven note/category methods take the
+argument and ignore it (`_ string`). Dropping it would give the two
+implementations different signatures, which is not a seam.
+
+**The 401 path is why `httpStore` holds the password in memory.** A JWT
+expires; a TUI can sit open for days. One silent re-login with the
+credentials from the last successful login (falling back to the environment),
+then retry — once, never a loop, because a wrong password would otherwise be
+re-sent forever. On failure the *original 401* is reported, not the re-login
+error: "unauthorized" is the accurate description of what happened to the
+user's action. `TestExpiredTokenTriggersOneSilentRelogin` asserts the count,
+not just the recovery.
+
+**The probe requires the envelope, not a 200.** Port 8444 can be held by
+anything, and guessing wrong starts the TUI in HTTP mode against a stranger.
+`ProbeServer` demands `success: true` and `data.status == "ok"`; the test
+table lists five services that would pass a laxer check, including a JSON API
+answering `{"status":"healthy"}`.
+
+**A bug the seam surfaced.** `models.AuthenticateUser` reports bad credentials
+as `(nil, nil)`. The old `loginCmd` only checked `err`, so a typo left `busy`
+set and the screen sat on "Signing in..." ignoring every subsequent key.
+Writing `fakeStore.AuthenticateUser` to match the real contract made it
+obvious. Fixed and pinned by `TestBadPasswordClearsTheBusyFlag`.
+
+**Tests (1,247 lines, two files).** `fake_store_test.go` is an in-memory
+`Store`; `storeFixtures()` reruns the boot flows against both it and the local
+store, so a screen that ever reaches around the Store back into `models.*`
+fails the fake run — there is no database open at all. It also has a
+`failWith` hook, which is the only sane way to produce a storage failure on
+demand. `store_http_test.go` runs the real `httpStore` against a real
+`httptest.Server` backed by a `fakeStore`, so round trips are genuine: a note
+created over HTTP is one the next GET returns. That is what lets
+`syncNoteCategories` — the one piece of real logic in `commands.go` — be
+exercised across the wire, over six endpoints.
+
+**Verified past the suite**, same pty harness as Phases 2–3, against a scratch
+server on port 18444 and a scratch data dir. Three runs on the *same* data
+directory with the *same* command, differing only in what was available:
+
+| run | mode | login screen | API calls the server logged |
+|---|---|---|---|
+| server up, env credentials | HTTP | flashes at byte 423, gone by 1760 | `health`, `auth/login`, `notes` |
+| server up, cached token only | HTTP | **never renders** (count 0) | `health`, `auth/me`, `notes` |
+| server stopped | local | prefilled `phase4`, password typed | — (probe refused) |
+
+The cached-token run is the cleanest: `/auth/me` answers faster than the first
+paint, so browse *is* the first frame. A login round trip does not, which is
+why the env-credential run shows the login card briefly. Both are correct; the
+difference is worth knowing before someone reports the flash as a bug.
+
+Note for the next phase: `gonotes serve` is **not** a subcommand — serving is
+the default action, so `gonotes serve -d <dir>` silently ignores `-d` and
+opens `~/.gonotes`. The invocation is `gonotes -d <dir> -p <port>`.
 
 ### Phase 5 — cats transport + hooks + host identity (the phone-push win)
 - New `cats/` package: `detect.go`, `client.go` (+ the `capture` verb),
