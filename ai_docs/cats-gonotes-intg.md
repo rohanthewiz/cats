@@ -183,6 +183,17 @@ dbc's nice-to-have list).
   tcell used `CSI > 1 u`. cats' emulator handled tcell's; the set form is
   equally standard, but `modes.kitty` registering must be confirmed live
   (Phase 5 manual pass). High confidence; dbc precedent one encoding away.
+  **Half-resolved in Phase 5.** The encoding is now observed rather than
+  assumed: the pty capture of the real binary shows
+  `ESC[>4m ESC[=0;1u ESC[>4;2m ESC[=1;1u` at startup — the **set** form, with
+  flags 1 (disambiguate), paired with modifyOtherKeys. What is still open is
+  only whether that registers on the host side, and the code path says it
+  should: cats does not parse this itself, it reads
+  `e.term.KittyKeyboardFlags()` from ghostty-vt
+  (`internal/terminal/ghostty.go:270`), which implements the whole kitty
+  protocol including set. Confirming it needs gonotes running in a real cats
+  pane — a fake control socket cannot answer this — so it stays on the live
+  checklist rather than being called done.
 - ~~**Server-side decryption over the API**: whether GET note decrypts private
   bodies when the server holds the key (web UI implies yes). If not, HTTP
   mode shows ciphertext for private notes and must say so (Phase 4).~~
@@ -580,7 +591,90 @@ Note for the next phase: `gonotes serve` is **not** a subcommand — serving is
 the default action, so `gonotes serve -d <dir>` silently ignores `-d` and
 opens `~/.gonotes`. The invocation is `gonotes -d <dir> -p <port>`.
 
-### Phase 5 — cats transport + hooks + host identity (the phone-push win)
+### Phase 5 — ✅ cats transport + hooks + host identity (the phone-push win) — done 2026-08-14
+
+Landed as specified. 1,885 lines of new `cats/` package (source + its four
+ported test files), 505 lines of `tui/cats_glue.go`, 746 lines of TUI tests in
+two new files, 113 insertions / 6 deletions across three existing files.
+`go build`, `go vet`, `go test -race ./...` green; the TUI suite stable over
+three consecutive runs.
+
+**The Phase 2-4 suites needed zero changes, which is the Tier-0 proof.**
+`newAppModel`'s signature is unchanged: it constructs an inert `catsState`
+whose zero value is "not in cats, nothing connected", and detection happens
+only when `Run` calls `init` on it. Every test in the package therefore
+constructs the model with no host at all, and passes.
+
+**The probe is a `tea.Cmd`, not a goroutine — and that is a deadlock fix, not
+a style choice.** The plan said "probe/subscribe goroutine". Bubble Tea's
+`Program.Send` *blocks* while the program has not started yet, and is a no-op
+only once it has terminated. A goroutine started before `p.Run()` that posted
+into that window — and then a stream reader doing the same — would make
+`close`'s `stream.Close()`, which waits for its reader, hang forever on a TUI
+that failed to start. A Cmd cannot run until the event loop already is, so
+nothing downstream of the probe (including the subscription, opened from
+`ready` on the loop) can ever reach the blocking window. `cs.send = p.Send` is
+still set before `p.Run()`, as planned; only the trigger moved.
+
+**`close` runs after `p.Run()` returns even when Run failed**, because `init`
+claimed the pane before the program existed. The error return is deferred
+until after the release for exactly that reason.
+
+**Only the external editor is a reported span.** cats turns a working→idle
+edge into a "finished" toast and a phone push, so a span is a claim that the
+user might reasonably have walked away during it. The form's save — one bytdb
+write, or one POST — resolves faster than the badge would render; reporting it
+would be how the channel earns being muted. The editor, where the user is in
+another program for as long as they like, is the one that qualifies. The span
+opens inside `openEditorCmd` rather than at its call site, because only that
+function knows an editor is actually going to run: the temp-file write can
+fail, and a pane badged "editing" for an editor that never launched would stay
+badged until the next transition.
+
+**Events are subscribed to and dropped.** `frame` has no consumers until Phase
+6 (theme) and Phase 7 (pane cache). Subscribing now is deliberate: it is what
+puts the handshake and the shutdown ordering under test before two more phases
+are built on top of them. The pane-cache half of the planned handshake test
+("prime cache") is correspondingly absent — there is no picker yet — so the
+test pins probe → resolve → subscribe → release.
+
+**The `capture` verb landed with the client**, ahead of its Phase 7 consumer,
+with `ansi` and `unwrap` both deliberately off (a note stores markdown, so VT
+styling would arrive as escape noise and unwrapping would rewrap prose to the
+pane's width) and a 5s timeout rather than the default 3s, because capture is
+not a local answer — cats forwards it to the cathost daemon.
+
+**Verified past the suite, on a real pty**, with a scripted cats host: a fake
+control socket answering ping / pane.list / events.subscribe, and a fake hook
+socket recording every report. Two runs of the real binary:
+
+| | control methods | hook reports |
+|---|---|---|
+| launch, sit at login, ctrl+c | `ping`, `pane.list`, `events.subscribe` | `idle` claim → `release` |
+| register → new note → ctrl+e (3s editor) → ctrl+c | same | `idle` → `working "editing: Recipes"` → `idle` (+3.26s) → `release` |
+
+The window title tracked it live: `GoNotes` → `editing: Recipes — GoNotes` →
+`GoNotes`. OSC 7 was emitted once, before the alternate screen. A
+`theme_changed` frame and a deliberately unknown frame were both delivered on
+the stream and dropped without incident.
+
+**Two traps this cost, both pre-existing and neither a Phase 5 bug:**
+
+1. **An empty `GONOTES_URL` does not mean "no server".** `ServerURL()` falls
+   back to `DefaultServerURL`, so the first smoke runs came up in HTTP mode
+   against the live MacApp server on 8444 — which is why a fresh data dir
+   never showed the first-run registration screen (`ErrNoUserList`, correctly,
+   does not enter registering mode). Force local mode with a dead port, e.g.
+   `GONOTES_URL=http://127.0.0.1:9`. Confirmed pre-existing by reproducing it
+   on the Phase 4 binary.
+2. **`gonotes -d <dir> tui` silently ignores `-d`.** The `tui` command declares
+   its own `--dir` with the same default, and command-level flags win on
+   lookup — so the global form resolves to the command flag's *default*, i.e.
+   `~/.gonotes`. The working form is `gonotes tui -d <dir>`. (Sibling of the
+   Phase 4 `gonotes serve` trap: serving is the default action, not a
+   subcommand.)
+
+Original spec:
 - New `cats/` package: `detect.go`, `client.go` (+ the `capture` verb),
   `hooks.go`, `events.go`, each with `_test.go` — hand-copied from
   `../dbc/cats/` with dbc's hard-won test conventions (short
