@@ -765,7 +765,117 @@ Original spec:
 - Tests: mapping table; teatest live-retheme reading restyled output.
   ~250 lines.
 
-### Phase 7 — capture-to-note (agent collaboration, inverted)
+### Phase 7 — ✅ capture-to-note (agent collaboration, inverted) — done 2026-08-14
+
+Landed as specified. `tui/capture.go` (413) and `tui/capture_test.go` (472) new;
+78 insertions / 20 deletions across `tui/cats_glue.go`, `tui/tui.go`,
+`tui/browse.go`, `tui/keymap.go`, `tui/form.go` and three existing test files.
+`go build`, `go vet`, `go test -race ./...` green; TUI suite stable over three
+consecutive runs.
+
+**The plan's one reversal: a successful probe now says something.** Phase 5 chose
+silence on Tier-1-up, reasoning that a notice displacing the login screen's own
+feedback would be a regression. Phase 7 is what changes that calculus — Tier 1
+acquired a *door*, and a door nothing advertises is a door nobody opens. It could
+not go in the browse footer: footers render in every terminal, and a permanent
+"ctrl+g capture" row would advertise a key whose only answer in a plain shell is
+that the feature is unavailable. So the hint is one status line at Tier-1-up,
+where it is true by construction. The Phase 5 concern turns out not to bind: the
+status bar is cleared by the first keypress, and login feedback only exists after
+the user has typed. Observed on the pty run at byte 372 — on the login screen,
+gone the moment typing started.
+
+**Stripping an escape BYTE is worse than leaving it.** The plan said "ansi:false
++ residual control strip", and the obvious reading — drop C0 and DEL, keep tab —
+is what the first draft did. It turns an *invisible* `\x1b[2K` into a *visible*
+`[2K` in the note's text: the ESC goes and its payload stays. So
+`stripEscapeSequences` removes sequences whole, as a scanner rather than a regexp
+— a CSI ends at a byte in a RANGE (0x40-0x7E, after any run of parameters and
+intermediates) and an OSC ends at BEL or ST, so "what terminates this" differs
+per introducer, which a scanner states directly and a pattern only approximates.
+It is deliberately not a full VT parser: DCS loses two bytes rather than its
+payload, and it cannot arrive here anyway, since cats answers ansi:false by
+stripping styling itself. This is the second line of defense, not the first.
+
+**The three pane events are handled identically, and that is the design.**
+`pane_agent`, `pane_added` and `pane_removed` all answer the same question —
+the cached layout is now wrong — so which one arrived changes nothing, and
+`pollPanes`' own 2s rate limit is what keeps a tab that opens four panes at once
+from costing four round trips. `focus_changed` is subscribed but deliberately
+*not* acted on: the picker does not render which pane is focused, so refreshing
+on it would be a round trip that changes nothing on screen.
+
+**`captureDone` is the one data message not routed to the active screen.** Every
+other result in the package lands on whatever screen asked for it; a capture is
+different because it takes seconds (cats forwards it to the cathost daemon) and
+the user is free to open a note or a category meanwhile. Delivering to the top of
+the stack would mean a capture the user explicitly asked for vanishing because
+they navigated while it was in flight. It is handled at the root, which pushes
+the form regardless of what is showing.
+
+**The picker is hand-rendered, and that is a simplification rather than a
+regression.** It holds three or four rows, no filter, no pagination — so unlike
+the two bubbles/list screens it stores nothing derived from the palette and needs
+no `restyle()` at all. Every color it draws with is read fresh from `styles.go`
+each frame. `confirmScreen` is the precedent, and the same rule produced it.
+
+The other decisions worth naming, each of which had an alternative:
+
+- **`CaptureRecent` (scope 1), 200 lines.** The visible viewport alone loses the
+  top of a long answer, which is exactly the thing being captured; the whole
+  buffer buries that answer in the conversation that led to it, and the user has
+  to delete more than they keep. `ansi` and `unwrap` stay off for the reasons
+  Phase 5 wrote down when the verb landed — the plan's original
+  `unwrap:true` did not survive contact with "a note stores markdown".
+- **The form opens UNSAVED.** The same rule the outbound half keeps, where
+  `pane.send_input` stages text without pressing Enter: what was captured is the
+  agent's words, and whether they are worth keeping is the user's call.
+- **No hook span for the capture.** Consistent with the save: cats turns a
+  working→idle edge into a toast and a phone push, and a five-second action the
+  user is watching does not qualify.
+- **No picker when there is nothing to pick.** At Tier 1 with no sibling agent,
+  ctrl+g answers with a status line rather than an empty modal — a dialog the
+  user has to dismiss just to learn it was empty.
+
+**Tests (472 lines).** Organized by the four seams and how each fails: the cache
+offers the wrong panes, the door dials from a keystroke, the wire asks for the
+wrong scope, the note arrives full of padding. The self-exclusion is tested twice
+(by resolved id and by handle fallback) because GoNotes reports *itself* as the
+agent "gonotes" and so appears in `pane.list` looking exactly like a target.
+`TestCaptureRequestsRecentScopeWithoutAnsi` asserts on the decoded wire params,
+not on the wrapper that built them. One harness note: `drainCmd` flattens
+`tea.Batch`, which is not transparent — it returns a `BatchMsg` carrying the
+sub-commands for the runtime — while `tea.Sequence`'s message type is unexported,
+which is why the enter-to-capture path is exercised through a real program
+instead. That is also why `captureDone` returns a Batch: the push and the status
+line are independent, so nothing was bought by the opaque form.
+
+**Verified past the suite, on a real pty**, against a scripted cats answering
+`capture` with a padded, ANSI-styled, blank-row-wrapped buffer. The real binary
+registered, pressed ctrl+g, and pressed Enter:
+
+```
+Capture from an agent pane
+  codex           blocked · w1:p4
+  claude          idle · w1:p9
+  ↑/↓ move • enter capture • esc back
+```
+
+| | |
+|---|---|
+| picker rows | blocked ranked first; the plain shell (`w1:p3`) and our own pane absent |
+| wire | `capture {"pane":4,"scope":1,"lines":200}` — no `ansi`, no `unwrap` |
+| form | title `Capture: codex — 2026-08-14 20:48`, tags `capture` |
+| body | 3 lines: padding, leading/trailing blank rows and `\x1b[38;5;204m` all gone, the interior blank line kept |
+| hooks | `idle` claim → `release`, and nothing in between |
+| `pane.list` calls | 3 — resolve, prime at Tier-1-up, refresh on picker open |
+
+One trap re-encountered rather than discovered: the smoke harness' socket
+directory has to be short. `AF_UNIX path too long` from a scratchpad path is the
+same 104-byte `sun_path` limit the test suite's `catsSockPath` works around, and
+it reads like a permissions failure.
+
+Original spec:
 - New `tui/capture.go` (+test) — `agentPickerScreen`, pane cache + rate
   limit, `captureCmd`, prefilled form push.
 - Edits: `tui/keymap.go` + `tui/browse.go` — the ctrl+g door; one Tier-1-up
