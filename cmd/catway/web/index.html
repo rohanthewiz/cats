@@ -1711,11 +1711,15 @@
     droid: 1, amp: 2, pi: 3, kimi: 4, opencode: 5, hermes: 6,
     kilo: 1, kiro: 2, agy: 3, cline: 4, grok: 5, qodercli: 6,
     // The house tools are seated in the order they arrived — claude, ced,
-    // dbc — because they are the ones that actually share this sidebar. dbc
-    // is listed rather than left to the hash for that reason alone: the hash
-    // would have put it on 5, beside cursor, and the point of the seating
-    // chart is to choose the neighbours rather than accept them.
+    // dbc, gonotes — because they are the ones that actually share this
+    // sidebar. dbc is listed rather than left to the hash for that reason
+    // alone: the hash would have put it on 5, beside cursor, and the point of
+    // the seating chart is to choose the neighbours rather than accept them.
     dbc: 3,
+    // gonotes had the worse draw: the hash puts it on 1, which is claude's —
+    // and a note-taking pane sits beside a claude pane more often than beside
+    // anything else, since capturing that pane's output is what it is for.
+    gonotes: 4,
   };
 
   // hueClass answers for labels the map has never seen — the ced case before

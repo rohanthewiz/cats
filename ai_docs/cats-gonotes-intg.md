@@ -881,15 +881,103 @@ Original spec:
 - Edits: `tui/keymap.go` + `tui/browse.go` — the ctrl+g door; one Tier-1-up
   log hint advertising it. ~300 lines.
 
-### Phase 8 — ⌘ accelerators
-- New `tui/metakeys.go` (+test) — chord table, super/meta fold, swallow
-  unclaimed, the "nothing ⌘-only" invariant test. Wired as the first branch
-  in root `Update`. ~150 lines.
+### Phase 8 — ✅ ⌘ accelerators — done 2026-08-14
 
-### Phase 9 — plugin manifest + cats-side seat
-- New `../gonotes/cats-plugin.toml` (cats-todo template).
-- Edit `cmd/catway/web/index.html` `AGENT_HUE` (~:1709): `gonotes: 4,` with
-  a one-line comment. (cats-mobile rev pin follow-up if needed.)
+Landed as specified. `tui/metakeys.go` (232) and `tui/metakeys_test.go` (347)
+new; 47 insertions across `tui/tui.go`, `tui/browse.go`, `tui/categories.go`,
+`tui/form.go`, `tui/login.go`, `tui/confirm.go` and `.gitignore`. `go build`,
+`go vet`, `go test -race ./...` green.
+
+**The plan's one addition: every chord needs TWO twins, not one.** The plan said
+"translate claimed chords to their existing twins and re-dispatch", which reads
+as one keystroke per chord. It cannot be: GoNotes spends unmodified letters on
+commands in the list screens (`e` edits, `f` flags, `d` deletes) and on content
+everywhere text is entered, so ⌘E means the `e` that opens the form on the note
+list and the `ctrl+e` that opens `$EDITOR` on the form — the same verb, one level
+down. So each row carries a command-mode twin and a typing-mode twin, the latter
+allowed to be *empty*, which is the instruction to swallow. Which applies is
+decided per keystroke by a new `texter` interface (`takingText() bool`), sibling
+of `refresher`/`restyler`: the form, login and prompt screens answer true
+unconditionally; the two list screens answer true only while their fuzzy filter
+prompt is up. Not implementing it is command mode, which is the safe default — a
+new screen has to opt IN to having its keystrokes protected, and forgetting costs
+a chord that does nothing rather than one that types.
+
+**The hazard is in the translation, not the fall-through — which reverses dbc's
+reasoning for the same code.** dbc swallowed unclaimed ⌘ chords because a chord
+that fell through "would reach the focused widget as a bare letter and type it".
+Under v2 that is no longer true: `key.Matches` compares `Key.String()`, which is
+`"super+f"` and matches no binding, and every text widget inserts `Key.Text`,
+which the CSI-u decoder deliberately leaves EMPTY for any modifier above shift
+(decoder.go, "we need to clear the text if we have a modifier key other than a
+ModShift key"; the Windows console path guards it the same way). An unclaimed
+chord is already inert. What is *not* inert is the twin this layer synthesizes —
+a real printable keystroke, `Text` and all, because it has to be
+indistinguishable from the user pressing the key. So ⌘D translated to a bare `d`
+without the mode check does not do nothing during a search: it appends a `d` to
+the search box. That is the one reachable bug here, and it is what the typing
+column prevents. The swallow stays anyway, demoted from repair to guarantee: it
+makes "a ⌘ chord stops here" a property of this file rather than a coincidence of
+three upstream implementation details.
+
+**No arming gate, and now there is a reason rather than an assumption.** dbc
+needed one because a terminal set to Option-as-Meta produced the same tcell
+`ModMeta` as ⌘, so `⌥e` could have fired an accelerator. v2 has no such
+ambiguity: Option-as-Meta arrives ESC-prefixed and decodes to `ModAlt`, while
+`ModMeta`/`ModSuper` come only from the kitty modifier bits (32 and 8) — so a
+chord can only arrive from a host that speaks the protocol and chose to forward
+it. Both mods are matched anyway; the two names for the same physical key differ
+by terminal and matching the unexpected one costs nothing.
+
+**Table shape.** `⌘S`→`ctrl+s` (both modes), `⌘G`→`ctrl+g` (both), `⌘E`→`e` /
+`ctrl+e`, `⌘F`→`f` / swallow, `⌘D`→`d` / swallow, `⌘/`→`/` / swallow. `⌘/`'s twin
+binding comes from `list.DefaultKeyMap().Filter` — the fuzzy filter belongs to
+bubbles, not to our keymap, and the invariant test needs a real binding to check
+against. `metaChord` prefers `BaseCode` over `Code` for the same reason
+`Key.Keystroke` does: it is the PC-101 physical key, which is what cats matched
+on (`KeyboardEvent.code`) when it decided to forward the chord, so an AZERTY
+keyboard resolves the same row. Shifted forms are claimed but not translated.
+
+**Verified on a real pty**, Tier 0, against the built binary with kitty CSI-u
+sequences at modifier 9 (1 + the super bit) — the exact bytes cats' input encoder
+and Ghostty emit. Register → create a note → ⌘E opened `Edit: Alpha`; ⌘F/⌘D/⌘P on
+the form drew nothing and left the title `Alpha`; ⌘G answered "Capturing an agent
+pane needs cats — GoNotes is running standalone" (the Tier-0 door, so the chord
+reached `keys.Capture`); ⌘F on the list flagged the note (`⚑ Alpha`); ⌘/ opened
+`Filter:`; ⌘D during that search opened nothing, and a subsequent `z` left the box
+reading `z` rather than `dz`. 10/10.
+
+One trap re-encountered: **a pty smoke test must force local mode**. The MacApp's
+embedded server answers on `localhost:8444`, so `gonotes tui -d <tmpdir>` probes,
+finds it, and comes up in HTTP mode against the *real* notes database — the temp
+directory is silently irrelevant. `GONOTES_URL=http://127.0.0.1:1` is the fix.
+
+### Phase 9 — ✅ plugin manifest + cats-side seat — done 2026-08-14
+
+- New `../gonotes/cats-plugin.toml`, on the `../cats-todo/cats-plugin.toml`
+  template. Validated through cats' own `plugin.LoadManifest`, not by eye.
+  `[[build]]` → `mkdir -p bin && go build -o bin/gonotes .` (run and confirmed;
+  `/bin/` added to gonotes' `.gitignore`). Two actions: `tui` first, so a bare
+  `plugin run` opens the TUI, and `serve` second for the web server.
+- Edit `cmd/catway/web/index.html` `AGENT_HUE`: `gonotes: 4,`.
+
+**The `-d` flag the plan specified is deliberately absent, and specifying it
+would have been a bug.** The plan said the action should be
+`./bin/gonotes tui -d ~/.gonotes` — an absolute default dir, because an action's
+argv[0] is anchored to the plugin root while the pane it opens has the *user's*
+project as its cwd, so a cwd-dependent data directory would put different notes
+behind every tab. The reasoning is right and the flag is the wrong way to get it:
+this argv is exec'd directly, with no shell to expand the tilde, so it would
+create a directory literally named `~`. It is also unnecessary — `gonotes tui`
+already defaults `--dir` to `$HOME/.gonotes` via `os.UserHomeDir` and chdirs into
+it before anything opens (confirmed: `--help` prints the resolved absolute path).
+
+**The FNV fallback was checked rather than assumed, as the plan asked, and it is
+what justifies the entry.** Hashing "gonotes" lands on slot **1** — claude's. A
+note-taking pane sits beside a claude pane more often than beside anything else,
+since capturing that pane's output is what it is for, so this is exactly the
+collision the seating chart exists to prevent. (For the record the same check on
+"dbc" gives 5 and "ced" gives 6, matching what the existing comment claims.)
 
 ## Verification
 
