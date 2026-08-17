@@ -361,13 +361,27 @@ command, so anything holding the control API can lift it.
 | `tab.list` | `tabs [workspace]` |
 | `pane.list` | `panes` |
 | `pane.get` | `pane [pane]` |
+| `host.list` | `hosts` |
 
 These are answered straight from the `Session` with no backend effects.
 `pane.list` / `pane.get` add one merge on top of it: each pane's runtime metadata
-(`PaneMeta` — `agent`, `agent_state`, `agent_model`, `title`, `cwd`) comes from
-the backend's per-pane cache, so a client sees the same arbitrated agent identity
-and live title the browser chrome shows, for every pane in the session rather
-than only the ones on screen. Every field is omitted when empty.
+(`PaneMeta` — `agent`, `agent_state`, `agent_model`, `title`, `cwd`, `host`)
+comes from the backend's per-pane cache, so a client sees the same arbitrated
+agent identity and live title the browser chrome shows, for every pane in the
+session rather than only the ones on screen. Every field is omitted when empty.
+
+`host.list` is the exception that proves the rule: the cathost roster is a set of
+live connections, not domain state, so it is the backend that answers. Each entry
+carries `id`, `label`, `connected`, `addr_kind`, `is_default`, `panes`, and an
+`error` explaining a host that is down. A session with no `hosts:` block answers
+with the single synthesized `local` host — which is how a client distinguishes
+"one machine here" from "the remote one is unreachable".
+
+`pane.list`'s `host` and `workspace.list`'s `host` mean different things on
+purpose: a pane's is *resolved* (which machine is holding that terminal right
+now, default fallbacks applied), while a workspace's is the id it *stored* —
+empty meaning "whatever the default host is" — because that field is a policy for
+new panes rather than a location.
 
 ### Worktrees, config, plugins, paths, server
 

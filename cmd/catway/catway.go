@@ -132,7 +132,10 @@ type orch struct {
 	//
 	// The map is built once in newOrchWith and not mutated afterwards (hot
 	// attach/detach is a later phase), so the dial goroutines may read it.
-	hosts       map[string]*daemon
+	hosts map[string]*daemon
+	// hostOrder is the roster in configured order — the order the sidebar and
+	// host.list print, which map iteration cannot supply.
+	hostOrder   []string
 	defaultHost string
 	area        layout.Rect
 	cellW       uint32
@@ -356,19 +359,41 @@ func (modelSpawner) Spawn(spec workspace.SpawnSpec) (workspace.TerminalID, error
 func (modelSpawner) Despawn(workspace.TerminalID) {}
 
 // newOrch builds the orchestrator with a fresh session (one workspace, one tab,
-// one pane). Splits, tabs, and workspaces are created at runtime via commands.
+// one pane) attached to the single synthesized local host. Splits, tabs, and
+// workspaces are created at runtime via commands.
 func newOrch(socket, cwd string) (*orch, error) {
+	return newOrchHosts(config.EffectiveHosts(socket, nil), cwd)
+}
+
+// newOrchHosts is newOrch over an explicit roster (main, from the config file).
+func newOrchHosts(hosts []config.Host, cwd string) (*orch, error) {
 	sess, err := app.NewSession(modelSpawner{}, cwd)
 	if err != nil {
 		return nil, err
 	}
-	return newOrchWith(socket, cwd, sess), nil
+	return newOrchHostsWith(hosts, cwd, sess)
 }
 
 // newOrchWith builds the orchestrator around an existing session — fresh
 // (newOrch) or restored from a snapshot (WS3; main falls back to fresh when
-// there is nothing to restore).
+// there is nothing to restore) — on the single synthesized local host.
 func newOrchWith(socket, cwd string, sess *app.Session) *orch {
+	o, err := newOrchHostsWith(config.EffectiveHosts(socket, nil), cwd, sess)
+	if err != nil {
+		// Unreachable: the synthesized local host is a unix socket, the one
+		// transport a daemon has always been able to build, and an unusable path
+		// fails at dial time rather than here.
+		panic("catway: local host: " + err.Error())
+	}
+	return o
+}
+
+// newOrchHostsWith is the real constructor: an existing session attached to an
+// explicit roster. The hosts are built BEFORE the first syncDaemon, because
+// that pass resolves each restored pane's host id and falls back to the default
+// for any host it does not find — a roster installed afterwards would arrive
+// after every pane had already been told it lives on the default machine.
+func newOrchHostsWith(hosts []config.Host, cwd string, sess *app.Session) (*orch, error) {
 	o := &orch{
 		session: sess,
 		panes:   make(map[uint32]*paneRuntime),
@@ -399,13 +424,42 @@ func newOrchWith(socket, cwd string, sess *app.Session) *orch {
 		usageNudge:     make(chan struct{}, 1),
 		mailbox:        make(chan func(), 256),
 	}
-	o.defaultHost = localHostID
-	o.hosts = map[string]*daemon{localHostID: newLocalDaemon(o, socket)}
+	if err := o.installHosts(hosts); err != nil {
+		return nil, err
+	}
 	o.syncDaemon()      // desired sizes; no daemon/conns yet, sends are dropped
 	o.refreshViewport() // seed the visible set
 	o.seedStructure()   // snapshot the initial pane set/focus (no retroactive events)
 	o.seedTheme()       // ditto for the appearance: no retroactive theme_changed
-	return o
+	return o, nil
+}
+
+// installHosts builds the daemon per configured host and names the default.
+// EffectiveHosts guarantees a non-empty roster with exactly one default, so the
+// only failure here is a host whose address cannot be turned into a dialer —
+// which is a startup error, not something to discover on the first split.
+//
+// hostOrder preserves the roster's order for display; the map is what everything
+// else resolves through, and Go's map iteration would otherwise reshuffle the
+// sidebar on every render.
+func (o *orch) installHosts(hosts []config.Host) error {
+	o.hosts = make(map[string]*daemon, len(hosts))
+	o.hostOrder = make([]string, 0, len(hosts))
+	for _, h := range hosts {
+		d, err := newDaemon(o, h)
+		if err != nil {
+			return err
+		}
+		o.hosts[h.ID] = d
+		o.hostOrder = append(o.hostOrder, h.ID)
+		if h.Default {
+			o.defaultHost = h.ID
+		}
+	}
+	if o.defaultHost == "" && len(o.hostOrder) > 0 {
+		o.defaultHost = o.hostOrder[0] // EffectiveHosts marks one, but never depend on it
+	}
+	return nil
 }
 
 // run is the event loop: the sole owner of orch state. Every state mutation
@@ -438,6 +492,18 @@ func (o *orch) viewportLayout() browserproto.Layout {
 	for i := range msg.Panes {
 		cols, rows := innerGrid(msg.Panes[i].Rect)
 		msg.Panes[i].Inner = browserproto.Rect{msg.Panes[i].Rect[0], msg.Panes[i].Rect[1] + chromeRows, cols, rows}
+		// Patched here rather than in BuildLayout for the same reason the tab
+		// names are: resolving a host needs the roster, which is the runtime's
+		// and not the workspace package's. The value is always the resolved id,
+		// never the model's "" — a badge reading nothing helps nobody, and the
+		// client decides whether to draw it from the roster's size.
+		msg.Panes[i].Host = o.paneHostID(msg.Panes[i].Pane)
+	}
+	wss := o.session.Workspaces()
+	for i := range msg.Workspaces {
+		if i < len(wss) {
+			msg.Workspaces[i].Host = o.workspaceHostID(wss[i])
+		}
 	}
 	if ws := o.activeWorkspace(); ws != nil && len(ws.Tabs) == len(msg.Tabs) {
 		for i, tab := range ws.Tabs {
@@ -537,9 +603,10 @@ func (o *orch) desiredGrids() map[uint32][2]uint16 {
 // into orch.hosts directly.
 
 // localHostID is the id of the always-present host reached over
-// server.cathost_socket. It is synthesized rather than configured, so a session
-// with no hosts: block still has exactly one host and it is this one.
-const localHostID = "local"
+// server.cathost_socket. It is synthesized rather than configured (by
+// config.EffectiveHosts), so a session with no hosts: block still has exactly
+// one host and it is this one.
+const localHostID = config.LocalHostID
 
 // nopDaemon stands in wherever a host cannot be resolved (an unknown pane, a
 // vanished host). Its sends drop and it is never connected — the same behaviour
@@ -597,6 +664,77 @@ func (o *orch) paneHostID(pid uint32) string {
 		return o.defaultHost
 	}
 	return id
+}
+
+// --- host roster (the browser's HOSTS section and §7 host.list) --------------
+
+// hostPaneCounts is how many live panes each host currently holds, resolved the
+// same way every send is (so a pane whose recorded host vanished is counted on
+// the default host it actually fell back to, not on the ghost).
+func (o *orch) hostPaneCounts() map[string]int {
+	counts := make(map[string]int, len(o.hosts))
+	if o.session == nil {
+		return counts // a partial harness orch: no model, so nothing is anywhere
+	}
+	for _, id := range o.session.AllPaneIDs() {
+		counts[o.paneHostID(uint32(id))]++
+	}
+	return counts
+}
+
+// Hosts is the Backend seam's roster (host.list), in configured order.
+// Loop-goroutine only, like every Backend method.
+func (o *orch) Hosts() []app.HostInfo {
+	counts := o.hostPaneCounts()
+	out := make([]app.HostInfo, 0, len(o.hostOrder))
+	for _, id := range o.hostOrder {
+		d := o.hosts[id]
+		if d == nil {
+			continue
+		}
+		connected, lastErr := d.status()
+		out = append(out, app.HostInfo{
+			ID:        d.id,
+			Label:     d.label,
+			Connected: connected,
+			AddrKind:  d.kind,
+			Default:   id == o.defaultHost,
+			Panes:     counts[id],
+			Error:     lastErr,
+		})
+	}
+	return out
+}
+
+// hostsMsg is the same roster as a browser message. Two shapes rather than one
+// because the wire structs are per-protocol by design (browserproto is the
+// browser's, app's results are the command vocabulary's); the translation is
+// this loop.
+func (o *orch) hostsMsg() browserproto.Hosts {
+	infos := o.Hosts()
+	items := make([]browserproto.HostItem, 0, len(infos))
+	for _, h := range infos {
+		items = append(items, browserproto.HostItem{
+			ID: h.ID, Label: h.Label, Connected: h.Connected,
+			AddrKind: h.AddrKind, Default: h.Default, Panes: h.Panes, Error: h.Error,
+		})
+	}
+	return browserproto.NewHosts(items)
+}
+
+// broadcastHosts pushes the roster to every client. Called on each host's
+// connect and disconnect — the two moments a dot changes colour — and cheap
+// enough at those rates to send unconditionally rather than diff.
+func (o *orch) broadcastHosts() { o.broadcast(o.hostsMsg()) }
+
+// workspaceHostID is a workspace's default host for new panes, resolved to a
+// host that exists (the model stores "" for "the default", and may name one
+// that has since left the roster).
+func (o *orch) workspaceHostID(ws *workspace.Workspace) string {
+	if ws == nil || ws.HostID == "" || o.hosts[ws.HostID] == nil {
+		return o.defaultHost
+	}
+	return ws.HostID
 }
 
 // syncDaemon reconciles the daemons' PTY sets with the session: spawn panes a
@@ -1413,7 +1551,10 @@ func (o *orch) PaneMeta(pane uint32) app.PaneMeta {
 	if rt == nil {
 		return app.PaneMeta{}
 	}
-	meta := app.PaneMeta{Title: rt.title, Cwd: rt.cwd}
+	// Host is resolved, not the raw model id: pane.list is what an automation
+	// client picks a target from, and "which machine will this run on" must be
+	// answerable without the client repeating catway's fallback rules.
+	meta := app.PaneMeta{Title: rt.title, Cwd: rt.cwd, Host: o.paneHostID(pane)}
 	if agent, state := rt.effectiveAgent(); agent != "" {
 		// The model rides the agent: it is resolved from that agent's transcript
 		// (agentmodel.go), so reporting it for a pane with no agent would be
@@ -1872,6 +2013,10 @@ func (o *orch) registerConn(c *client, init *browserproto.Init) {
 		o.hostOf(rt).send(orchestration.NewRequestResync(pid))
 	}
 	o.send(c, o.agentsMsg())
+	// The roster before the first frame settles: the host badges the layout
+	// already carries are only drawn once the client knows how many hosts there
+	// are, so sending it later would flash them in.
+	o.send(c, o.hostsMsg())
 	if o.usage != nil {
 		o.send(c, *o.usage)
 	}

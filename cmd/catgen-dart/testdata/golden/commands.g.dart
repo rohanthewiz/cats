@@ -150,6 +150,8 @@ abstract final class CmdName {
   static const String paneList = 'pane.list';
 
   static const String paneGet = 'pane.get';
+
+  static const String hostList = 'host.list';
 }
 
 /// A screen-buffer coordinate. On the wire it is the bare array
@@ -336,6 +338,7 @@ class ConfigServerInfo {
     this.controlSocket = '',
     this.hookSocket = '',
     required this.sessionTtl,
+    this.hosts = const <HostInfo>[],
   });
 
   final String addr;
@@ -346,6 +349,12 @@ class ConfigServerInfo {
   final String hookSocket;
   final String sessionTtl;
 
+  /// Hosts is the live roster (the same listing host.list returns), so the
+  /// settings modal can show which machines this catway attached to without a
+  /// second call. Like the rest of this struct it is read-only: hosts: is a
+  /// restart-time setting, and config.set never writes it.
+  final List<HostInfo> hosts;
+
   factory ConfigServerInfo.fromJson(Map<String, Object?> j) => ConfigServerInfo(
         addr: asString(j['addr']),
         auth: asString(j['auth']),
@@ -354,6 +363,7 @@ class ConfigServerInfo {
         controlSocket: asString(j['control_socket']),
         hookSocket: asString(j['hook_socket']),
         sessionTtl: asString(j['session_ttl']),
+        hosts: asList(j['hosts'], (e) => HostInfo.fromJson(asObj(e))),
       );
 
   Map<String, Object?> toJson() => {
@@ -364,6 +374,7 @@ class ConfigServerInfo {
         if (controlSocket.isNotEmpty) 'control_socket': controlSocket,
         if (hookSocket.isNotEmpty) 'hook_socket': hookSocket,
         'session_ttl': sessionTtl,
+        if (hosts.isNotEmpty) 'hosts': [for (final e in hosts) e.toJson()],
       };
 }
 
@@ -457,6 +468,77 @@ class DirParams {
 
   Map<String, Object?> toJson() => {
         'dir': dir,
+      };
+}
+
+/// HostInfo describes one cathost for host.list — the machines the session's
+/// panes are spread over. A single-host session answers with one entry, which is
+/// how a client tells "hosts aren't configured here" from "the remote one is
+/// down" without a capability flag.
+///
+/// AddrKind names the transport ("unix", "tcp", "tls") rather than the address:
+/// the address is a socket path or a hostname, neither of which a listing needs
+/// and both of which are worth not printing by reflex. Error carries the last
+/// dial/session failure for a host that is not connected, so `catctl hosts` can
+/// say why rather than just "false".
+class HostInfo {
+  const HostInfo({
+    required this.id,
+    required this.label,
+    required this.connected,
+    this.addrKind = '',
+    this.isDefault = false,
+    required this.panes,
+    this.error = '',
+  });
+
+  final String id;
+  final String label;
+  final bool connected;
+  final String addrKind;
+
+  /// Default is "is_default" on the wire, not "default": generated clients bind
+  /// each key to an identifier, and `default` is a reserved word in Dart (see
+  /// cmd/catgen-dart, which refuses it rather than silently mangling the name).
+  final bool isDefault;
+  final int panes;
+  final String error;
+
+  factory HostInfo.fromJson(Map<String, Object?> j) => HostInfo(
+        id: asString(j['id']),
+        label: asString(j['label']),
+        connected: asBool(j['connected']),
+        addrKind: asString(j['addr_kind']),
+        isDefault: asBool(j['is_default']),
+        panes: asInt(j['panes']),
+        error: asString(j['error']),
+      );
+
+  Map<String, Object?> toJson() => {
+        'id': id,
+        'label': label,
+        'connected': connected,
+        if (addrKind.isNotEmpty) 'addr_kind': addrKind,
+        if (isDefault) 'is_default': isDefault,
+        'panes': panes,
+        if (error.isNotEmpty) 'error': error,
+      };
+}
+
+/// HostListResult is CmdResult.Data for host.list.
+class HostListResult {
+  const HostListResult({
+    required this.hosts,
+  });
+
+  final List<HostInfo> hosts;
+
+  factory HostListResult.fromJson(Map<String, Object?> j) => HostListResult(
+        hosts: asList(j['hosts'], (e) => HostInfo.fromJson(asObj(e))),
+      );
+
+  Map<String, Object?> toJson() => {
+        'hosts': [for (final e in hosts) e.toJson()],
       };
 }
 
@@ -591,6 +673,7 @@ class PaneInfo {
     this.agentModel = '',
     this.title = '',
     this.cwd = '',
+    this.host = '',
   });
 
   final int pane;
@@ -616,6 +699,14 @@ class PaneInfo {
   /// live working directory
   final String cwd;
 
+  /// Host is the cathost the pane's terminal lives on, resolved against the
+  /// live roster — so it always names a host that exists, including for a pane
+  /// restored onto one that has since gone away. It sits here rather than
+  /// beside the session's own fields because the resolution is the runtime's:
+  /// the model stores an id that may be empty or stale, the backend knows which
+  /// machine is actually holding the PTY.
+  final String host;
+
   /// The embedded `PaneMeta` block, regrouped. Go's embedding flattens these
   /// onto the wire; this hands them back as the unit they were declared as.
   PaneMeta get paneMeta => PaneMeta(
@@ -624,6 +715,7 @@ class PaneInfo {
         agentModel: agentModel,
         title: title,
         cwd: cwd,
+        host: host,
       );
 
   factory PaneInfo.fromJson(Map<String, Object?> j) => PaneInfo(
@@ -637,6 +729,7 @@ class PaneInfo {
         agentModel: asString(j['agent_model']),
         title: asString(j['title']),
         cwd: asString(j['cwd']),
+        host: asString(j['host']),
       );
 
   Map<String, Object?> toJson() => {
@@ -650,6 +743,7 @@ class PaneInfo {
         if (agentModel.isNotEmpty) 'agent_model': agentModel,
         if (title.isNotEmpty) 'title': title,
         if (cwd.isNotEmpty) 'cwd': cwd,
+        if (host.isNotEmpty) 'host': host,
       };
 }
 
@@ -683,6 +777,7 @@ class PaneMeta {
     this.agentModel = '',
     this.title = '',
     this.cwd = '',
+    this.host = '',
   });
 
   /// detected agent label ("claude", "codex", …)
@@ -700,12 +795,21 @@ class PaneMeta {
   /// live working directory
   final String cwd;
 
+  /// Host is the cathost the pane's terminal lives on, resolved against the
+  /// live roster — so it always names a host that exists, including for a pane
+  /// restored onto one that has since gone away. It sits here rather than
+  /// beside the session's own fields because the resolution is the runtime's:
+  /// the model stores an id that may be empty or stale, the backend knows which
+  /// machine is actually holding the PTY.
+  final String host;
+
   factory PaneMeta.fromJson(Map<String, Object?> j) => PaneMeta(
         agent: asString(j['agent']),
         agentState: asString(j['agent_state']),
         agentModel: asString(j['agent_model']),
         title: asString(j['title']),
         cwd: asString(j['cwd']),
+        host: asString(j['host']),
       );
 
   Map<String, Object?> toJson() => {
@@ -714,6 +818,7 @@ class PaneMeta {
         if (agentModel.isNotEmpty) 'agent_model': agentModel,
         if (title.isNotEmpty) 'title': title,
         if (cwd.isNotEmpty) 'cwd': cwd,
+        if (host.isNotEmpty) 'host': host,
       };
 }
 
@@ -1745,6 +1850,7 @@ class WorkspaceEntry {
     required this.active,
     required this.tabs,
     this.locked = false,
+    this.host = '',
   });
 
   /// stable public handle, e.g. "w1"
@@ -1760,12 +1866,21 @@ class WorkspaceEntry {
   /// closed to automation (workspace.lock)
   final bool locked;
 
+  /// Host is the cathost new panes in this workspace land on, as the MODEL
+  /// records it: empty means "whatever the default host is", which is what a
+  /// workspace created before hosts existed (or on the default) stores. It is a
+  /// policy, not a location — where a pane actually runs is PaneMeta.Host, which
+  /// the backend resolves, because a pane's process is somewhere whether or not
+  /// the workspace ever named a machine.
+  final String host;
+
   factory WorkspaceEntry.fromJson(Map<String, Object?> j) => WorkspaceEntry(
         id: asString(j['id']),
         name: asString(j['name']),
         active: asBool(j['active']),
         tabs: asInt(j['tabs']),
         locked: asBool(j['locked']),
+        host: asString(j['host']),
       );
 
   Map<String, Object?> toJson() => {
@@ -1774,6 +1889,7 @@ class WorkspaceEntry {
         'active': active,
         'tabs': tabs,
         if (locked) 'locked': locked,
+        if (host.isNotEmpty) 'host': host,
       };
 }
 
@@ -2096,6 +2212,7 @@ const List<CommandSpec> kCommandSpecs = <CommandSpec>[
   CommandSpec('tab.list'),
   CommandSpec('pane.list'),
   CommandSpec('pane.get'),
+  CommandSpec('host.list'),
 ];
 
 /// What a generated command method needs from the connection.
@@ -2404,4 +2521,8 @@ mixin CatsCommands implements CatsCommandTransport {
   /// Params are optional: absent means the zero value, which is a real call.
   Future<PaneInfo> paneGet([OptPaneParams? params]) async =>
       PaneInfo.fromJson(asObj(await invoke(CmdName.paneGet, params?.toJson())));
+
+  /// `host.list`
+  Future<HostListResult> hostList() async =>
+      HostListResult.fromJson(asObj(await invoke(CmdName.hostList, null)));
 }

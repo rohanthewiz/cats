@@ -61,6 +61,12 @@ type Backend interface {
 	PaneExists(pane uint32) bool
 	DaemonConnected() bool
 	PaneHostConnected(pane uint32) bool
+	// Hosts reports the cathost roster (host.list): which machines this session
+	// is attached to, whether each is connected, and how many panes it holds.
+	// It is on the Backend seam rather than the Session because a host is a
+	// runtime connection, not domain state — the model only ever records which
+	// host id a pane named.
+	Hosts() []HostInfo
 	// PaneMeta reports the runtime-side metadata for a pane — detected agent,
 	// live title, cwd — which the session's domain model cannot know. The
 	// dispatcher merges it into pane.list / pane.get results; an unknown pane
@@ -951,6 +957,9 @@ func (d *Dispatcher) Dispatch(name string, dec ParamDecoder, r Responder) {
 		}
 		info.PaneMeta = d.backend.PaneMeta(info.Pane)
 		r.OK(info)
+
+	case CmdHostList:
+		r.OK(HostListResult{Hosts: d.backend.Hosts()})
 
 	default:
 		r.Fail(fmt.Sprintf("command %q not supported yet (WS2 in progress)", name))

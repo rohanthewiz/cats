@@ -38,6 +38,7 @@ func (s *Session) ListWorkspaces() []WorkspaceInfo {
 			Active: i == s.active,
 			Tabs:   len(ws.Tabs),
 			Locked: ws.Locked,
+			Host:   ws.HostID, // as stored: "" = whatever the default host is
 		})
 	}
 	return out

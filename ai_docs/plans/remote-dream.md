@@ -88,7 +88,34 @@ per-pane connectivity, unknown-host fallback), `internal/workspace/host_test.go`
 - Tests: `persist_test.go` `newPipeDaemon` → `o.hosts[o.defaultHost].setConn`, add `newPipeDaemonFor(t,o,hostID)`; `resume_test.go` reconcile call; new `cmd/catway/daemon_test.go` (two pipe hosts: reconcile on A leaves B untouched; disconnect A flushes only A's pending/waiters); `internal/persist` round-trip proves no `host` key emitted; `internal/workspace` HostID default tests.
 - Ship gate: `session.json`/`history.json` byte-identical before/after for a single-host session.
 
-### Phase 2 — `hosts:` config, roster, badges, `host.list`
+### Phase 2 — `hosts:` config, roster, badges, `host.list` — **DONE**
+
+As built (deltas from the plan below): `config.LocalHostID` is now the one spelling of
+`"local"` (catway's `localHostID` aliases it) and `Host.Transport()` is the single address
+parser both `Validate` and `dialerFor` use — lenient about an empty unix target (a
+socket-less test orch must fail at dial, not at build), strict in `Validate`; ids are
+bounded by a regexp and a `local` entry must stay `unix://`. `EffectiveHosts` normalizes
+the `Default` flag onto a copy, so the config's own slice is never rewritten. Construction
+went through `newOrchHosts`/`newOrchHostsWith` with the old `newOrch`/`newOrchWith` kept as
+single-host wrappers — the roster has to exist *before* the first `syncDaemon`, which is
+where restored panes resolve their host. `orch.hostOrder` preserves configured order (map
+iteration would reshuffle the sidebar every render); `daemon.lastErr` + `status()` carry
+*why* a host is down, which the roster and `catctl hosts` both show. Host ids are filled
+into `layout` unconditionally (always resolved, never the model's `""`) and the *client*
+hides badges while the roster holds one host — one rule, one place. `HostItem.Default` is
+`is_default` on the wire: `default` is reserved in Dart and catgen-dart refuses it.
+`PaneMeta` (not `PaneInfo` directly) carries the resolved pane host, so `pane.list` and
+`pane.get` get it from the one backend merge that already exists; `workspace.list` reports
+the *stored* id instead, empty ⇒ default, because that field is a policy for new panes
+rather than a location. Settings modal lists the roster only when >1 host.
+Tests added: `internal/config` (synthesis, override, default selection, transport table,
+validation rejects, YAML round trip), `cmd/catway/hosts_test.go` (single-host roster shape,
+two-host counts + scoped disconnect, layout host fill, configured-roster construction,
+tls:// refused), `internal/app` host.list routing (roster passthrough + single-host shape).
+Verified live: two cathosts on two sockets → `catctl hosts` shows both; killing one leaves
+the other connected and streaming with the dial error on the dead row; restarting it flips
+back; `catctl probe` tallies the `hosts` push on connect; `catctl panes` reports `host`.
+
 - `internal/config/config.go`: `Host`, `Config.Hosts`, `Validate()` (unique non-empty ids, ≤1 default, parse `Addr` scheme), `EffectiveHosts(cathostSocket) []Host` synthesizing `local`; example + tests.
 - `cmd/catway/main.go`: build daemons from `EffectiveHosts` (`newOrchHosts`); `daemon.go` `dialerFor(addr)` (unix now; tcp/tls return "unsupported until Phase 4").
 - `internal/browserproto/{proto,down}.go`: `MsgHosts`, `Hosts/HostItem`, `Host` on `PaneRectInfo`/`WorkspaceInfo`; `catway.go` `hostsMsg()` sent on client init and broadcast on connect/disconnect; layout fills `Host`.

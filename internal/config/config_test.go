@@ -299,3 +299,142 @@ func TestExampleConfigParses(t *testing.T) {
 			got, want)
 	}
 }
+
+// --- hosts -------------------------------------------------------------------
+
+// With no hosts: block there is still exactly one host — "local", on the
+// cathost socket, and the default. This is the shape every existing single-host
+// session gets, so it is the one that must never change.
+func TestEffectiveHostsSynthesizesLocal(t *testing.T) {
+	got := Default().EffectiveHosts("/tmp/cats-cathost.sock")
+	if len(got) != 1 {
+		t.Fatalf("hosts = %+v; want exactly one", got)
+	}
+	h := got[0]
+	if h.ID != LocalHostID || h.Addr != "unix:///tmp/cats-cathost.sock" || !h.Default {
+		t.Fatalf("synthesized local host = %+v", h)
+	}
+	if h.DisplayLabel() == "" {
+		t.Fatal("the local host must carry a display label (the machine name)")
+	}
+}
+
+// A configured host joins the synthesized local one, in file order, and the
+// local host stays the default while nothing claims it.
+func TestEffectiveHostsAppendsConfigured(t *testing.T) {
+	c := Default()
+	c.Hosts = []Host{{ID: "devbox", Addr: "unix:///tmp/devbox.sock"}}
+	got := c.EffectiveHosts("/tmp/local.sock")
+	if len(got) != 2 || got[0].ID != LocalHostID || got[1].ID != "devbox" {
+		t.Fatalf("hosts = %+v; want [local devbox]", got)
+	}
+	if !got[0].Default || got[1].Default {
+		t.Fatalf("local should be the default: %+v", got)
+	}
+	// The input roster must not be touched — EffectiveHosts normalizes Default
+	// flags, and doing that in place would rewrite the caller's config.
+	if c.Hosts[0].Default {
+		t.Fatal("EffectiveHosts mutated the config's own host entry")
+	}
+}
+
+// An explicit default wins, and a hosts: entry that claims the "local" id
+// replaces the synthesized one instead of colliding with it.
+func TestEffectiveHostsDefaultAndOverride(t *testing.T) {
+	c := Default()
+	c.Hosts = []Host{
+		{ID: LocalHostID, Label: "this box", Addr: "unix:///tmp/other.sock"},
+		{ID: "devbox", Addr: "unix:///tmp/devbox.sock", Default: true},
+	}
+	got := c.EffectiveHosts("/tmp/ignored.sock")
+	if len(got) != 2 {
+		t.Fatalf("hosts = %+v; want two (no synthesized duplicate)", got)
+	}
+	if got[0].ID != LocalHostID || got[0].Addr != "unix:///tmp/other.sock" || got[0].Label != "this box" {
+		t.Fatalf("configured local host should win: %+v", got[0])
+	}
+	if got[0].Default || !got[1].Default {
+		t.Fatalf("devbox should be the default: %+v", got)
+	}
+}
+
+func TestHostTransport(t *testing.T) {
+	cases := []struct {
+		addr, scheme, target string
+		wantErr              bool
+	}{
+		{addr: "unix:///tmp/a.sock", scheme: "unix", target: "/tmp/a.sock"},
+		{addr: "unix://", scheme: "unix", target: ""}, // lenient: fails at dial, not at build
+		{addr: "tcp://127.0.0.1:8422", scheme: "tcp", target: "127.0.0.1:8422"},
+		{addr: "tls://devbox:8422", scheme: "tls", target: "devbox:8422"},
+		{addr: "tls://devbox", wantErr: true}, // no port
+		{addr: "ssh://devbox", wantErr: true}, // unknown scheme
+		{addr: "/tmp/a.sock", wantErr: true},  // no scheme
+	}
+	for _, c := range cases {
+		scheme, target, err := Host{ID: "h", Addr: c.addr}.Transport()
+		if c.wantErr {
+			if err == nil {
+				t.Errorf("%q: want error, got %s/%s", c.addr, scheme, target)
+			}
+			continue
+		}
+		if err != nil || scheme != c.scheme || target != c.target {
+			t.Errorf("%q = %q/%q, %v; want %q/%q", c.addr, scheme, target, err, c.scheme, c.target)
+		}
+	}
+}
+
+// A malformed roster must fail at load, where the operator is looking, rather
+// than as a pane that never spawns.
+func TestValidateHostsRejects(t *testing.T) {
+	cases := []struct {
+		name  string
+		hosts []Host
+	}{
+		{"no id", []Host{{Addr: "unix:///tmp/a.sock"}}},
+		{"bad id", []Host{{ID: "dev box", Addr: "unix:///tmp/a.sock"}}},
+		{"duplicate id", []Host{
+			{ID: "dev", Addr: "unix:///tmp/a.sock"},
+			{ID: "dev", Addr: "unix:///tmp/b.sock"},
+		}},
+		{"no addr", []Host{{ID: "dev"}}},
+		{"empty target", []Host{{ID: "dev", Addr: "unix://"}}},
+		{"bad scheme", []Host{{ID: "dev", Addr: "ssh://dev"}}},
+		{"remote local", []Host{{ID: LocalHostID, Addr: "tls://elsewhere:8422"}}},
+		{"two credentials", []Host{{ID: "dev", Addr: "unix:///tmp/a.sock", Token: "t", TokenFile: "f"}}},
+		{"two defaults", []Host{
+			{ID: "a", Addr: "unix:///tmp/a.sock", Default: true},
+			{ID: "b", Addr: "unix:///tmp/b.sock", Default: true},
+		}},
+	}
+	for _, c := range cases {
+		cfg := Default()
+		cfg.Hosts = c.hosts
+		if err := cfg.Validate(); err == nil {
+			t.Errorf("%s: should not validate", c.name)
+		}
+	}
+}
+
+// The good case, through the real YAML path: a hosts: block parses into the
+// roster and survives validation.
+func TestParseHosts(t *testing.T) {
+	got, err := parse([]byte(`
+hosts:
+  - id: devbox
+    label: "devbox (ssh)"
+    addr: "unix:///tmp/devbox.sock"
+    default: true
+`))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(got.Hosts) != 1 {
+		t.Fatalf("hosts = %+v", got.Hosts)
+	}
+	h := got.Hosts[0]
+	if h.ID != "devbox" || h.Addr != "unix:///tmp/devbox.sock" || !h.Default || h.DisplayLabel() != "devbox (ssh)" {
+		t.Fatalf("host = %+v", h)
+	}
+}

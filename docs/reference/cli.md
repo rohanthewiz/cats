@@ -122,6 +122,7 @@ catctl workspaces               # list workspaces
 catctl tabs [workspace]         # list tabs
 catctl panes                    # list all panes
 catctl pane [pane]              # describe one pane
+catctl hosts                    # list the cathosts panes can run on
 catctl events [pane]            # stream pane events until Ctrl-C
 ```
 

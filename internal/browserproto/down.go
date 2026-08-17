@@ -105,6 +105,10 @@ type WorkspaceInfo struct {
 	// Locked: closed to automation (workspace.lock). The sidebar draws the row
 	// dimmed with a lock beside the name; the refusal itself is the server's.
 	Locked bool `json:"locked,omitempty"`
+	// Host is the cathost new panes in this workspace land on, resolved (never
+	// the empty "means the default" form the model stores). The sidebar shows it
+	// only while more than one host exists — see the hosts message.
+	Host string `json:"host,omitempty"`
 }
 
 // TabInfo is one tab of the active workspace.
@@ -123,6 +127,12 @@ type PaneRectInfo struct {
 	Inner     Rect   `json:"inner"`
 	Scrollbar *Rect  `json:"scrollbar,omitempty"`
 	Focused   bool   `json:"focused"`
+	// Host is the id of the cathost this pane's terminal lives on, resolved
+	// against the roster (so it names a host that exists, even for a pane
+	// restored onto one that has since gone away). The pane header renders it as
+	// a badge only while the session has more than one host — with one, the
+	// answer is the same for every pane and says nothing.
+	Host string `json:"host,omitempty"`
 }
 
 // BorderInfo is one draggable split boundary (layout.SplitBorder shape). ID is
@@ -173,6 +183,41 @@ type AgentItem struct {
 }
 
 func NewAgents(items []AgentItem) Agents { return Agents{T: MsgAgents, Items: items} }
+
+// Hosts is the cathost roster, pushed on connect and re-pushed whenever a host
+// connects or drops. It is the client's answer to two different questions:
+// "which machines is this session spread over" (the sidebar's HOSTS section)
+// and "is there more than one" — the gate every host badge hangs on, since with
+// a single host every pane's host is the same word and worth no pixels.
+//
+// It carries connectivity rather than leaving clients to infer it from error
+// toasts: a host that is down still owns its panes, and a client that knows
+// which ones can say so on the pane instead of blaming the whole session.
+type Hosts struct {
+	T     Type       `json:"t"`
+	Items []HostItem `json:"items"`
+}
+
+// HostItem is one cathost in the roster.
+type HostItem struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+	// Connected is the live link state. AddrKind is the transport ("unix",
+	// "tcp", "tls") — not the address itself, which can carry a path or a
+	// hostname an operator would rather not paint into a shared screen.
+	Connected bool   `json:"connected"`
+	AddrKind  string `json:"addr_kind,omitempty"`
+	// Default marks where panes that name no host land. Spelled "is_default" for
+	// the same reason app.HostInfo's is: `default` is reserved in Dart, and the
+	// mobile client's types are generated from these keys.
+	Default bool `json:"is_default,omitempty"`
+	Panes   int  `json:"panes"` // live panes currently on this host
+	// Error is the last transport-level reason this host is unreachable, when
+	// one is known ("dial: connection refused"). Empty while connected.
+	Error string `json:"error,omitempty"`
+}
+
+func NewHosts(items []HostItem) Hosts { return Hosts{T: MsgHosts, Items: items} }
 
 // PaneTitle reports a pane's window title (OSC 0/2); "" clears.
 type PaneTitle struct {

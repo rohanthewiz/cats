@@ -32,8 +32,10 @@ func twoHostOrch(t *testing.T) (o *orch, localPane, remotePane uint32, pdLocal, 
 		t.Fatalf("newOrch: %v", err)
 	}
 	// A second host needs no dialer: the test drives its connection directly,
-	// which is exactly what run() would hand it.
+	// which is exactly what run() would hand it. It joins hostOrder too, since
+	// that (not the map) is what the roster is read from.
 	o.hosts[testRemoteHost] = &daemon{o: o, id: testRemoteHost, label: testRemoteHost, kind: "unix"}
+	o.hostOrder = append(o.hostOrder, testRemoteHost)
 
 	localPane = uint32(o.session.AllPaneIDs()[0])
 	if _, err := o.session.CreateWorkspaceAtOn(t.TempDir(), testRemoteHost); err != nil {

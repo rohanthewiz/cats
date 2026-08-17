@@ -13,6 +13,7 @@ import (
 
 	"github.com/rohanthewiz/cats/internal/app"
 	"github.com/rohanthewiz/cats/internal/browserproto"
+	"github.com/rohanthewiz/cats/internal/config"
 	"github.com/rohanthewiz/cats/internal/orchestration"
 	"github.com/rohanthewiz/cats/internal/terminal"
 )
@@ -44,13 +45,19 @@ type daemon struct {
 	socket string
 	dial   func() (net.Conn, error)
 
-	mu sync.Mutex // serializes writes; guards conn and peerVersion
+	mu sync.Mutex // serializes writes; guards conn, peerVersion and lastErr
 	// peerVersion is the protocol version the connected cathost reported in its
 	// welcome, 0 while disconnected. Nothing branches on it yet (the handshake
 	// still demands exact equality); it exists so the version-range negotiation
 	// of Phase 4 has somewhere to record the answer.
 	peerVersion int
-	conn        net.Conn
+	// lastErr is why this host is currently unreachable — the dial or session
+	// error the retry loop last saw, cleared on a successful handshake. It is
+	// what the roster shows beside a disconnected host: "not connected" alone
+	// leaves the operator guessing between a stopped daemon, a wrong path and a
+	// forward that died, which are three different fixes.
+	lastErr string
+	conn    net.Conn
 }
 
 // unixDialer builds the dial func for a unix-socket cathost — the only
@@ -62,19 +69,43 @@ func unixDialer(path string) func() (net.Conn, error) {
 	}
 }
 
-// newLocalDaemon builds the always-present default host from the cathost socket
-// path. Its label is deliberately plain: in a single-host session it is the
-// only host there is, so error text must read exactly as it did before hosts
-// existed.
-func newLocalDaemon(o *orch, socket string) *daemon {
+// dialerFor resolves one configured host's transport into a dialer. Only unix
+// sockets are dialable today — which is not the limitation it sounds like, since
+// `ssh -L local.sock:remote.sock` turns one into a genuinely remote cathost —
+// and tcp/tls are named here so a config that reaches for them fails at startup
+// with the reason, rather than retrying a dial that can never work.
+func dialerFor(h config.Host) (kind string, dial func() (net.Conn, error), err error) {
+	scheme, target, err := h.Transport()
+	if err != nil {
+		return "", nil, err
+	}
+	switch scheme {
+	case config.HostUnix:
+		return scheme, unixDialer(target), nil
+	case config.HostTCP, config.HostTLS:
+		return "", nil, fmt.Errorf("addr %q: the %s transport is not implemented yet — use unix:// (an `ssh -L` forward reaches a remote cathost today)", h.Addr, scheme)
+	}
+	return "", nil, fmt.Errorf("addr %q: unknown scheme %q", h.Addr, scheme)
+}
+
+// newDaemon builds the daemon for one configured host. The label is what error
+// toasts and the roster show; for the synthesized local host of a single-host
+// session it is never shown at all (see lostMessage), so a session that has no
+// hosts: block reads exactly as it did before hosts existed.
+func newDaemon(o *orch, h config.Host) (*daemon, error) {
+	kind, dial, err := dialerFor(h)
+	if err != nil {
+		return nil, fmt.Errorf("host %s: %w", h.ID, err)
+	}
+	_, target, _ := h.Transport() // already parsed by dialerFor
 	return &daemon{
 		o:      o,
-		id:     localHostID,
-		label:  localHostID,
-		kind:   "unix",
-		socket: socket,
-		dial:   unixDialer(socket),
-	}
+		id:     h.ID,
+		label:  h.DisplayLabel(),
+		kind:   kind,
+		socket: target,
+		dial:   dial,
+	}, nil
 }
 
 func (d *daemon) connected() bool {
@@ -103,8 +134,31 @@ func (d *daemon) setConn(c net.Conn) {
 	d.conn = c
 	if c == nil {
 		d.peerVersion = 0
+	} else {
+		d.lastErr = "" // a completed handshake retires whatever kept us out before
 	}
 	d.mu.Unlock()
+}
+
+// setLastErr records why this host is unreachable (dial refused, handshake
+// rejected, connection dropped). Written by the dial loop, read by the roster.
+func (d *daemon) setLastErr(err error) {
+	d.mu.Lock()
+	if err == nil {
+		d.lastErr = ""
+	} else {
+		d.lastErr = err.Error()
+	}
+	d.mu.Unlock()
+}
+
+// status is the roster's view of this host: connected, and why not when it
+// isn't. One lock for the pair so a caller can never report "disconnected" with
+// the error of a link that has since come back.
+func (d *daemon) status() (connected bool, lastErr string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.conn != nil, d.lastErr
 }
 
 // setPeerVersion records the version the connected cathost reported.
@@ -121,15 +175,22 @@ func (d *daemon) run() {
 		conn, err := d.dial()
 		if err != nil {
 			log.Printf("catway: cathost dial (%s): %v (retrying in %s)", d.label, err, backoff)
+			d.setLastErr(err)
+			// The roster carries connectivity, so a host that never came up must
+			// still refresh it: the failure is the only news there is about a
+			// machine nobody has heard from.
+			d.o.post(func() { d.o.broadcastHosts() })
 			time.Sleep(backoff)
 			backoff = min(backoff*2, 5*time.Second)
 			continue
 		}
 		backoff = time.Second
-		if err := d.session(conn); err != nil {
+		err = d.session(conn)
+		if err != nil {
 			log.Printf("catway: cathost session (%s): %v", d.label, err)
 		}
 		_ = conn.Close()
+		d.setLastErr(err) // nil (a clean end) clears it; a real error explains the gap
 		d.setConn(nil)
 		// Only this host's in-flight work is failed: a request or waiter on
 		// another host is still perfectly answerable, and failing it here would
@@ -138,6 +199,7 @@ func (d *daemon) run() {
 			d.o.flushPendingFor(d.id, "cathost connection lost")
 			d.o.flushWaitersFor(d.id, "cathost connection lost")
 			d.o.broadcast(browserproto.NewError(0, d.lostMessage()))
+			d.o.broadcastHosts()
 		})
 	}
 }
@@ -177,6 +239,7 @@ func (d *daemon) session(conn net.Conn) error {
 
 	d.setConn(conn)
 	d.setPeerVersion(w.ProtocolVersion)
+	d.o.post(func() { d.o.broadcastHosts() }) // the roster's dot goes green
 	d.reconcile(w.Panes)
 
 	for {

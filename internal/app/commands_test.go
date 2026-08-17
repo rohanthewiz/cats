@@ -57,6 +57,9 @@ type fakeBackend struct {
 	// paneMeta is the canned per-pane metadata PaneMeta answers with (nil ⇒ all
 	// zero values), letting pane.list/pane.get tests assert the merge.
 	paneMeta map[uint32]PaneMeta
+	// hosts is the canned roster host.list answers with (nil ⇒ a single
+	// connected local host, the shape of a session with no hosts: block).
+	hosts []HostInfo
 	// staged records StageSpawn calls so tab.create tests can assert the
 	// override reached the backend (and, via the log, before applyModel).
 	staged map[uint32]SpawnOverride
@@ -75,9 +78,19 @@ func (b *fakeBackend) DaemonConnected() bool       { return b.daemonUp }
 func (b *fakeBackend) PaneHostConnected(uint32) bool { return b.daemonUp }
 
 func (b *fakeBackend) PaneMeta(p uint32) PaneMeta { return b.paneMeta[p] }
-func (b *fakeBackend) RefreshUsage()              { b.rec("refreshUsage") }
-func (b *fakeBackend) ReloadConfig() error        { b.rec("reload"); return b.reloadErr }
-func (b *fakeBackend) Shutdown()                  { b.rec("shutdown") }
+
+// Hosts answers with whatever the test installed, defaulting to the shape a
+// single-host session has: one connected local host.
+func (b *fakeBackend) Hosts() []HostInfo {
+	if b.hosts == nil {
+		return []HostInfo{{ID: "local", Label: "local", Connected: b.daemonUp, AddrKind: "unix", Default: true}}
+	}
+	return b.hosts
+}
+
+func (b *fakeBackend) RefreshUsage()       { b.rec("refreshUsage") }
+func (b *fakeBackend) ReloadConfig() error { b.rec("reload"); return b.reloadErr }
+func (b *fakeBackend) Shutdown()           { b.rec("shutdown") }
 
 func (b *fakeBackend) ChatSend(r Responder, p ChatSendParams) { b.rec("chatSend"); r.OK(nil) }
 func (b *fakeBackend) ChatCancel(r Responder)                 { b.rec("chatCancel"); r.OK(nil) }
@@ -1664,5 +1677,37 @@ func TestDispatchThemeCommands(t *testing.T) {
 	h.d.Dispatch(CmdThemeList, noParams(), silent)
 	if len(*h.log) != len(log) {
 		t.Fatal("no-reply theme.list should not reach the backend")
+	}
+}
+
+// host.list is a query like the rest, but its answer comes from the Backend
+// (the roster is a set of live connections, not domain state), so this checks
+// the one thing the dispatcher owns: it asks the backend and hands the answer
+// back untouched.
+func TestDispatchHostList(t *testing.T) {
+	h := newCmdHarness(t)
+	h.b.hosts = []HostInfo{
+		{ID: "local", Label: "studio", Connected: true, AddrKind: "unix", Default: true, Panes: 2},
+		{ID: "devbox", Label: "devbox", Connected: false, AddrKind: "unix", Panes: 1, Error: "dial: no such file"},
+	}
+
+	got := okDataFor[HostListResult](t, h, CmdHostList).Hosts
+
+	if len(got) != 2 || got[0].ID != "local" || got[1].ID != "devbox" {
+		t.Fatalf("host.list = %+v; want the backend's roster in order", got)
+	}
+	if !got[0].Default || got[1].Connected || got[1].Error == "" {
+		t.Fatalf("host.list dropped roster detail: %+v", got)
+	}
+}
+
+// A session with no hosts: block answers with the single synthesized host —
+// which is how a client tells "this catway has one machine" from "the remote
+// one is down" without a capability flag.
+func TestDispatchHostListSingleHost(t *testing.T) {
+	h := newCmdHarness(t)
+	got := okDataFor[HostListResult](t, h, CmdHostList).Hosts
+	if len(got) != 1 || !got[0].Default || !got[0].Connected {
+		t.Fatalf("single-host roster = %+v", got)
 	}
 }

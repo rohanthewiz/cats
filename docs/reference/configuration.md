@@ -90,6 +90,54 @@ server:
 `server.*` settings are fixed for the process's lifetime. Changing them needs a
 restart.
 
+## `hosts`
+
+The cathosts panes can run on. Omit the section — the default — and there is
+exactly one host, `local`, on `server.cathost_socket`: the UI grows no roster and
+no badges, and nothing about a single-machine session changes.
+
+```yaml
+hosts:
+  - id: devbox                                   # letters, digits, . _ -
+    label: "devbox (ssh)"                        # display name; defaults to the id
+    addr: "unix:///tmp/devbox-cathost.sock"
+    # default: true                              # new panes land here instead of local
+    # token_file: "~/.config/cats/devbox.token"  # inert until tls:// lands
+    # fingerprint: "AB:CD:…"
+```
+
+| Key | Notes |
+|-----|-------|
+| `id` | how panes name the host; recorded per pane in `session.json` |
+| `label` | display name in the sidebar and in error toasts |
+| `addr` | `unix://path`, `tcp://host:port`, or `tls://host:port` |
+| `default` | where a pane that names no host lands. At most one entry; with none, `local` is the default |
+| `token` / `token_file` | credential for a cathost that requires one (set one, not both) |
+| `fingerprint` | pinned TLS certificate for a `tls://` host |
+
+The `local` entry is **always synthesized** from `server.cathost_socket`, so this
+list only ever names the extra machines. Listing an entry with `id: local`
+overrides the synthesized one (its address must stay `unix://`).
+
+Only `unix://` is dialable today, which is less of a limit than it sounds:
+
+```sh
+ssh -N -L /tmp/devbox-cathost.sock:/tmp/cats-cathost.sock devbox
+```
+
+makes a remote machine's cathost a local socket, and a `unix://` host pointed at
+it is a genuine remote host — panes on it appear beside local ones in the same
+workspace. `tcp://` and `tls://` are accepted by the parser but refused at
+startup until the native transport ships.
+
+Like `server.*`, this section is read once at startup: adding or removing a host
+needs a restart. Every pane records the host it ran on, so a restart re-adopts
+each pane on its own machine; a pane whose host has left the config falls back to
+the default host rather than staying dark.
+
+`catctl hosts` prints the live roster (which hosts, connected or not, and how
+many panes each holds).
+
 ## `persistence`
 
 ```yaml

@@ -32,6 +32,7 @@ const (
 	MsgWelcome     Type = "welcome"
 	MsgLayout      Type = "layout"
 	MsgAgents      Type = "agents"
+	MsgHosts       Type = "hosts"
 	MsgPaneTitle   Type = "pane_title"
 	MsgPaneCwd     Type = "pane_cwd"
 	MsgPaneBranch  Type = "pane_branch"
@@ -145,6 +146,8 @@ func DecodeDown(data []byte) (any, error) {
 		return decodeAs[Layout](data)
 	case MsgAgents:
 		return decodeAs[Agents](data)
+	case MsgHosts:
+		return decodeAs[Hosts](data)
 	case MsgPaneTitle:
 		return decodeAs[PaneTitle](data)
 	case MsgPaneCwd:

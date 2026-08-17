@@ -23,9 +23,12 @@ import (
 	"fmt"
 	"io/fs"
 	"maps"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 	"time"
 
 	"github.com/goccy/go-yaml"
@@ -40,11 +43,208 @@ const EnvVar = "CATS_CONFIG"
 // Config is the whole catway configuration file.
 type Config struct {
 	Server      Server      `yaml:"server"`
+	Hosts       []Host      `yaml:"hosts,omitempty"`
 	Persistence Persistence `yaml:"persistence"`
 	Theme       Theme       `yaml:"theme"`
 	Keybindings Keybindings `yaml:"keybindings"`
 	Worktrees   Worktrees   `yaml:"worktrees"`
 	Push        Push        `yaml:"push"`
+}
+
+// --- hosts --------------------------------------------------------------------
+
+// LocalHostID is the id of the host catway always has: the cathost reached over
+// server.cathost_socket. It is SYNTHESIZED rather than configured (see
+// EffectiveHosts), so a config with no hosts: block still describes exactly one
+// host, and every pane that names no host belongs to it. A hosts: entry may
+// claim the id to override its address or label.
+const LocalHostID = "local"
+
+// Address schemes a host's addr may use.
+const (
+	HostUnix = "unix" // unix://path — a local socket, or an `ssh -L` forward of a remote one
+	HostTCP  = "tcp"  // tcp://host:port — cleartext, so loopback binds only
+	HostTLS  = "tls"  // tls://host:port — cathost's own transport (Phase 4)
+)
+
+// Host is one cathost this catway attaches to. Panes carry a host id, so the
+// roster is what turns "the daemon" into "this pane's machine".
+//
+// Addr is scheme://target:
+//
+//	unix:///tmp/cats-cathost.sock   the local daemon — and, forwarded over
+//	                                `ssh -L /tmp/box.sock:/tmp/cats.sock`, a
+//	                                genuinely remote one with no new protocol
+//	tcp://127.0.0.1:8422            cleartext; only sane on a loopback bind
+//	tls://devbox:8422               cathost's native remote transport
+//
+// Token/TokenFile authenticate to a cathost that requires one and Fingerprint
+// pins its self-signed certificate; both are inert until the transport that
+// uses them exists. TokenFile is the better of the pair — the settings modal
+// rewrites this file wholesale on every config.set, so a literal token lives on
+// in a file that is easy to commit by accident (the same reasoning that keeps
+// Push's credential out of the config entirely).
+type Host struct {
+	ID          string `yaml:"id"`
+	Label       string `yaml:"label,omitempty"` // display name; "" ⇒ the id
+	Addr        string `yaml:"addr"`
+	Token       string `yaml:"token,omitempty"`
+	TokenFile   string `yaml:"token_file,omitempty"`
+	Fingerprint string `yaml:"fingerprint,omitempty"` // pinned TLS cert SHA-256
+	// Default marks the host new panes land on when nothing names one — and the
+	// host a pane whose recorded host has vanished falls back to. At most one
+	// entry may set it; with none set, the local host is the default.
+	Default bool `yaml:"default,omitempty"`
+}
+
+// DisplayLabel is the host's human name: its label, or its id when unlabelled.
+func (h Host) DisplayLabel() string {
+	if h.Label != "" {
+		return h.Label
+	}
+	return h.ID
+}
+
+// Transport splits Addr into its scheme and target. It is deliberately lenient
+// about an empty unix path — a catway started with no cathost socket at all
+// (tests, a probe run) should fail at dial time like any other unreachable
+// socket, not refuse to build its roster. Validate is the strict half, applied
+// to what an operator actually wrote in the file.
+func (h Host) Transport() (scheme, target string, err error) {
+	i := strings.Index(h.Addr, "://")
+	if i < 0 {
+		return "", "", fmt.Errorf("addr %q: want scheme://target (unix://path, tcp://host:port, tls://host:port)", h.Addr)
+	}
+	scheme, target = h.Addr[:i], h.Addr[i+3:]
+	switch scheme {
+	case HostUnix:
+		return scheme, target, nil
+	case HostTCP, HostTLS:
+		if _, _, err := net.SplitHostPort(target); err != nil {
+			return "", "", fmt.Errorf("addr %q: %s needs host:port", h.Addr, scheme)
+		}
+		return scheme, target, nil
+	}
+	return "", "", fmt.Errorf("addr %q: unknown scheme %q", h.Addr, scheme)
+}
+
+// hostIDRe bounds host ids to what can travel unescaped everywhere one appears:
+// a JSON field, a session file, a CSS/DOM id in the sidebar, a catctl argument.
+var hostIDRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
+
+// validateHosts checks the roster as written: unique, well-formed ids, a
+// parseable address each, at most one default, and no ambiguous credential.
+func (c Config) validateHosts() error {
+	seen := make(map[string]bool, len(c.Hosts))
+	defaults := 0
+	for i, h := range c.Hosts {
+		if h.ID == "" {
+			return fmt.Errorf("hosts[%d]: id is required", i)
+		}
+		if !hostIDRe.MatchString(h.ID) {
+			return fmt.Errorf("hosts[%d]: id %q: want letters, digits, '.', '_' or '-'", i, h.ID)
+		}
+		if seen[h.ID] {
+			return fmt.Errorf("hosts: duplicate id %q", h.ID)
+		}
+		seen[h.ID] = true
+		if h.Addr == "" {
+			return fmt.Errorf("hosts.%s: addr is required", h.ID)
+		}
+		scheme, target, err := h.Transport()
+		if err != nil {
+			return fmt.Errorf("hosts.%s: %w", h.ID, err)
+		}
+		if target == "" {
+			return fmt.Errorf("hosts.%s: addr %q: empty target", h.ID, h.Addr)
+		}
+		if scheme != HostUnix && h.ID == LocalHostID {
+			// Not a hard rule of the protocol — a warning would do — but an id
+			// that means "this machine" pointing at another one is the kind of
+			// thing that makes every later error message lie.
+			return fmt.Errorf("hosts.%s: the local host must use a unix:// address", h.ID)
+		}
+		if h.Token != "" && h.TokenFile != "" {
+			return fmt.Errorf("hosts.%s: set token or token_file, not both", h.ID)
+		}
+		if h.Default {
+			defaults++
+		}
+	}
+	if defaults > 1 {
+		return errors.New("hosts: at most one host may be marked default")
+	}
+	return nil
+}
+
+// EffectiveHosts is the roster catway actually attaches to: the configured
+// hosts with the local one synthesized in front unless the file already claims
+// that id, and exactly one entry marked Default.
+//
+// The synthesis is what keeps single-host users at zero config: with no hosts:
+// block the result is one unix host on server.cathost_socket, which is what
+// catway has always dialed. The default is the explicitly marked host, else the
+// local one, else the first — so "which machine does a new pane land on" always
+// has an answer, and it is the historical one until somebody says otherwise.
+//
+// The receiver's slice is never mutated: the result is a fresh slice of copies,
+// because the Default flags are normalized on it.
+func (c Config) EffectiveHosts(cathostSocket string) []Host {
+	return EffectiveHosts(cathostSocket, c.Hosts)
+}
+
+// EffectiveHosts is the package-level form, for callers holding a roster rather
+// than a whole Config (catway's single-host constructors).
+func EffectiveHosts(cathostSocket string, hosts []Host) []Host {
+	out := make([]Host, 0, len(hosts)+1)
+	local := false
+	for _, h := range hosts {
+		if h.ID == LocalHostID {
+			local = true
+		}
+	}
+	if !local {
+		out = append(out, Host{ID: LocalHostID, Label: localHostLabel(), Addr: HostUnix + "://" + cathostSocket})
+	}
+	out = append(out, hosts...)
+
+	def := -1
+	for i, h := range out {
+		if h.Default {
+			def = i
+			break
+		}
+	}
+	if def < 0 {
+		for i, h := range out {
+			if h.ID == LocalHostID {
+				def = i
+				break
+			}
+		}
+	}
+	if def < 0 && len(out) > 0 {
+		def = 0
+	}
+	for i := range out {
+		out[i].Default = i == def
+	}
+	return out
+}
+
+// localHostLabel names the local host after the machine, short form: on a LAN
+// the roster reads "studio · devbox", not "local · devbox". Falls back to the
+// id when the hostname is unavailable, which is also what an unlabelled host
+// displays as.
+func localHostLabel() string {
+	h, err := os.Hostname()
+	if err != nil || h == "" {
+		return LocalHostID
+	}
+	if i := strings.Index(h, "."); i > 0 {
+		h = h[:i] // studio.local → studio
+	}
+	return h
 }
 
 // Push is the outbound push-notification bridge (internal/push): when catway
@@ -347,6 +547,9 @@ func (c Config) Validate() error {
 	// surface months later as an unexplained browser trust warning.
 	if _, _, err := gwtls.ParseSANs(c.Server.TLS.SANs); err != nil {
 		return fmt.Errorf("server.tls.sans: %w", err)
+	}
+	if err := c.validateHosts(); err != nil {
+		return err
 	}
 	if c.Persistence.HistoryLines < 0 {
 		return fmt.Errorf("persistence.history_lines %d: must be >= 0", c.Persistence.HistoryLines)

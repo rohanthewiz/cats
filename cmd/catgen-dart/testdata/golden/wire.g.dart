@@ -53,6 +53,7 @@ abstract final class MsgType {
   static const String welcome = 'welcome';
   static const String layout = 'layout';
   static const String agents = 'agents';
+  static const String hosts = 'hosts';
   static const String paneTitle = 'pane_title';
   static const String paneCwd = 'pane_cwd';
   static const String paneBranch = 'pane_branch';
@@ -964,6 +965,92 @@ class Focus {
       };
 }
 
+/// HostItem is one cathost in the roster.
+class HostItem {
+  const HostItem({
+    required this.id,
+    required this.label,
+    required this.connected,
+    this.addrKind = '',
+    this.isDefault = false,
+    required this.panes,
+    this.error = '',
+  });
+
+  final String id;
+  final String label;
+
+  /// Connected is the live link state. AddrKind is the transport ("unix",
+  /// "tcp", "tls") — not the address itself, which can carry a path or a
+  /// hostname an operator would rather not paint into a shared screen.
+  final bool connected;
+  final String addrKind;
+
+  /// Default marks where panes that name no host land. Spelled "is_default" for
+  /// the same reason app.HostInfo's is: `default` is reserved in Dart, and the
+  /// mobile client's types are generated from these keys.
+  final bool isDefault;
+
+  /// live panes currently on this host
+  final int panes;
+
+  /// Error is the last transport-level reason this host is unreachable, when
+  /// one is known ("dial: connection refused"). Empty while connected.
+  final String error;
+
+  factory HostItem.fromJson(Map<String, Object?> j) => HostItem(
+        id: asString(j['id']),
+        label: asString(j['label']),
+        connected: asBool(j['connected']),
+        addrKind: asString(j['addr_kind']),
+        isDefault: asBool(j['is_default']),
+        panes: asInt(j['panes']),
+        error: asString(j['error']),
+      );
+
+  Map<String, Object?> toJson() => {
+        'id': id,
+        'label': label,
+        'connected': connected,
+        if (addrKind.isNotEmpty) 'addr_kind': addrKind,
+        if (isDefault) 'is_default': isDefault,
+        'panes': panes,
+        if (error.isNotEmpty) 'error': error,
+      };
+}
+
+/// Hosts is the cathost roster, pushed on connect and re-pushed whenever a host
+/// connects or drops. It is the client's answer to two different questions:
+/// "which machines is this session spread over" (the sidebar's HOSTS section)
+/// and "is there more than one" — the gate every host badge hangs on, since with
+/// a single host every pane's host is the same word and worth no pixels.
+///
+/// It carries connectivity rather than leaving clients to infer it from error
+/// toasts: a host that is down still owns its panes, and a client that knows
+/// which ones can say so on the pane instead of blaming the whole session.
+///
+/// Wire type: `hosts`.
+class Hosts {
+  const Hosts({
+    required this.items,
+  });
+
+  /// The `t` discriminator this class always carries. It is a property of
+  /// the type, not a field: a caller who could set it could set it wrong.
+  static const String type = 'hosts';
+
+  final List<HostItem> items;
+
+  factory Hosts.fromJson(Map<String, Object?> j) => Hosts(
+        items: asList(j['items'], (e) => HostItem.fromJson(asObj(e))),
+      );
+
+  Map<String, Object?> toJson() => {
+        't': type,
+        'items': [for (final e in items) e.toJson()],
+      };
+}
+
 /// Image is a clipboard image paste (base64 on the wire).
 ///
 /// Wire type: `image`.
@@ -1543,6 +1630,7 @@ class PaneRectInfo {
     required this.inner,
     this.scrollbar,
     required this.focused,
+    this.host = '',
   });
 
   final int pane;
@@ -1554,6 +1642,13 @@ class PaneRectInfo {
   final Rect? scrollbar;
   final bool focused;
 
+  /// Host is the id of the cathost this pane's terminal lives on, resolved
+  /// against the roster (so it names a host that exists, even for a pane
+  /// restored onto one that has since gone away). The pane header renders it as
+  /// a badge only while the session has more than one host — with one, the
+  /// answer is the same for every pane and says nothing.
+  final String host;
+
   factory PaneRectInfo.fromJson(Map<String, Object?> j) => PaneRectInfo(
         pane: asInt(j['pane']),
         pub: asString(j['pub']),
@@ -1561,6 +1656,7 @@ class PaneRectInfo {
         inner: Rect.fromJson(j['inner']),
         scrollbar: j['scrollbar'] == null ? null : Rect.fromJson(j['scrollbar']),
         focused: asBool(j['focused']),
+        host: asString(j['host']),
       );
 
   Map<String, Object?> toJson() => {
@@ -1570,6 +1666,7 @@ class PaneRectInfo {
         'inner': inner.toJson(),
         if (scrollbar != null) 'scrollbar': scrollbar?.toJson(),
         'focused': focused,
+        if (host.isNotEmpty) 'host': host,
       };
 }
 
@@ -2061,6 +2158,7 @@ class WorkspaceInfo {
     required this.active,
     this.agentSummary = '',
     this.locked = false,
+    this.host = '',
   });
 
   /// stable public id, e.g. "w1"
@@ -2073,12 +2171,18 @@ class WorkspaceInfo {
   /// dimmed with a lock beside the name; the refusal itself is the server's.
   final bool locked;
 
+  /// Host is the cathost new panes in this workspace land on, resolved (never
+  /// the empty "means the default" form the model stores). The sidebar shows it
+  /// only while more than one host exists — see the hosts message.
+  final String host;
+
   factory WorkspaceInfo.fromJson(Map<String, Object?> j) => WorkspaceInfo(
         id: asString(j['id']),
         name: asString(j['name']),
         active: asBool(j['active']),
         agentSummary: asString(j['agent_summary']),
         locked: asBool(j['locked']),
+        host: asString(j['host']),
       );
 
   Map<String, Object?> toJson() => {
@@ -2087,6 +2191,7 @@ class WorkspaceInfo {
         'active': active,
         if (agentSummary.isNotEmpty) 'agent_summary': agentSummary,
         if (locked) 'locked': locked,
+        if (host.isNotEmpty) 'host': host,
       };
 }
 
@@ -2103,6 +2208,8 @@ Object? decodeDown(Map<String, Object?> j) {
       return Layout.fromJson(j);
     case Agents.type:
       return Agents.fromJson(j);
+    case Hosts.type:
+      return Hosts.fromJson(j);
     case PaneTitle.type:
       return PaneTitle.fromJson(j);
     case PaneCwd.type:

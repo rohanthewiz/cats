@@ -68,6 +68,7 @@ var subcommands = []subcommand{
 	{"tabs", app.CmdTabList, "tabs [workspace]", []argKind{argWorkspace}, "list tabs (active workspace by default)", buildTabList},
 	{"panes", app.CmdPaneList, "panes", nil, "list all panes", noParams},
 	{"pane", app.CmdPaneGet, "pane [pane]", []argKind{argPane}, "describe one pane (focused by default)", buildOptPane},
+	{"hosts", app.CmdHostList, "hosts", nil, "list the cathosts panes can run on", noParams},
 	{"events", ctlproto.MethodEventsSubscribe, "events [pane]", []argKind{argPane}, "stream pane events until interrupted (Ctrl-C)", buildEvents},
 	{"clipboard", ctlproto.MethodClipboardRead, "clipboard", nil, "print the host system clipboard's text", noParams},
 

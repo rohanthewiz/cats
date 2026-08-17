@@ -248,6 +248,9 @@ func (o *orch) configSnapshot() app.ConfigGetResult {
 			ControlSocket: c.Server.ControlSocket,
 			HookSocket:    c.Server.HookSocket,
 			SessionTTL:    c.Server.SessionTTL,
+			// The live roster, not c.Hosts: the synthesized local host is not in
+			// the file, and connectivity is not a config fact at all.
+			Hosts: o.Hosts(),
 		},
 	}
 }

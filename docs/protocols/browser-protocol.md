@@ -48,6 +48,7 @@ server assumes a default 120×32 area.
 | `welcome` | protocol version, plus an `error` string if the connection is being refused |
 | `layout` | **full replacement** of the viewport structure: workspaces (sidebar), the active workspace's tabs, the active tab's pane rects, and border handles. Computed rects only — the BSP tree never crosses the wire |
 | `agents` | the cross-session agent roster for the sidebar |
+| `hosts` | the cathost roster: one item per configured host with `id`, `label`, `connected`, `addr_kind`, `is_default`, `panes`, and an `error` explaining a host that is down. Sent on connect and re-sent whenever a host connects or drops. A single-item roster is the normal single-machine session, which is how a client knows to draw no host UI at all |
 | `pane_title` | OSC 0/2 title for a pane |
 | `pane_cwd` | working directory for a pane |
 | `pane_branch` | the git branch checked out in that working directory (`""` when the pane is not in a repository); sent separately from `pane_cwd` because a checkout moves the branch without moving the pane |
@@ -56,6 +57,12 @@ server assumes a default 120×32 area.
 | `pane_exited` | the pane's child exited |
 
 A `Rect` on the wire is a compact `[x, y, w, h]` array of cell coordinates.
+
+Each pane rect and each workspace in `layout` also carries `host`, the id of the
+cathost it lives on (for a workspace: where its new panes will land). It is
+always a resolved id naming a host in the `hosts` roster, never the empty "the
+default one" form the session file stores. Clients should render it only when the
+roster holds more than one host — with one, every pane's answer is the same.
 
 ### Pane content (§4)
 

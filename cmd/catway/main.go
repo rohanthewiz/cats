@@ -182,7 +182,12 @@ func main() {
 		log.Fatalf("catway: read embedded page: %v", err)
 	}
 
-	o, err := buildOrch(eff.CathostSocket, spawnRoot(), effPersist)
+	// The host roster: the configured hosts with "local" synthesized from
+	// server.cathost_socket (which the --socket flag may have overridden), so a
+	// config with no hosts: block yields exactly the single host catway has
+	// always dialed. Restart-only, like every other server.* setting.
+	hosts := cfg.EffectiveHosts(eff.CathostSocket)
+	o, err := buildOrch(hosts, spawnRoot(), effPersist)
 	if err != nil {
 		log.Fatalf("catway: %v", err)
 	}
@@ -323,6 +328,17 @@ func main() {
 		scheme = "https"
 	}
 	log.Printf("catway: serving at %s://localhost%s (cathost socket %s)", scheme, eff.Addr, eff.CathostSocket)
+	if len(hosts) > 1 {
+		// Only worth a line when there is something to say: with one host the
+		// socket is already in the line above.
+		for _, h := range hosts {
+			def := ""
+			if h.Default {
+				def = " (default)"
+			}
+			log.Printf("catway: host %s [%s] %s%s", h.ID, h.DisplayLabel(), h.Addr, def)
+		}
+	}
 	if err := s.Run(); err != nil {
 		log.Fatalf("catway: %v", err)
 	}
@@ -379,9 +395,9 @@ func healPaneCwds(cwds map[uint32]string) map[uint32]string {
 // never a dead catway. Scrollback seeds and saved cwds are installed only
 // when the model itself restored: against a fresh session their pane ids would
 // collide with newly allocated ones.
-func buildOrch(socket, cwd string, pc config.Persistence) (*orch, error) {
+func buildOrch(hosts []config.Host, cwd string, pc config.Persistence) (*orch, error) {
 	if !pc.Enabled {
-		return newOrch(socket, cwd)
+		return newOrchHosts(hosts, cwd)
 	}
 	dir := pc.StateDir
 	if dir == "" {
@@ -389,7 +405,7 @@ func buildOrch(socket, cwd string, pc config.Persistence) (*orch, error) {
 	}
 	if dir == "" {
 		log.Printf("catway: persistence disabled — no resolvable state dir")
-		return newOrch(socket, cwd)
+		return newOrchHosts(hosts, cwd)
 	}
 	sessionPath, historyPath := persist.SessionPath(dir), persist.HistoryPath(dir)
 
@@ -416,7 +432,7 @@ func buildOrch(socket, cwd string, pc config.Persistence) (*orch, error) {
 		}
 	}
 	if sess == nil {
-		o, err := newOrch(socket, cwd)
+		o, err := newOrchHosts(hosts, cwd)
 		if err != nil {
 			return nil, err
 		}
@@ -425,7 +441,10 @@ func buildOrch(socket, cwd string, pc config.Persistence) (*orch, error) {
 		return o, nil
 	}
 
-	o := newOrchWith(socket, cwd, sess)
+	o, err := newOrchHostsWith(hosts, cwd, sess)
+	if err != nil {
+		return nil, err
+	}
 	o.sessionPath, o.historyPath = sessionPath, historyPath
 	o.histLines = uint32(pc.HistoryLines)
 	o.restoredCwds = savedCwds

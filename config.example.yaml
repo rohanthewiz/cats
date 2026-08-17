@@ -30,6 +30,32 @@ server:
     cert: ""                           # operator PEM (cert + key must be set together)
     key: ""
 
+# Hosts: the cathosts this catway attaches to. Panes carry a host, so a roster
+# with more than one entry means panes on different machines side by side in the
+# same workspace — the sidebar grows a HOSTS section and every pane header a host
+# badge. Omit this block entirely (the default) and there is exactly one host,
+# "local", on server.cathost_socket above: no roster, no badges, nothing changes.
+#
+# The "local" entry is always synthesized unless you list one with that id, so a
+# hosts: block only ever names the EXTRA machines. Restarting catway is what
+# picks up a change here.
+#
+# addr is scheme://target:
+#   unix://path       a socket on this machine — including one forwarded from a
+#                     remote box: `ssh -L /tmp/devbox.sock:/tmp/cats-cathost.sock
+#                     devbox` makes a real remote host with no extra setup
+#   tcp://host:port   cleartext (loopback binds only)      — not yet implemented
+#   tls://host:port   cathost's own remote transport       — not yet implemented
+#
+# hosts:
+#   - id: devbox                          # letters/digits/._- ; how panes name it
+#     label: "devbox (ssh)"               # display name; defaults to the id
+#     addr: "unix:///tmp/devbox-cathost.sock"
+#     # default: true                     # new panes land here instead of local
+#     # token_file: "~/.config/cats/devbox.token"   # for a cathost that requires
+#     # fingerprint: "AB:CD:…"            # a token / pins its TLS certificate
+#                                         # (both inert until tls:// lands)
+
 # Session persistence & restore: the workspace/tab/pane model survives a
 # catway restart, and scrollback seeds survive a cathost daemon loss.
 persistence:

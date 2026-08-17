@@ -503,6 +503,31 @@
   #ws-list li .lock { width:calc(12px * var(--sb-scale)); height:calc(12px * var(--sb-scale)); }
   #ws-list li.add { color:var(--muted); font-style:italic; cursor:pointer; }
   #ws-list li.add:hover { color:var(--accent); background:none; }
+  /* HOSTS: one row per cathost this catway attached to — a state dot, the
+     label, and how many panes live there. The whole section is hidden while
+     there is only one host (renderHosts sets [hidden]), so a session that never
+     configured a second machine sees exactly the sidebar it always had.
+     Rows are not clickable yet — attach/detach is a later phase — hence the
+     default cursor and the suppressed hover, matching #usage-list's rows. */
+  #host-list li { display:flex; align-items:baseline; gap:6px; cursor:default; }
+  #host-list li:hover { background:none; }
+  #host-list .hdot { font-size:calc(10px * var(--sb-scale)); }
+  #host-list li.up .hdot { color:var(--ok); }
+  #host-list li.down .hdot { color:var(--err); }
+  #host-list .hname { min-width:0; overflow:hidden; text-overflow:ellipsis; }
+  /* A host that is down keeps its row at full strength — it still owns panes,
+     and fading it would read as "not important" when it is the opposite. Only
+     the label steps back a little; the red dot and the reason carry the news. */
+  #host-list li.down .hname { opacity:.75; }
+  #host-list .hdef { color:var(--muted); font-size:calc(9px * var(--sb-scale)); }
+  #host-list .hmeta { margin-left:auto; flex:none; color:var(--muted);
+    font-size:calc(10px * var(--sb-scale)); font-variant-numeric:tabular-nums; }
+  #host-list li.down .hmeta { color:var(--err); }
+  /* The same badge as the pane header's, on the workspace rows: a workspace's
+     host is where its NEW panes land, which is worth seeing beside its name once
+     the two can differ. Pinned before the agent rollup at the right edge. */
+  #ws-list li.ws .wshost { color:var(--muted); font-size:calc(10px * var(--sb-scale));
+    flex:none; margin-left:4px; }
   #pane-list li, #agent-list li { cursor:pointer; }
   #pane-list li:hover, #agent-list li:hover { background:var(--panel2); }
   #pane-list li.focused { background:var(--chrome-focus); color:var(--fg-strong); }
@@ -709,6 +734,19 @@
   /* A detached HEAD ("@a1b2c3d") is drawn as the warning it is: a commit made
      there belongs to no branch, and the header is the only place that says so. */
   .pane .chrome .info .branch.detached { color:var(--warn); }
+  /* The host badge: which machine this pane's terminal is actually running on.
+     Drawn only while the session spans more than one cathost (renderChrome asks
+     the roster first), because with one the answer is the same for every pane in
+     every workspace and would be a word of pure noise on every header. It sits
+     right after the handle — before the title and the path — because it is the
+     outermost coordinate of the pair "which box, then where on it", and because
+     a path only means something once you know whose filesystem it is on.
+     Muted, not hued: it qualifies the identity rather than competing with it,
+     and it goes red the moment its host drops, which is the one time a header
+     needs to explain why the pane stopped moving. */
+  .pane .chrome .info .host { color:var(--muted); max-width:16ch;
+    overflow:hidden; text-overflow:ellipsis; }
+  .pane .chrome .info .host.off { color:var(--err); }
   .pane .chrome .info .agent { color:var(--warn); }
   .pane .chrome .info .exited { color:var(--err); font-weight:600; }
   /* Pane-scoped mode chips (copy mode, zoom) ride the header of the pane they
@@ -1073,6 +1111,13 @@
       its own — it has no groups to fold, but the arrow that hides the whole
       section rides the same right-edge berth in all four headings.
     --><section id="sec-usage"><h2>Usage<span class="hctl" id="usage-hctl"></span></h2><ul id="usage-list"><li class="empty">…</li></ul></section>
+    <!--
+      Hosts sits above Workspaces because it is the outer coordinate: a machine
+      holds workspaces, which hold tabs, which hold panes, and the sidebar reads
+      down that chain. It starts hidden and stays hidden for as long as the
+      session has one host (see renderHosts) — which, with no hosts: block in the
+      config, is forever.
+    --><section id="sec-hosts" hidden><h2>Hosts<span class="hctl" id="host-hctl"></span></h2><ul id="host-list"></ul></section>
     <section id="sec-workspaces"><h2>Workspaces<span id="ws-global-todo"></span><span class="hctl" id="ws-hctl"><span class="hcount" id="ws-count"></span></span></h2><ul id="ws-list"></ul></section>
     <section id="sec-panes"><h2>Panes<span class="hctl" id="pane-hctl"></span></h2><ul id="pane-list"></ul></section>
     <section id="sec-agents"><h2>Agents<span class="hctl" id="agent-hctl"></span></h2><ul id="agent-list"><li class="empty">none</li></ul></section>
@@ -1124,6 +1169,8 @@
   const paneListEl = document.getElementById("pane-list");
   const agentListEl = document.getElementById("agent-list");
   const usageListEl = document.getElementById("usage-list");
+  const hostSecEl = document.getElementById("sec-hosts");
+  const hostListEl = document.getElementById("host-list");
   const tabbarEl = document.getElementById("tabbar");
   const toastsEl = document.getElementById("toasts");
   const palHintEl = document.getElementById("palhint");
@@ -1793,6 +1840,20 @@
       seg("mode", "COPY");
       seg("hint", "hjkl/arrows move · v select · r rect · y copy · Esc exit");
     } else {
+      // Which machine, before what is on it: the host is the outermost
+      // coordinate of the identity, and the path below is only meaningful once
+      // you know whose filesystem it names. Drawn only in a multi-host session,
+      // and turned red while its host is disconnected — that is the header's
+      // whole explanation for a pane that has stopped moving. Copy mode's branch
+      // above deliberately omits it: the hints need that room, and the machine
+      // is not what you are deciding about while selecting text.
+      if (multiHost() && p.info && p.info.host) {
+        const hs = seg("host", "@" + hostLabel(p.info.host));
+        if (hs && !hostUp(p.info.host)) {
+          hs.classList.add("off");
+          hs.title = hostLabel(p.info.host) + " is not connected";
+        }
+      }
       seg("ttl", p.title);
       // Path then branch, reading outside-in: the path says which tree, the
       // branch says where in it — the same order a prompt puts them in, and the
@@ -2132,6 +2193,16 @@
         // the workspace itself — what may be started in it — where the todo mark
         // reports on the project inside.
         if (w.locked) li.appendChild(lockMark());
+        // A workspace's host is where its NEW panes land — a property of the
+        // workspace itself, like the lock, so it rides beside the name rather
+        // than out at the right edge with the agent rollup. Multi-host only, for
+        // the same reason the pane headers' badge is.
+        if (multiHost() && w.host) {
+          const hb = document.createElement("span"); hb.className = "wshost";
+          hb.textContent = "@" + hostLabel(w.host);
+          hb.title = "new panes in this workspace run on " + hostLabel(w.host);
+          li.appendChild(hb);
+        }
         // The todo mark sits with the name — it says something about the project,
         // not about a pane — while the agent counts stay pinned to the right edge.
         const todo = todoMark(todos.get(w.id) || 0);
@@ -3520,6 +3591,67 @@
       (pop.st === "blocked" ? " is blocked" : " finished") + " — sidebar reopened");
   }
 
+  // ---- Hosts: the cathost roster ----
+  //
+  // The server pushes it on connect and again whenever a host connects or drops,
+  // so it is both the HOSTS section's data and the answer to the question every
+  // host badge asks before drawing itself: is there more than one machine here?
+  // With one host — the default, and what a config with no hosts: block gets —
+  // every badge is the same word on every row, so nothing is drawn at all and
+  // the section stays hidden.
+  let hostItems = [];
+  const multiHost = () => hostItems.length > 1;
+
+  // hostLabel/hostUp resolve a host id against the roster. Both are deliberately
+  // forgiving of an id the roster does not list: a layout can name a host for the
+  // moment between its removal and the next roster push, and printing the raw id
+  // (or declining to paint it as broken) beats printing nothing or a red herring.
+  function hostLabel(id) {
+    if (!id) return "";
+    const h = hostItems.find((x) => x.id === id);
+    return h ? (h.label || h.id) : id;
+  }
+  function hostUp(id) {
+    const h = hostItems.find((x) => x.id === id);
+    return !h || !!h.connected;
+  }
+
+  initSectionFold("sec-hosts", "host-hctl", "hosts");
+
+  function renderHosts(items) {
+    hostItems = items || [];
+    hostSecEl.hidden = !multiHost();
+    hostListEl.innerHTML = "";
+    for (const h of hostItems) {
+      const li = document.createElement("li");
+      li.className = "host " + (h.connected ? "up" : "down");
+      li.dataset.host = h.id;
+      const dot = document.createElement("span"); dot.className = "hdot"; dot.textContent = "●";
+      const name = document.createElement("span"); name.className = "hname"; name.textContent = h.label || h.id;
+      li.appendChild(dot); li.appendChild(name);
+      // Which host an unqualified new pane lands on — the one fact about the
+      // roster that changes what a click elsewhere in the UI will do.
+      if (h.is_default) {
+        const d = document.createElement("span"); d.className = "hdef"; d.textContent = "default";
+        li.appendChild(d);
+      }
+      // Connected: what it is carrying. Disconnected: that it isn't — its panes
+      // are still real and still counted in the tooltip, they just aren't moving.
+      const meta = document.createElement("span"); meta.className = "hmeta";
+      meta.textContent = h.connected ? (h.panes + (h.panes === 1 ? " pane" : " panes")) : "offline";
+      li.appendChild(meta);
+      li.title = h.id + " · " + (h.addr_kind || "?") +
+        " · " + h.panes + (h.panes === 1 ? " pane" : " panes") +
+        (h.connected ? "" : (h.error ? " · " + h.error : " · not connected"));
+      hostListEl.appendChild(li);
+    }
+    // Every host badge in the app is gated on this message, so a roster change
+    // has to redraw the places that carry one: the pane headers and, through the
+    // layout, the workspace rows.
+    for (const p of panes.values()) renderChrome(p);
+    if (layoutMsg) renderWorkspaces(layoutMsg);
+  }
+
   // Agents has no groups to fold, so its heading carries the section arrow and
   // nothing else — the one control every section now has, in the one position it
   // is the same distance from every heading's right edge.
@@ -3804,6 +3936,7 @@
       }
       case "pane_exited": { const p = pane(msg.pane); p.exited = msg.code; renderChrome(p); refreshPaneList(); break; }
       case "agents": renderAgents(msg.items); break;
+      case "hosts": renderHosts(msg.items); break;
       case "usage": renderUsage(msg); break;
       case "clipboard": // OSC 52 write from a pane app — no user activation
         try { clipWrite(b64decode(msg.data)).catch(() => {}); } catch (e) {}
@@ -5857,6 +5990,15 @@
       ro("control socket", server.control_socket || "(default)");
       ro("hook socket", server.hook_socket || "(disabled)");
       ro("session ttl", server.session_ttl || "");
+      // The roster, one row per host — but only once there is a roster to speak
+      // of. With a single host the line above already names its socket, and a
+      // row reading "local (connected)" would be the modal restating it.
+      if ((server.hosts || []).length > 1) {
+        for (const h of server.hosts) {
+          ro("host " + h.id, (h.label || h.id) + " · " + (h.addr_kind || "?") +
+            (h.is_default ? " · default" : "") + (h.connected ? "" : " · not connected"));
+        }
+      }
       const note = document.createElement("div"); note.className = "hint";
       note.textContent = "server settings come from flags/config file and take effect on restart";
       body.appendChild(note);

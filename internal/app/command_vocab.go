@@ -108,6 +108,7 @@ const (
 	CmdTabList       = "tab.list"
 	CmdPaneList      = "pane.list"
 	CmdPaneGet       = "pane.get"
+	CmdHostList      = "host.list"
 )
 
 // CommandSpec describes one §7 command as data: its name, the zero value of its
@@ -247,6 +248,9 @@ var commandSpecs = []CommandSpec{
 	{Name: CmdTabList, Params: TabListParams{}, Result: TabListResult{}},
 	{Name: CmdPaneList, Result: PaneListResult{}},
 	{Name: CmdPaneGet, Params: OptPaneParams{}, Result: PaneInfo{}},
+	// host.list is the one query the session cannot answer — the roster is the
+	// backend's — but it is a query all the same: no effects, no round trip.
+	{Name: CmdHostList, Result: HostListResult{}},
 }
 
 // CommandSpecs returns the §7 command table, in a stable order. The returned
@@ -694,6 +698,13 @@ type WorkspaceInfo struct {
 	Active bool   `json:"active"`
 	Tabs   int    `json:"tabs"`             // tab count
 	Locked bool   `json:"locked,omitempty"` // closed to automation (workspace.lock)
+	// Host is the cathost new panes in this workspace land on, as the MODEL
+	// records it: empty means "whatever the default host is", which is what a
+	// workspace created before hosts existed (or on the default) stores. It is a
+	// policy, not a location — where a pane actually runs is PaneMeta.Host, which
+	// the backend resolves, because a pane's process is somewhere whether or not
+	// the workspace ever named a machine.
+	Host string `json:"host,omitempty"`
 }
 
 // WorkspaceListResult is CmdResult.Data for workspace.list.
@@ -748,6 +759,13 @@ type PaneMeta struct {
 	AgentModel string `json:"agent_model,omitempty"` // LLM the agent is running under; only some agents resolve one
 	Title      string `json:"title,omitempty"`       // live terminal title
 	Cwd        string `json:"cwd,omitempty"`         // live working directory
+	// Host is the cathost the pane's terminal lives on, resolved against the
+	// live roster — so it always names a host that exists, including for a pane
+	// restored onto one that has since gone away. It sits here rather than
+	// beside the session's own fields because the resolution is the runtime's:
+	// the model stores an id that may be empty or stale, the backend knows which
+	// machine is actually holding the PTY.
+	Host string `json:"host,omitempty"`
 }
 
 // TabCreateParams is the optional params block for tab.create. The zero value
@@ -875,6 +893,34 @@ type PaneListResult struct {
 	Panes []PaneInfo `json:"panes"`
 }
 
+// HostInfo describes one cathost for host.list — the machines the session's
+// panes are spread over. A single-host session answers with one entry, which is
+// how a client tells "hosts aren't configured here" from "the remote one is
+// down" without a capability flag.
+//
+// AddrKind names the transport ("unix", "tcp", "tls") rather than the address:
+// the address is a socket path or a hostname, neither of which a listing needs
+// and both of which are worth not printing by reflex. Error carries the last
+// dial/session failure for a host that is not connected, so `catctl hosts` can
+// say why rather than just "false".
+type HostInfo struct {
+	ID        string `json:"id"`
+	Label     string `json:"label"`
+	Connected bool   `json:"connected"`
+	AddrKind  string `json:"addr_kind,omitempty"`
+	// Default is "is_default" on the wire, not "default": generated clients bind
+	// each key to an identifier, and `default` is a reserved word in Dart (see
+	// cmd/catgen-dart, which refuses it rather than silently mangling the name).
+	Default bool   `json:"is_default,omitempty"`
+	Panes   int    `json:"panes"`
+	Error   string `json:"error,omitempty"`
+}
+
+// HostListResult is CmdResult.Data for host.list.
+type HostListResult struct {
+	Hosts []HostInfo `json:"hosts"`
+}
+
 // --- Worktree params & results (§7, WS8 dialogs) ------------------------------
 
 // WorktreeListParams: worktree.list. Pane nil = the focused pane; the repo is
@@ -982,6 +1028,11 @@ type ConfigServerInfo struct {
 	ControlSocket string `json:"control_socket,omitempty"`
 	HookSocket    string `json:"hook_socket,omitempty"`
 	SessionTTL    string `json:"session_ttl"`
+	// Hosts is the live roster (the same listing host.list returns), so the
+	// settings modal can show which machines this catway attached to without a
+	// second call. Like the rest of this struct it is read-only: hosts: is a
+	// restart-time setting, and config.set never writes it.
+	Hosts []HostInfo `json:"hosts,omitempty"`
 }
 
 // ConfigGetResult is CmdResult.Data for config.get (and config.set /
