@@ -997,3 +997,60 @@ collision the seating chart exists to prevent. (For the record the same check on
   question); gonotes appears in the ⌘K palette and launches via
   `catctl plugin run <id> tui`; with the GoNotes server running, the same
   pane comes up in HTTP mode with no DB conflict.
+
+### Live walk — 2026-08-16
+
+`catctl plugin link .` run from the gonotes checkout first: the entry in
+`~/.config/cats/plugins` is a **symlink** (not a copy, unlike the installed
+cats-todo), and the link fired the manifest's `[[build]]`, so `bin/gonotes` is
+the plugin's own copy and only refreshes on relink.
+
+Confirmed against the running catway (`cats-ctl-34660.sock`):
+
+| item | result |
+|---|---|
+| ⌘K palette + `catctl plugin run` | `plugin list` shows both actions; `plugin run rohanthewiz.gonotes tui` opened tab 85 / pane 336 |
+| sidebar `gonotes idle` | `catctl pane 336` → `"agent":"gonotes"`, `"agent_state":"idle"`, `"title":"GoNotes"` |
+| no-`-d`-flag design | pane `cwd` is `/Users/RAllison3/.gonotes`, not the project — Phase 9's reasoning holds in the real host |
+| HTTP mode, no DB conflict | the TUI holds `ESTABLISHED [::1]:63323->[::1]:8444` beside the running server |
+
+**Not answerable this way, and worth recording as a method limit.** `catctl
+capture` returned byte-identical text across every probe — including after a
+`/` that should have opened the filter prompt — so it is reading a stale or
+primary-buffer snapshot while the TUI lives on the alternate screen.
+`pane.send_input` reports `ok` and control bytes have to be built at runtime
+(`chr(7)`), but nothing observable comes back. So ctrl+g capture-to-note, the
+theme repaint, the ⌘ chords and the `modes.kitty` set-form question all still
+need a human at the keyboard — capture cannot substitute for eyes on an
+alt-screen TUI. Phase 8's chords remain the right observable for the kitty
+question; the pane does carry the full cats environment (`CATS_PANE_ID`,
+`CATS_SOCKET_PATH`, `CATS_PLUGIN_ID`), so the preconditions are in place.
+
+### `GONOTES_JWT_SECRET` — closed 2026-08-16
+
+Set in `~/.gonotes/config/cfg_files/.env` (0600), the path
+`fileops.EnvFromFile` reads *relative to cwd* — which both `serve` and `runTui`
+chdir into before loading, so one file covers both. 64 chars from
+`openssl rand -base64 48` mapped to the base64url alphabet **on purpose**: the
+loader truncates an unquoted value at `#` and strips surrounding quotes, so a
+raw base64 secret could have been silently mangled. Note the loader calls
+`os.Setenv` unconditionally — this file **overrides** the shell environment.
+
+Safe to mint fresh because no `config/` existed and sync is disabled; the
+secret is shared hub↔spoke, so on a configured spoke this would have to match
+the hub instead.
+
+Proved on the live server rather than assumed, via `GET /api/v1/auth/me` with a
+GUID that does not exist, so the two failure modes separate cleanly:
+
+```
+new secret   -> 401 {"error":"user not found"}          signature ACCEPTED
+dev constant -> 401 {"error":"authentication required"}  rejected, same as garbage
+```
+
+Restart notes: gonotes installs no signal handler of its own, yet SIGTERM still
+logged `Private/Public database closed` — a dependency handles it, so the stop
+was clean. Rotation invalidated the cached `~/.gonotes/.api_token`; the TUI's
+silent re-auth could **not** cover it (`reauthenticate` needs `GONOTES_USER`/
+`GONOTES_PASSWORD` or an in-memory credential, and a cold start has neither),
+so one interactive login was required and performed.
