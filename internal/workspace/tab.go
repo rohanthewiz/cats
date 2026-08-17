@@ -19,11 +19,24 @@ type PaneState struct {
 	// the terminal-reported title (pane.rename). It is durable session state, so
 	// it survives a daemon restart (unlike the cached terminal title).
 	CustomName string
+	// HostID names the cathost this pane's terminal lives on ("" = the
+	// backend's default host). Per-pane rather than per-workspace because
+	// restore truth is per-pane: a workspace's default only decides where
+	// *new* panes land, while an existing pane must come back on the machine
+	// its process is (or was) actually running on.
+	HostID string
 }
 
 // NewPaneState returns a pane state attached to the given terminal, marked seen.
 func NewPaneState(attached TerminalID) *PaneState {
 	return &PaneState{AttachedTerminalID: attached, Seen: true}
+}
+
+// newPaneStateOn is NewPaneState with the pane's host recorded — the single
+// path used by every spawn, so a pane's host and its terminal are always set
+// together.
+func newPaneStateOn(attached TerminalID, hostID string) *PaneState {
+	return &PaneState{AttachedTerminalID: attached, Seen: true, HostID: hostID}
 }
 
 // Tab is one pane tree within a workspace (cf. workspace/tab.rs). It holds
@@ -55,7 +68,7 @@ func NewTab(s PaneSpawner, number int, initialCwd string, spec SpawnSpec) (*Tab,
 		Number:   number,
 		RootPane: rootID,
 		Layout:   lay,
-		Panes:    map[layout.PaneID]*PaneState{rootID: NewPaneState(terminalID)},
+		Panes:    map[layout.PaneID]*PaneState{rootID: newPaneStateOn(terminalID, spec.HostID)},
 	}, nil
 }
 
@@ -113,7 +126,7 @@ func (t *Tab) splitFocusedWithSpawner(s PaneSpawner, direction layout.Direction,
 		t.Layout.FocusPane(previousFocus)
 		return NewPane{}, err
 	}
-	t.Panes[newID] = NewPaneState(terminalID)
+	t.Panes[newID] = newPaneStateOn(terminalID, spec.HostID)
 	t.Zoomed = false
 	return NewPane{PaneID: newID, TerminalID: terminalID}, nil
 }

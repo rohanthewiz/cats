@@ -17,17 +17,64 @@ import (
 	"github.com/rohanthewiz/cats/internal/terminal"
 )
 
-// daemon manages the orchestrator's single connection to the cathost daemon:
-// dial + hello/welcome, reconciling the daemon's surviving panes against the
-// model, then pumping events until the connection drops — and redialing. All
-// state that the pump touches beyond the raw socket lives in orch and is
-// reached by posting closures onto the orchestrator loop (never a lock).
+// daemon manages the orchestrator's connection to one cathost: dial +
+// hello/welcome, reconciling that host's surviving panes against the model,
+// then pumping events until the connection drops — and redialing. All state
+// that the pump touches beyond the raw socket lives in orch and is reached by
+// posting closures onto the orchestrator loop (never a lock).
+//
+// One orch holds a daemon per configured host (orch.hosts), each with its own
+// dial loop and its own slice of the pane set. Everything host-scoped hangs off
+// the daemon's id: reconcile only judges panes whose runtime says they are
+// this host's, and a disconnect only fails the requests and waiters belonging
+// to it, so one machine going away leaves the others streaming.
 type daemon struct {
-	o      *orch
+	o *orch
+	// id is the stable host id used across the model, the runtimes, and (later)
+	// the wire ("local" for the always-present default host). label is the
+	// human-facing name that appears in log lines and error toasts; kind names
+	// the transport ("unix" today, "tcp"/"tls" from Phase 4).
+	id    string
+	label string
+	kind  string
+	// socket is the unix path this host dials, kept for logging and for tests
+	// that build a daemon directly; dial is the transport-agnostic way to open
+	// a fresh connection, so adding tcp/tls means adding a dialer, not a branch
+	// in run().
 	socket string
+	dial   func() (net.Conn, error)
 
-	mu   sync.Mutex // serializes writes; guards conn
-	conn net.Conn
+	mu sync.Mutex // serializes writes; guards conn and peerVersion
+	// peerVersion is the protocol version the connected cathost reported in its
+	// welcome, 0 while disconnected. Nothing branches on it yet (the handshake
+	// still demands exact equality); it exists so the version-range negotiation
+	// of Phase 4 has somewhere to record the answer.
+	peerVersion int
+	conn        net.Conn
+}
+
+// unixDialer builds the dial func for a unix-socket cathost — the only
+// transport catway speaks today, and the one a `ssh -L` forward turns into a
+// genuinely remote host with no protocol work at all.
+func unixDialer(path string) func() (net.Conn, error) {
+	return func() (net.Conn, error) {
+		return net.DialTimeout("unix", path, 3*time.Second)
+	}
+}
+
+// newLocalDaemon builds the always-present default host from the cathost socket
+// path. Its label is deliberately plain: in a single-host session it is the
+// only host there is, so error text must read exactly as it did before hosts
+// existed.
+func newLocalDaemon(o *orch, socket string) *daemon {
+	return &daemon{
+		o:      o,
+		id:     localHostID,
+		label:  localHostID,
+		kind:   "unix",
+		socket: socket,
+		dial:   unixDialer(socket),
+	}
 }
 
 func (d *daemon) connected() bool {
@@ -54,32 +101,55 @@ func (d *daemon) send(m any) {
 func (d *daemon) setConn(c net.Conn) {
 	d.mu.Lock()
 	d.conn = c
+	if c == nil {
+		d.peerVersion = 0
+	}
 	d.mu.Unlock()
 }
 
-// run dials the daemon forever, with backoff.
+// setPeerVersion records the version the connected cathost reported.
+func (d *daemon) setPeerVersion(v int) {
+	d.mu.Lock()
+	d.peerVersion = v
+	d.mu.Unlock()
+}
+
+// run dials this host forever, with backoff.
 func (d *daemon) run() {
 	backoff := time.Second
 	for {
-		conn, err := net.DialTimeout("unix", d.socket, 3*time.Second)
+		conn, err := d.dial()
 		if err != nil {
-			log.Printf("catway: cathost dial: %v (retrying in %s)", err, backoff)
+			log.Printf("catway: cathost dial (%s): %v (retrying in %s)", d.label, err, backoff)
 			time.Sleep(backoff)
 			backoff = min(backoff*2, 5*time.Second)
 			continue
 		}
 		backoff = time.Second
 		if err := d.session(conn); err != nil {
-			log.Printf("catway: cathost session: %v", err)
+			log.Printf("catway: cathost session (%s): %v", d.label, err)
 		}
 		_ = conn.Close()
 		d.setConn(nil)
+		// Only this host's in-flight work is failed: a request or waiter on
+		// another host is still perfectly answerable, and failing it here would
+		// turn one machine's reboot into a session-wide outage.
 		d.o.post(func() {
-			d.o.flushPending("cathost connection lost")
-			d.o.flushWaiters("cathost connection lost")
-			d.o.broadcast(browserproto.NewError(0, "cathost connection lost — reconnecting"))
+			d.o.flushPendingFor(d.id, "cathost connection lost")
+			d.o.flushWaitersFor(d.id, "cathost connection lost")
+			d.o.broadcast(browserproto.NewError(0, d.lostMessage()))
 		})
 	}
+}
+
+// lostMessage is the disconnect toast. With one host it is the historical
+// wording verbatim (nothing to disambiguate); with several, the host's label
+// leads, because "which machine went away" is then the whole content.
+func (d *daemon) lostMessage() string {
+	if len(d.o.hosts) <= 1 {
+		return "cathost connection lost — reconnecting"
+	}
+	return d.label + ": cathost connection lost — reconnecting"
 }
 
 // session runs one daemon connection: handshake, reconcile, event pump.
@@ -106,6 +176,7 @@ func (d *daemon) session(conn net.Conn) error {
 	}
 
 	d.setConn(conn)
+	d.setPeerVersion(w.ProtocolVersion)
 	d.reconcile(w.Panes)
 
 	for {
@@ -117,10 +188,17 @@ func (d *daemon) session(conn net.Conn) error {
 	}
 }
 
-// reconcile syncs the daemon's surviving pane set to the model: mark survivors
+// reconcile syncs this host's surviving pane set to the model: mark survivors
 // created, drop the created flag on the rest so syncDaemon respawns them, close
-// daemon panes outside the model, then re-apply the model and resync the
-// visible panes for any attached browser. Runs on the orchestrator loop.
+// this host's panes that are outside the model, then re-apply the model and
+// resync the visible panes for any attached browser. Runs on the orchestrator
+// loop.
+//
+// Every judgement here is host-scoped. alivePanes is what *this* cathost holds,
+// so panes belonging to another host must not be measured against it: they are
+// neither survivors to adopt (their own host's reconcile does that) nor
+// strays to close. Pane ids are catway-allocated and globally unique, so the
+// two hosts' id sets never collide — the only thing needed is the filter.
 func (d *daemon) reconcile(alivePanes []uint32) {
 	d.o.post(func() {
 		o := d.o
@@ -131,6 +209,9 @@ func (d *daemon) reconcile(alivePanes []uint32) {
 		model := make(map[uint32]bool)
 		for _, id := range o.session.AllPaneIDs() {
 			pid := uint32(id)
+			if o.paneHostID(pid) != d.id {
+				continue // another host's pane; not ours to adopt or close
+			}
 			model[pid] = true
 			rt := o.panes[pid]
 			if rt == nil {
@@ -335,7 +416,7 @@ func (o *orch) applyPaneModes(ev orchestration.PaneModes) {
 	if !wasReporting && rt.modes.FocusReporting && rt.exited == nil {
 		rt.appFocused = o.paneSeen(ev.PaneID)
 		if b := rt.enc.Focus(rt.appFocused); len(b) > 0 {
-			o.daemon.send(orchestration.NewInput(rt.id, b))
+			o.hostOf(rt).send(orchestration.NewInput(rt.id, b))
 		}
 	}
 	if o.visible[ev.PaneID] {

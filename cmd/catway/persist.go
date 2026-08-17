@@ -145,7 +145,7 @@ func (o *orch) runHistoryCapture() {
 // spawned, and (for the periodic sweep) with output since the last capture.
 // Returns how many requests were issued. Loop goroutine.
 func (o *orch) captureHistory(final bool) int {
-	if o.historyPath == "" || !o.daemon.connected() {
+	if o.historyPath == "" {
 		return 0
 	}
 	n := 0
@@ -156,9 +156,17 @@ func (o *orch) captureHistory(final bool) int {
 		if !final && !rt.histDirty {
 			continue
 		}
+		// Connectivity is per pane, not per session: a host that is down can't
+		// answer a capture, but its panes must not stop the healthy hosts' from
+		// being captured. histDirty is left set for the skipped ones so the
+		// next sweep after the reconnect picks them up.
+		d := o.hostOf(rt)
+		if !d.connected() {
+			continue
+		}
 		rt.histDirty = false
 		o.registerPending(histResponder{o: o, pane: pid, final: final}, reqKey{pid, reqText})
-		o.daemon.send(orchestration.NewRequestText(pid, uint8(terminal.TextRecent), o.histLines, true, false))
+		d.send(orchestration.NewRequestText(pid, uint8(terminal.TextRecent), o.histLines, true, false))
 		n++
 	}
 	return n

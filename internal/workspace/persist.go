@@ -19,6 +19,11 @@ import (
 type PaneSnapshot struct {
 	CustomName string `json:"custom_name,omitempty"`
 	Seen       bool   `json:"seen"`
+	// HostID is the cathost the pane's terminal lived on. Omitted when empty,
+	// which is both the single-host case and every file written before hosts
+	// existed — so an old snapshot restores byte-identically and every pane in
+	// it lands on the default host.
+	HostID string `json:"host,omitempty"`
 }
 
 // TabSnapshot is a tab's durable state: identity, the layout tree with its
@@ -38,6 +43,7 @@ type Snapshot struct {
 	ID             string                `json:"id"`
 	CustomName     string                `json:"custom_name,omitempty"`
 	IdentityCwd    string                `json:"identity_cwd,omitempty"`
+	HostID         string                `json:"host,omitempty"`
 	Locked         bool                  `json:"locked,omitempty"`
 	ActiveTab      int                   `json:"active_tab"`
 	PaneNumbers    map[layout.PaneID]int `json:"pane_numbers"`
@@ -50,7 +56,7 @@ type Snapshot struct {
 func (t *Tab) Snapshot() TabSnapshot {
 	panes := make(map[layout.PaneID]PaneSnapshot, len(t.Panes))
 	for id, st := range t.Panes {
-		panes[id] = PaneSnapshot{CustomName: st.CustomName, Seen: st.Seen}
+		panes[id] = PaneSnapshot{CustomName: st.CustomName, Seen: st.Seen, HostID: st.HostID}
 	}
 	return TabSnapshot{
 		Number:     t.Number,
@@ -74,6 +80,7 @@ func (w *Workspace) Snapshot() Snapshot {
 		ID:             w.ID,
 		CustomName:     w.CustomName,
 		IdentityCwd:    w.IdentityCwd,
+		HostID:         w.HostID,
 		Locked:         w.Locked,
 		ActiveTab:      w.activeTab,
 		PaneNumbers:    numbers,
@@ -101,6 +108,7 @@ func Restore(s PaneSpawner, snap Snapshot) (*Workspace, error) {
 		ID:                snap.ID,
 		CustomName:        snap.CustomName,
 		IdentityCwd:       snap.IdentityCwd,
+		HostID:            snap.HostID,
 		Locked:            snap.Locked,
 		PublicPaneNumbers: make(map[layout.PaneID]int, len(snap.PaneNumbers)),
 		activeTab:         snap.ActiveTab,
@@ -169,12 +177,16 @@ func restoreTab(s PaneSpawner, wsnap Snapshot, snap TabSnapshot) (*Tab, error) {
 			PaneID:       id,
 			Cwd:          wsnap.IdentityCwd,
 			PublicPaneID: publicPaneIDForNumber(wsnap.ID, wsnap.PaneNumbers[id]),
+			// The pane's own recorded host, not the workspace's: a pane that
+			// was placed on another host must be respawned there, or a restart
+			// would silently migrate a running process's replacement.
+			HostID: ps.HostID,
 		}
 		terminalID, err := s.Spawn(spec)
 		if err != nil {
 			return nil, fmt.Errorf("tab %d: respawn pane %d: %w", snap.Number, id, err)
 		}
-		panes[id] = &PaneState{AttachedTerminalID: terminalID, Seen: ps.Seen, CustomName: ps.CustomName}
+		panes[id] = &PaneState{AttachedTerminalID: terminalID, Seen: ps.Seen, CustomName: ps.CustomName, HostID: ps.HostID}
 	}
 	return &Tab{
 		CustomName: snap.CustomName,

@@ -337,15 +337,33 @@ func (s *Session) paneState(id layout.PaneID) *workspace.PaneState {
 	return nil
 }
 
+// PaneHost reports the cathost a pane's terminal belongs to, "" for the
+// backend's default host (and for an unknown pane — the caller resolves "" to
+// the default either way, so there is nothing an ok flag would add).
+func (s *Session) PaneHost(id layout.PaneID) string {
+	if st := s.paneState(id); st != nil {
+		return st.HostID
+	}
+	return ""
+}
+
 // SplitPane splits target (the focused pane if nil) in dir, focusing the new
 // pane, and returns its id.
 func (s *Session) SplitPane(target *layout.PaneID, dir layout.Direction) (layout.PaneID, error) {
+	return s.SplitPaneWith(target, dir, workspace.SpawnSpec{})
+}
+
+// SplitPaneWith is SplitPane with an explicit spawn spec — today only its
+// HostID matters (which machine the new pane lands on), the rest of the spec
+// being the backend's business via StageSpawn. An empty spec reproduces
+// SplitPane exactly.
+func (s *Session) SplitPaneWith(target *layout.PaneID, dir layout.Direction, spec workspace.SpawnSpec) (layout.PaneID, error) {
 	id, err := s.resolvePaneTarget(target)
 	if err != nil {
 		return 0, err
 	}
 	_, ws := s.workspaceIndexOf(id)
-	_, np, err := ws.SplitPane(id, dir, true, workspace.SpawnSpec{})
+	_, np, err := ws.SplitPane(id, dir, true, spec)
 	if err != nil {
 		return 0, err
 	}
@@ -435,6 +453,13 @@ func (s *Session) CreateTab() (int, error) {
 // pane, which is the new one only when the target workspace happens to be the
 // active one. Returning it here keeps the answer right for both cases.
 func (s *Session) CreateTabIn(wsID string) (int, layout.PaneID, error) {
+	return s.CreateTabInWith(wsID, workspace.SpawnSpec{})
+}
+
+// CreateTabInWith is CreateTabIn with an explicit spawn spec (its HostID picks
+// the machine; an empty spec falls back to the workspace's own host, which is
+// what CreateTabIn asks for).
+func (s *Session) CreateTabInWith(wsID string, spec workspace.SpawnSpec) (int, layout.PaneID, error) {
 	ws := s.WorkspaceByID(wsID)
 	if ws == nil {
 		return 0, 0, fmt.Errorf("unknown workspace %s", wsID)
@@ -443,7 +468,7 @@ func (s *Session) CreateTabIn(wsID string) (int, layout.PaneID, error) {
 	if cwd == "" {
 		cwd = s.cwd
 	}
-	idx, err := ws.CreateTab(cwd, workspace.SpawnSpec{})
+	idx, err := ws.CreateTab(cwd, spec)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -536,7 +561,14 @@ func (s *Session) CreateWorkspace() (string, error) {
 // worktree commands open workspaces on a checkout, and the cwd becomes the
 // workspace's IdentityCwd so every pane spawned in it inherits the checkout.
 func (s *Session) CreateWorkspaceAt(cwd string) (string, error) {
-	ws, err := workspace.New(s.spawner, cwd, workspace.SpawnSpec{})
+	return s.CreateWorkspaceAtOn(cwd, "")
+}
+
+// CreateWorkspaceAtOn is CreateWorkspaceAt pinned to a cathost: the id becomes
+// the workspace's HostID, so its root pane and every later pane created in it
+// default to that machine. "" = the backend's default host.
+func (s *Session) CreateWorkspaceAtOn(cwd, hostID string) (string, error) {
+	ws, err := workspace.New(s.spawner, cwd, workspace.SpawnSpec{HostID: hostID})
 	if err != nil {
 		return "", err
 	}

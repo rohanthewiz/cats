@@ -64,7 +64,22 @@ port-forward is needed. Single-host users must see zero change with zero config 
 
 ## Phases (each independently shippable, tests green)
 
-### Phase 1 — multi-daemon plumbing with exactly one host (zero behaviour change)
+### Phase 1 — multi-daemon plumbing with exactly one host (zero behaviour change) — **DONE**
+
+As built (deltas from the plan below): `localHostID = "local"` const; `newLocalDaemon(o, socket)`
+builds the synthesized host; `o.hostByID/hostOf/hostForPane/paneHostID` are the only readers of
+`orch.hosts` (package-level `nopDaemon`, no orch back-pointer, so it can never be dialed);
+`syncDaemon` re-resolves `rt.host` every pass (a runtime built before its model state was restored
+would otherwise keep the default forever); `captureHistory` skips disconnected hosts per pane and
+leaves their `histDirty` set instead of returning early; `pane.send_input` moved onto
+`PaneHostConnected` alongside read/capture/wait (same class of pane-addressed write);
+`daemon.peerVersion` is recorded from the welcome but nothing branches on it yet;
+`daemon.lostMessage()` keeps the historical toast verbatim while only one host exists.
+Tests added: `cmd/catway/daemon_test.go` (two-host harness, host-scoped reconcile/close/flush,
+per-pane connectivity, unknown-host fallback), `internal/workspace/host_test.go`,
+`internal/app/session_test.go:TestPaneHostPlacement`,
+`internal/persist:TestSessionFileHasNoHostKeyForSingleHost`.
+
 - `cmd/catway/daemon.go`: add `id, label, kind, dial, peerVersion`; `unixDialer(path)`; `run()` uses `d.dial`; disconnect posts `flushPendingFor(d.id)/flushWaitersFor(d.id)` + `NewError(0, label+": cathost connection lost — reconnecting")`; `reconcile` filters model panes by `rt.host == d.id` and closes only this host's alive-but-unknown ids; `applyPaneModes` → `o.hostOf(rt).send`.
 - `cmd/catway/catway.go`: `orch.hosts`, `orch.defaultHost`, `paneRuntime.host`; `hostOf/hostForPane/nopDaemon`; `PaneHostConnected`; `flush*For`; convert every `o.daemon.*` site; `syncDaemon` sets `rt.host = o.session.PaneHost(pid)` (fallback default); `newOrch(socket, cwd)` keeps its signature and builds `hosts["local"]`.
 - `cmd/catway/persist.go` (148/161 gates per pane host), `cmd/catway/main.go:267` (range hosts → `go d.run()`).

@@ -29,6 +29,13 @@ type SpawnSpec struct {
 	// PublicPaneID is the stable public handle, e.g. "w1:p3". Filled in by
 	// Workspace; any caller-provided value is overwritten.
 	PublicPaneID string
+	// HostID names the cathost the pane's terminal lives on ("" = the
+	// orchestrator's default host). The model only carries it — resolving an
+	// id to a connection is entirely the backend's job — but it must live
+	// here, because a pane's host is durable state that restore has to
+	// reproduce, not something re-derivable from the layout. Workspace fills
+	// it from its own HostID when the caller left it empty.
+	HostID string
 }
 
 // PaneSpawner is the seam between the pure workspace/tab bookkeeping and the

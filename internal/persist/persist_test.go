@@ -1,6 +1,7 @@
 package persist
 
 import (
+	"bytes"
 	"errors"
 	"io/fs"
 	"os"
@@ -143,5 +144,24 @@ func TestSaveCreatesDir(t *testing.T) {
 	fi, err := os.Stat(dir)
 	if err != nil || !fi.IsDir() {
 		t.Fatalf("state dir not created: %v", err)
+	}
+}
+
+// The ship gate for the multi-host seam: a single-host session's state file
+// must be byte-for-byte what it always was. HostID is additive and omitempty
+// on both the pane and the workspace, so a session that never named a host
+// emits no "host" key anywhere — old catways read the new file, and a diff of
+// two builds' session.json is empty.
+func TestSessionFileHasNoHostKeyForSingleHost(t *testing.T) {
+	path := SessionPath(t.TempDir())
+	if err := SaveSession(path, sampleSnapshot(t), nil, nil); err != nil {
+		t.Fatalf("SaveSession: %v", err)
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if bytes.Contains(b, []byte(`"host"`)) {
+		t.Fatalf("single-host session.json must not carry a host key:\n%s", b)
 	}
 }

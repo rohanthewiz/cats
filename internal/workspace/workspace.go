@@ -35,6 +35,11 @@ type Workspace struct {
 	// IdentityCwd is the fallback workspace identity source for tests, old
 	// snapshots, or missing runtimes.
 	IdentityCwd string
+	// HostID is the default cathost for panes created in this workspace ("" =
+	// the backend's default host). It is only a default: each pane records its
+	// own HostID, so a caller may put a single pane on another host without
+	// moving the workspace.
+	HostID string
 	// Locked marks a workspace as off-limits to automation: no spawning a
 	// process from a supplied command line in it, and no typing into its panes
 	// from the control API. Working in it by hand is untouched — the point is
@@ -66,6 +71,7 @@ func New(s PaneSpawner, initialCwd string, spec SpawnSpec) (*Workspace, error) {
 	return &Workspace{
 		ID:          id,
 		IdentityCwd: initialCwd,
+		HostID:      spec.HostID,
 		// CachedGitBranch stays nil until the GitProvider seam lands (Rust
 		// calls git_branch(&initial_cwd) here).
 		PublicPaneNumbers:    map[layout.PaneID]int{tab.RootPane: 1},
@@ -74,6 +80,17 @@ func New(s PaneSpawner, initialCwd string, spec SpawnSpec) (*Workspace, error) {
 		Tabs:                 []*Tab{tab},
 		spawner:              s,
 	}, nil
+}
+
+// defaultHost fills a spawn spec's host from the workspace default, leaving a
+// caller-set host alone. Every pane-creating path runs through it, which is
+// what makes "the workspace's host" mean "where its new panes go" without
+// preventing a single pane from being placed elsewhere.
+func (w *Workspace) defaultHost(spec SpawnSpec) SpawnSpec {
+	if spec.HostID == "" {
+		spec.HostID = w.HostID
+	}
+	return spec
 }
 
 // publicPaneIDForNumber renders the stable public pane handle, e.g. "w1:p3".
@@ -122,6 +139,7 @@ func (w *Workspace) CreateTab(cwd string, spec SpawnSpec) (int, error) {
 	w.nextPublicTabNumber++
 	paneNumber := w.nextPublicPaneNumber
 	spec.PublicPaneID = publicPaneIDForNumber(w.ID, paneNumber)
+	spec = w.defaultHost(spec)
 
 	tab, err := NewTab(w.spawner, number, cwd, spec)
 	if err != nil {
@@ -210,6 +228,7 @@ func (w *Workspace) SplitFocusedWithRatio(direction layout.Direction, ratio floa
 func (w *Workspace) splitActive(direction layout.Direction, ratio *float32, spec SpawnSpec) (NewPane, error) {
 	paneNumber := w.nextPublicPaneNumber
 	spec.PublicPaneID = publicPaneIDForNumber(w.ID, paneNumber)
+	spec = w.defaultHost(spec)
 	tab := w.ActiveTab()
 	if tab == nil {
 		return NewPane{}, errors.New("workspace: no active tab")
@@ -240,6 +259,7 @@ func (w *Workspace) splitPaneWithSpawner(paneID layout.PaneID, direction layout.
 	}
 	paneNumber := w.nextPublicPaneNumber
 	spec.PublicPaneID = publicPaneIDForNumber(w.ID, paneNumber)
+	spec = w.defaultHost(spec)
 	tab := w.Tabs[tabIdx]
 	previousFocus := tab.Layout.Focused()
 	tab.Layout.FocusPane(paneID)

@@ -250,7 +250,7 @@ func TestReconcileAdoptionDropsPlanKeepsRef(t *testing.T) {
 	})
 	<-done
 
-	o.daemon.reconcile([]uint32{pid})
+	o.hosts[o.defaultHost].reconcile([]uint32{pid})
 
 	check := make(chan struct{})
 	o.post(func() {

@@ -31,8 +31,20 @@ type pipeMsg struct {
 
 func newPipeDaemon(t *testing.T, o *orch) *pipeDaemon {
 	t.Helper()
+	return newPipeDaemonFor(t, o, o.defaultHost)
+}
+
+// newPipeDaemonFor is newPipeDaemon against a named host, so a test can hold
+// two hosts at once and assert that one's traffic (or one's disconnect) leaves
+// the other alone.
+func newPipeDaemonFor(t *testing.T, o *orch, hostID string) *pipeDaemon {
+	t.Helper()
+	d := o.hosts[hostID]
+	if d == nil {
+		t.Fatalf("no such host %q", hostID)
+	}
 	client, server := net.Pipe()
-	o.daemon.setConn(client)
+	d.setConn(client)
 	pd := &pipeDaemon{msgs: make(chan pipeMsg, 64), conn: server}
 	go func() {
 		for {

@@ -53,8 +53,14 @@ type Backend interface {
 	StageSpawn(pane uint32, ov SpawnOverride)
 
 	// PaneExists / DaemonConnected gate the async round-trip commands.
+	// DaemonConnected answers for the default cathost — the session-wide
+	// "is there a backend at all" question; PaneHostConnected answers it for
+	// the one host a pane-addressed command actually needs, which is the same
+	// answer in a single-host session and the only correct one once panes can
+	// live on different machines.
 	PaneExists(pane uint32) bool
 	DaemonConnected() bool
+	PaneHostConnected(pane uint32) bool
 	// PaneMeta reports the runtime-side metadata for a pane — detected agent,
 	// live title, cwd — which the session's domain model cannot know. The
 	// dispatcher merges it into pane.list / pane.get results; an unknown pane
@@ -417,7 +423,7 @@ func (d *Dispatcher) Dispatch(name string, dec ParamDecoder, r Responder) {
 			r.Fail(fmt.Sprintf("unknown pane %d", p.Pane))
 			return
 		}
-		if !d.backend.DaemonConnected() {
+		if !d.backend.PaneHostConnected(p.Pane) {
 			r.Fail("cathost daemon not connected")
 			return
 		}
@@ -436,7 +442,7 @@ func (d *Dispatcher) Dispatch(name string, dec ParamDecoder, r Responder) {
 			r.Fail(fmt.Sprintf("unknown pane %d", p.Pane))
 			return
 		}
-		if !d.backend.DaemonConnected() {
+		if !d.backend.PaneHostConnected(p.Pane) {
 			r.Fail("cathost daemon not connected")
 			return
 		}
@@ -459,7 +465,7 @@ func (d *Dispatcher) Dispatch(name string, dec ParamDecoder, r Responder) {
 			r.Fail(fmt.Sprintf("unknown pane %d", p.Pane))
 			return
 		}
-		if !d.backend.DaemonConnected() {
+		if !d.backend.PaneHostConnected(p.Pane) {
 			r.Fail("cathost daemon not connected")
 			return
 		}
@@ -479,9 +485,10 @@ func (d *Dispatcher) Dispatch(name string, dec ParamDecoder, r Responder) {
 			r.Fail(fmt.Sprintf("unknown pane %d", p.Pane))
 			return
 		}
-		// Gate on the daemon like read/capture: the backend's write path drops
-		// silently when disconnected, and a vanished prompt is worse than an error.
-		if !d.backend.DaemonConnected() {
+		// Gate on the pane's own host like read/capture: the backend's write
+		// path drops silently when disconnected, and a vanished prompt is worse
+		// than an error.
+		if !d.backend.PaneHostConnected(p.Pane) {
 			r.Fail("cathost daemon not connected")
 			return
 		}

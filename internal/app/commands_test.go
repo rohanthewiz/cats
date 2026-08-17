@@ -69,10 +69,15 @@ func (b *fakeBackend) BroadcastLayout()            { b.rec("broadcastLayout") }
 func (b *fakeBackend) BroadcastPaneTitle(p uint32) { b.rec("title"); b.lastTitle = p }
 func (b *fakeBackend) PaneExists(uint32) bool      { return b.paneExists }
 func (b *fakeBackend) DaemonConnected() bool       { return b.daemonUp }
-func (b *fakeBackend) PaneMeta(p uint32) PaneMeta  { return b.paneMeta[p] }
-func (b *fakeBackend) RefreshUsage()               { b.rec("refreshUsage") }
-func (b *fakeBackend) ReloadConfig() error         { b.rec("reload"); return b.reloadErr }
-func (b *fakeBackend) Shutdown()                   { b.rec("shutdown") }
+
+// PaneHostConnected tracks daemonUp: the fake session is single-host, so every
+// pane's host is the default one.
+func (b *fakeBackend) PaneHostConnected(uint32) bool { return b.daemonUp }
+
+func (b *fakeBackend) PaneMeta(p uint32) PaneMeta { return b.paneMeta[p] }
+func (b *fakeBackend) RefreshUsage()              { b.rec("refreshUsage") }
+func (b *fakeBackend) ReloadConfig() error        { b.rec("reload"); return b.reloadErr }
+func (b *fakeBackend) Shutdown()                  { b.rec("shutdown") }
 
 func (b *fakeBackend) ChatSend(r Responder, p ChatSendParams) { b.rec("chatSend"); r.OK(nil) }
 func (b *fakeBackend) ChatCancel(r Responder)                 { b.rec("chatCancel"); r.OK(nil) }

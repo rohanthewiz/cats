@@ -263,8 +263,12 @@ func main() {
 		os.Exit(1)
 	}()
 
-	go o.run()        // the orchestrator event loop (sole state owner)
-	go o.daemon.run() // dial the cathost daemon
+	go o.run() // the orchestrator event loop (sole state owner)
+	// One dial loop per host: each reconnects on its own schedule, so a host
+	// that is down never delays or interrupts the others.
+	for _, d := range o.hosts {
+		go d.run()
+	}
 	if o.historyPath != "" {
 		go o.runHistoryCapture() // periodic scrollback sweep for cold-restore seeds
 	}

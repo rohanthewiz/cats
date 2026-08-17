@@ -625,3 +625,58 @@ func TestPaneByPublicID(t *testing.T) {
 		t.Error("malformed fallback should not resolve")
 	}
 }
+
+// The host-aware session methods: PaneHost reports where a pane lives, and the
+// *With/*On variants are the only way a caller places one somewhere other than
+// the default. The plain signatures stay host-less, which is what keeps every
+// existing caller (and single-host behaviour) unchanged.
+func TestPaneHostPlacement(t *testing.T) {
+	s := newTestSession(t)
+	root, _ := s.FocusedPane()
+	if got := s.PaneHost(root); got != "" {
+		t.Fatalf("default session pane host = %q, want empty", got)
+	}
+
+	plain, err := s.SplitPane(nil, layout.Horizontal)
+	if err != nil {
+		t.Fatalf("SplitPane: %v", err)
+	}
+	if got := s.PaneHost(plain); got != "" {
+		t.Fatalf("plain split host = %q, want empty", got)
+	}
+
+	onHost, err := s.SplitPaneWith(&root, layout.Vertical, workspace.SpawnSpec{HostID: "devbox"})
+	if err != nil {
+		t.Fatalf("SplitPaneWith: %v", err)
+	}
+	if got := s.PaneHost(onHost); got != "devbox" {
+		t.Fatalf("hosted split host = %q, want devbox", got)
+	}
+
+	wsID, err := s.CreateWorkspaceAtOn("/tmp/remote", "devbox")
+	if err != nil {
+		t.Fatalf("CreateWorkspaceAtOn: %v", err)
+	}
+	wsRoot := s.WorkspaceByID(wsID).Tabs[0].RootPane
+	if got := s.PaneHost(wsRoot); got != "devbox" {
+		t.Fatalf("workspace root host = %q, want devbox", got)
+	}
+	// A tab created in that workspace inherits its host without being told.
+	if _, tabRoot, err := s.CreateTabIn(wsID); err != nil {
+		t.Fatalf("CreateTabIn: %v", err)
+	} else if got := s.PaneHost(tabRoot); got != "devbox" {
+		t.Fatalf("inherited tab host = %q, want devbox", got)
+	}
+	// And an explicit host on the tab wins over the workspace's.
+	if _, tabRoot, err := s.CreateTabInWith(wsID, workspace.SpawnSpec{HostID: "buildbox"}); err != nil {
+		t.Fatalf("CreateTabInWith: %v", err)
+	} else if got := s.PaneHost(tabRoot); got != "buildbox" {
+		t.Fatalf("explicit tab host = %q, want buildbox", got)
+	}
+
+	// An unknown pane answers "the default host" rather than erroring — the
+	// caller resolves "" to the default either way.
+	if got := s.PaneHost(layout.PaneID(9999)); got != "" {
+		t.Fatalf("unknown pane host = %q, want empty", got)
+	}
+}

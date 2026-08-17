@@ -42,7 +42,13 @@ var defaultArea = layout.Rect{Width: 120, Height: 32}
 // encoder, cached chrome for late-joining browsers, the desired grid, and
 // whether the daemon has spawned its PTY. Keyed by pane id in orch.panes.
 type paneRuntime struct {
-	id    uint32
+	id uint32
+	// host is the id of the cathost this pane's PTY lives on — the runtime
+	// mirror of the model's PaneState.HostID, resolved once in syncDaemon so
+	// every send site can pick a connection without walking the session. It is
+	// always a host that exists in orch.hosts (an unknown one falls back to the
+	// default), so hostOf never has to guess.
+	host  string
 	enc   *inputenc.Encoder
 	modes terminal.InputModes
 	title string
@@ -119,11 +125,19 @@ type orch struct {
 	// left, or the grid it reports changed. Set anywhere; cleared only by
 	// flushClients between mailbox closures (see dropConn for why).
 	connsDirty bool
-	daemon     *daemon
-	area       layout.Rect
-	cellW      uint32
-	cellH      uint32
-	cwd        string
+	// hosts is every cathost this catway attaches to, by host id, and
+	// defaultHost names the one that panes with no recorded host belong to.
+	// A single-host session has exactly one entry ("local"), which is why
+	// nothing above this seam had to learn about hosts at all.
+	//
+	// The map is built once in newOrchWith and not mutated afterwards (hot
+	// attach/detach is a later phase), so the dial goroutines may read it.
+	hosts       map[string]*daemon
+	defaultHost string
+	area        layout.Rect
+	cellW       uint32
+	cellH       uint32
+	cwd         string
 	// visible is the current viewport's pane set (active workspace's active
 	// tab) — the panes whose frames stream to browsers (§8). Recomputed by
 	// refreshViewport whenever the viewport changes.
@@ -385,7 +399,8 @@ func newOrchWith(socket, cwd string, sess *app.Session) *orch {
 		usageNudge:     make(chan struct{}, 1),
 		mailbox:        make(chan func(), 256),
 	}
-	o.daemon = &daemon{o: o, socket: socket}
+	o.defaultHost = localHostID
+	o.hosts = map[string]*daemon{localHostID: newLocalDaemon(o, socket)}
 	o.syncDaemon()      // desired sizes; no daemon/conns yet, sends are dropped
 	o.refreshViewport() // seed the visible set
 	o.seedStructure()   // snapshot the initial pane set/focus (no retroactive events)
@@ -514,9 +529,79 @@ func (o *orch) desiredGrids() map[uint32][2]uint16 {
 	return grids
 }
 
-// syncDaemon reconciles the daemon's PTY set with the session: spawn panes the
-// daemon lacks, resize panes whose grid changed, close panes dropped from the
-// model, and drop their runtimes.
+// --- host resolution ---------------------------------------------------------
+//
+// Every β send is addressed to a pane, and every pane belongs to exactly one
+// host, so the whole multi-host seam reduces to "which daemon does this pane
+// use". These four helpers are that answer; nothing else in catway may reach
+// into orch.hosts directly.
+
+// localHostID is the id of the always-present host reached over
+// server.cathost_socket. It is synthesized rather than configured, so a session
+// with no hosts: block still has exactly one host and it is this one.
+const localHostID = "local"
+
+// nopDaemon stands in wherever a host cannot be resolved (an unknown pane, a
+// vanished host). Its sends drop and it is never connected — the same behaviour
+// as a real host that is down, which is what every call site already handles.
+// It deliberately has no orch back-pointer: it must never be dialed or flushed.
+var nopDaemon = &daemon{id: "", label: "unknown host", kind: "none"}
+
+// hostByID resolves a host id to its daemon, falling back to the default host
+// for "" and returning nopDaemon for an id no longer configured.
+func (o *orch) hostByID(id string) *daemon {
+	if id == "" {
+		id = o.defaultHost
+	}
+	if d := o.hosts[id]; d != nil {
+		return d
+	}
+	return nopDaemon
+}
+
+// hostOf resolves the daemon for a pane runtime — the form used wherever the
+// caller already has the runtime in hand (the overwhelmingly common case).
+func (o *orch) hostOf(rt *paneRuntime) *daemon {
+	if rt == nil {
+		return nopDaemon
+	}
+	return o.hostByID(rt.host)
+}
+
+// hostForPane resolves the daemon for a pane id. An unknown pane yields
+// nopDaemon rather than the default host: a send for a pane with no runtime has
+// nowhere legitimate to go, and silently routing it to the default machine is
+// exactly the bug this seam exists to prevent.
+func (o *orch) hostForPane(pid uint32) *daemon {
+	rt := o.panes[pid]
+	if rt == nil {
+		return nopDaemon
+	}
+	return o.hostByID(rt.host)
+}
+
+// paneHostID is the resolved host id for a pane: the runtime's when there is
+// one, else the model's, normalized so the answer always names a configured
+// host. A pane restored onto a host that no longer exists falls back to the
+// default — a wrong-machine pane is recoverable, a permanently black one is not.
+func (o *orch) paneHostID(pid uint32) string {
+	if rt := o.panes[pid]; rt != nil && rt.host != "" {
+		return rt.host
+	}
+	id := o.session.PaneHost(layout.PaneID(pid))
+	if id == "" {
+		return o.defaultHost
+	}
+	if o.hosts[id] == nil {
+		log.Printf("catway: pane %d names unknown host %q — using %s", pid, id, o.defaultHost)
+		return o.defaultHost
+	}
+	return id
+}
+
+// syncDaemon reconciles the daemons' PTY sets with the session: spawn panes a
+// host lacks, resize panes whose grid changed, close panes dropped from the
+// model, and drop their runtimes. Each pane's commands go to its own host.
 func (o *orch) syncDaemon() {
 	grids := o.desiredGrids()
 
@@ -529,11 +614,18 @@ func (o *orch) syncDaemon() {
 			}
 			o.panes[pid] = &paneRuntime{id: pid, enc: enc}
 		}
+		// Resolve the host on every sync, not just at creation: a runtime born
+		// before its model state was restored would otherwise keep the default
+		// host forever. paneHostID reads the runtime first, so this is a
+		// one-time resolution per pane in practice.
+		if rt := o.panes[pid]; rt != nil {
+			rt.host = o.paneHostID(pid)
+		}
 	}
 	for pid, rt := range o.panes {
 		if _, ok := grids[pid]; !ok {
 			if rt.created {
-				o.daemon.send(orchestration.NewClosePane(pid))
+				o.hostOf(rt).send(orchestration.NewClosePane(pid))
 			}
 			delete(o.panes, pid)
 			// A never-realized spawn override dies with its pane (a plan is
@@ -562,7 +654,7 @@ func (o *orch) syncDaemon() {
 		case changed:
 			r := orchestration.NewResize(pid, cols, rows)
 			r.CellWidthPx, r.CellHeightPx = o.cellW, o.cellH
-			o.daemon.send(r)
+			o.hostOf(rt).send(r)
 		}
 	}
 }
@@ -593,7 +685,7 @@ func (o *orch) createPane(rt *paneRuntime) {
 		}
 		cp.Env[ctlproto.SocketEnvVar] = o.controlSocket
 	}
-	if o.daemon.connected() {
+	if o.hostOf(rt).connected() {
 		if cwd, ok := o.restoredCwds[rt.id]; ok {
 			cp.Cwd = cwd
 			delete(o.restoredCwds, rt.id)
@@ -632,7 +724,7 @@ func (o *orch) createPane(rt *paneRuntime) {
 			delete(o.seeds, rt.id)
 		}
 	}
-	o.daemon.send(cp)
+	o.hostOf(rt).send(cp)
 	rt.created = true
 }
 
@@ -695,7 +787,7 @@ func (o *orch) resyncPane(pid uint32) {
 			t.Reset()
 		}
 	}
-	o.daemon.send(orchestration.NewRequestResync(pid))
+	o.hostForPane(pid).send(orchestration.NewRequestResync(pid))
 }
 
 // agentsMsg builds the global sidebar rollup from every pane's cached agent
@@ -742,7 +834,7 @@ func (o *orch) agentsMsg() browserproto.Agents {
 // extract the selection. The pane_selection reply completes r in resolvePending.
 func (o *orch) StartRead(r app.Responder, p app.ReadParams) {
 	o.registerPending(r, reqKey{p.Pane, reqSelection})
-	o.daemon.send(orchestration.NewRequestSelection(p.Pane,
+	o.hostForPane(p.Pane).send(orchestration.NewRequestSelection(p.Pane,
 		orchestration.SelectionPoint{Row: p.Anchor[0], Col: uint16(p.Anchor[1])},
 		orchestration.SelectionPoint{Row: p.Cursor[0], Col: uint16(p.Cursor[1])},
 		p.Rect))
@@ -752,7 +844,7 @@ func (o *orch) StartRead(r app.Responder, p app.ReadParams) {
 // to extract the pane's buffer text. The pane_text reply completes r.
 func (o *orch) StartCapture(r app.Responder, p app.CaptureParams) {
 	o.registerPending(r, reqKey{p.Pane, reqText})
-	o.daemon.send(orchestration.NewRequestText(p.Pane, p.Scope, p.Lines, p.Ansi, p.Unwrap))
+	o.hostForPane(p.Pane).send(orchestration.NewRequestText(p.Pane, p.Scope, p.Lines, p.Ansi, p.Unwrap))
 }
 
 // registerPending enqueues an in-flight request under key and arms its timeout.
@@ -793,10 +885,19 @@ func (o *orch) timeoutPending(key reqKey, pr *pending) {
 	}
 }
 
-// flushPending fails every in-flight request (the daemon connection dropped, so
-// no reply will arrive).
-func (o *orch) flushPending(errMsg string) {
+// flushPending fails every in-flight request, whatever host it was addressed to
+// (the session is going away, so no reply will arrive for any of them).
+func (o *orch) flushPending(errMsg string) { o.flushPendingFor("", errMsg) }
+
+// flushPendingFor fails the in-flight requests belonging to one host — what a
+// single cathost dropping means. hostID "" flushes every host. Requests are
+// keyed by pane, and a pane's host is exactly what decides whether its reply
+// can still arrive.
+func (o *orch) flushPendingFor(hostID, errMsg string) {
 	for key, q := range o.pendingReqs {
+		if hostID != "" && o.paneHostID(key.pane) != hostID {
+			continue
+		}
 		for _, pr := range q {
 			if pr.timer != nil {
 				pr.timer.Stop()
@@ -882,10 +983,7 @@ func (o *orch) StartWaitForOutput(r app.Responder, p app.WaitForOutputParams) {
 // only issued while connected — the dispatcher gates on DaemonConnected before a
 // waiter registers — and a disable on the last waiter is a best-effort cleanup.
 func (o *orch) sendStreamSub(pane uint32, enabled bool) {
-	if o.daemon == nil {
-		return
-	}
-	o.daemon.send(orchestration.NewSetOutputStream(pane, enabled))
+	o.hostForPane(pane).send(orchestration.NewSetOutputStream(pane, enabled))
 }
 
 // triggerWaiterCheck issues one capture-check for a pane's active waiters unless
@@ -895,12 +993,13 @@ func (o *orch) triggerWaiterCheck(pane uint32) {
 	if len(o.waiters[pane]) == 0 || o.waiterCheck[pane] {
 		return
 	}
-	if o.daemon == nil || !o.daemon.connected() {
+	d := o.hostForPane(pane)
+	if !d.connected() {
 		return // nothing to capture from; a reconnect's frames re-trigger
 	}
 	o.waiterCheck[pane] = true
 	o.registerPending(waiterResponder{o: o, pane: pane}, reqKey{pane, reqText})
-	o.daemon.send(orchestration.NewRequestText(pane, uint8(terminal.TextRecent), o.waiterScanLines(pane), false, false))
+	d.send(orchestration.NewRequestText(pane, uint8(terminal.TextRecent), o.waiterScanLines(pane), false, false))
 }
 
 // waiterScanLines is how many recent rows a capture-check reads: 0 (the whole
@@ -1011,10 +1110,19 @@ func (o *orch) resolveWaitersOnExit(pane uint32) {
 	}
 }
 
-// flushWaiters fails every active waiter when the daemon connection drops — no
-// capture can resolve, so a wait can't complete. Mirrors flushPending.
-func (o *orch) flushWaiters(errMsg string) {
+// flushWaiters fails every active waiter — no capture can resolve, so a wait
+// can't complete. Mirrors flushPending.
+func (o *orch) flushWaiters(errMsg string) { o.flushWaitersFor("", errMsg) }
+
+// flushWaitersFor fails the waiters on one host's panes (hostID "" = all), the
+// waiter half of flushPendingFor: a wait is fed by its pane's output stream and
+// capture-checks, both of which die with that pane's cathost and neither of
+// which is affected by another host dropping.
+func (o *orch) flushWaitersFor(hostID, errMsg string) {
 	for pane, q := range o.waiters {
+		if hostID != "" && o.paneHostID(pane) != hostID {
+			continue
+		}
 		for _, w := range q {
 			if w.done {
 				continue
@@ -1182,7 +1290,7 @@ func (o *orch) syncAppFocus() {
 			continue
 		}
 		if b := rt.enc.Focus(want); len(b) > 0 {
-			o.daemon.send(orchestration.NewInput(rt.id, b))
+			o.hostOf(rt).send(orchestration.NewInput(rt.id, b))
 		}
 	}
 }
@@ -1229,7 +1337,7 @@ func (o *orch) ScrollPane(pane uint32, delta int) error {
 	if o.panes[pane] == nil {
 		return fmt.Errorf("unknown pane %d", pane)
 	}
-	o.daemon.send(orchestration.NewScrollViewport(pane, int32(delta)))
+	o.hostForPane(pane).send(orchestration.NewScrollViewport(pane, int32(delta)))
 	return nil
 }
 
@@ -1256,7 +1364,7 @@ func (o *orch) SendInput(pane uint32, text string, submit bool) error {
 			return fmt.Errorf("send_input: paste encode: %w", err)
 		}
 		if len(b) > 0 {
-			o.daemon.send(orchestration.NewInput(rt.id, b))
+			o.hostOf(rt).send(orchestration.NewInput(rt.id, b))
 		}
 	}
 	if submit {
@@ -1266,7 +1374,7 @@ func (o *orch) SendInput(pane uint32, text string, submit bool) error {
 				return fmt.Errorf("send_input: enter encode: %w", err)
 			}
 			if len(b) > 0 {
-				o.daemon.send(orchestration.NewInput(rt.id, b))
+				o.hostOf(rt).send(orchestration.NewInput(rt.id, b))
 			}
 		}
 	}
@@ -1281,9 +1389,18 @@ func (o *orch) StageSpawn(pane uint32, ov app.SpawnOverride) {
 	o.spawnPlans[pane] = ov
 }
 
-// PaneExists / DaemonConnected gate the async round-trip commands.
+// PaneExists / DaemonConnected / PaneHostConnected gate the async round-trip
+// commands. DaemonConnected reports the default host — the session-wide "is
+// there a backend" answer, which is what a caller with no pane in hand (and
+// every single-host session) means by it. PaneHostConnected answers for the
+// machine a specific pane actually lives on, so a pane on a healthy host stays
+// usable while another host is down; an unknown pane resolves to nopDaemon and
+// therefore reports disconnected, which is the honest answer for it.
 func (o *orch) PaneExists(pane uint32) bool { return o.panes[pane] != nil }
-func (o *orch) DaemonConnected() bool       { return o.daemon.connected() }
+func (o *orch) DaemonConnected() bool       { return o.hostByID(o.defaultHost).connected() }
+func (o *orch) PaneHostConnected(pane uint32) bool {
+	return o.hostForPane(pane).connected()
+}
 
 // PaneMeta answers pane.list/pane.get's runtime-metadata merge from the pane's
 // cached runtime state — no daemon round trip. The agent pair comes from
@@ -1752,7 +1869,7 @@ func (o *orch) registerConn(c *client, init *browserproto.Init) {
 			o.send(c, browserproto.NewPaneExited(pid, *rt.exited))
 		}
 		c.translator(pid).Reset()
-		o.daemon.send(orchestration.NewRequestResync(pid))
+		o.hostOf(rt).send(orchestration.NewRequestResync(pid))
 	}
 	o.send(c, o.agentsMsg())
 	if o.usage != nil {
@@ -1764,7 +1881,7 @@ func (o *orch) registerConn(c *client, init *browserproto.Init) {
 		o.send(c, o.chat.Snapshot())
 	}
 	o.send(c, browserproto.NewTitle(o.appTitle()))
-	if !o.daemon.connected() {
+	if !o.hostByID(o.defaultHost).connected() {
 		o.send(c, browserproto.NewError(0, "cathost daemon not connected — retrying"))
 	}
 }
@@ -1825,7 +1942,7 @@ func (o *orch) handleUp(c *client, up any) {
 		if b, err := rt.enc.Key(*m); err != nil {
 			log.Printf("catway: key encode: %v", err)
 		} else if len(b) > 0 {
-			o.daemon.send(orchestration.NewInput(rt.id, b))
+			o.hostOf(rt).send(orchestration.NewInput(rt.id, b))
 		}
 
 	case *browserproto.Mouse:
@@ -1840,9 +1957,9 @@ func (o *orch) handleUp(c *client, up any) {
 		}
 		switch {
 		case len(b) > 0:
-			o.daemon.send(orchestration.NewInput(rt.id, b))
+			o.hostOf(rt).send(orchestration.NewInput(rt.id, b))
 		case m.Kind == browserproto.MouseWheel && m.DY != 0:
-			o.daemon.send(orchestration.NewScrollViewport(rt.id, int32(m.DY)))
+			o.hostOf(rt).send(orchestration.NewScrollViewport(rt.id, int32(m.DY)))
 		}
 
 	case *browserproto.Paste:
@@ -1853,7 +1970,7 @@ func (o *orch) handleUp(c *client, up any) {
 		if b, err := rt.enc.Paste(m.Data); err != nil {
 			log.Printf("catway: paste encode: %v", err)
 		} else if len(b) > 0 {
-			o.daemon.send(orchestration.NewInput(rt.id, b))
+			o.hostOf(rt).send(orchestration.NewInput(rt.id, b))
 		}
 
 	case *browserproto.Focus:
@@ -1868,7 +1985,7 @@ func (o *orch) handleUp(c *client, up any) {
 	case *browserproto.Raw:
 		id, ok := o.session.FocusedPane()
 		if ok && len(m.Data) > 0 {
-			o.daemon.send(orchestration.NewInput(uint32(id), m.Data))
+			o.hostForPane(uint32(id)).send(orchestration.NewInput(uint32(id), m.Data))
 		}
 
 	case *browserproto.Resize:
