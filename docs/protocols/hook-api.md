@@ -39,11 +39,58 @@ does nothing — which is why installing an integration is harmless outside cats
 If the hook server fails to start, `catway` logs it and clears the path rather
 than pointing panes at a socket nobody serves.
 
+### Panes on another machine
+
+A pane on a remote cathost cannot dial `catway`'s socket: the path names a file
+in a filesystem it cannot see. Worse, the conventional path exists on any box
+that runs cats itself, so injecting it there would post a remote agent's state
+onto a *different* server's panes.
+
+So each cathost opens a **hook relay** on its own machine, advertises the path in
+its `welcome`, and `catway` injects that into the panes it creates there. What
+arrives is forwarded across the seam verbatim and answered by `catway`:
+
+```mermaid
+flowchart LR
+  subgraph host["the remote machine"]
+    HOOK["installed hook script"]
+    RL["cathost hook relay<br/>/tmp/cats-hookrelay-…"]
+  end
+  subgraph gw["catway"]
+    LOOP["orchestrator loop<br/>applyHookReport"]
+  end
+  HOOK -->|"one JSON line"| RL
+  RL -->|"hook_report (bytes, verbatim)"| LOOP
+  LOOP -->|"hook_reply"| RL
+  RL -->|"the reply line"| HOOK
+```
+
+The cathost parses none of it. The pane the report is about belongs to
+`catway`'s model and the hook API is `catway`'s to define, so relaying bytes is
+both the correct division and what keeps the next field added here from needing a
+cathost release. A relayed report goes through exactly the same arbitration,
+idempotency and error codes as a local one — only the wire differs.
+
+Two consequences worth knowing:
+
+* the relay path is stable for the **cathost's lifetime**, not the connection's.
+  Panes outlive a reconnect in persistent mode and their environment cannot be
+  rewritten afterwards.
+* a host whose cathost predates the relay gets **no** hook environment rather
+  than a fallback. Dormant hooks beat hooks dialing whatever answers on the
+  other machine.
+
+`CATS_CONTROL_SOCKET` is **not** exported to remote panes, for the same reason
+and with no relay standing in for it yet: the control API is a duplex protocol
+rather than this one-shot line, so carrying it across the seam is its own piece
+of work. In-pane `catctl` on a remote host fails to dial rather than quietly
+reaching a different `catway`.
+
 ## Transport
 
 | | |
 |---|---|
-| Socket | `/tmp/cats-hooks.sock` by default; `server.hook_socket`; `--hook-socket`; `none` disables |
+| Socket | `/tmp/cats-hooks.sock` by default; `server.hook_socket`; `--hook-socket`; `none` disables. On a cathost the relay picks `/tmp/cats-hookrelay-<pid>-<n>.sock`; `cathost --hook-socket` overrides it and `-` disables it |
 | Permissions | `0600`, owner-only — the hooks run as the same user, so the **path is the capability** |
 | Pattern | one connection, one newline-terminated JSON request, one reply, close |
 | Read timeout | 5 s |

@@ -878,13 +878,27 @@ func (o *orch) createPane(rt *paneRuntime) {
 	// Arm the integration hooks: every pane learns the hook-report socket and
 	// its own public handle (WS7's catctl installers plant hooks that read
 	// exactly these variables).
+	//
+	// Which socket depends on where the pane is. A local pane gets this
+	// process's own; a pane on another machine gets that cathost's relay, which
+	// forwards what arrives to us. Injecting our path there would name a file in
+	// a filesystem the pane cannot see — and on a remote box that happens to run
+	// cats itself, would name a DIFFERENT server's socket and post a remote
+	// agent's state onto someone else's panes.
 	pub, _ := o.session.PublicPaneID(layout.PaneID(rt.id))
-	cp.Env = paneEnvMap(o.hookSocket, rt.id, pub)
+	cp.Env = paneEnvMap(o.hookSocketFor(rt), rt.id, pub)
 	// Export the control socket alongside the hook env: in-pane automation
 	// (cats-todo, plugin binaries launched via tab.create) resolves the socket
 	// from CATS_CONTROL_SOCKET, which must hold even when catway listens on a
 	// non-default path.
-	if o.controlSocket != "" {
+	//
+	// Local panes only, for the reason above and with no relay to stand in for
+	// it: the control API is a duplex protocol rather than the hook API's
+	// one-shot line, so carrying it across the seam is its own piece of work. A
+	// remote pane is left with no override, which is honest — catctl there
+	// fails to dial rather than quietly reaching a different catway through an
+	// inherited path.
+	if o.controlSocket != "" && o.paneIsLocal(rt.id) {
 		if cp.Env == nil {
 			cp.Env = make(map[string]string, 1)
 		}

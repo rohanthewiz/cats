@@ -253,6 +253,9 @@ type Host struct {
 	// The host-stats subscription (hoststats.go): nil until a client asks, and
 	// dropped again when it stops asking or the session ends.
 	statsFields
+	// The hook relay (hookrelay.go): a socket on this machine that carries
+	// agent hook reports back to the orchestrator.
+	relayFields
 }
 
 // NewHost creates an empty Host.
@@ -271,6 +274,9 @@ func NewHost() *Host {
 // first Attach. ctx bounds the flusher; Stop tears everything down.
 func (h *Host) Start(ctx context.Context) {
 	h.startOnce.Do(func() {
+		// Before the first welcome can be written, since the welcome advertises
+		// its path and a pane created off that welcome must find it there.
+		h.startHookRelay()
 		h.armIdle() // exit if a persistent daemon is spawned but no client ever attaches
 		go h.branchPump(ctx)
 		go func() {
@@ -392,6 +398,7 @@ type endSession struct{}
 func (h *Host) Stop() {
 	h.closedOnce.Do(func() { close(h.closed) })
 	h.stopHostStats()
+	h.stopHookRelay()
 	h.shutdownAll()
 }
 
@@ -531,6 +538,13 @@ func (h *Host) dispatch(typ MessageType, payload []byte) error {
 		if err := h.requestText(c); err != nil {
 			h.emit(NewError(c.PaneID, err.Error()))
 		}
+	case MsgHookReply:
+		var c HookReply
+		if err := json.Unmarshal(payload, &c); err != nil {
+			h.emit(NewError(0, "bad hook_reply: "+err.Error()))
+			return nil
+		}
+		h.deliverHookReply(c)
 	case MsgRequestListDir:
 		var c RequestListDir
 		if err := json.Unmarshal(payload, &c); err != nil {
@@ -613,7 +627,12 @@ func (h *Host) handleHello(payload []byte) error {
 	// The welcome reports the *negotiated* version, not ours: an older client
 	// demands equality with what it sent, so answering with a newer number is
 	// how a rolled-out daemon would break every catway not yet upgraded.
-	h.emit(NewWelcomeAt(version, "", ids))
+	w := NewWelcomeAt(version, "", ids)
+	// The path the client injects into every pane it creates here. Filled in on
+	// the way out rather than by NewWelcomeAt, which knows nothing about this
+	// daemon's sockets.
+	w.HookSocket = h.hookSocketPath()
+	h.emit(w)
 	for _, p := range ps {
 		h.resyncPane(p)
 	}

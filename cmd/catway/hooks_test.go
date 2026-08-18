@@ -7,9 +7,11 @@ import (
 	"encoding/json"
 	"net"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/rohanthewiz/cats/internal/layout"
 	"github.com/rohanthewiz/cats/internal/orchestration"
 )
 
@@ -360,5 +362,100 @@ func TestServeHooksEndToEnd(t *testing.T) {
 	m = send(`{"id":"y","method":"pane.nope","params":{}}`)
 	if err := json.Unmarshal(m["error"], &e); err != nil || e.Code != "invalid_request" {
 		t.Fatalf("unknown method reply: %v", m)
+	}
+}
+
+// Which hook socket a pane is told about is a question about which machine it
+// is on. Getting it wrong is not a missing feature but a wrong answer: this
+// process's path names a file the remote pane cannot see, and on a box that
+// runs cats itself it names a DIFFERENT server's socket.
+func TestHookSocketForFollowsThePanesMachine(t *testing.T) {
+	o, localPane, remotePane, _, _ := twoHostOrch(t)
+	o.hookSocket = "/tmp/local-hooks.sock"
+	o.hosts[testRemoteHost].setHookSocket("/tmp/cats-hookrelay-99-1.sock")
+
+	if got := o.hookSocketFor(o.panes[localPane]); got != "/tmp/local-hooks.sock" {
+		t.Errorf("local pane hook socket = %q, want this process's own", got)
+	}
+	if got := o.hookSocketFor(o.panes[remotePane]); got != "/tmp/cats-hookrelay-99-1.sock" {
+		t.Errorf("remote pane hook socket = %q, want that host's relay", got)
+	}
+
+	// A host with no relay yields no hook environment at all. Dormant hooks beat
+	// hooks dialing whatever answers on the other machine.
+	o.hosts[testRemoteHost].hookSocket = ""
+	if got := o.hookSocketFor(o.panes[remotePane]); got != "" {
+		t.Errorf("hook socket = %q for a host with no relay, want none", got)
+	}
+	if paneEnvMap("", remotePane, "w2:p1") != nil {
+		t.Error("an empty socket must produce no hook environment")
+	}
+}
+
+// The advertised path outlives the connection that carried it: the panes
+// already running there were spawned with it, and a value that vanished on a
+// reconnect would leave a respawned pane without the socket its neighbours have.
+func TestHookSocketSurvivesADisconnect(t *testing.T) {
+	d := &daemon{id: "h", label: "h"}
+	d.setHookSocket("/tmp/relay.sock")
+	d.setConn(nil)
+	if got := d.hookRelaySocket(); got != "/tmp/relay.sock" {
+		t.Fatalf("hook socket after a drop = %q, want it kept", got)
+	}
+	// And a reconnect that advertises nothing does not erase it either.
+	d.setHookSocket("")
+	if got := d.hookRelaySocket(); got != "/tmp/relay.sock" {
+		t.Fatalf("hook socket after an empty advertisement = %q, want it kept", got)
+	}
+}
+
+// A relayed report is the same event as a local one and goes through the same
+// arbitration — only the wire differs. This drives the whole path: the daemon's
+// report in, the model updated, the reply out.
+func TestRelayedHookReportMovesTheAgentState(t *testing.T) {
+	o, _, remotePane, _, pdRemote := twoHostOrch(t)
+	go o.run()
+	d := o.hosts[testRemoteHost]
+
+	pub, _ := o.session.PublicPaneID(layout.PaneID(remotePane))
+	req := `{"id":"h7","method":"pane.report_agent","params":{"pane_id":"` + pub +
+		`","source":"hooks","agent":"codex","state":"working"}}`
+	d.dispatch(orchestration.MsgHookReport, mustJSON(t, orchestration.NewHookReport(4, []byte(req+"\n"))))
+
+	payload := pdRemote.expect(t, orchestration.MsgHookReply)
+	var reply orchestration.HookReply
+	if err := json.Unmarshal(payload, &reply); err != nil {
+		t.Fatalf("decode reply: %v", err)
+	}
+	if reply.ID != 4 {
+		t.Errorf("reply id = %d, want the report's 4", reply.ID)
+	}
+	if !strings.Contains(string(reply.Payload), `"ok"`) {
+		t.Fatalf("reply = %q, want an ok result", reply.Payload)
+	}
+
+	var state string
+	syncPost(o, func() { state = o.panes[remotePane].hook.state })
+	if state != "working" {
+		t.Fatalf("remote pane agent state = %q, want working", state)
+	}
+}
+
+// A malformed relayed request is answered rather than dropped, with the same
+// error codes the local socket produces: the hook client on the other machine
+// is waiting for a line, and the CLI equivalents parse it.
+func TestRelayedHookReportAnswersBadRequests(t *testing.T) {
+	o, _, _, _, pdRemote := twoHostOrch(t)
+	go o.run()
+	d := o.hosts[testRemoteHost]
+
+	d.dispatch(orchestration.MsgHookReport, mustJSON(t, orchestration.NewHookReport(9, []byte("{not json\n"))))
+	payload := pdRemote.expect(t, orchestration.MsgHookReply)
+	var reply orchestration.HookReply
+	if err := json.Unmarshal(payload, &reply); err != nil {
+		t.Fatalf("decode reply: %v", err)
+	}
+	if !strings.Contains(string(reply.Payload), "invalid_request") {
+		t.Fatalf("reply = %q, want an invalid_request error", reply.Payload)
 	}
 }

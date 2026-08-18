@@ -84,6 +84,7 @@ const (
 	MsgPing             MessageType = "ping"
 	MsgRequestHostStats MessageType = "request_host_stats"
 	MsgRequestListDir   MessageType = "request_list_dir"
+	MsgHookReply        MessageType = "hook_reply"
 
 	// Go → Rust (events).
 	MsgWelcome       MessageType = "welcome"
@@ -101,6 +102,7 @@ const (
 	MsgPong          MessageType = "pong"
 	MsgHostStats     MessageType = "host_stats"
 	MsgDirListing    MessageType = "dir_listing"
+	MsgHookReport    MessageType = "hook_report"
 	MsgError         MessageType = "error"
 )
 
@@ -136,6 +138,13 @@ const (
 	// complete a path for a pane on another machine, instead of being switched
 	// off with an apology.
 	FeatureListDir = "list_dir"
+	// FeatureHookRelay: the daemon runs a hook-report socket on its own machine
+	// and relays what arrives there to the client (MsgHookReport →
+	// MsgHookReply). Advertised as a name AND as a path — Welcome.HookSocket is
+	// what a client actually needs, since the value has to be injected into
+	// every pane's environment — but the name is here so a client can reason
+	// about the capability without special-casing an empty string.
+	FeatureHookRelay = "hook_relay"
 )
 
 // --- Commands (Rust → Go) ---------------------------------------------------
@@ -370,6 +379,18 @@ func NewRequestListDir(paneID uint32, dir, base string, recents bool, live []str
 	return RequestListDir{Type: MsgRequestListDir, PaneID: paneID, Dir: dir, Base: base, Recents: recents, Live: live}
 }
 
+// HookReply carries a hook reply back to the daemon, which writes it to the
+// waiting hook client and closes. ID matches the report it answers.
+type HookReply struct {
+	Type    MessageType `json:"type"`
+	ID      uint64      `json:"id"`
+	Payload []byte      `json:"payload"`
+}
+
+func NewHookReply(id uint64, payload []byte) HookReply {
+	return HookReply{Type: MsgHookReply, ID: id, Payload: payload}
+}
+
 type RequestHostStats struct {
 	Type       MessageType `json:"type"`
 	IntervalMs int         `json:"interval_ms"`
@@ -403,6 +424,19 @@ type Welcome struct {
 	// every daemon built before capabilities existed, which is why the client's
 	// rule is "send it only if it is listed" rather than "unless it is refused".
 	Features []string `json:"features,omitempty"`
+	// HookSocket is the path, ON THE DAEMON'S MACHINE, of the socket that
+	// relays agent hook reports back to this client. Empty when the daemon
+	// could not open one.
+	//
+	// It is in the welcome rather than behind a request because a client needs
+	// it before it creates its first pane: the path is injected into every
+	// pane's environment (CATS_SOCKET_PATH), and a pane spawned before the
+	// answer arrived would have inert hooks until something respawned it.
+	//
+	// The path is stable for the daemon's lifetime, not the connection's. Panes
+	// outlive a reconnect in persistent mode, and their environment cannot be
+	// rewritten after the fact.
+	HookSocket string `json:"hook_socket,omitempty"`
 }
 
 func NewWelcome(errMsg string, panes []uint32) Welcome {
@@ -428,7 +462,7 @@ func NewWelcomeAt(version int, errMsg string, panes []uint32) Welcome {
 // Features is what this build can answer. Returned as a fresh slice so a caller
 // cannot alter the daemon's advertisement by holding onto it.
 func Features() []string {
-	return []string{FeaturePing, FeatureHostStats, FeatureListDir}
+	return []string{FeaturePing, FeatureHostStats, FeatureListDir, FeatureHookRelay}
 }
 
 type PaneFrame struct {
@@ -657,6 +691,25 @@ type DirListing struct {
 
 func NewDirListing(paneID uint32, l pathpick.Listing) DirListing {
 	return DirListing{Type: MsgDirListing, PaneID: paneID, Listing: l}
+}
+
+// HookReport forwards one request that arrived on the daemon's hook socket,
+// verbatim. The daemon does not parse it and does not act on it: the agent
+// state it describes belongs to a pane the orchestrator owns, and the hook API
+// is the orchestrator's to define. Relaying the bytes rather than a decoded
+// shape is also what keeps the daemon out of the way of the next field added to
+// that API.
+//
+// ID is the daemon's; it holds the hook client's connection open until the
+// matching HookReply comes back.
+type HookReport struct {
+	Type    MessageType `json:"type"`
+	ID      uint64      `json:"id"`
+	Payload []byte      `json:"payload"`
+}
+
+func NewHookReport(id uint64, payload []byte) HookReport {
+	return HookReport{Type: MsgHookReport, ID: id, Payload: payload}
 }
 
 type Error struct {

@@ -50,6 +50,8 @@ func main() {
 		"keep panes alive across client disconnects; a restarted/handed-off cats reconnects and resyncs (overrides -exit-on-disconnect)")
 	idleTimeout := flag.Duration("idle-timeout", 10*time.Minute,
 		"in persistent mode, exit if no client is attached for this long (0 disables)")
+	hookSocket := flag.String("hook-socket", "",
+		"path for the agent hook-relay socket this daemon opens for its panes; empty picks /tmp/cats-hookrelay-<pid>-<n>.sock, \"-\" disables the relay")
 	manifestUpdate := flag.Bool("manifest-update", true,
 		"fetch agent-detection manifest updates from the herdr.dev catalog at startup (env "+detect.CatalogURLEnv+" overrides the URL)")
 	flag.Parse()
@@ -91,9 +93,9 @@ func main() {
 	defer cleanup()
 
 	if *persistent {
-		err = runPersistent(ln, desc, token, *idleTimeout)
+		err = runPersistent(ln, desc, token, *idleTimeout, *hookSocket)
 	} else {
-		err = run(ln, desc, token, *exitOnDisconnect)
+		err = run(ln, desc, token, *exitOnDisconnect, *hookSocket)
 	}
 	if err != nil {
 		cleanup() // os.Exit skips the defer
@@ -102,7 +104,7 @@ func main() {
 	}
 }
 
-func run(ln net.Listener, desc, token string, exitOnDisconnect bool) error {
+func run(ln net.Listener, desc, token string, exitOnDisconnect bool, hookSocket string) error {
 	defer ln.Close()
 
 	// SIGHUP too: in managed mode the orchestrator is our parent, so its exit (or a
@@ -132,6 +134,7 @@ func run(ln net.Listener, desc, token string, exitOnDisconnect bool) error {
 			defer conn.Close()
 			h := orchestration.NewHost()
 			h.RequireToken = token
+			h.HookSocketPath = hookSocket
 			if err := h.Serve(ctx, conn); err != nil {
 				log.Printf("session ended: %v", err)
 			} else {
@@ -162,7 +165,7 @@ func run(ln net.Listener, desc, token string, exitOnDisconnect bool) error {
 // client. A cats that restarts or hands off reconnects to this same daemon and
 // resyncs its surviving panes (the create_pane-less path). The daemon exits on a
 // clean-quit shutdown command, on the idle timeout, or on a signal.
-func runPersistent(ln net.Listener, desc, token string, idleTimeout time.Duration) error {
+func runPersistent(ln net.Listener, desc, token string, idleTimeout time.Duration, hookSocket string) error {
 	defer ln.Close()
 
 	// Persistent mode must outlive the orchestrator. When cats dies its controlling
@@ -178,6 +181,7 @@ func runPersistent(ln net.Listener, desc, token string, idleTimeout time.Duratio
 	h := orchestration.NewHost()
 	h.Persistent = true
 	h.IdleTimeout = idleTimeout
+	h.HookSocketPath = hookSocket
 	h.RequireToken = token
 	h.Start(ctx)
 	defer h.Stop()

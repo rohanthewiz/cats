@@ -107,6 +107,16 @@ type daemon struct {
 	// CPU and disk on (0 = nothing). Held across disconnects so the reconnect
 	// can re-establish it without asking the orchestrator what it wanted.
 	statsInterval time.Duration
+	// hookSocket is the path, ON THIS HOST'S MACHINE, of the socket its cathost
+	// relays agent hook reports through (Welcome.HookSocket). It is what a pane
+	// created here gets as CATS_SOCKET_PATH.
+	//
+	// Unlike latency and features this is NOT cleared on a disconnect. The path
+	// is the daemon's for its lifetime, not the connection's, and the panes
+	// already running there were spawned with it in their environment — a value
+	// that went away on a reconnect would leave catway unable to give a
+	// respawned pane the same socket its neighbours have.
+	hookSocket string
 }
 
 // unixDialer builds the dial func for a unix-socket cathost — the only
@@ -382,6 +392,27 @@ func (d *daemon) supports(feature string) bool {
 	return d.conn != nil && d.features[feature]
 }
 
+// setHookSocket records the hook-relay path this cathost advertised. An empty
+// advertisement is ignored rather than stored: a daemon that failed to open its
+// relay this time has not invalidated the path the panes already running there
+// were given.
+func (d *daemon) setHookSocket(path string) {
+	if path == "" {
+		return
+	}
+	d.mu.Lock()
+	d.hookSocket = path
+	d.mu.Unlock()
+}
+
+// hookRelaySocket is the path to inject into a pane created on this host, "" if
+// this host has no relay.
+func (d *daemon) hookRelaySocket() string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.hookSocket
+}
+
 // latencyMs is the roster's round-trip figure in milliseconds, 0 for "unknown"
 // — never measured, not connected, or a daemon too old to answer a ping.
 //
@@ -640,6 +671,7 @@ func (d *daemon) session(conn net.Conn) error {
 	d.setConn(conn)
 	d.setPeerVersion(w.ProtocolVersion)
 	d.setFeatures(w.Features)
+	d.setHookSocket(w.HookSocket)
 	d.o.post(func() { d.o.broadcastHosts() }) // the roster's dot goes green
 	d.reconcile(w.Panes)
 	// The probe is per-session and dies with the connection: it holds the conn
@@ -740,6 +772,18 @@ func (d *daemon) dispatch(mt orchestration.MessageType, payload []byte) {
 		if d.notePong(ev.ID) {
 			o.post(func() { o.broadcastHosts() })
 		}
+	case orchestration.MsgHookReport:
+		var ev orchestration.HookReport
+		if err := json.Unmarshal(payload, &ev); err != nil {
+			return
+		}
+		// Answered on its own goroutine, not here: answerHook waits for the
+		// orchestrator loop, and the pump is the goroutine every pane's output
+		// arrives through. Blocking it to arbitrate one agent's state would
+		// stall every terminal on this host.
+		go func() {
+			d.send(orchestration.NewHookReply(ev.ID, o.answerHook(ev.Payload)))
+		}()
 	case orchestration.MsgDirListing:
 		var ev orchestration.DirListing
 		if err := json.Unmarshal(payload, &ev); err != nil {

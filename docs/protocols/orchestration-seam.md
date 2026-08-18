@@ -40,7 +40,7 @@ sequenceDiagram
   end
   GW->>TH: hello {protocol_version: 3, token?}
   alt version in range and token accepted
-    TH-->>GW: welcome {protocol_version: negotiated, panes: [ids], features: [...]}
+    TH-->>GW: welcome {protocol_version: negotiated, panes: [ids],<br/>features: [...], hook_socket}
   else refused
     TH-->>GW: welcome {error: reason}, then close
   end
@@ -82,13 +82,14 @@ without racing the daemon's own post-hello replay. Unknown pane ids are ignored.
 | `ping` | `id` | round-trip probe; answered with `pong` carrying the same `id`. Sent only to a daemon advertising the `ping` capability |
 | `request_host_stats` | `interval_ms` | subscribe to the daemon's readings of its own machine, one `host_stats` per interval; `0` cancels. Capability: `host_stats` |
 | `request_list_dir` | `pane_id`, `dir`, `base`, `recents`, `live` | list a directory **on the daemon's filesystem**; answered with `dir_listing`. Capability: `list_dir` |
+| `hook_reply` | `id`, `payload` | the answer to a `hook_report`, written back to the waiting hook client verbatim |
 | `shutdown` | — | ask a persistent daemon to exit and tear down all panes |
 
 ### Events — `cathost` → `catway`
 
 | Type | Payload | Notes |
 |------|---------|-------|
-| `welcome` | `protocol_version`, `panes`, `features` | the surviving pane ids — the input to reconciliation — and the optional requests this daemon can answer |
+| `welcome` | `protocol_version`, `panes`, `features`, `hook_socket` | the surviving pane ids — the input to reconciliation — the optional requests this daemon can answer, and the path of its agent hook relay |
 | `pane_frame` | `Frame` (see below) | full or skip-flagged diff |
 | `pane_output` | `pane_id`, `data` (base64) | raw PTY bytes, only while streaming is enabled. **Not** browser-facing |
 | `pane_cwd` | `pane_id`, `cwd` | from OSC 7, or the process probe |
@@ -103,6 +104,7 @@ without racing the daemon's own post-hello replay. Unknown pane ids are ignored.
 | `pong` | `id` | reply to `ping`, echoing its `id`. The only event with no pane |
 | `host_stats` | `rows` | one reading of the daemon's machine — memory, CPU, disk — display-ready. Only while a subscription is live |
 | `dir_listing` | `pane_id`, `listing` | reply to `request_list_dir`, one per request. A path that does not resolve is `exists:false` with a reason, not an error event |
+| `hook_report` | `id`, `payload` | one agent hook request that arrived on the daemon's own hook socket, forwarded **verbatim**. Capability: `hook_relay` |
 | `error` | code, message | |
 
 ## Versioning
@@ -146,6 +148,7 @@ reads correctly as "the base protocol only".
 | `ping` | `ping` / `pong` | the roster's per-host round-trip figure, and liveness — see below |
 | `host_stats` | `request_host_stats` / `host_stats` | the sidebar's per-host meters — see below |
 | `list_dir` | `request_list_dir` / `dir_listing` | the start-path picker completing a path on another machine — see below |
+| `hook_relay` | `hook_report` / `hook_reply`, plus `welcome.hook_socket` | agent hook reports from panes on this machine — see below |
 
 ### Liveness
 
@@ -223,6 +226,32 @@ every pane arrives through.
 
 Both halves of `path.list` — local and remote — call the same
 `internal/pathpick` code. The only difference is which process runs it.
+
+### Hook relay
+
+Every pane is spawned with `CATS_SOCKET_PATH` so the hooks
+`catctl integration install` plants can report an agent's state. For a pane on
+another machine that path used to be `catway`'s own — a file in a filesystem the
+pane cannot see, and on a box that runs cats itself, a *different* server's
+socket.
+
+So the daemon opens a hook socket of its own, advertises it as
+`welcome.hook_socket`, and `catway` injects that into the panes it creates here.
+What arrives is forwarded as `hook_report` and answered with `hook_reply`.
+
+The payload is **bytes, verbatim**. The daemon parses none of it: the pane the
+report is about belongs to the orchestrator's model, the hook API is the
+orchestrator's to define, and relaying bytes keeps the daemon out of the way of
+the next field added to it. The read limits (5 s, 1 MiB) are still enforced
+daemon-side, because this end owns the socket — a request the orchestrator would
+refuse must not get as far as occupying a frame on the seam.
+
+`welcome.hook_socket` carries the path rather than a request/reply pair because
+the client needs it *before* it creates its first pane. It is stable for the
+daemon's lifetime, not the connection's: panes outlive a reconnect in persistent
+mode and their environment cannot be rewritten afterwards.
+
+See [the hook API](hook-api.md#panes-on-another-machine) for the rest.
 
 ## Why the daemon resolves cwd and branch
 

@@ -80,11 +80,23 @@ type hookError struct {
 	Message string `json:"message"`
 }
 
-// writeHookReply writes cats's reply shape: {"id","result":{"type":"ok"}} on
-// success, {"id","error":{"code","message"}} on failure. The hooks ignore the
-// reply, but the CLI equivalents (cats pane report-agent …) parse it, so the
-// shape is part of the asset-interop contract.
+// writeHookReply writes cats's reply shape onto a connection. See
+// hookReplyBytes for the shape itself.
 func writeHookReply(w *net.UnixConn, id string, herr *hookError) {
+	if b := hookReplyBytes(id, herr); b != nil {
+		_, _ = w.Write(b)
+	}
+}
+
+// hookReplyBytes renders cats's reply shape: {"id","result":{"type":"ok"}} on
+// success, {"id","error":{"code","message"}} on failure, newline-terminated.
+// The hooks ignore the reply, but the CLI equivalents (cats pane report-agent …)
+// parse it, so the shape is part of the asset-interop contract.
+//
+// Bytes rather than a write, because the same reply now has two ways home: down
+// the local socket, and back across the orchestration seam to the cathost that
+// took the report for a pane on another machine (hookRelay).
+func hookReplyBytes(id string, herr *hookError) []byte {
 	var v any
 	if herr == nil {
 		v = struct {
@@ -103,9 +115,9 @@ func writeHookReply(w *net.UnixConn, id string, herr *hookError) {
 	}
 	b, err := json.Marshal(v)
 	if err != nil {
-		return
+		return nil
 	}
-	_, _ = w.Write(append(b, '\n'))
+	return append(b, '\n')
 }
 
 // serveHooks opens the hook-report socket and serves it until process exit,
@@ -150,30 +162,45 @@ func (o *orch) serveHookConn(conn *net.UnixConn) {
 	if len(line) == 0 && err != nil {
 		return
 	}
+	if reply := o.answerHook(line); reply != nil {
+		_, _ = conn.Write(reply)
+	}
+}
+
+// answerHook takes one raw hook request and returns the raw reply, doing the
+// model work on the orchestrator loop.
+//
+// It is split from the connection because a hook report now arrives two ways
+// and must be treated identically by both: straight off this machine's socket,
+// and relayed across the seam by the cathost that took it for a pane on another
+// machine. A remote agent's state transition is not a different kind of event
+// from a local one — only the wire it came in on differs — so the arbitration,
+// the idempotency token and the error codes all have to be the same code.
+//
+// It runs on the caller's goroutine (a connection handler, or the daemon pump)
+// and never on the loop, because it waits for the loop.
+func (o *orch) answerHook(line []byte) []byte {
 	var req hookRequest
 	if err := json.Unmarshal(line, &req); err != nil {
-		writeHookReply(conn, "", &hookError{Code: "invalid_request", Message: "invalid request: " + err.Error()})
-		return
+		return hookReplyBytes("", &hookError{Code: "invalid_request", Message: "invalid request: " + err.Error()})
 	}
 	switch req.Method {
 	case methodReportAgent, methodReportAgentSession, methodReleaseAgent:
 	default:
-		writeHookReply(conn, req.ID, &hookError{Code: "invalid_request",
+		return hookReplyBytes(req.ID, &hookError{Code: "invalid_request",
 			Message: fmt.Sprintf("invalid request: unknown method %q", req.Method)})
-		return
 	}
 	var p hookReportParams
 	if err := json.Unmarshal(req.Params, &p); err != nil {
-		writeHookReply(conn, req.ID, &hookError{Code: "invalid_request", Message: "invalid request: " + err.Error()})
-		return
+		return hookReplyBytes(req.ID, &hookError{Code: "invalid_request", Message: "invalid request: " + err.Error()})
 	}
 	done := make(chan *hookError, 1)
 	o.post(func() { done <- o.applyHookReport(req.Method, p) })
 	select {
 	case herr := <-done:
-		writeHookReply(conn, req.ID, herr)
+		return hookReplyBytes(req.ID, herr)
 	case <-time.After(hookReadTimeout):
-		writeHookReply(conn, req.ID, &hookError{Code: "invalid_request", Message: "server busy"})
+		return hookReplyBytes(req.ID, &hookError{Code: "invalid_request", Message: "server busy"})
 	}
 }
 
@@ -484,6 +511,22 @@ func stripControl(s string) string {
 
 func hasControl(s string) bool {
 	return strings.ContainsFunc(s, func(r rune) bool { return r < 0x20 || r == 0x7f })
+}
+
+// hookSocketFor is the hook-report socket a pane should be told about: this
+// process's own for a local pane, and the pane's own cathost relay for a remote
+// one.
+//
+// "" — a host whose cathost is too old to relay, or one that could not open its
+// socket — means the pane is created with no hook environment at all. That is
+// the right answer rather than a fallback: with no CATS_SOCKET_PATH the
+// installed hooks stay dormant, where a stale path would have them dialing
+// whatever happens to answer on the other machine.
+func (o *orch) hookSocketFor(rt *paneRuntime) string {
+	if o.paneIsLocal(rt.id) {
+		return o.hookSocket
+	}
+	return o.hostOf(rt).hookRelaySocket()
 }
 
 // paneEnvMap builds a pane's hook environment (CATS_SOCKET_PATH /
