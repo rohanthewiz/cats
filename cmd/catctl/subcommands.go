@@ -40,14 +40,15 @@ type subcommand struct {
 type argKind int
 
 const (
-	argNone      argKind = iota // no candidates (free text, numbers)
-	argPane                     // live pane ids, from pane.list
-	argTab                      // live tab numbers, from tab.list
-	argWorkspace                // live workspace ids, from workspace.list
-	argDirection                // left|right|up|down
-	argSplitDir                 // h|v
-	argCycleDir                 // next|prev
-	argTheme                    // installed theme names, from theme.list
+	argNone       argKind = iota // no candidates (free text, numbers)
+	argPane                      // live pane ids, from pane.list
+	argTab                       // live tab numbers, from tab.list
+	argWorkspace                 // live workspace ids, from workspace.list
+	argDirection                 // left|right|up|down
+	argSplitDir                  // h|v
+	argCycleDir                  // next|prev
+	argTheme                     // installed theme names, from theme.list
+	argDetachHost                // detachable cathost ids, from host.list
 )
 
 // usageErr reports malformed subcommand arguments; its message is the verb's
@@ -103,6 +104,14 @@ var subcommands = []subcommand{
 	{"rename-ws", app.CmdWorkspaceRename, "rename-ws <id> <name...>", []argKind{argWorkspace}, "rename a workspace (empty name clears)", buildRenameWorkspace},
 	{"lock-ws", app.CmdWorkspaceLock, "lock-ws [id]", []argKind{argWorkspace}, "close a workspace to plugins and agents (active by default)", buildLockWorkspace},
 	{"unlock-ws", app.CmdWorkspaceLock, "unlock-ws [id]", []argKind{argWorkspace}, "reopen a locked workspace (active by default)", buildUnlockWorkspace},
+
+	// Host commands. They edit the roster of the RUNNING catway and its config
+	// file together, so neither needs a restart. Only the two positional
+	// essentials are exposed here — a token, a token file or a pinned
+	// fingerprint goes through `catctl host.attach --params …`, which is also
+	// the shape a script would rather write.
+	{"attach-host", app.CmdHostAttach, "attach-host <id> <addr> [label...]", nil, "attach a cathost (addr: unix://path, tcp://host:port, tls://host:port)", buildAttachHost},
+	{"detach-host", app.CmdHostDetach, "detach-host <id> [force]", []argKind{argDetachHost}, "detach a cathost (force also re-homes its panes)", buildDetachHost},
 
 	// Misc.
 	{"agent", app.CmdAgentFocus, "agent <pane>", []argKind{argPane}, "reveal an agent's pane", buildPane},
@@ -424,6 +433,37 @@ func buildTheme(args []string) (json.RawMessage, error) {
 		return nil, usageErr{"theme <name>"}
 	}
 	return marshal(app.ConfigSetParams{Theme: &app.ConfigTheme{Name: args[0]}})
+}
+
+// buildAttachHost: attach-host <id> <addr> [label...].
+func buildAttachHost(args []string) (json.RawMessage, error) {
+	if len(args) < 2 {
+		return nil, usageErr{"attach-host <id> <addr> [label...]"}
+	}
+	p := app.HostAttachParams{ID: args[0], Addr: args[1]}
+	if len(args) > 2 {
+		p.Label = strings.Join(args[2:], " ")
+	}
+	return marshal(p)
+}
+
+// buildDetachHost: detach-host <id> [force].
+//
+// "force" is spelled out as a word rather than offered as a flag because it is
+// the argument that decides whether running terminals are thrown away; a script
+// that types it has said so, and a fat-fingered `-f` cannot mean it by accident.
+func buildDetachHost(args []string) (json.RawMessage, error) {
+	if len(args) < 1 || len(args) > 2 {
+		return nil, usageErr{"detach-host <id> [force]"}
+	}
+	p := app.HostDetachParams{ID: args[0]}
+	if len(args) == 2 {
+		if args[1] != "force" {
+			return nil, usageErr{"detach-host <id> [force]"}
+		}
+		p.Force = true
+	}
+	return marshal(p)
 }
 
 // buildWorkspace: ws <id>.

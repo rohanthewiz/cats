@@ -50,6 +50,19 @@ type daemon struct {
 	// tcp and tls meant adding two dialers and no branch in run().
 	socket string
 	dial   func() (net.Conn, error)
+	// spec is the config entry this daemon was built from. It is kept whole so
+	// the roster diff (applyHostRoster) can ask the only question that matters
+	// when a config is re-read or edited live: is this still the same host, or
+	// does it need redialing? Comparing the entry beats comparing the fields
+	// pulled out of it, because a field added to config.Host later is then
+	// part of the comparison automatically rather than silently ignored.
+	spec config.Host
+	// quit is closed by stop() to end the dial loop: a detached host must stop
+	// redialing, and must do it without the disconnect toast and pending-flush
+	// that a real connection loss earns — the panes it held have already been
+	// dealt with by the detach itself.
+	quit chan struct{}
+
 	// token/tokenFile authenticate us to a cathost started with -token-file.
 	// The file is read at each handshake rather than at startup, so rotating a
 	// token takes effect on the next reconnect instead of on a catway restart —
@@ -57,7 +70,7 @@ type daemon struct {
 	token     string
 	tokenFile string
 
-	mu sync.Mutex // serializes writes; guards conn, peerVersion and lastErr
+	mu sync.Mutex // serializes writes; guards conn, peerVersion, lastErr and stopped
 	// peerVersion is the negotiated protocol version this cathost's welcome
 	// agreed to, 0 while disconnected. It is what decides who resolves a pane's
 	// git branch: a v3 daemon does it itself (the cwd is on its filesystem), a
@@ -71,6 +84,10 @@ type daemon struct {
 	// forward that died, which are three different fixes.
 	lastErr string
 	conn    net.Conn
+	// stopped marks a detached daemon. Checked by the dial loop at both of its
+	// waiting points so a detach that lands mid-dial or mid-session ends the
+	// goroutine at the next boundary instead of one backoff later.
+	stopped bool
 }
 
 // unixDialer builds the dial func for a unix-socket cathost — the only
@@ -217,6 +234,8 @@ func newDaemon(o *orch, h config.Host) (*daemon, error) {
 		kind:      kind,
 		socket:    target,
 		dial:      dial,
+		spec:      h,
+		quit:      make(chan struct{}),
 		token:     h.Token,
 		tokenFile: h.TokenFile,
 	}, nil
@@ -275,6 +294,40 @@ func (d *daemon) status() (connected bool, lastErr string) {
 	return d.conn != nil, d.lastErr
 }
 
+// stop ends this daemon for good: the dial loop exits at its next boundary and
+// the live connection (if any) is closed so a blocked read returns immediately.
+// Idempotent — a second call on an already-stopped daemon is a no-op, which
+// matters because a roster diff may stop a host the operator is detaching at
+// the same moment.
+//
+// It deliberately does NOT touch the panes, the pending requests or the
+// waiters: the caller (detachHost) has already re-homed or failed all of them,
+// and it knows things the daemon does not — chiefly whether this is a detach or
+// a redial under a changed address.
+func (d *daemon) stop() {
+	d.mu.Lock()
+	if d.stopped {
+		d.mu.Unlock()
+		return
+	}
+	d.stopped = true
+	close(d.quit)
+	conn := d.conn
+	d.conn = nil
+	d.peerVersion = 0
+	d.mu.Unlock()
+	if conn != nil {
+		_ = conn.Close() // unblocks the pump's read; run() then sees stopped
+	}
+}
+
+// stopping reports whether stop has been called.
+func (d *daemon) stopping() bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.stopped
+}
+
 // setPeerVersion records the version the connected cathost reported.
 func (d *daemon) setPeerVersion(v int) {
 	d.mu.Lock()
@@ -315,6 +368,9 @@ func (d *daemon) authToken() (string, error) {
 func (d *daemon) run() {
 	backoff := time.Second
 	for {
+		if d.stopping() {
+			return
+		}
 		conn, err := d.dial()
 		if err != nil {
 			log.Printf("catway: cathost dial (%s): %v (retrying in %s)", d.label, err, backoff)
@@ -323,7 +379,15 @@ func (d *daemon) run() {
 			// still refresh it: the failure is the only news there is about a
 			// machine nobody has heard from.
 			d.o.post(func() { d.o.broadcastHosts() })
-			time.Sleep(backoff)
+			// The backoff is the loop's longest wait, so it is where a detach
+			// would otherwise be felt: a host that is down and being detached
+			// must not keep a goroutine (and a roster row) alive for another
+			// five seconds after the operator dropped it.
+			select {
+			case <-time.After(backoff):
+			case <-d.quit:
+				return
+			}
 			backoff = min(backoff*2, 5*time.Second)
 			continue
 		}
@@ -333,6 +397,13 @@ func (d *daemon) run() {
 			log.Printf("catway: cathost session (%s): %v", d.label, err)
 		}
 		_ = conn.Close()
+		if d.stopping() {
+			// A detached host is not a lost one. Everything below announces an
+			// outage and fails the work that was in flight; the detach has
+			// already re-homed the panes and said so, and repeating it here
+			// would toast the user about a machine they just removed.
+			return
+		}
 		d.setLastErr(err) // nil (a clean end) clears it; a real error explains the gap
 		d.setConn(nil)
 		// Only this host's in-flight work is failed: a request or waiter on

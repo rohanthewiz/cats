@@ -186,7 +186,9 @@ func main() {
 	// The host roster: the configured hosts with "local" synthesized from
 	// server.cathost_socket (which the --socket flag may have overridden), so a
 	// config with no hosts: block yields exactly the single host catway has
-	// always dialed. Restart-only, like every other server.* setting.
+	// always dialed. Unlike the other server.* settings this one is not
+	// restart-only: host.attach/host.detach and server.reload_config re-shape
+	// the roster live (cmd/catway/hosts.go).
 	hosts := cfg.EffectiveHosts(eff.CathostSocket)
 	o, err := buildOrch(hosts, spawnRoot(), effPersist)
 	if err != nil {

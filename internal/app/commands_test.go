@@ -60,6 +60,11 @@ type fakeBackend struct {
 	// hosts is the canned roster host.list answers with (nil ⇒ a single
 	// connected local host, the shape of a session with no hosts: block).
 	hosts []HostInfo
+	// lastHostAttach / lastHostDetach are the params of the last roster edit the
+	// dispatcher forwarded, so a test can prove the shape checks ran on the
+	// dispatcher side and the rest arrived intact.
+	lastHostAttach HostAttachParams
+	lastHostDetach HostDetachParams
 	// staged records StageSpawn calls so tab.create tests can assert the
 	// override reached the backend (and, via the log, before applyModel).
 	staged map[uint32]SpawnOverride
@@ -89,6 +94,21 @@ func (b *fakeBackend) Hosts() []HostInfo {
 		}}
 	}
 	return b.hosts
+}
+
+// HostAttach / HostDetach record the call and echo the roster: the dispatcher's
+// share of host.attach/host.detach is the shape and existence checks, and these
+// let a test see which of them let a request through.
+func (b *fakeBackend) HostAttach(r Responder, p HostAttachParams) {
+	b.rec("hostAttach")
+	b.lastHostAttach = p
+	r.OK(HostListResult{Hosts: b.Hosts()})
+}
+
+func (b *fakeBackend) HostDetach(r Responder, p HostDetachParams) {
+	b.rec("hostDetach")
+	b.lastHostDetach = p
+	r.OK(HostListResult{Hosts: b.Hosts()})
 }
 
 func (b *fakeBackend) RefreshUsage()       { b.rec("refreshUsage") }
@@ -1712,6 +1732,87 @@ func TestDispatchHostListSingleHost(t *testing.T) {
 	got := okDataFor[HostListResult](t, h, CmdHostList).Hosts
 	if len(got) != 1 || !got[0].Default || !got[0].Connected {
 		t.Fatalf("single-host roster = %+v", got)
+	}
+}
+
+// --- Host roster edits (Phase 5): host.attach / host.detach -------------------
+//
+// The dispatcher owns only the shape checks here — the roster and the config
+// file are the backend's — so these pin down which requests it refuses on its
+// own and that everything else arrives intact.
+
+func TestDispatchHostAttach(t *testing.T) {
+	h := newCmdHarness(t)
+	twoHostBackend(h)
+
+	r := h.resp()
+	h.d.Dispatch(CmdHostAttach, params(t, HostAttachParams{
+		ID: "buildbox", Label: "the build box", Addr: "tls://buildbox:8422",
+		TokenFile: "/etc/cats/token", Fingerprint: "ab12", Default: true,
+	}), r)
+	if !r.okCall {
+		t.Fatalf("host.attach: ok=%v fail=%v (%q)", r.okCall, r.failCall, r.errMsg)
+	}
+	got := h.b.lastHostAttach
+	if got.ID != "buildbox" || got.Addr != "tls://buildbox:8422" || got.Label != "the build box" ||
+		got.TokenFile != "/etc/cats/token" || got.Fingerprint != "ab12" || !got.Default {
+		t.Fatalf("params reached the backend mangled: %+v", got)
+	}
+	// The id is deliberately NOT checked against the roster here: "already
+	// attached" is the backend's answer, since it is the half that knows.
+	if !slices.Contains(*h.log, "hostAttach") {
+		t.Fatalf("effects = %v", *h.log)
+	}
+}
+
+// The two fields without which there is no host at all are refused before the
+// backend sees them — an attach that reached the config layer with no address
+// would be a validation error about a file the caller never mentioned.
+func TestDispatchHostAttachRequiresIDAndAddr(t *testing.T) {
+	for _, p := range []HostAttachParams{
+		{Addr: "unix:///tmp/x.sock"},
+		{ID: "devbox"},
+	} {
+		h := newCmdHarness(t)
+		r := h.resp()
+		h.d.Dispatch(CmdHostAttach, params(t, p), r)
+		if !r.failCall {
+			t.Fatalf("host.attach %+v was accepted", p)
+		}
+		if slices.Contains(*h.log, "hostAttach") {
+			t.Fatalf("host.attach %+v reached the backend: %v", p, *h.log)
+		}
+	}
+}
+
+func TestDispatchHostDetach(t *testing.T) {
+	h := newCmdHarness(t)
+	twoHostBackend(h)
+
+	r := h.resp()
+	h.d.Dispatch(CmdHostDetach, params(t, HostDetachParams{ID: "devbox", Force: true}), r)
+	if !r.okCall {
+		t.Fatalf("host.detach: ok=%v fail=%v (%q)", r.okCall, r.failCall, r.errMsg)
+	}
+	if got := h.b.lastHostDetach; got.ID != "devbox" || !got.Force {
+		t.Fatalf("params reached the backend mangled: %+v", got)
+	}
+}
+
+// Detaching something the roster never listed is a caller mistake, and one the
+// dispatcher can answer from the roster it already reads for every host param —
+// so it does, rather than making the backend restate it.
+func TestDispatchHostDetachUnknownHost(t *testing.T) {
+	h := newCmdHarness(t)
+	twoHostBackend(h)
+
+	r := h.resp()
+	h.d.Dispatch(CmdHostDetach, params(t, HostDetachParams{ID: "nowhere"}), r)
+	if !r.failCall || !strings.Contains(r.errMsg, "nowhere") {
+		t.Fatalf("host.detach of an unknown host: fail=%v err=%q", r.failCall, r.errMsg)
+	}
+	if slices.Contains(*h.log, "hostDetach") {
+		t.Fatalf("it reached the backend anyway: %v", *h.log)
 	}
 }
 

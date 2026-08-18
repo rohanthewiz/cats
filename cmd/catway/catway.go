@@ -130,17 +130,27 @@ type orch struct {
 	// A single-host session has exactly one entry ("local"), which is why
 	// nothing above this seam had to learn about hosts at all.
 	//
-	// The map is built once in newOrchWith and not mutated afterwards (hot
-	// attach/detach is a later phase), so the dial goroutines may read it.
+	// The map is owned by the loop goroutine: it is built in newOrchWith and
+	// re-shaped by applyHostRoster (host.attach / host.detach / a config
+	// reload), both of which run there. A dial goroutine must therefore never
+	// read it directly — it reaches the orch only by posting a closure, which
+	// is why every host-scoped thing a daemon needs (its id, its label) is a
+	// field on the daemon rather than a lookup back through here.
 	hosts map[string]*daemon
 	// hostOrder is the roster in configured order — the order the sidebar and
 	// host.list print, which map iteration cannot supply.
 	hostOrder   []string
 	defaultHost string
-	area        layout.Rect
-	cellW       uint32
-	cellH       uint32
-	cwd         string
+	// cathostSocket is the local host's socket as resolved at startup, flags
+	// included. Every later roster edit re-derives the effective roster from
+	// o.cfg.Hosts (the file's half) plus this (the synthesized local host's
+	// address), which the config file alone cannot supply — a --socket flag may
+	// have overridden it.
+	cathostSocket string
+	area          layout.Rect
+	cellW         uint32
+	cellH         uint32
+	cwd           string
 	// visible is the current viewport's pane set (active workspace's active
 	// tab) — the panes whose frames stream to browsers (§8). Recomputed by
 	// refreshViewport whenever the viewport changes.
@@ -455,6 +465,9 @@ func (o *orch) installHosts(hosts []config.Host) error {
 		if h.Default {
 			o.defaultHost = h.ID
 		}
+		if h.ID == localHostID {
+			o.cathostSocket = d.socket // the effective path, flags already applied
+		}
 	}
 	if o.defaultHost == "" && len(o.hostOrder) > 0 {
 		o.defaultHost = o.hostOrder[0] // EffectiveHosts marks one, but never depend on it
@@ -754,6 +767,26 @@ func (o *orch) workspaceHostID(ws *workspace.Workspace) string {
 	return ws.HostID
 }
 
+// workspaceHostOwns reports whether a workspace's start directory belongs to the
+// machine a pane is running on — the question paneCwd asks before handing that
+// path to a cathost.
+//
+// It is not simply workspaceHostID(ws) == host, because that resolves an
+// unknown host to the default one, and a workspace pinned to a host that has
+// LEFT the roster would then match every default-host pane. That is exactly the
+// state a detach produces: the workspace still says "devbox", its panes have
+// been re-homed onto the local machine, and its identity cwd is a path on a
+// filesystem this catway can no longer reach. A departed host owns nothing.
+func (o *orch) workspaceHostOwns(ws *workspace.Workspace, hostID string) bool {
+	if ws == nil {
+		return false
+	}
+	if ws.HostID != "" && o.hosts[ws.HostID] == nil {
+		return false
+	}
+	return o.workspaceHostID(ws) == hostID
+}
+
 // syncDaemon reconciles the daemons' PTY sets with the session: spawn panes a
 // host lacks, resize panes whose grid changed, close panes dropped from the
 // model, and drop their runtimes. Each pane's commands go to its own host.
@@ -894,7 +927,7 @@ func (o *orch) createPane(rt *paneRuntime) {
 func (o *orch) paneCwd(pid uint32) string {
 	host := o.paneHostID(pid)
 	if ws := o.session.PaneWorkspace(layout.PaneID(pid)); ws != nil && ws.IdentityCwd != "" &&
-		o.workspaceHostID(ws) == host {
+		o.workspaceHostOwns(ws, host) {
 		return ws.IdentityCwd
 	}
 	if host != localHostID {
@@ -1599,9 +1632,13 @@ func (o *orch) PaneMeta(pane uint32) app.PaneMeta {
 // theme and copy-mode keybindings take effect on the next page load / browser
 // connection. Server settings (addr, sockets, auth, tls) are fixed for the
 // process's lifetime — they need a restart — so this deliberately re-applies
-// only the front-end half. A missing config path or a parse/validate error
-// leaves the current page in place and reports the failure to the caller. Runs
-// on the loop goroutine; the HTTP handler reads o.page atomically.
+// only the front-end half, plus the one server-side section that is no longer
+// restart-only: hosts:, which is diffed against the running roster exactly as
+// host.attach/host.detach diff it (a host added to the file is dialed, one
+// removed is detached and its panes re-homed). A missing config path or a
+// parse/validate error leaves the current page in place and reports the failure
+// to the caller. Runs on the loop goroutine; the HTTP handler reads o.page
+// atomically.
 func (o *orch) ReloadConfig() error {
 	if o.cfgPath == "" || o.baseHTML == nil {
 		log.Printf("catway: server.reload_config — no config file in use; nothing to reload")
@@ -1616,7 +1653,15 @@ func (o *orch) ReloadConfig() error {
 	page := renderPage(o.baseHTML, cfg)
 	o.page.Store(&page)
 	o.broadcastTheme() // the theme lands live everywhere; keybindings still need a reload
-	log.Printf("catway: reloaded config from %s — theme applied live, keybindings apply to new page loads; server settings need a restart", path)
+	// The roster is adopted after o.cfg, so a host that fails to build leaves the
+	// reload otherwise applied and the previous roster running — the same
+	// all-or-nothing guarantee applyHostRoster gives host.attach, scoped to the
+	// hosts: section rather than to the whole file.
+	if err := o.applyHostRoster(cfg.Hosts); err != nil {
+		log.Printf("catway: server.reload_config: hosts: %v (keeping the running roster)", err)
+		return err
+	}
+	log.Printf("catway: reloaded config from %s — theme and hosts applied live, keybindings apply to new page loads; other server settings need a restart", path)
 	return nil
 }
 

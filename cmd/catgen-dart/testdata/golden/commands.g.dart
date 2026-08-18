@@ -141,6 +141,10 @@ abstract final class CmdName {
 
   static const String pathList = 'path.list';
 
+  static const String hostAttach = 'host.attach';
+
+  static const String hostDetach = 'host.detach';
+
   static const String sessionGet = 'session.get';
 
   static const String workspaceList = 'workspace.list';
@@ -468,6 +472,88 @@ class DirParams {
 
   Map<String, Object?> toJson() => {
         'dir': dir,
+      };
+}
+
+/// HostAttachParams: host.attach — one cathost, in the same shape config.yaml's
+/// hosts: entries use (config.Host), because the command's other half is writing
+/// exactly that entry to the file. A client that can describe a host in the
+/// config can describe one here with the same keys.
+///
+/// Addr is scheme://target — unix://path, tcp://host:port (loopback only), or
+/// tls://host:port. Token/TokenFile authenticate to a cathost started with
+/// -token-file, and Fingerprint pins its self-signed certificate; TokenFile is
+/// the better of the pair, since a literal token is written into the config file
+/// verbatim.
+class HostAttachParams {
+  const HostAttachParams({
+    required this.id,
+    this.label = '',
+    required this.addr,
+    this.token = '',
+    this.tokenFile = '',
+    this.fingerprint = '',
+    this.isDefault = false,
+  });
+
+  final String id;
+  final String label;
+  final String addr;
+  final String token;
+  final String tokenFile;
+  final String fingerprint;
+
+  /// Default makes the new host the one unqualified panes land on. It is
+  /// "is_default" on the wire for the same reason HostInfo.Default is: `default`
+  /// is a reserved word in the generated Dart client.
+  final bool isDefault;
+
+  factory HostAttachParams.fromJson(Map<String, Object?> j) => HostAttachParams(
+        id: asString(j['id']),
+        label: asString(j['label']),
+        addr: asString(j['addr']),
+        token: asString(j['token']),
+        tokenFile: asString(j['token_file']),
+        fingerprint: asString(j['fingerprint']),
+        isDefault: asBool(j['is_default']),
+      );
+
+  Map<String, Object?> toJson() => {
+        'id': id,
+        if (label.isNotEmpty) 'label': label,
+        'addr': addr,
+        if (token.isNotEmpty) 'token': token,
+        if (tokenFile.isNotEmpty) 'token_file': tokenFile,
+        if (fingerprint.isNotEmpty) 'fingerprint': fingerprint,
+        if (isDefault) 'is_default': isDefault,
+      };
+}
+
+/// HostDetachParams: host.detach — drop a cathost from the running session and
+/// from the config's hosts: block.
+///
+/// A host holding panes is refused unless Force, because detaching it abandons
+/// those terminals: the command cannot move a running process between machines,
+/// so Force re-homes the panes onto the default host, where they respawn as
+/// fresh shells. The refusal is the default so that "detach" never silently
+/// costs somebody a working session.
+class HostDetachParams {
+  const HostDetachParams({
+    required this.id,
+    this.force = false,
+  });
+
+  final String id;
+  final bool force;
+
+  factory HostDetachParams.fromJson(Map<String, Object?> j) => HostDetachParams(
+        id: asString(j['id']),
+        force: asBool(j['force']),
+      );
+
+  Map<String, Object?> toJson() => {
+        'id': id,
+        if (force) 'force': force,
       };
 }
 
@@ -2251,6 +2337,8 @@ const List<CommandSpec> kCommandSpecs = <CommandSpec>[
   CommandSpec('plugin.list', replyRequired: true),
   CommandSpec('plugin.uninstall', paramsRequired: true),
   CommandSpec('path.list', replyRequired: true),
+  CommandSpec('host.attach', paramsRequired: true),
+  CommandSpec('host.detach', paramsRequired: true),
   CommandSpec('session.get'),
   CommandSpec('workspace.list'),
   CommandSpec('tab.list'),
@@ -2541,6 +2629,14 @@ mixin CatsCommands implements CatsCommandTransport {
   /// This method always correlates, so it always runs.
   Future<PathListResult> pathList([PathListParams? params]) async =>
       PathListResult.fromJson(asObj(await invoke(CmdName.pathList, params?.toJson())));
+
+  /// `host.attach`
+  Future<HostListResult> hostAttach(HostAttachParams params) async =>
+      HostListResult.fromJson(asObj(await invoke(CmdName.hostAttach, params.toJson())));
+
+  /// `host.detach`
+  Future<HostListResult> hostDetach(HostDetachParams params) async =>
+      HostListResult.fromJson(asObj(await invoke(CmdName.hostDetach, params.toJson())));
 
   /// `session.get`
   Future<SessionInfoResult> sessionGet() async =>

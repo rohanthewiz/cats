@@ -3621,7 +3621,85 @@
     return !h || !!h.connected;
   }
 
-  initSectionFold("sec-hosts", "host-hctl", "hosts");
+  // The heading carries one button of its own: attach. Detach is per-row (a
+  // right-click on the host it would remove), because it is the destructive
+  // half and the row is the only place that says what it holds.
+  //
+  // Both are hidden with the section when there is a single host — the whole
+  // point of that rule is that a session nobody configured hosts for looks
+  // exactly as it did before hosts existed — so the gear menu carries "attach
+  // host…" as well. That is the entry point out of one-host life; without it
+  // the first attach would be a config-file edit and a restart, which is the
+  // thing this phase exists to remove.
+  (function initHostHeadingCtl() {
+    document.getElementById("host-hctl")
+      .appendChild(mkBtn("＋", "attach a cathost", "", openAttachHostDialog));
+    initSectionFold("sec-hosts", "host-hctl", "hosts");
+  })();
+
+  // openAttachHostDialog collects one hosts: entry. The fields are the config
+  // file's, in the order an operator fills them: what to call it, how to reach
+  // it, then the two credentials only a tls:// host needs. Everything but id and
+  // addr is optional, and a unix:// host (including an `ssh -L` forward) needs
+  // neither credential.
+  function openAttachHostDialog() {
+    dialogFields({
+      title: "attach cathost",
+      submitLabel: "attach",
+      hint: "addr: unix:///path/to.sock · tls://box:8422 · tcp://127.0.0.1:8422 (loopback only). " +
+        "A tls host needs the token file and fingerprint cathost printed at startup.",
+      fields: [
+        { label: "id", placeholder: "devbox" },
+        { label: "address", placeholder: "tls://devbox:8422" },
+        { label: "label", placeholder: "(optional — defaults to the id)" },
+        { label: "token file", placeholder: "(optional) /path/to/token" },
+        { label: "fingerprint", placeholder: "(optional) pinned SHA-256" },
+      ],
+      onSubmit: (id, addr, label, tokenFile, fingerprint) => {
+        id = (id || "").trim(); addr = (addr || "").trim();
+        if (!id || !addr) { toast("a host needs an id and an address"); return; }
+        sendCmdAwait("host.attach", {
+          id, addr, label: (label || "").trim(),
+          token_file: (tokenFile || "").trim(), fingerprint: (fingerprint || "").trim(),
+        }, (res) => {
+          if (!res.ok) { toast(res.error || "attach failed"); return; }
+          // No "connected" claim here: the reply means the roster took it, and
+          // the dial is still in flight. The row's dot is the honest report.
+          toast("attached " + id + " — dialing");
+        });
+      },
+    });
+  }
+
+  // hostMenuItems is the roster row's context menu. Detach is the only verb: a
+  // host's address is edited in the config file (or re-attached), and a "make
+  // default" that silently moved where new panes land is the kind of one-click
+  // change that is only discovered later, from the wrong machine's shell.
+  // The local host gets no menu at all (an empty list, which the row's handler
+  // declines to open): it is synthesized from server.cathost_socket rather than
+  // configured, so there is nothing to detach and nowhere to move its panes to.
+  function hostMenuItems(h) {
+    if (h.local) return [];
+    const detach = (force) => sendCmdAwait("host.detach", { id: h.id, force: !!force }, (res) => {
+      if (!res.ok) { toast(res.error || "detach failed"); return; }
+      toast("detached " + (h.label || h.id));
+    });
+    if (!h.panes) {
+      return [{ label: "detach host", danger: true, fn: () => detach(false) }];
+    }
+    return [{
+      label: "detach host (" + h.panes + (h.panes === 1 ? " pane" : " panes") + ")…",
+      danger: true,
+      fn: () => dialogConfirm({
+        title: "detach " + (h.label || h.id),
+        message: "Detach this cathost? Its " + h.panes + (h.panes === 1 ? " pane" : " panes") +
+          " cannot follow — the terminals stay on that machine and the panes respawn as new shells on the default host.",
+        warn: "Anything running in them is left behind.",
+        confirmLabel: "detach and respawn", danger: true,
+        onConfirm: () => detach(true),
+      }),
+    }];
+  }
 
   function renderHosts(items) {
     hostItems = items || [];
@@ -3647,7 +3725,13 @@
       li.appendChild(meta);
       li.title = h.id + " · " + (h.addr_kind || "?") +
         " · " + h.panes + (h.panes === 1 ? " pane" : " panes") +
-        (h.connected ? "" : (h.error ? " · " + h.error : " · not connected"));
+        (h.connected ? "" : (h.error ? " · " + h.error : " · not connected")) +
+        (h.local ? "" : " · right-click to detach");
+      li.addEventListener("contextmenu", (e) => {
+        const items = hostMenuItems(h);
+        if (!items.length) return;
+        e.preventDefault(); openCtx(e.clientX, e.clientY, items);
+      });
       hostListEl.appendChild(li);
     }
     // Every host badge in the app is gated on this message, so a roster change
@@ -6657,6 +6741,7 @@
       { label: "settings", fn: openSettings },
       { label: "keybinds", fn: openHelp },
       { label: "reload config", fn: () => sendCmd("server.reload_config", {}) },
+      { label: "attach host…", fn: openAttachHostDialog },
     ];
     if (updateInfo) items.push({ label: "update ready" + (updateInfo.version ? " — " + updateInfo.version : ""), fn: showUpdateBanner });
     items.push("-", { label: "stop server…", danger: true, fn: confirmStopServer });

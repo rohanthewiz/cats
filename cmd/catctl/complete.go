@@ -421,6 +421,8 @@ func argCandidates(kind argKind, words []string) []candidate {
 		return liveWorkspaces(words)
 	case argTheme:
 		return liveThemes(words)
+	case argDetachHost:
+		return liveDetachableHosts(words)
 	case argDirection:
 		return []candidate{{"left", ""}, {"right", ""}, {"up", ""}, {"down", ""}}
 	case argSplitDir:
@@ -546,6 +548,47 @@ func liveThemes(words []string) []candidate {
 			desc = strings.TrimPrefix(desc+" · active", " · ")
 		}
 		out = append(out, candidate{t.Name, desc})
+	}
+	return out
+}
+
+// liveDetachableHosts offers the cathost ids detach-host will accept: the roster
+// minus the synthesized local host, which is always refused (it is this
+// machine's own cathost and the fallback every other host's panes land on).
+//
+// The kind is named for that filter rather than for the roster, because a
+// completion that offers a value the command cannot take is worse than one that
+// offers nothing. A future slot that wants the WHOLE roster — a --host argument,
+// say — should add its own kind rather than widen this one.
+//
+// Each candidate is described the way the roster reads: the label when it says
+// something the id does not, then how many panes would have to be re-homed —
+// the one fact that decides whether the command needs "force".
+func liveDetachableHosts(words []string) []candidate {
+	var res app.HostListResult
+	if !liveCall(words, app.CmdHostList, &res) {
+		return nil
+	}
+	out := make([]candidate, 0, len(res.Hosts))
+	for _, h := range res.Hosts {
+		if h.Local {
+			continue
+		}
+		desc := h.Label
+		if desc == h.ID {
+			desc = ""
+		}
+		parts := []string{}
+		if desc != "" {
+			parts = append(parts, desc)
+		}
+		if h.Panes > 0 {
+			parts = append(parts, fmt.Sprintf("%d panes", h.Panes))
+		}
+		if !h.Connected {
+			parts = append(parts, "offline")
+		}
+		out = append(out, candidate{h.ID, strings.Join(parts, " · ")})
 	}
 	return out
 }

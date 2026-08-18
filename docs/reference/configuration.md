@@ -36,10 +36,12 @@ flowchart TD
   EDIT["edit config.yaml"]
   KIND{"which section?"}
   LIVE["theme · keybindings<br/>catctl reload — re-renders the served page"]
+  HOSTS["hosts<br/>catctl reload — diffs the roster, dials/detaches"]
   FIXED["server.* · persistence.*<br/>fixed for the process lifetime — restart catway"]
 
   EDIT --> KIND
   KIND -->|"appearance"| LIVE
+  KIND -->|"machines"| HOSTS
   KIND -->|"wiring"| FIXED
 ```
 
@@ -48,7 +50,9 @@ server-side with the theme and keybindings injected, re-rendering it is all a
 theme change needs — no restart, no rebuild.
 
 The settings modal in the UI does the same thing through `config.get` /
-`config.set`, which persist the live-appliable sections.
+`config.set`, which persist the live-appliable sections. `hosts:` has its own
+pair — `host.attach` / `host.detach` — for the same reason: see
+[editing the roster](#editing-the-roster-without-a-restart).
 
 ## `server`
 
@@ -150,13 +154,48 @@ An address catway cannot safely dial (cleartext off the loopback, a fingerprint
 that is not a SHA-256) fails at **startup**, with the reason, rather than
 becoming a roster row that retries forever.
 
-Like `server.*`, this section is read once at startup: adding or removing a host
-needs a restart. Every pane records the host it ran on, so a restart re-adopts
-each pane on its own machine; a pane whose host has left the config falls back to
-the default host rather than staying dark.
+Every pane records the host it ran on, so a restart re-adopts each pane on its
+own machine; a pane whose host has left the config falls back to the default
+host rather than staying dark.
 
 `catctl hosts` prints the live roster (which hosts, connected or not, and how
 many panes each holds).
+
+### Editing the roster without a restart
+
+Unlike the rest of the server-side settings, `hosts:` is **live**. Three ways in,
+all of which change the running session *and* rewrite this section of the file,
+so the roster and the config can never disagree:
+
+```sh
+catctl attach-host devbox unix:///tmp/devbox-cathost.sock "devbox (ssh)"
+catctl detach-host devbox            # refused while it still holds panes
+catctl detach-host devbox force      # …unless you say so; see below
+catctl reload                        # apply a hand-edit of hosts: to the running catway
+```
+
+In the browser it is the `＋` on the HOSTS section heading (and **attach host…**
+in the gear menu, since that section is hidden while there is only one host);
+detach is a right-click on the host's row.
+
+A newly attached host starts dialing immediately — the reply means the roster
+took it, not that it answered, so the row's dot is the thing to watch. An
+address catway cannot safely dial is refused before anything is written.
+
+Detaching is the destructive half, because a terminal cannot move between
+machines: the panes on that host are abandoned. So a host that still holds panes
+is refused unless you force it, and forcing it re-homes those panes onto the
+default host, where they **respawn as new shells** — the layout, names and public
+handles survive, whatever was running does not. The departing cathost is asked to
+close the PTYs it was holding (best effort — it is often unreachable, which is
+usually why it is being detached).
+
+The `local` host is not detachable: it is synthesized rather than configured, and
+it is where everything else falls back to.
+
+A live edit that only changes a host's `label` (or moves `default`) keeps the
+connection — a rename must not interrupt the streams a machine is carrying. A
+changed `addr` redials, keeping that host's panes: same host, new route.
 
 ## `persistence`
 

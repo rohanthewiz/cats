@@ -37,8 +37,13 @@ server:
 # "local", on server.cathost_socket above: no roster, no badges, nothing changes.
 #
 # The "local" entry is always synthesized unless you list one with that id, so a
-# hosts: block only ever names the EXTRA machines. Restarting catway is what
-# picks up a change here.
+# hosts: block only ever names the EXTRA machines.
+#
+# This block is live: `catctl attach-host <id> <addr>` / `catctl detach-host <id>`
+# edit the running roster AND rewrite this section, and `catctl reload` applies a
+# hand-edit here without a restart. Detaching a host that still holds panes is
+# refused unless forced — those terminals are on the other machine and cannot
+# follow, so forcing it respawns them as new shells on the default host.
 #
 # addr is scheme://target:
 #   unix://path       a socket on this machine — including one forwarded from a

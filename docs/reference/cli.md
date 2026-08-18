@@ -193,6 +193,26 @@ and an agent row inside it will not reveal its pane — revealing a pane *is* a
 switch, so the two refusals are the same one. Every deliberate route in still
 works: the row's context menu, the command palette, and the keyboard.
 
+Hosts — these edit the **running** roster and the config's `hosts:` block
+together, so neither needs a restart:
+
+```bash
+catctl attach-host <id> <addr> [label...]   # unix://path | tcp://host:port | tls://host:port
+catctl detach-host <id>                     # refused while it still holds panes
+catctl detach-host <id> force               # ...and re-home them onto the default host
+```
+
+A token, a token file or a pinned fingerprint goes through the raw form, which is
+also the shape a script would rather write:
+
+```bash
+catctl host.attach --params '{"id":"box","addr":"tls://box.lan:8422","token_file":"~/.config/cats/box.token","fingerprint":"dd7d9b31..."}'
+```
+
+`force` is the word that throws work away: the panes on that host cannot follow
+it, so they respawn as new shells on the default host. See
+[hosts](configuration.md#editing-the-roster-without-a-restart).
+
 Misc:
 
 ```bash

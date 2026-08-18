@@ -100,6 +100,16 @@ const (
 	// server's filesystem instead of asking the user to type it blind.
 	CmdPathList = "path.list"
 
+	// Host commands (the HOSTS section's buttons + catctl): attach a cathost to
+	// the running session, or detach one. They are §7 commands rather than a
+	// config-file-only setting for the same reason config.set is one — a browser
+	// client is an authenticated owner of this catway, and making "add the
+	// build box" a restart turns the roster into something only the terminal
+	// can edit. Both persist to the config's hosts: block, so the roster
+	// survives the restart they no longer require.
+	CmdHostAttach = "host.attach"
+	CmdHostDetach = "host.detach"
+
 	// Read-only query commands (§7): they return a snapshot of session state
 	// and mutate nothing, so the dispatcher answers them straight from the
 	// Session with no Backend effects.
@@ -239,6 +249,11 @@ var commandSpecs = []CommandSpec{
 
 	// Path listing.
 	{Name: CmdPathList, Params: PathListParams{}, Result: PathListResult{}, ReplyRequired: true},
+
+	// Hosts. Both writers echo the new roster, so a client repaints from the
+	// reply instead of waiting for the hosts push that also follows.
+	{Name: CmdHostAttach, Params: HostAttachParams{}, Result: HostListResult{}, ParamsRequired: true},
+	{Name: CmdHostDetach, Params: HostDetachParams{}, Result: HostListResult{}, ParamsRequired: true},
 
 	// Read-only queries. They answer straight from the Session, so they are not
 	// reply-gated — a query with no reply channel is a cheap no-op rather than a
@@ -950,6 +965,42 @@ type HostInfo struct {
 // HostListResult is CmdResult.Data for host.list.
 type HostListResult struct {
 	Hosts []HostInfo `json:"hosts"`
+}
+
+// HostAttachParams: host.attach — one cathost, in the same shape config.yaml's
+// hosts: entries use (config.Host), because the command's other half is writing
+// exactly that entry to the file. A client that can describe a host in the
+// config can describe one here with the same keys.
+//
+// Addr is scheme://target — unix://path, tcp://host:port (loopback only), or
+// tls://host:port. Token/TokenFile authenticate to a cathost started with
+// -token-file, and Fingerprint pins its self-signed certificate; TokenFile is
+// the better of the pair, since a literal token is written into the config file
+// verbatim.
+type HostAttachParams struct {
+	ID          string `json:"id"`
+	Label       string `json:"label,omitempty"`
+	Addr        string `json:"addr"`
+	Token       string `json:"token,omitempty"`
+	TokenFile   string `json:"token_file,omitempty"`
+	Fingerprint string `json:"fingerprint,omitempty"`
+	// Default makes the new host the one unqualified panes land on. It is
+	// "is_default" on the wire for the same reason HostInfo.Default is: `default`
+	// is a reserved word in the generated Dart client.
+	Default bool `json:"is_default,omitempty"`
+}
+
+// HostDetachParams: host.detach — drop a cathost from the running session and
+// from the config's hosts: block.
+//
+// A host holding panes is refused unless Force, because detaching it abandons
+// those terminals: the command cannot move a running process between machines,
+// so Force re-homes the panes onto the default host, where they respawn as
+// fresh shells. The refusal is the default so that "detach" never silently
+// costs somebody a working session.
+type HostDetachParams struct {
+	ID    string `json:"id"`
+	Force bool   `json:"force,omitempty"`
 }
 
 // --- Worktree params & results (§7, WS8 dialogs) ------------------------------

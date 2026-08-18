@@ -67,6 +67,13 @@ type Backend interface {
 	// runtime connection, not domain state — the model only ever records which
 	// host id a pane named.
 	Hosts() []HostInfo
+	// HostAttach / HostDetach edit the roster live (host.attach / host.detach):
+	// dial a newly named cathost, or stop talking to one and re-home whatever it
+	// held. Both persist the change to the config's hosts: block and resolve r
+	// synchronously — the work is a config write plus a goroutine, and the dial
+	// itself is the daemon's own retry loop, not something to wait on here.
+	HostAttach(r Responder, p HostAttachParams)
+	HostDetach(r Responder, p HostDetachParams)
 	// PaneMeta reports the runtime-side metadata for a pane — detected agent,
 	// live title, cwd — which the session's domain model cannot know. The
 	// dispatcher merges it into pane.list / pane.get results; an unknown pane
@@ -986,6 +993,44 @@ func (d *Dispatcher) Dispatch(name string, dec ParamDecoder, r Responder) {
 
 	case CmdHostList:
 		r.OK(HostListResult{Hosts: d.backend.Hosts()})
+
+	case CmdHostAttach:
+		var p HostAttachParams
+		if err := dec.Decode(&p); err != nil {
+			bad(err)
+			return
+		}
+		// Shape checks only. Whether the id is free, the address parses, and the
+		// scheme is one catway can dial are all answered against the live roster
+		// and config by the backend — the half that holds both.
+		if p.ID == "" {
+			r.Fail("host.attach: id is required")
+			return
+		}
+		if p.Addr == "" {
+			r.Fail("host.attach: addr is required (unix://path, tcp://host:port or tls://host:port)")
+			return
+		}
+		d.backend.HostAttach(r, p)
+
+	case CmdHostDetach:
+		var p HostDetachParams
+		if err := dec.Decode(&p); err != nil {
+			bad(err)
+			return
+		}
+		if p.ID == "" {
+			r.Fail("host.detach: id is required")
+			return
+		}
+		// Unlike attach, the id must already be one: detaching a host nobody
+		// named is a caller mistake worth reporting, and checkHost's message
+		// already lists what does exist.
+		if err := d.checkHost(p.ID); err != nil {
+			r.Fail(err.Error())
+			return
+		}
+		d.backend.HostDetach(r, p)
 
 	default:
 		r.Fail(fmt.Sprintf("command %q not supported yet (WS2 in progress)", name))

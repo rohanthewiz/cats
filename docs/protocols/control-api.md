@@ -377,6 +377,27 @@ carries `id`, `label`, `connected`, `addr_kind`, `is_default`, `panes`, and an
 with the single synthesized `local` host — which is how a client distinguishes
 "one machine here" from "the remote one is unreachable".
 
+`host.attach` and `host.detach` are the writers, and they edit the RUNNING
+session: attach builds the daemon and starts dialing, detach stops it. Both also
+rewrite the config's `hosts:` block — a roster that vanished on restart would
+make the pair a toy — and both answer with the new roster, so a client repaints
+from the reply. `host.attach` takes a config `Host` (`id`, `addr`, and
+optionally `label`, `token`/`token_file`, `fingerprint`, `is_default`); an id
+already on the roster, or an address catway cannot safely dial, is refused
+before anything is written.
+
+`host.detach` takes `{id, force}`. Without `force` a host still holding panes is
+refused, because detaching abandons those terminals — the command cannot move a
+running process between machines. With it, the panes are re-homed onto the
+default host and respawn there as new shells (layout, names and public handles
+survive; what was running does not), and the departing cathost is asked to close
+the PTYs it held. The synthesized `local` host cannot be detached.
+
+`server.reload_config` applies a hand-edit of `hosts:` the same way: the file's
+roster is diffed against the running one, a new entry is dialed, a removed one is
+detached and its panes re-homed. A label-only change keeps the connection; a
+changed address redials and keeps that host's panes.
+
 `pane.list`'s `host` and `workspace.list`'s `host` mean different things on
 purpose: a pane's is *resolved* (which machine is holding that terminal right
 now, default fallbacks applied), while a workspace's is the id it *stored* —
@@ -389,6 +410,7 @@ new panes rather than a location.
 |--------|----------------|
 | `worktree.list` / `worktree.create` / `worktree.open` / `worktree.remove` | — |
 | `config.get` / `config.set` | — |
+| `host.attach` / `host.detach` | `attach-host <id> <addr> [label...]` / `detach-host <id> [force]` |
 | `theme.list` / `theme.save` / `theme.delete` | — |
 | `plugin.list` / `plugin.uninstall` | — |
 | `path.list` | — |

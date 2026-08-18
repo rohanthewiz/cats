@@ -347,6 +347,25 @@ func (s *Session) PaneHost(id layout.PaneID) string {
 	return ""
 }
 
+// SetPaneHost records the cathost a pane's terminal now lives on. It is the
+// one writer of that field outside of pane creation, and it exists for exactly
+// one caller: detaching a host has to move the panes it held onto another
+// machine, and the move has to outlive the process — a session file still
+// naming a host nobody is attached to would put those panes back on a ghost at
+// the next restore. Reports false for an unknown pane.
+//
+// Only a pane's host moves this way, never its workspace's: PaneState.HostID is
+// where a terminal *is*, while Workspace.HostID is a policy for new panes, and
+// a workspace pinned to a host that comes back should go on preferring it.
+func (s *Session) SetPaneHost(id layout.PaneID, hostID string) bool {
+	st := s.paneState(id)
+	if st == nil {
+		return false
+	}
+	st.HostID = hostID
+	return true
+}
+
 // SplitPane splits target (the focused pane if nil) in dir, focusing the new
 // pane, and returns its id.
 func (s *Session) SplitPane(target *layout.PaneID, dir layout.Direction) (layout.PaneID, error) {

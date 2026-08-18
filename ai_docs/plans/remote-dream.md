@@ -239,7 +239,78 @@ Known gap for Phase 5: hot attach/detach still needs a restart, and an unqualifi
 - Tests: `protocol_test.go`, `host_test.go` (bad token/old version rejected; v2 hello on unix accepted), `daemon_test.go` (fingerprint mismatch fails).
 - Ship gate: `hosts: [{id: devbox, addr: tls://devbox:8422, token_file: …, fingerprint: …}]` works with no ssh.
 
-### Phase 5 — hot attach/detach
+### Phase 5 — hot attach/detach — **DONE**
+
+As built (deltas from the plan below): there is no `attachHost`/`detachHost` pair —
+every roster change goes through one **`applyHostRoster(configured []config.Host)`**
+that re-derives the effective roster from `o.cfg.Hosts` + `o.cathostSocket` and
+diffs it against what is running, so attach, detach and `ReloadConfig` are the
+same code path and the file and the session can never describe different
+machines (`orch.effHosts` was written and then deleted for that reason: the
+config *is* the base). Its order is load-bearing — build → retire → install →
+re-home → start → announce: every new daemon is built before the first one is
+retired, so an unusable address fails the whole edit (`TestApplyHostRosterIsAllOrNothing`),
+and the departing host's panes are found while they still resolve to it. The diff
+compares `sameDialTarget` (id/addr/token/token_file/fingerprint), not the whole
+entry: a rename or a moved `default:` must not drop a live connection, while a
+changed address rebuilds the daemon and **keeps** its panes (same host, new route
+— its PTYs are not closed either, since the reconnect's reconcile may adopt them).
+`daemon` grew `spec`, `quit` and `stopped`: `stop()` closes the live conn to
+unblock the pump and the dial loop checks `stopping()` at both waiting points
+(the backoff is a `select`, so detaching a host that is down does not leave a
+goroutine and a roster row alive for another five seconds), and a stopped daemon
+returns *without* the disconnect toast and pending-flush — a detach is not an
+outage. Two things the plan did not anticipate: `Session.SetPaneHost` had to
+exist (a re-home has to outlive the process, or the next restore puts the pane
+back on a ghost) and it stores `""`, not the default host's id, so a displaced
+pane tracks the default rather than being pinned; and `paneCwd`'s workspace check
+became `workspaceHostOwns`, because `workspaceHostID` resolves an unknown host to
+the *default*, which made a workspace pinned to the just-detached host match every
+re-homed pane and hand it a path from a filesystem this catway can no longer reach
+(found live). A forced detach sends `close_pane` to the departing host first
+(best effort — it is usually unreachable, which is why it is being detached) so a
+persistent cathost nobody is attached to does not keep the shells. `Workspace.HostID`
+is deliberately left alone: a pane's host is where it *is*, a workspace's is a
+policy for new panes, and a host that comes back should get its workspace again.
+Dispatcher-side the checks are shape-only (`id`/`addr` present, `checkHost` for
+detach) — the roster and the file are the backend's. catctl got `attach-host <id>
+<addr> [label...]` / `detach-host <id> [force]` (force is a word, not a flag: it
+is the argument that throws work away) and a new `argDetachHost` completion kind
+that offers the roster *minus* local, since detaching local is always refused.
+The browser got `＋` on the HOSTS heading, a right-click detach on each row (with
+a confirm dialog when it holds panes) and **attach host… in the gear menu** — the
+section is hidden while there is one host, which would otherwise make the first
+attach unreachable from the UI.
+Tests added: `cmd/catway/hostedit_test.go` (attach lands in roster + memory +
+file and never writes the synthesized local host; `is_default` moves and releases;
+five refusals each leaving no file behind; detach refuses local, refuses a host
+with panes, plain-detaches an empty one; forced detach closes the remote PTY,
+re-homes the pane, respawns it on the default host and clears the file; a re-homed
+pane does not inherit the departed host's path; the dial loop stops; rename keeps
+the connection; readdress redials and keeps its panes; two hosts dropped in one
+edit are each told about their OWN panes — the orphan list accumulates, and the
+first draft handed the running total to every departing host; an unusable entry
+changes nothing), `internal/app/commands_test.go` (attach/detach routing, missing id/addr
+refused before the backend, unknown detach id refused), `cmd/catctl` (the new
+kind in `TestArgKindsMatchSynopsis`).
+Verified live (two cathosts on two sockets, one catway, no restart anywhere):
+`catctl attach-host` → the row appears and connects and the `hosts:` block is
+written; a workspace created on it spawns there (`echo` into a file on B proves
+it); plain detach is refused naming the pane count and the destination; forced
+detach re-homes the pane, which then streams a live shell on A with its branch
+badge (seen through `catctl probe`); `catctl reload` after a hand-edit attaches,
+renames (without redialing — B logged no second connect) and detaches; every
+refusal (cleartext off the loopback, duplicate id, `local`, unknown id) leaves
+the roster untouched; `catctl __complete` offers `devbox` and not `local`.
+Docs updated: `docs/reference/configuration.md` (a new "editing the roster
+without a restart" section + the live-reload diagram), `docs/protocols/control-api.md`
+(the two commands and what `force` costs), `docs/reference/cli.md` (the verbs and
+the raw form for tokens/fingerprints), `config.example.yaml`.
+catgen-dart goldens regenerated (two new commands); **cats-mobile has not been
+regenerated** — that needs cats pushed first (see memory: cats-mobile regen flow).
+Known gap, unchanged from Phase 3: an unqualified `pane.split` still takes the
+*workspace's* default host rather than the split pane's.
+
 - §7 `host.attach`/`host.detach` (`HostAttachParams` = config `Host` shape); `orch.attachHost/detachHost` (detach refuses while it owns panes unless `force` → respawn on default); persist to `hosts:` like `config.set`; `ReloadConfig` diffs the roster; roster buttons in the aside; `catctl host attach/detach`.
 
 ### Phase 6 — follow-ups
