@@ -296,6 +296,25 @@ type Push struct {
 	// between working and blocked while a tool retries must not vibrate the
 	// phone every few seconds.
 	MinInterval string `yaml:"min_interval,omitempty"`
+	// Actions turns the notification's buttons on. An "attention" push then
+	// carries the agent's own menu (read off the pane's screen) as tappable
+	// choices, and tapping one answers the prompt.
+	//
+	// It is opt-in, and separately from the topic URL, because it is the only
+	// INBOUND surface in this file: everything else here is catway posting out.
+	// Turning it on means a request arriving from the internet, carrying a token
+	// the notification server has also seen, can type into a terminal. That is
+	// worth deciding on purpose.
+	Actions bool `yaml:"actions,omitempty"`
+	// ActionURL is the base catway is reachable at FROM THE PHONE — scheme,
+	// host and port, no trailing path. The action endpoint is appended.
+	//
+	// It cannot be derived: catway knows the address it bound (often
+	// 127.0.0.1, or a Tailscale name, or nothing routable at all) but not the
+	// one a phone on another network would use to come back. Required when
+	// Actions is set, because buttons pointing nowhere are worse than no
+	// buttons — they look like they worked.
+	ActionURL string `yaml:"action_url,omitempty"`
 }
 
 // Interval is the parsed MinInterval; an empty value means no debounce.
@@ -647,8 +666,25 @@ func (p Push) Validate() error {
 	if u.Host == "" {
 		return fmt.Errorf("url %q: missing host", p.URL)
 	}
+	if p.Actions {
+		if p.ActionURL == "" {
+			return errors.New("action_url: required when push.actions is set (the address a phone reaches this catway at)")
+		}
+		au, err := url.Parse(p.ActionURL)
+		if err != nil {
+			return fmt.Errorf("action_url %q: %w", p.ActionURL, err)
+		}
+		if (au.Scheme != "http" && au.Scheme != "https") || au.Host == "" {
+			return fmt.Errorf("action_url %q: want an http or https base URL", p.ActionURL)
+		}
+	}
 	return nil
 }
+
+// ActionBase is ActionURL without its trailing slash, so a caller can join a
+// path onto it without producing a double slash — which some reverse proxies
+// treat as a different route, and every notification client renders verbatim.
+func (p Push) ActionBase() string { return strings.TrimRight(p.ActionURL, "/") }
 
 // resolvePath picks the config path: an explicit override (flag) wins, then
 // CATS_CONFIG, then the default location. explicit reports whether the path came

@@ -219,6 +219,15 @@ func main() {
 			MinInterval: mustPushInterval(effPush),
 		})
 		log.Printf("catway: push notifications enabled (%s)", pushHostOf(effPush.URL))
+		// The inbound half is opt-in on its own (notifyaction.go). Validate has
+		// already refused push.actions without an action_url, so reaching here
+		// with the flag set means there is an address a phone can come back to.
+		o.pushActions = effPush.Actions
+		o.pushActionBase = effPush.ActionBase()
+		if o.pushActions {
+			log.Printf("catway: notification actions enabled (callbacks at %s%s…)",
+				o.pushActionBase, notifyActionPath)
+		}
 	}
 	initialPage := renderPage(indexHTML, cfg)
 	o.page.Store(&initialPage)
@@ -325,6 +334,15 @@ func main() {
 	s.Get("/", func(ctx rweb.Context) error {
 		return ctx.WriteHTML(string(*o.page.Load()))
 	})
+	// The notification-action callback. Registered unconditionally so a stale
+	// button gets a straight refusal rather than the login redirect a phone
+	// would render as a mysterious success — but no token can exist unless
+	// push.actions is set, so with the feature off every request here is one.
+	//
+	// POST only, deliberately: notification clients and link previewers fetch
+	// URLs they are shown, and a GET that answered a prompt would be answered
+	// by whatever prefetched it.
+	s.Post(notifyActionPath+":token", o.handleNotifyAction)
 	s.WebSocket("/ws", func(ws *rweb.WSConn) error {
 		return o.serve(ws)
 	})

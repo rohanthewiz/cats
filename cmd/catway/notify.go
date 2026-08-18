@@ -131,7 +131,7 @@ func (o *orch) notifyAll(n browserproto.Notify, agent, msg string) {
 	o.emitEvent(app.EventPaneNotify, n.Pane,
 		app.PaneNotifyEvent{Pane: n.Pane, Agent: agent, Kind: n.Kind, Message: msg,
 			ID: n.ID, Actions: n.Actions})
-	o.push.Send(o.pushEvent(n, agent))
+	o.sendPush(n, agent)
 }
 
 // pushEvent renders a notification's push payload from the pane's live runtime

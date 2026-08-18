@@ -80,7 +80,27 @@ type Event struct {
 	Pub   string // public handle "w1:p3" — the stable id a deep link should carry
 	Agent string
 	Cwd   string
+	// Actions are the buttons the notification carries, already resolved to
+	// absolute URLs the phone can POST to. This package neither mints nor
+	// interprets the tokens in them: it renders a header. Empty is the normal
+	// case and the default.
+	Actions []Action
 }
+
+// Action is one notification button: what it says, and where tapping it posts.
+//
+// It is a URL rather than anything richer because that is the whole contract an
+// ntfy client can honour — it fires an HTTP request and shows the result. All
+// the meaning (which notification, which choice, may this caller answer at all)
+// lives at the other end of that URL, where catway can check it.
+type Action struct {
+	Label string
+	URL   string
+}
+
+// maxActions is what ntfy renders. A fourth button is not shown, so sending one
+// would be a choice the user is silently denied.
+const maxActions = 3
 
 // Config is the resolved push configuration. Token is separate from the rest
 // because it comes from the environment, never the config file — see the
@@ -221,6 +241,46 @@ func (b *Bridge) applyHeaders(req *http.Request, ev Event) {
 	if b.cfg.ClickURL != "" && ev.Pub != "" {
 		req.Header.Set("Click", b.cfg.ClickURL+ev.Pub)
 	}
+	if a := renderActions(ev.Actions); a != "" {
+		req.Header.Set("Actions", a)
+	}
+}
+
+// renderActions builds ntfy's Actions header:
+//
+//	http, "Yes", https://cats.example/api/notify-action/tok, method=POST, clear=true
+//
+// Each label is quoted unconditionally rather than only when it contains a
+// comma. The labels here come from an agent's own menu text (see
+// internal/promptopts), so "Yes, and don't ask again" is the common case, not
+// the exotic one — and a header that is correct only for the labels somebody
+// remembered to test is the kind that breaks on the notification that mattered.
+//
+// clear=true dismisses the notification on the phone once the request goes.
+// Without it the buttons stay on the lock screen after being pressed, inviting
+// the second tap that catway will refuse.
+func renderActions(actions []Action) string {
+	if len(actions) > maxActions {
+		actions = actions[:maxActions]
+	}
+	var parts []string
+	for _, a := range actions {
+		if a.URL == "" {
+			continue
+		}
+		// clampHeader also flattens the newlines terminal-derived text can
+		// carry and trims, so the empty check below sees the rendered label
+		// rather than what it started as.
+		label := clampHeader(strings.NewReplacer(`"`, "'", ";", ",").Replace(a.Label))
+		if label == "" {
+			// A button with no words is a button nobody can choose. The label
+			// is display text, so a stand-in is better than dropping a choice
+			// the prompt offered.
+			label = "OK"
+		}
+		parts = append(parts, `http, "`+label+`", `+a.URL+`, method=POST, clear=true`)
+	}
+	return strings.Join(parts, "; ")
 }
 
 // renderBody is what a lock screen shows under the title. Two lines: the

@@ -59,6 +59,14 @@ func (g *authGuard) middleware(ctx rweb.Context) error {
 	if path == "/login" || path == "/favicon.ico" {
 		return ctx.Next()
 	}
+	// The notification-action callback carries its own credential — a
+	// single-use token for one button on one notification — and must be
+	// reachable by a phone that holds no session and no password. It is public
+	// HERE and authenticated THERE (notifyaction.go); a token that names no
+	// live notification is refused, which with push.actions off is every token.
+	if strings.HasPrefix(path, notifyActionPath) {
+		return ctx.Next()
+	}
 	if path == "/ws" {
 		origin := ctx.Request().Header("Origin")
 		if !gwauth.OriginOK(origin, ctx.Request().Host(), g.allowedOrigins) {

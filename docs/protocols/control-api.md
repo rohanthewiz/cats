@@ -526,6 +526,13 @@ attempt reported an error. Buttons expire after 30 minutes: by then the agent ha
 usually timed out and the shell has scrolled, and an answer would land somewhere
 it was never meant for.
 
+When [`push.actions`](../reference/configuration.md#answering-from-the-notification)
+is on, an `attention` notification that declared no actions of its own gets them
+derived: catway reads the blocked pane's screen, parses the agent's menu out of
+it, and the phone's buttons answer the prompt. Those derived buttons are
+phone-only — a browser is one click from the pane — and a notification that
+declared its own actions is never second-guessed that way.
+
 This confers no privilege a caller does not already have: anything holding this
 socket can `pane.send_input` directly, and gating the honest route would only
 make it look more privileged than the dishonest one — the same argument written

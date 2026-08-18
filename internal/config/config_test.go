@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 )
@@ -447,5 +448,46 @@ hosts:
 	h := got.Hosts[0]
 	if h.ID != "devbox" || h.Addr != "unix:///tmp/devbox.sock" || !h.Default || h.DisplayLabel() != "devbox (ssh)" {
 		t.Fatalf("host = %+v", h)
+	}
+}
+
+// push.actions is the only INBOUND surface in the config, and buttons that
+// point nowhere are worse than no buttons — they look like they worked. So the
+// switch requires an address a phone can come back to, and that address has to
+// be a real http(s) base.
+func TestPushActionsRequireAnActionURL(t *testing.T) {
+	base := Push{Enabled: true, URL: "https://ntfy.sh/cats-7f3a91"}
+
+	on := base
+	on.Actions = true
+	if err := on.Validate(); err == nil {
+		t.Fatal("push.actions with no action_url validated")
+	} else if !strings.Contains(err.Error(), "action_url") {
+		t.Fatalf("refusal does not name the missing key: %v", err)
+	}
+
+	bad := on
+	bad.ActionURL = "cats.example"
+	if err := bad.Validate(); err == nil {
+		t.Fatal("a schemeless action_url validated")
+	}
+
+	ok := on
+	ok.ActionURL = "https://cats.example/"
+	if err := ok.Validate(); err != nil {
+		t.Fatalf("valid action_url refused: %v", err)
+	}
+	// The base is joined onto, so its trailing slash must not survive into a
+	// double-slash path that a proxy may route somewhere else entirely.
+	if got := ok.ActionBase(); got != "https://cats.example" {
+		t.Errorf("ActionBase() = %q", got)
+	}
+
+	// With actions off the field is ignored, so an old config that set one
+	// while experimenting still starts.
+	off := base
+	off.ActionURL = "not a url"
+	if err := off.Validate(); err != nil {
+		t.Fatalf("action_url checked while actions are off: %v", err)
 	}
 }

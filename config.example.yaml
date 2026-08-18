@@ -110,6 +110,18 @@ push:
   priority:                            # ntfy priority per kind. Deliberately not
     attention: "high"                  # "urgent" — that bypasses Do Not Disturb,
     finished: "low"                    # and a blocked agent is not an emergency.
+  actions: false                       # render tappable buttons on an "attention"
+                                       # push: catway reads the blocked agent's
+                                       # own menu off its screen and each button
+                                       # answers the prompt. This is the ONLY
+                                       # inbound surface in this file — a request
+                                       # from the internet, carrying a token your
+                                       # notification server has also seen, can
+                                       # type into a terminal. Off by default.
+  action_url: ""                       # where a PHONE reaches this catway
+                                       # (scheme + host, no path). Required with
+                                       # actions: catway knows what it bound, not
+                                       # what a phone elsewhere would dial.
   min_interval: "60s"                  # debounce per (pane, kind), so an agent
                                        # flapping working↔blocked buzzes once
   # click_url: "cats://pane/"          # deep-link base; the pane handle ("w1:p3")

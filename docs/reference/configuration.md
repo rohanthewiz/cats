@@ -280,6 +280,8 @@ push:
     finished: "low"
   min_interval: "60s"       # debounce per (pane, kind)
   click_url: "cats://pane/" # deep-link base; the pane handle is appended
+  actions: false            # tappable buttons that answer the agent's prompt
+  action_url: ""            # where a phone reaches this catway; required with actions
 ```
 
 | Key | Flag | Default | Notes |
@@ -290,6 +292,8 @@ push:
 | `priority` | — | `attention: high`, `finished: low` | per kind. Accepts ntfy's `min`/`low`/`default`/`high`/`urgent` or `1`–`5` |
 | `min_interval` | — | `60s` | Go duration. `0` disables the debounce |
 | `click_url` | — | — | tap target; the pane's public handle (`w1:p3`) is appended. Empty means no click action |
+| `actions` | — | `false` | render buttons that answer the agent's prompt from the notification |
+| `action_url` | — | — | the base URL a **phone** reaches this catway at (scheme + host, no path). Required when `actions` is set |
 
 Because the POST is an ordinary outbound request from the machine `catway` runs
 on, it needs no inbound reachability and keeps working when no client is
@@ -306,6 +310,55 @@ be raised by anything holding the control socket must not be able to reach a
 phone until you say so. `priority` tops out at `high`, never `urgent`: ntfy's
 urgent bypasses Do Not Disturb on Android, and a blocked agent is not a 3am
 emergency.
+
+### Answering from the notification
+
+With `actions: true`, an `attention` push carries the blocked agent's own
+choices as buttons:
+
+```yaml
+push:
+  enabled: true
+  url: "https://ntfy.sh/cats-7f3a91"
+  actions: true
+  action_url: "https://cats.tail1234.ts.net"   # what the PHONE dials
+```
+
+When an agent blocks, catway reads that pane's screen, parses the menu out of
+the bottom of it (`internal/promptopts`), and renders up to three buttons —
+"Yes", "Yes, and don't ask again", "No". Tapping one POSTs to
+`<action_url>/api/notify-action/<token>` and the choice is typed into the pane.
+
+Four properties are worth understanding before you turn it on.
+
+**The token is not your password.** Your notification server relays the request
+and therefore sees whatever credential rides it, so the button carries a token
+that answers exactly one choice on one notification, once, and expires with it
+(30 minutes). It authorizes nothing else — no command, no pane, no read.
+
+**A notification is answerable once**, whichever route gets there first. A
+browser toast and a lock screen can show the same buttons; the first tap wins
+and the second is refused. An action whose pane exited in the meantime is still
+spent, so a retry over a flaky mobile link cannot land an answer twice.
+
+**Nothing is guessed.** If the screen does not hold a menu the parser is sure of
+— numbered from 1, ascending, at the very bottom, at least two entries — the
+notification arrives with no buttons at all. A wrong button types a real
+keystroke into a real terminal, so the failure mode is "go and look".
+
+**`action_url` cannot be derived.** catway knows the address it bound (often
+`127.0.0.1`, or a Tailscale name, or nothing routable at all), not the one a
+phone on another network would use to come back. Use the address you would type
+into that phone's browser — a Tailscale/WireGuard name, or a reverse proxy in
+front of catway. The endpoint is public in the auth middleware, because a phone
+holds no session cookie; it is authenticated by the token instead, and with
+`actions` off no token exists, so every request to it is refused.
+
+Buttons derived from a screen are **phone-only**. The browser has already had
+its toast, and a browser is one click away from the pane itself; a second
+delayed toast carrying the same choices would be noise in the one place the
+prompt is already reachable. A caller that wants buttons in the browser declares
+them on [`ui.notify`](../protocols/control-api.md#notifications).
 
 > **Warning — the topic URL is a capability**
 >

@@ -291,3 +291,87 @@ func TestRenderTagsSkipsCommaBearingAgent(t *testing.T) {
 		t.Fatalf("renderTags = %q", got)
 	}
 }
+
+// The Actions header is ntfy's, and its shape is the whole contract with the
+// phone: every label quoted (agent menu text is full of commas), POST, and
+// clear=true so pressed buttons leave the lock screen instead of inviting the
+// second tap catway will refuse.
+func TestRenderActions(t *testing.T) {
+	got := renderActions([]Action{
+		{Label: "Yes", URL: "https://cats.example/api/notify-action/aaa"},
+		{Label: "Yes, and don't ask again", URL: "https://cats.example/api/notify-action/bbb"},
+	})
+	want := `http, "Yes", https://cats.example/api/notify-action/aaa, method=POST, clear=true; ` +
+		`http, "Yes, and don't ask again", https://cats.example/api/notify-action/bbb, method=POST, clear=true`
+	if got != want {
+		t.Errorf("renderActions =\n %s\nwant\n %s", got, want)
+	}
+}
+
+// Every way a label or a list can be hostile to the header format.
+func TestRenderActionsSanitizes(t *testing.T) {
+	cases := []struct {
+		name string
+		in   []Action
+		want string
+	}{
+		{"no actions", nil, ""},
+		{"an action with no url is skipped", []Action{{Label: "X"}}, ""},
+		{
+			// A quote would end the label early and turn the rest into
+			// positional parameters ntfy does not understand.
+			name: "quotes and semicolons in the label",
+			in:   []Action{{Label: `Say "no"; then stop`, URL: "https://x/a"}},
+			want: `http, "Say 'no', then stop", https://x/a, method=POST, clear=true`,
+		},
+		{
+			// Terminal-derived text can carry newlines, and an HTTP header
+			// cannot.
+			name: "newlines in the label",
+			in:   []Action{{Label: "Yes\nplease", URL: "https://x/a"}},
+			want: `http, "Yes please", https://x/a, method=POST, clear=true`,
+		},
+		{
+			name: "an empty label still names its button",
+			in:   []Action{{Label: "   ", URL: "https://x/a"}},
+			want: `http, "OK", https://x/a, method=POST, clear=true`,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := renderActions(c.in); got != c.want {
+				t.Errorf("renderActions = %q, want %q", got, c.want)
+			}
+		})
+	}
+
+	// A fourth button is not rendered by ntfy, so sending one would be a choice
+	// the user is silently denied — it is dropped here where that is visible.
+	four := make([]Action, 4)
+	for i := range four {
+		four[i] = Action{Label: "b", URL: "https://x/a"}
+	}
+	if n := strings.Count(renderActions(four), "http, "); n != maxActions {
+		t.Errorf("rendered %d actions, want %d", n, maxActions)
+	}
+}
+
+// Actions ride the real delivery, and an event without them sets no header at
+// all — the bridge's behaviour for every notification before this existed.
+func TestSendCarriesActionsHeader(t *testing.T) {
+	rec := newRecorder(t)
+	b := New(Config{URL: rec.srv.URL, Kinds: map[string]bool{KindAttention: true}})
+
+	b.Send(Event{Kind: KindAttention, Pane: 1, Title: "claude needs attention", Pub: "w1:p1",
+		Actions: []Action{{Label: "Yes", URL: "https://cats.example/api/notify-action/tok"}}})
+	rec.wait(t, 1)
+	if got := rec.at(rec.count()-1).header.Get("Actions"); !strings.Contains(got, "notify-action/tok") {
+		t.Errorf("Actions header = %q", got)
+	}
+
+	b.Send(Event{Kind: KindAttention, Pane: 2, Title: "codex needs attention", Pub: "w1:p2"})
+	rec.wait(t, 1)
+	if got := rec.at(rec.count()-1).header.Get("Actions"); got != "" {
+		t.Errorf("a notification with no actions set Actions = %q", got)
+	}
+}

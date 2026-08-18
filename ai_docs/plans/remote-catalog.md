@@ -141,17 +141,82 @@ the suppression exception), `docs/reference/cli.md` (`catctl notify` + the raw f
 catgen-dart goldens regenerated (`NotifyAction`, the two commands); **cats-mobile has not
 been regenerated** — still owed from slice 1 (see memory: cats-mobile regen flow).
 
-### Phase 2 — reply from the notification
+### Phase 2 — reply from the notification — **DONE**
 
-`push.actions: true` opts in. An `attention` notification captures the pane's screen tail,
-parses the agent's numbered prompt (`internal/promptopts`), and renders up to three ntfy
-action buttons pointing at `POST /api/notify-action/<token>`. Tokens are single-use,
-per-action, 30-minute, and stored in memory only. The route is public in the middleware and
-authenticated by the token alone.
+As built. Phase 1 gave a notification buttons and one way to press them; this is the other
+way — a tap on a lock screen, which is the case the push bridge exists for at all. The
+single-use guarantee needed no new machinery: the notification registry already drops
+itself on the first take, so a token is spent whichever route reaches it first.
 
-Ship gate: a real blocked claude in a pane produces a phone notification whose buttons say
-what the prompt says; tapping one answers the prompt and the second tap is refused; a token
-for a pane that has since exited is refused by name.
+Deltas from the plan above:
+
+* **The push waits; the browser never does.** Deriving an agent's menu means reading its
+  screen, which is a round trip to that pane's cathost — so `notifyAll` grew an outbound
+  half, `sendPush`, and it is the only step that can block. The broadcast and the event
+  have already gone by then, which is `notifyAll`'s own stated rule ("the browser broadcast
+  goes first and unconditionally") applied to a slower push rather than bent for it. Every
+  way the read can fail — timeout, host gone, pane closed while in flight, nothing
+  parseable — still pushes, without buttons.
+* **The internal capture goes through the ordinary pending queue** (`funcResponder`, three
+  lines) rather than a private path. It gets the timeout, the host-scoped flush and the
+  disconnect handling for free; a private path would have needed its own copies of all
+  three, which is how the "capture failure swallows the notification" bug gets written.
+* **Scope is `recent`, not `visible`.** A pane whose viewport is scrolled up still has its
+  prompt at the bottom of the *buffer*, and that is what the agent is waiting on.
+* **`internal/promptopts` refuses more than it accepts, and that is the feature.** A menu
+  is the last contiguous run of numbered lines with nothing printed after it, numbered from
+  1, ascending by 1, at least two entries. Anchoring at the bottom is not an optimisation:
+  numbered lines are everywhere in ordinary output, and "nothing came after it" is the only
+  thing that distinguishes a live prompt from a list that finished. A run starting at 4 is
+  a menu whose head has scrolled off, and offering "4" as the first button would answer a
+  prompt whose other options are invisible. Nothing parsed ⇒ no buttons, never a guess.
+* **Derived buttons are phone-only**, and the notification that declared its own is never
+  second-guessed. A browser is one click from the pane; a second delayed toast carrying the
+  same choices would be noise in the one place the prompt is already reachable.
+* **POST only.** Notification clients, link previewers and crawlers fetch URLs they are
+  shown; a GET that answered a prompt would be answered by whatever prefetched it. Verified
+  live: `GET` on a live token is a 404.
+* **The route is public in the middleware and authenticated by the token.** A phone holds
+  no session cookie, so it cannot be gated there; the token answers one choice on one
+  notification once and expires with it, which is the only credential worth showing the
+  notification server that relays the request. With `push.actions` off no token exists, so
+  every request to the endpoint is refused — the route is still registered, because a stale
+  button deserves a straight 409 rather than the login redirect a phone would render as a
+  mysterious success.
+* **`action_url` is required by `Validate` when `actions` is set** and cannot be derived:
+  catway knows the address it bound, not the one a phone on another network would dial.
+  Buttons pointing nowhere are worse than none — they look like they worked.
+* Labels are quoted unconditionally in the `Actions` header. Agent menu text is
+  "Yes, and don't ask again" far more often than not, so a header correct only for the
+  labels somebody remembered to test is the kind that breaks on the notification that
+  mattered. `clear=true` dismisses the phone's copy, so a pressed button stops inviting the
+  second tap catway will refuse.
+
+Tests added: `internal/promptopts` (the two real prompt shapes, ANSI stripping, trailing
+blank rows, and every way an ordinary screen can look like a menu — a finished list, a run
+that starts at 4, gaps, bare numbers, one option — plus the cap and the label rules),
+`internal/push` (the header's exact text, quotes/semicolons/newlines/empty labels, the
+fourth button dropped, and the header set only when there are actions),
+`cmd/catway/notifyaction_test.go` (the menu reaching the phone with distinct tokens, a tap
+answering once from `source:"push"`, an unparseable screen minting nothing, a failed
+capture still pushing, the feature off reading no screen, declared actions skipping the
+read, tokens dying with their notification, and only `attention` triggering a read),
+`internal/config` (`action_url` required, checked, trimmed, and ignored while off).
+
+Verified live (catway + cathost + a stand-in ntfy topic that prints its headers, a
+`catctl probe` client for the viewport, and a claude-shaped prompt drawn into a pane
+running `read`): reporting the agent blocked produced a push whose `Actions` header carried
+all three of the agent's own choices — `"Yes"`, `"Yes, and do not ask again for rg…"`,
+`"No, and tell Claude what to do…"` — each with a distinct token under the configured base;
+`GET` on one is a 404 and `POST` is `ok`, after which the pane shows `2` and `PICKED=2`;
+the second `POST` is `409 this notification is no longer answerable`. Restarted with
+`--password`: `/` redirects to `/login` while the action endpoint still answers without a
+credential and refuses an invented token, and a token containing a slash is a 404.
+
+Docs updated: `docs/reference/configuration.md` (a new "Answering from the notification"
+section with the four properties, the two new keys in the table),
+`docs/protocols/control-api.md` (derived buttons in the Notifications section),
+`config.example.yaml`.
 
 ### Phase 3 — `pane.open_file`
 

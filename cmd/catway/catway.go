@@ -184,6 +184,12 @@ type orch struct {
 	// slice index rather than a scan over timestamps.
 	notifs     map[string]*liveNotify
 	notifOrder []string
+	// actionTokens are the single-use credentials a phone's notification button
+	// posts back with (notifyaction.go), keyed by token. pushActions /
+	// pushActionBase are the config that decides whether any are minted at all.
+	actionTokens   map[string]actionToken
+	pushActions    bool
+	pushActionBase string
 	// structPanes (pane id → public handle) and structFocus snapshot the model's
 	// pane set and globally-focused pane at the last emit; emitStructuralEvents
 	// diffs against them after each mutation to derive pane_added / pane_removed /
