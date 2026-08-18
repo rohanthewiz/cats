@@ -119,6 +119,11 @@ var subcommands = []subcommand{
 	// actions would rather write anyway.
 	{"notify", app.CmdUINotify, "notify <title...>", nil, "raise a notification on every client (and the phone bridge)", buildNotify},
 
+	// Editors. The path is positional and the line is the optional second
+	// argument, because "open this file at this line" is what a linter, a stack
+	// trace and a grep hit all have in hand.
+	{"open", app.CmdPaneOpenFile, "open <path> [line]", nil, "open a file in the session's editor", buildOpenFile},
+
 	// Misc.
 	{"agent", app.CmdAgentFocus, "agent <pane>", []argKind{argPane}, "reveal an agent's pane", buildPane},
 	{"themes", app.CmdThemeList, "themes", nil, "list available UI themes", noParams},
@@ -252,6 +257,23 @@ func buildNotify(args []string) (json.RawMessage, error) {
 		return nil, usageErr{"notify <title...>"}
 	}
 	return marshal(app.UINotifyParams{Title: title})
+}
+
+// buildOpenFile: open <path> [line]. The path is passed through unexpanded —
+// it names a file on the editor's machine, and "~" there is not "~" here.
+func buildOpenFile(args []string) (json.RawMessage, error) {
+	if len(args) < 1 || len(args) > 2 || strings.TrimSpace(args[0]) == "" {
+		return nil, usageErr{"open <path> [line]"}
+	}
+	p := app.OpenFileParams{Path: args[0]}
+	if len(args) == 2 {
+		line, err := strconv.Atoi(args[1])
+		if err != nil || line < 0 {
+			return nil, fmt.Errorf("line %q is not a line number", args[1])
+		}
+		p.Line = line
+	}
+	return marshal(p)
 }
 
 // buildResize: resize <border> <ratio>.

@@ -116,6 +116,19 @@ const (
 	CmdUINotify = "ui.notify"
 	CmdUIAction = "ui.action"
 
+	// pane.open_file asks the session's editor to open a path — the inverse of
+	// `ced --remote`, and the command behind "click a path anywhere in cats and
+	// it opens in the editor".
+	//
+	// cats deliberately learns almost nothing about editors from this. It does
+	// not run an editor CLI and does not know one exists: it works out WHICH
+	// pane should hear the request and emits a pane_open_file event on the
+	// control stream that pane's editor is already subscribed to. An editor on
+	// another machine is then free by construction — the control relay carries
+	// its subscription — which is the same reason path.list and the worktree
+	// commands are shaped the way they are.
+	CmdPaneOpenFile = "pane.open_file"
+
 	// Host commands (the HOSTS section's buttons + catctl): attach a cathost to
 	// the running session, or detach one. They are §7 commands rather than a
 	// config-file-only setting for the same reason config.set is one — a browser
@@ -272,6 +285,11 @@ var commandSpecs = []CommandSpec{
 	// and is still around to watch for them.
 	{Name: CmdUINotify, Params: UINotifyParams{}, Result: UINotifyResult{}, ParamsRequired: true},
 	{Name: CmdUIAction, Params: UIActionParams{}, ParamsRequired: true},
+
+	// pane.open_file returns which editor it reached (and whether it had to
+	// start one), but is not reply-gated: "open this file" is worth doing for a
+	// caller that never listens, exactly like a split.
+	{Name: CmdPaneOpenFile, Params: OpenFileParams{}, Result: OpenFileResult{}, ParamsRequired: true},
 
 	// Hosts. Both writers echo the new roster, so a client repaints from the
 	// reply instead of waiting for the hosts push that also follows.
@@ -1418,6 +1436,83 @@ func NotifyKindOK(kind string) bool {
 	switch kind {
 	case NotifyKindAttention, NotifyKindFinished, NotifyKindInfo:
 		return true
+	}
+	return false
+}
+
+// --- Editor params & results (§7, pane.open_file) ----------------------------
+
+// OpenFileParams: pane.open_file.
+//
+// Path is NOT expanded or resolved here, for the reason every other path in
+// this vocabulary travels raw since the multi-host slice: it names a file on
+// the machine the editor is on. "~" is that user's home and a relative path is
+// relative to that editor's own root, neither of which this side can answer
+// about a disk it may not be able to see.
+//
+// Pane is the ANCHOR — where the request came from, usually the pane whose
+// output the path was clicked in. It decides three things: which host the file
+// is on, which tab and workspace to look for an editor in first, and where a
+// freshly spawned editor is split. Nil means the focused pane, the same
+// neighbour rule new tabs and splits use.
+//
+// Editor names an editor pane explicitly, skipping resolution. Use it when the
+// caller already knows (an editor asking cats to open a file beside itself);
+// leave it out and cats finds one.
+//
+// Host overrides the anchor's machine. It exists for the same reason
+// PathListParams.Host does — a caller may be naming a file on a machine no
+// current pane is anchored to — and the editor found must be on it, because a
+// path is only half an identity: the same string on two machines is two files.
+type OpenFileParams struct {
+	Path   string  `json:"path"`
+	Line   int     `json:"line,omitempty"`
+	Column int     `json:"column,omitempty"`
+	Pane   *uint32 `json:"pane,omitempty"`
+	Editor *uint32 `json:"editor,omitempty"`
+	Host   string  `json:"host,omitempty"`
+	// Spawn allows starting an editor when none is running. Nil means the
+	// configured default (editor.spawn, on). Set it false for a caller that
+	// wants "reveal it if the editor is open" and nothing more — a linter
+	// walking twenty findings should not open twenty editors.
+	Spawn *bool `json:"spawn,omitempty"`
+}
+
+// OpenFileResult is CmdResult.Data for pane.open_file: which pane was asked,
+// and whether it had to be started. Spawned is worth reporting rather than
+// inferring, because a spawned editor opens the file from its ARGV and has not
+// seen the line number — see the CmdPaneOpenFile comment.
+type OpenFileResult struct {
+	Pane    uint32 `json:"pane"`
+	Host    string `json:"host"`
+	Spawned bool   `json:"spawned,omitempty"`
+}
+
+// EditorInfo is the backend's editor policy, as the dispatcher needs it: which
+// agent labels mark a pane as an editor, how to start one, and whether starting
+// one is allowed at all.
+//
+// It comes over the Backend seam rather than being read from config here for
+// the same reason the host roster does: the dispatcher is protocol-neutral and
+// holds no configuration, and a fake in a test wants to answer this question
+// without a config file.
+type EditorInfo struct {
+	Agents  []string
+	Command []string
+	Spawn   bool
+}
+
+// IsEditorAgent reports whether an agent label marks its pane as an editor.
+// Case-insensitive: an agent label is a name a human typed into a config or a
+// hook asset, and "CEd" and "ced" are the same editor.
+func (e EditorInfo) IsEditorAgent(agent string) bool {
+	if agent == "" {
+		return false
+	}
+	for _, a := range e.Agents {
+		if strings.EqualFold(a, agent) {
+			return true
+		}
 	}
 	return false
 }

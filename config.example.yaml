@@ -157,3 +157,19 @@ keybindings:
     rect:       ["r"]
     yank:       ["y", "Enter"]
     exit:       ["Escape", "q"]
+
+# --- Editor -------------------------------------------------------------------
+# What cats knows about editors, which is deliberately almost nothing.
+# pane.open_file ("click a path, it opens") finds the editor pane and emits an
+# event the editor is already subscribed to from inside its own pane — so cats
+# never runs an editor CLI, and an editor on another host works by construction.
+editor:
+  agents: ["ced"]                      # a pane reporting one of these agent
+                                       # labels IS an editor. The label is the
+                                       # editor's own name for itself (hook API),
+                                       # not a cats-side registry.
+  command: ["ced"]                     # how to start one when none is running;
+                                       # the path is appended to this argv.
+  spawn: true                          # false makes pane.open_file a
+                                       # "reveal it if the editor is open"
+                                       # command instead.

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -146,6 +147,18 @@ type Backend interface {
 	// one already answered.
 	UINotify(r Responder, p UINotifyParams)
 	UIAction(r Responder, p UIActionParams)
+
+	// EditorConfig reports the editor policy (pane.open_file): which agent
+	// labels mark a pane as an editor, the argv that starts one, and whether
+	// starting one is allowed. It is a Backend question because it is
+	// configuration, which the dispatcher deliberately holds none of.
+	//
+	// OpenFileIn delivers the request to the chosen pane. The dispatcher decided
+	// WHICH pane; the backend owns the event stream that pane's editor is
+	// subscribed to. It cannot fail: an event with no subscriber is not an
+	// error, it is an editor that has not connected yet.
+	EditorConfig() EditorInfo
+	OpenFileIn(pane uint32, p OpenFileParams)
 
 	// RefreshUsage asks the backend's rate-limit poller to take a reading now
 	// (usage.refresh). It returns immediately: the read is one network round
@@ -955,6 +968,14 @@ func (d *Dispatcher) Dispatch(name string, dec ParamDecoder, r Responder) {
 		}
 		d.backend.UIAction(r, p)
 
+	case CmdPaneOpenFile:
+		var p OpenFileParams
+		if err := dec.Decode(&p); err != nil {
+			bad(err)
+			return
+		}
+		d.openFile(r, p)
+
 	case CmdUsageRefresh:
 		// Ack the ask, not the answer: the reading lands later, on every client
 		// at once, as a `usage` push.
@@ -1156,6 +1177,144 @@ func (d *Dispatcher) inheritedSplitCwd(target *layout.PaneID, host string) strin
 		return ""
 	}
 	return meta.Cwd
+}
+
+// openFile implements pane.open_file: find the editor that should open Path,
+// starting one if there is none, and hand it the request.
+//
+// The whole of this lives in the dispatcher rather than the backend because
+// every question it asks is a MODEL question — which tab is this pane in, which
+// panes exist, split this one — and the two runtime facts it needs (a pane's
+// agent and host, the editor policy) already come over the Backend seam for
+// other commands.
+func (d *Dispatcher) openFile(r Responder, p OpenFileParams) {
+	if strings.TrimSpace(p.Path) == "" {
+		r.Fail("path is required")
+		return
+	}
+	anchor, err := d.session.ResolvePaneTarget(optPaneID(p.Pane))
+	if err != nil {
+		r.Fail(err.Error())
+		return
+	}
+	if err := d.checkHost(p.Host); err != nil {
+		r.Fail(err.Error())
+		return
+	}
+	// The target machine is where the FILE is, and that is the anchor's machine
+	// unless the caller says otherwise. Everything below is scoped to it: an
+	// editor elsewhere would resolve the same path string against a different
+	// disk, which is the "a path is only half an identity" rule this codebase
+	// learned the hard way in the worktree slice.
+	host := p.Host
+	if host == "" {
+		host = d.backend.PaneMeta(uint32(anchor)).Host
+	}
+	ed := d.backend.EditorConfig()
+
+	if p.Editor != nil {
+		target := *p.Editor
+		if !d.backend.PaneExists(target) {
+			r.Fail(fmt.Sprintf("pane %d not found", target))
+			return
+		}
+		if meta := d.backend.PaneMeta(target); !d.sameHost(meta.Host, host) {
+			r.Fail(fmt.Sprintf("pane %d is on host %q, but the file is on %q",
+				target, meta.Host, host))
+			return
+		}
+		d.backend.OpenFileIn(target, p)
+		r.OK(OpenFileResult{Pane: target, Host: host})
+		return
+	}
+
+	if target, ok := d.findEditorPane(anchor, host, ed); ok {
+		d.backend.OpenFileIn(target, p)
+		r.OK(OpenFileResult{Pane: target, Host: host})
+		return
+	}
+
+	spawn := ed.Spawn
+	if p.Spawn != nil {
+		spawn = *p.Spawn
+	}
+	if !spawn {
+		r.Fail(noEditorErr(host))
+		return
+	}
+	if len(ed.Command) == 0 {
+		r.Fail("no editor is running and editor.command is not configured")
+		return
+	}
+	// Starting an editor is starting a process in the workspace, so it answers
+	// to the same lock as tab.create and a split carrying a command.
+	if ws := d.session.ActiveWorkspace(); ws != nil && ws.Locked {
+		r.Fail(workspaceLockedErr(ws.ID, "start an editor in"))
+		return
+	}
+	np, err := d.session.SplitPaneOn(&anchor, layout.Horizontal, p.Host)
+	if err != nil {
+		r.Fail(err.Error())
+		return
+	}
+	// The path rides the ARGV rather than a follow-up event: a just-spawned
+	// editor is not subscribed yet, and an event emitted into that gap is
+	// simply lost. The cost is the line number, which no editor CLI here
+	// accepts — a cold open lands at the top of the file, which is why the
+	// result reports that it spawned.
+	d.backend.StageSpawn(uint32(np), SpawnOverride{Command: append(append([]string{}, ed.Command...), p.Path)})
+	d.backend.ApplyModel()
+	r.OK(OpenFileResult{Pane: uint32(np), Host: host, Spawned: true})
+}
+
+// findEditorPane picks the editor that should receive a request anchored at
+// anchor, on host.
+//
+// Nearest wins: the anchor's own tab, then its workspace, then anywhere in the
+// session. That is the order a person means by "the editor" — the one beside
+// what they are looking at — and it degrades to "the only one there is" in the
+// common case of a single editor.
+//
+// Ties inside a rung are broken by the lowest pane id rather than by focus
+// recency. Deliberately: a stable answer means clicking two paths in a row
+// opens both in the same editor, where "most recently focused" would send the
+// second one wherever the first click happened to leave the focus.
+func (d *Dispatcher) findEditorPane(anchor layout.PaneID, host string, ed EditorInfo) (uint32, bool) {
+	if len(ed.Agents) == 0 {
+		return 0, false
+	}
+	var inTab, inWorkspace, anywhere []uint32
+	tabPanes, wsPanes := d.session.PaneNeighbourhood(anchor)
+	for _, id := range d.session.AllPaneIDs() {
+		meta := d.backend.PaneMeta(uint32(id))
+		if !ed.IsEditorAgent(meta.Agent) || !d.sameHost(meta.Host, host) {
+			continue
+		}
+		switch {
+		case tabPanes[id]:
+			inTab = append(inTab, uint32(id))
+		case wsPanes[id]:
+			inWorkspace = append(inWorkspace, uint32(id))
+		default:
+			anywhere = append(anywhere, uint32(id))
+		}
+	}
+	for _, rung := range [][]uint32{inTab, inWorkspace, anywhere} {
+		if len(rung) > 0 {
+			return slices.Min(rung), true
+		}
+	}
+	return 0, false
+}
+
+// noEditorErr phrases the refusal so the caller learns both facts it needs: no
+// editor was found, and starting one was not allowed here.
+func noEditorErr(host string) string {
+	where := ""
+	if host != "" {
+		where = " on host " + strconv.Quote(host)
+	}
+	return "no editor pane" + where + " and spawning one is disabled"
 }
 
 // --- host resolution (the roster is the Backend's; the rules are here) -------

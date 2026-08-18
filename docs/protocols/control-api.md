@@ -228,6 +228,7 @@ slow-connection drop.
 | `pane_cwd` | the pane's working directory changed (OSC 7) |
 | `pane_notify` | a notification was raised — an agent state change (blocked, or a background run finished), or anything sent through `ui.notify` |
 | `ui_action` | somebody took an action on a notification (`ui.action`, or a push action button) |
+| `pane_open_file` | cats is asking the editor in this pane to open a path (`pane.open_file`) |
 | `pane_added` | a pane entered the session (split / new tab / new workspace) |
 | `pane_removed` | a pane left the session |
 | `focus_changed` | the globally-focused pane changed |
@@ -239,6 +240,15 @@ status bar, a phone bridge of your own — has the id to send `ui.action` with a
 the labels to draw, without a second call. `ui_action` then reports the tap,
 **after** the action's own input has already been injected, along with `source`
 (`control` for a `ui.action` command).
+
+`pane_open_file` is the one event that is a **request** rather than a fact.
+Everything else here reports something that happened; this one asks the editor
+running in the named pane to open `path` (at `line`/`column` when given, both
+1-based). An editor subscribes filtered to its own pane and needs nothing else:
+
+```bash
+catctl events.subscribe --params '{"pane":7,"events":["pane_open_file"]}'
+```
 
 Every event but `theme_changed` names a pane — `ui_action` names the
 notification's pane, which is 0 for a session-level one. `theme_changed` is
@@ -445,6 +455,7 @@ new panes rather than a location.
 | `plugin.list` / `plugin.uninstall` | — |
 | `path.list` | — |
 | `ui.notify` / `ui.action` | `notify <title...>` / — |
+| `pane.open_file` | `open <path> [line]` |
 | `agent.focus` | `agent <pane>` |
 | `usage.refresh` | — |
 | `server.reload_config` | `reload` |
@@ -471,6 +482,56 @@ catway can no longer reach.
 
 Git work runs **off** the orchestrator loop at both ends, so a slow
 `git worktree add` never stalls input on either machine.
+
+### Opening a file in the editor
+
+`pane.open_file` is the inverse of `ced --remote`: cats asks the session's editor
+to open a path.
+
+```bash
+catctl open internal/app/commands.go 412
+catctl pane.open_file --params '{"path":"~/projs/go/cats/main.go","line":9,"pane":3}'
+```
+
+**cats does not run an editor.** It works out which pane should hear the request
+and emits a `pane_open_file` event on the control stream that pane's editor is
+already subscribed to. Three things follow, and each is a thing cats does not
+have to do: it never learns an editor's CLI (`ced --remote`'s discovery — probe
+every socket, pick the instance whose root contains the file, longest root wins
+— is ced's, and runs on ced's machine); an editor on **another host** works by
+construction, because its subscription arrives through the control relay; and
+any editor works, since the whole contract is one event name plus the agent
+label that pane reports.
+
+| Param | Meaning |
+|-------|---------|
+| `path` | required, and passed **verbatim** — it names a file on the editor's machine, where `~` is that user's home |
+| `line` / `column` | 1-based; omit for "wherever the file opens" |
+| `pane` | the **anchor** — where the request came from. Decides the host, the tab and workspace searched first, and where a spawned editor is split. Defaults to the focused pane |
+| `editor` | an explicit editor pane, skipping resolution |
+| `host` | overrides the anchor's machine |
+| `spawn` | allow starting an editor when none is running; defaults to [`editor.spawn`](../reference/configuration.md#editor) |
+
+**Nearest wins.** The editor in the anchor's own tab, then its workspace, then
+anywhere in the session — the order a person means by "the editor". Ties inside
+a rung go to the lowest pane id rather than to focus recency, so clicking two
+paths in a row opens both in the same editor.
+
+**The editor must be on the file's machine.** A path is only half an identity:
+the same string on two hosts is two different files, so an editor elsewhere is
+not offered, and an explicit one is refused by name.
+
+**A spawned editor gets the path in its argv**, not as an event — an editor that
+has not started cannot be subscribed to one, and an event sent into that gap is
+simply lost. The cost is the line number, which no editor CLI here accepts, so a
+cold open lands at the top of the file. `spawned` in the result says which of the
+two happened. Starting an editor is starting a process, so it answers to the
+[workspace lock](../reference/cli.md#verbs) like `tab.create`.
+
+In the browser this is what a **`file://` OSC 8 hyperlink** does when clicked: a
+compiler or linter emitting one names a file on the *pane's* machine, and
+rendering it as text in a browser tab is not what anybody clicking a stack trace
+wanted. Every other scheme still opens in a new tab.
 
 ### Notifications
 

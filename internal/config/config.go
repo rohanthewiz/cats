@@ -49,6 +49,7 @@ type Config struct {
 	Keybindings Keybindings `yaml:"keybindings"`
 	Worktrees   Worktrees   `yaml:"worktrees"`
 	Push        Push        `yaml:"push"`
+	Editor      Editor      `yaml:"editor"`
 }
 
 // --- hosts --------------------------------------------------------------------
@@ -428,6 +429,25 @@ type Worktrees struct {
 	Directory string `yaml:"directory"`
 }
 
+// Editor is what cats knows about editors, which is deliberately almost
+// nothing: a set of agent labels that mark a pane as one, and an argv that
+// starts one. There is no editor integration behind this — pane.open_file emits
+// an event on the control stream and the editor, already a client of that
+// stream from inside its pane, acts on it.
+//
+// Agents is a list because a session can hold more than one kind of editor, and
+// because the label is whatever that editor reports over the hook API — it is
+// the editor's name for itself, not a cats-side registry.
+type Editor struct {
+	Agents  []string `yaml:"agents,omitempty"`
+	Command []string `yaml:"command,omitempty"`
+	// Spawn allows pane.open_file to start an editor when none is running. On
+	// by default: "click a path and it opens" is the whole point, and a
+	// request that silently does nothing because no editor happened to be open
+	// is the worst of the three outcomes.
+	Spawn bool `yaml:"spawn"`
+}
+
 // TTL parses SessionTTL into a duration.
 func (s Server) TTL() (time.Duration, error) {
 	d, err := time.ParseDuration(s.SessionTTL)
@@ -480,6 +500,12 @@ func Default() Config {
 		Theme:       Theme{Colors: map[string]string{}},
 		Keybindings: Keybindings{CopyMode: cloneKeyMap(defaultCopyMode)},
 		Worktrees:   Worktrees{Directory: "~/.cats/worktrees"},
+		// ced is the editor cats is named alongside and the only one that
+		// speaks this protocol today. Naming it here rather than leaving the
+		// list empty means the feature works out of the box for the setup it
+		// was built for, and the list is the extension point for anything else
+		// that reports itself over the hook API.
+		Editor: Editor{Agents: []string{"ced"}, Command: []string{"ced"}, Spawn: true},
 		// Off by default, but with the shape filled in: a saved config then shows
 		// the operator the feature exists and what its knobs are, and the values
 		// round-trip equal to this default.

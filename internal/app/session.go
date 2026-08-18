@@ -78,6 +78,37 @@ func (s *Session) AllPaneIDs() []layout.PaneID {
 	return ids
 }
 
+// PaneNeighbourhood answers "how close is that pane to this one" as two sets:
+// the panes sharing id's tab, and the panes sharing its workspace (the tab set
+// included). id itself is in both.
+//
+// It exists for pane.open_file's "nearest editor wins" rule, which needs the
+// distinction and would otherwise rebuild it from Workspaces() and
+// FindTabIndexForPane at every call site that ever wants it. An unknown pane
+// yields two empty sets rather than an error: "nothing is near it" is the right
+// answer for a pane that is not in the model, and every caller of a
+// neighbourhood is choosing, not validating.
+func (s *Session) PaneNeighbourhood(id layout.PaneID) (tab, workspace map[layout.PaneID]bool) {
+	tab, workspace = map[layout.PaneID]bool{}, map[layout.PaneID]bool{}
+	ws := s.PaneWorkspace(id)
+	if ws == nil {
+		return tab, workspace
+	}
+	own, ok := ws.FindTabIndexForPane(id)
+	if !ok {
+		return tab, workspace
+	}
+	for i, t := range ws.Tabs {
+		for _, pid := range t.Layout.PaneIDs() {
+			workspace[pid] = true
+			if i == own {
+				tab[pid] = true
+			}
+		}
+	}
+	return tab, workspace
+}
+
 // VisiblePaneIDs lists panes in the current viewport (active workspace's active
 // tab) — the only panes whose frames stream to the browser (§8). A zoomed tab
 // shows only its focused pane, so that is the whole viewport.

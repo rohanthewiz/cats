@@ -145,6 +145,8 @@ abstract final class CmdName {
 
   static const String uiAction = 'ui.action';
 
+  static const String paneOpenFile = 'pane.open_file';
+
   static const String hostAttach = 'host.attach';
 
   static const String hostDetach = 'host.detach';
@@ -745,6 +747,101 @@ class MoveWorkspaceParams {
   Map<String, Object?> toJson() => {
         'id': id,
         'index': index,
+      };
+}
+
+/// OpenFileParams: pane.open_file.
+///
+/// Path is NOT expanded or resolved here, for the reason every other path in
+/// this vocabulary travels raw since the multi-host slice: it names a file on
+/// the machine the editor is on. "~" is that user's home and a relative path is
+/// relative to that editor's own root, neither of which this side can answer
+/// about a disk it may not be able to see.
+///
+/// Pane is the ANCHOR — where the request came from, usually the pane whose
+/// output the path was clicked in. It decides three things: which host the file
+/// is on, which tab and workspace to look for an editor in first, and where a
+/// freshly spawned editor is split. Nil means the focused pane, the same
+/// neighbour rule new tabs and splits use.
+///
+/// Editor names an editor pane explicitly, skipping resolution. Use it when the
+/// caller already knows (an editor asking cats to open a file beside itself);
+/// leave it out and cats finds one.
+///
+/// Host overrides the anchor's machine. It exists for the same reason
+/// PathListParams.Host does — a caller may be naming a file on a machine no
+/// current pane is anchored to — and the editor found must be on it, because a
+/// path is only half an identity: the same string on two machines is two files.
+class OpenFileParams {
+  const OpenFileParams({
+    required this.path,
+    this.line = 0,
+    this.column = 0,
+    this.pane,
+    this.editor,
+    this.host = '',
+    this.spawn,
+  });
+
+  final String path;
+  final int line;
+  final int column;
+  final int? pane;
+  final int? editor;
+  final String host;
+
+  /// Spawn allows starting an editor when none is running. Nil means the
+  /// configured default (editor.spawn, on). Set it false for a caller that
+  /// wants "reveal it if the editor is open" and nothing more — a linter
+  /// walking twenty findings should not open twenty editors.
+  final bool? spawn;
+
+  factory OpenFileParams.fromJson(Map<String, Object?> j) => OpenFileParams(
+        path: asString(j['path']),
+        line: asInt(j['line']),
+        column: asInt(j['column']),
+        pane: asIntOrNull(j['pane']),
+        editor: asIntOrNull(j['editor']),
+        host: asString(j['host']),
+        spawn: asBoolOrNull(j['spawn']),
+      );
+
+  Map<String, Object?> toJson() => {
+        'path': path,
+        if (line != 0) 'line': line,
+        if (column != 0) 'column': column,
+        if (pane != null) 'pane': pane,
+        if (editor != null) 'editor': editor,
+        if (host.isNotEmpty) 'host': host,
+        if (spawn != null) 'spawn': spawn,
+      };
+}
+
+/// OpenFileResult is CmdResult.Data for pane.open_file: which pane was asked,
+/// and whether it had to be started. Spawned is worth reporting rather than
+/// inferring, because a spawned editor opens the file from its ARGV and has not
+/// seen the line number — see the CmdPaneOpenFile comment.
+class OpenFileResult {
+  const OpenFileResult({
+    required this.pane,
+    required this.host,
+    this.spawned = false,
+  });
+
+  final int pane;
+  final String host;
+  final bool spawned;
+
+  factory OpenFileResult.fromJson(Map<String, Object?> j) => OpenFileResult(
+        pane: asInt(j['pane']),
+        host: asString(j['host']),
+        spawned: asBool(j['spawned']),
+      );
+
+  Map<String, Object?> toJson() => {
+        'pane': pane,
+        'host': host,
+        if (spawned) 'spawned': spawned,
       };
 }
 
@@ -2491,6 +2588,7 @@ const List<CommandSpec> kCommandSpecs = <CommandSpec>[
   CommandSpec('path.list', replyRequired: true),
   CommandSpec('ui.notify', paramsRequired: true),
   CommandSpec('ui.action', paramsRequired: true),
+  CommandSpec('pane.open_file', paramsRequired: true),
   CommandSpec('host.attach', paramsRequired: true),
   CommandSpec('host.detach', paramsRequired: true),
   CommandSpec('session.get'),
@@ -2792,6 +2890,10 @@ mixin CatsCommands implements CatsCommandTransport {
   Future<void> uiAction(UIActionParams params) async {
     await invoke(CmdName.uiAction, params.toJson());
   }
+
+  /// `pane.open_file`
+  Future<OpenFileResult> paneOpenFile(OpenFileParams params) async =>
+      OpenFileResult.fromJson(asObj(await invoke(CmdName.paneOpenFile, params.toJson())));
 
   /// `host.attach`
   Future<HostListResult> hostAttach(HostAttachParams params) async =>

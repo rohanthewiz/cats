@@ -196,6 +196,17 @@ and an agent row inside it will not reveal its pane — revealing a pane *is* a
 switch, so the two refusals are the same one. Every deliberate route in still
 works: the row's context menu, the command palette, and the keyboard.
 
+Editors:
+
+```bash
+catctl open internal/app/commands.go 412   # open a path in the session's editor
+```
+
+The path is passed through unexpanded — it names a file on the **editor's**
+machine. cats finds the nearest editor pane on that host and asks it, starting
+one if there is none; see
+[the control API](../protocols/control-api.md#opening-a-file-in-the-editor).
+
 Notifications — the same toast an agent transition raises, from a script:
 
 ```bash

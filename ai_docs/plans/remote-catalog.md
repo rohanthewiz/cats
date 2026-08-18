@@ -11,7 +11,7 @@ needing no foundation" pulled to the front because they are exactly that.
 Two of the quick wins (`pane.open_file`, `ui.notify`) are also two thirds of the "ced trio",
 so shipping them here empties that slot down to file transfer.
 
-Everything below inherits slice 1's rule and it is worth restating, because it decides most
+Phases 1-3 are the three quick wins and are shipped. Everything below inherits slice 1's rule and it is worth restating, because it decides most
 of the arguments in this document: **a question about another machine is answered by that
 machine.** A pane's screen, its files, its editor and its shell all live where the pane
 lives, so anything this plan reads or runs per pane is a cathost capability with a catway
@@ -218,16 +218,72 @@ section with the four properties, the two new keys in the table),
 `docs/protocols/control-api.md` (derived buttons in the Notifications section),
 `config.example.yaml`.
 
-### Phase 3 — `pane.open_file`
+### Phase 3 — `pane.open_file` — **DONE**
 
-`pane.open_file {path, line?, column?, pane?, host?}`. Resolution, refusals, the
-`pane_open_file` event, `editor.agents` / `editor.command` config, spawn-if-absent as a
-split carrying the path in its argv, and the browser side: a path in a toast or in the
-sidebar becomes clickable.
+As built, and the striking thing is how little of it is editor code. cats works out WHICH
+pane should hear the request and emits `pane_open_file` on the control stream that pane's
+editor is already subscribed to. Three things follow, and each is a thing not written: no
+editor CLI (ced's own remote discovery is ced's, and runs on ced's machine); cross-host for
+free, because an editor in a remote pane subscribes through the Phase 7 control relay; and
+any editor at all, since the whole contract is one event name plus the agent label that
+pane reports over the hook API.
 
-Ship gate: with ced running in a pane, `catctl open-file --params '{"path":"…","line":42}'`
-puts ced on that line; with no editor pane, one is spawned already showing the file; a path
-on a remote pane's host reaches that host's editor.
+Deltas from the plan above:
+
+* **The resolution lives in the dispatcher, not the backend.** Every question it asks is a
+  MODEL question — which tab is this pane in, which panes exist, split this one — and the
+  two runtime facts it needs already cross the Backend seam for other commands
+  (`PaneMeta`'s agent and host). The backend gained exactly two methods: `EditorConfig`
+  (configuration, which the dispatcher deliberately holds none of) and `OpenFileIn`
+  (the event stream).
+* **`pane_open_file` is the first event that is a REQUEST rather than a fact.** Everything
+  else in the vocabulary reports something that happened. It is pane-addressed, so an
+  editor subscribes filtered to its own pane and nothing else in the session has to care.
+* **Nearest wins, ties by pane id.** Anchor's tab → anchor's workspace → anywhere, which is
+  the order a person means by "the editor". Ties deliberately do NOT go to focus recency: a
+  stable answer means clicking two paths in a row opens both in the same editor, where
+  recency would send the second wherever the first click left the focus.
+  `Session.PaneNeighbourhood` is the one new model helper.
+* **The editor must be on the file's machine**, and an explicitly named one elsewhere is
+  refused by name rather than handed a path from another filesystem — the worktree slice's
+  "a path is only half an identity" applied to the third thing that reads a file.
+* **A spawned editor gets the path in its ARGV**, not as an event. An editor that has not
+  started cannot be subscribed to one, and an event sent into that gap is simply lost. The
+  cost is the line number — no editor CLI here accepts one — so a cold open lands at the
+  top of the file, which is why `spawned` is in the result rather than inferred. Starting
+  an editor is starting a process, so it answers to the workspace lock like `tab.create`.
+* **`spawn` is per request as well as per config.** A linter walking twenty findings must
+  not open twenty editors, and "reveal it if the editor is open" is a different command
+  that would otherwise need its own name.
+* **The browser surface is the `file://` OSC 8 hyperlink.** Clicking one used to
+  `window.open` it, which in a browser means rendering a source file as text — and in a
+  multi-host session, a file on a machine the browser cannot see at all. It now routes to
+  `pane.open_file` with the pane it was clicked in; every other scheme opens in a tab as
+  before. A `file://` URI with a host component is left to the browser to refuse visibly,
+  since naming a third machine is not something this side can honour.
+
+Tests added: `internal/app/commands_test.go` (delivery with the path verbatim, the three
+rungs of nearest-wins, the spawn's argv with no event emitted into the gap, and six
+refusals — no path, unknown host, an explicit editor on another machine, no editor on the
+file's machine, spawn disabled per request, locked workspace), `cmd/catway/openfile_test.go`
+(the event reaching the editor's own pane subscription and not another's, and the policy
+tracking the live config, case-insensitively).
+
+Verified live (catway, two cathosts, a `catctl probe` client, and a fake editor that is a
+shell script reporting `agent: ced` over the hook API): with no editor, `catctl open
+internal/app/commands.go 412` spawns one whose pane shows `FAKE-EDITOR-OPENED
+internal/app/commands.go`; once that pane reports itself an editor and subscribes,
+`catctl open '~/projs/go/cats/main.go' 9` is delivered as
+`pane_open_file {pane:2, path:"~/projs/go/cats/main.go", line:9}` — path unexpanded — and
+spawns nothing; the unknown-host, missing-path and spawn-disabled refusals each name what
+is wrong; and with an editor on `devbox` only, a file anchored at the local pane is refused
+by host while one anchored at the devbox pane reaches it.
+
+Docs updated: `docs/protocols/control-api.md` (an "Opening a file in the editor" section,
+the event row and its request-not-fact note), `docs/reference/configuration.md` (a new
+Editor section), `docs/reference/cli.md` (`catctl open`), `config.example.yaml`.
+catgen-dart goldens regenerated (`OpenFileParams`/`OpenFileResult`, the new command);
+**cats-mobile has not been regenerated** — still owed from slice 1.
 
 ### Phase 4 — shell integration + the command ledger
 

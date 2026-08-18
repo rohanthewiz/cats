@@ -27,6 +27,12 @@ const (
 	EventPaneCwd    = "pane_cwd"    // the pane's working directory changed (OSC 7)
 	EventPaneNotify = "pane_notify" // an agent state change warrants attention (blocked / background finish)
 	EventUIAction   = "ui_action"   // somebody took an action on a notification (ui.action, or a push action button)
+	// EventPaneOpenFile is addressed AT a pane rather than reported about one:
+	// it is cats asking the editor running in that pane to open a path
+	// (pane.open_file). Every other event here is a fact; this one is a
+	// request, which is why an editor subscribes filtered to its own pane and
+	// nothing else in the session needs to care.
+	EventPaneOpenFile = "pane_open_file"
 
 	EventPaneAdded    = "pane_added"    // a pane entered the session (split / new tab / new workspace)
 	EventPaneRemoved  = "pane_removed"  // a pane left the session (close pane / tab / workspace)
@@ -46,7 +52,7 @@ const (
 func EventNames() []string {
 	return []string{
 		EventPaneExited, EventPaneAgent, EventPaneTitle, EventPaneCwd, EventPaneNotify,
-		EventUIAction,
+		EventUIAction, EventPaneOpenFile,
 		EventPaneAdded, EventPaneRemoved, EventFocusChanged,
 		EventThemeChanged,
 	}
@@ -110,6 +116,21 @@ type UIActionEvent struct {
 	ID     string `json:"id"`
 	Action string `json:"action"`
 	Source string `json:"source"`
+}
+
+// PaneOpenFileEvent is the payload for EventPaneOpenFile: open Path in the
+// editor running in Pane.
+//
+// Path is verbatim as the caller gave it — see OpenFileParams — because the
+// editor is the thing that can resolve it: it is on that machine, and it knows
+// its own root. Line and Column are 1-based and 0 means "wherever the file
+// opens", which is also what a freshly spawned editor gets, since it learns the
+// path from its argv and never sees this event.
+type PaneOpenFileEvent struct {
+	Pane   uint32 `json:"pane"`
+	Path   string `json:"path"`
+	Line   int    `json:"line,omitempty"`
+	Column int    `json:"column,omitempty"`
 }
 
 // PaneRefEvent is the payload for the three model-structure events

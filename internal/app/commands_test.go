@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -33,6 +34,9 @@ type fakeBackend struct {
 	reloadErr      error
 	lastRead       Responder
 	lastNotify     UINotifyParams
+	editor         EditorInfo
+	lastOpen       OpenFileParams
+	lastOpenPane   uint32
 	lastCapture    Responder
 	lastWait       Responder
 	lastWaitP      WaitForOutputParams
@@ -121,6 +125,14 @@ func (b *fakeBackend) UINotify(r Responder, p UINotifyParams) {
 func (b *fakeBackend) UIAction(r Responder, p UIActionParams) {
 	b.rec("uiAction:" + p.ID + ":" + p.Action)
 	r.OK(nil)
+}
+
+func (b *fakeBackend) EditorConfig() EditorInfo { return b.editor }
+
+func (b *fakeBackend) OpenFileIn(pane uint32, p OpenFileParams) {
+	b.rec("openFileIn:" + strconv.FormatUint(uint64(pane), 10) + ":" + p.Path)
+	b.lastOpen = p
+	b.lastOpenPane = pane
 }
 
 func (b *fakeBackend) RefreshUsage()       { b.rec("refreshUsage") }
@@ -2131,3 +2143,205 @@ func TestDispatchUIAction(t *testing.T) {
 		t.Fatalf("action did not reach the backend: %v", *h2.log)
 	}
 }
+
+// --- pane.open_file -----------------------------------------------------------
+
+// editorHarness is a cmdHarness with an editor policy and a pane meta table
+// ready to place editors around the session.
+func editorHarness(t *testing.T) cmdHarness {
+	t.Helper()
+	h := newCmdHarness(t)
+	h.b.editor = EditorInfo{Agents: []string{"ced"}, Command: []string{"ced"}, Spawn: true}
+	h.b.paneMeta = map[uint32]PaneMeta{}
+	return h
+}
+
+// The request reaches the editor pane, carrying the path VERBATIM and the line.
+// A path is not expanded here: it names a file on the editor's machine.
+func TestOpenFileReachesTheEditor(t *testing.T) {
+	h := editorHarness(t)
+	anchor, _ := h.s.FocusedPane()
+	ed, err := h.s.SplitPane(nil, layout.Horizontal)
+	if err != nil {
+		t.Fatalf("split: %v", err)
+	}
+	h.b.paneMeta[uint32(ed)] = PaneMeta{Agent: "ced"}
+
+	r := h.resp()
+	h.d.Dispatch(CmdPaneOpenFile, params(t, OpenFileParams{
+		Path: "~/projs/go/cats/main.go", Line: 42, Pane: ptrU32(uint32(anchor)),
+	}), r)
+	if !r.okCall {
+		t.Fatalf("refused: %q", r.errMsg)
+	}
+	if got := r.data.(OpenFileResult); got.Pane != uint32(ed) || got.Spawned {
+		t.Fatalf("result = %+v; want the existing editor pane %d", got, ed)
+	}
+	if h.b.lastOpen.Path != "~/projs/go/cats/main.go" || h.b.lastOpen.Line != 42 {
+		t.Errorf("delivered %+v; the path must travel unexpanded", h.b.lastOpen)
+	}
+	if h.b.lastOpenPane != uint32(ed) {
+		t.Errorf("delivered to pane %d, want %d", h.b.lastOpenPane, ed)
+	}
+}
+
+// Nearest wins: an editor in the anchor's own tab beats one elsewhere in the
+// workspace, which beats one in another workspace. That is the order a person
+// means by "the editor" — the one beside what they are looking at.
+func TestOpenFilePicksTheNearestEditor(t *testing.T) {
+	h := editorHarness(t)
+	anchor, _ := h.s.FocusedPane()
+
+	// A far editor first, in a second workspace.
+	if _, err := h.s.CreateWorkspaceAt(""); err != nil {
+		t.Fatalf("workspace: %v", err)
+	}
+	far, _ := h.s.FocusedPane()
+	h.b.paneMeta[uint32(far)] = PaneMeta{Agent: "ced"}
+	if err := h.s.FocusPane(anchor); err != nil {
+		t.Fatalf("refocus: %v", err)
+	}
+
+	// With only the far one, it is chosen — "anywhere" is still a rung.
+	r := h.resp()
+	h.d.Dispatch(CmdPaneOpenFile, params(t, OpenFileParams{Path: "a.go", Pane: ptrU32(uint32(anchor))}), r)
+	if !r.okCall || r.data.(OpenFileResult).Pane != uint32(far) {
+		t.Fatalf("far editor not chosen: ok=%v %+v (%q)", r.okCall, r.data, r.errMsg)
+	}
+
+	// A nearer one, in the anchor's own tab, takes over.
+	near, err := h.s.SplitPane(&anchor, layout.Horizontal)
+	if err != nil {
+		t.Fatalf("split: %v", err)
+	}
+	h.b.paneMeta[uint32(near)] = PaneMeta{Agent: "ced"}
+	r2 := h.resp()
+	h.d.Dispatch(CmdPaneOpenFile, params(t, OpenFileParams{Path: "a.go", Pane: ptrU32(uint32(anchor))}), r2)
+	if !r2.okCall || r2.data.(OpenFileResult).Pane != uint32(near) {
+		t.Fatalf("near editor not preferred: %+v (%q)", r2.data, r2.errMsg)
+	}
+}
+
+// With no editor anywhere, one is started as a split beside the anchor, with
+// the path in its argv — an editor that has not started cannot be subscribed to
+// an event, so the path cannot travel as one.
+func TestOpenFileSpawnsAnEditor(t *testing.T) {
+	h := editorHarness(t)
+	anchor, _ := h.s.FocusedPane()
+
+	r := h.resp()
+	h.d.Dispatch(CmdPaneOpenFile, params(t, OpenFileParams{Path: "cmd/x.go", Line: 9, Pane: ptrU32(uint32(anchor))}), r)
+	if !r.okCall {
+		t.Fatalf("refused: %q", r.errMsg)
+	}
+	res := r.data.(OpenFileResult)
+	if !res.Spawned || res.Pane == uint32(anchor) {
+		t.Fatalf("result = %+v; want a freshly spawned pane", res)
+	}
+	ov, ok := h.b.staged[res.Pane]
+	if !ok {
+		t.Fatalf("nothing staged for the new pane; staged = %+v", h.b.staged)
+	}
+	if !slices.Equal(ov.Command, []string{"ced", "cmd/x.go"}) {
+		t.Errorf("argv = %v; want the editor command plus the path", ov.Command)
+	}
+	// No event: the new editor is not listening yet, and one sent into that gap
+	// would simply be lost.
+	for _, e := range *h.log {
+		if strings.HasPrefix(e, "openFileIn") {
+			t.Errorf("emitted an open_file event at a pane that has not started: %v", *h.log)
+		}
+	}
+}
+
+// Every refusal, and the one that is not a refusal at all.
+func TestOpenFileRefusals(t *testing.T) {
+	t.Run("no path", func(t *testing.T) {
+		h := editorHarness(t)
+		r := h.resp()
+		h.d.Dispatch(CmdPaneOpenFile, params(t, OpenFileParams{Line: 3}), r)
+		if !r.failCall || !strings.Contains(r.errMsg, "path is required") {
+			t.Fatalf("ok=%v %q", r.okCall, r.errMsg)
+		}
+	})
+
+	t.Run("unknown host", func(t *testing.T) {
+		h := editorHarness(t)
+		r := h.resp()
+		h.d.Dispatch(CmdPaneOpenFile, params(t, OpenFileParams{Path: "a.go", Host: "ghost"}), r)
+		if !r.failCall || !strings.Contains(r.errMsg, "unknown host") {
+			t.Fatalf("ok=%v %q", r.okCall, r.errMsg)
+		}
+	})
+
+	t.Run("explicit editor on another machine", func(t *testing.T) {
+		// A path is only half an identity: the same string on two machines is
+		// two files, so an editor over there must not be handed one from here.
+		h := editorHarness(t)
+		h.b.hosts = []HostInfo{
+			{ID: "local", Connected: true, Default: true, Local: true},
+			{ID: "devbox", Connected: true},
+		}
+		anchor, _ := h.s.FocusedPane()
+		ed, _ := h.s.SplitPane(nil, layout.Horizontal)
+		h.b.paneMeta[uint32(anchor)] = PaneMeta{Host: "local"}
+		h.b.paneMeta[uint32(ed)] = PaneMeta{Agent: "ced", Host: "devbox"}
+
+		r := h.resp()
+		h.d.Dispatch(CmdPaneOpenFile, params(t, OpenFileParams{
+			Path: "a.go", Pane: ptrU32(uint32(anchor)), Editor: ptrU32(uint32(ed)),
+		}), r)
+		if !r.failCall || !strings.Contains(r.errMsg, "devbox") {
+			t.Fatalf("ok=%v %q", r.okCall, r.errMsg)
+		}
+	})
+
+	t.Run("an editor on another machine is not found either", func(t *testing.T) {
+		h := editorHarness(t)
+		h.b.editor.Spawn = false
+		h.b.hosts = []HostInfo{
+			{ID: "local", Connected: true, Default: true, Local: true},
+			{ID: "devbox", Connected: true},
+		}
+		anchor, _ := h.s.FocusedPane()
+		ed, _ := h.s.SplitPane(nil, layout.Horizontal)
+		h.b.paneMeta[uint32(anchor)] = PaneMeta{Host: "local"}
+		h.b.paneMeta[uint32(ed)] = PaneMeta{Agent: "ced", Host: "devbox"}
+
+		r := h.resp()
+		h.d.Dispatch(CmdPaneOpenFile, params(t, OpenFileParams{Path: "a.go", Pane: ptrU32(uint32(anchor))}), r)
+		if !r.failCall || !strings.Contains(r.errMsg, "no editor pane") {
+			t.Fatalf("ok=%v %q", r.okCall, r.errMsg)
+		}
+	})
+
+	t.Run("spawn disabled per request", func(t *testing.T) {
+		// "Reveal it if the editor is open" — a linter walking twenty findings
+		// must not open twenty editors.
+		h := editorHarness(t)
+		no := false
+		r := h.resp()
+		h.d.Dispatch(CmdPaneOpenFile, params(t, OpenFileParams{Path: "a.go", Spawn: &no}), r)
+		if !r.failCall || !strings.Contains(r.errMsg, "spawning one is disabled") {
+			t.Fatalf("ok=%v %q", r.okCall, r.errMsg)
+		}
+		if len(h.b.staged) != 0 {
+			t.Errorf("spawned anyway: %+v", h.b.staged)
+		}
+	})
+
+	t.Run("locked workspace", func(t *testing.T) {
+		// Starting an editor is starting a process, which answers to the same
+		// lock as tab.create and a split carrying a command.
+		h := editorHarness(t)
+		ws := h.s.ActiveWorkspace()
+		ws.Locked = true
+		r := h.resp()
+		h.d.Dispatch(CmdPaneOpenFile, params(t, OpenFileParams{Path: "a.go"}), r)
+		if !r.failCall || !strings.Contains(r.errMsg, "locked") {
+			t.Fatalf("ok=%v %q", r.okCall, r.errMsg)
+		}
+	})
+}
+
+func ptrU32(v uint32) *uint32 { return &v }

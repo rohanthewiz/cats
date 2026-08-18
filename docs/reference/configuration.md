@@ -360,6 +360,27 @@ delayed toast carrying the same choices would be noise in the one place the
 prompt is already reachable. A caller that wants buttons in the browser declares
 them on [`ui.notify`](../protocols/control-api.md#notifications).
 
+## Editor
+
+What cats knows about editors, which is deliberately almost nothing:
+
+```yaml
+editor:
+  agents: ["ced"]     # a pane running one of these agents IS an editor
+  command: ["ced"]    # how to start one when none is running
+  spawn: true         # may pane.open_file start one?
+```
+
+| Key | Default | Notes |
+|-----|---------|-------|
+| `agents` | `["ced"]` | matched case-insensitively against the pane's reported agent label |
+| `command` | `["ced"]` | argv; the path is appended when an editor is spawned |
+| `spawn` | `true` | `false` makes [`pane.open_file`](../protocols/control-api.md#opening-a-file-in-the-editor) a "reveal it if the editor is open" command |
+
+An agent label is the editor's own name for itself — what it reports over the
+[hook API](../protocols/hook-api.md) — not a cats-side registry, which is why
+adding another editor is one word here and no code anywhere.
+
 > **Warning — the topic URL is a capability**
 >
 > Anyone who learns your ntfy topic path can read your notifications, so treat
