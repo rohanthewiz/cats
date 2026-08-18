@@ -6,6 +6,10 @@
 // do not function. installAppMenu builds a minimal App + Edit menu and installs
 // it on the shared application.
 //
+// The thin client adds a Connect menu listing its saved catways; see
+// installConnectMenu on the Go side for why the whole bar is rebuilt to move a
+// checkmark.
+//
 // Quit is special: it must reap the supervised catway/cathost daemons before
 // the process dies. Rather than target NSApp's terminate: directly, the Quit
 // item targets a small helper whose action first calls the Go-exported
@@ -22,6 +26,7 @@
 - (void)zoomIn:(id)sender;
 - (void)zoomOut:(id)sender;
 - (void)zoomActual:(id)sender;
+- (void)connect:(id)sender;
 @end
 
 @implementation CatsMenuTarget
@@ -35,11 +40,16 @@
 - (void)zoomIn:(id)sender     { catappZoom(1); }
 - (void)zoomOut:(id)sender    { catappZoom(-1); }
 - (void)zoomActual:(id)sender { catappZoom(0); }
+// Connect items carry their index in the saved-catway list as the item tag;
+// "Connect to Another…" carries -1. The list itself lives in Go, so the tag is
+// the whole message.
+- (void)connect:(id)sender { catappConnectPreset((int)[(NSMenuItem *)sender tag]); }
 @end
 
 static CatsMenuTarget *gMenuTarget = nil;
 
-void installAppMenu(const char *cAppName) {
+void installAppMenu(const char *cAppName, const char **hostNames, int hostCount,
+                    int currentHost) {
     @autoreleasepool {
         if (!gMenuTarget) {
             gMenuTarget = [[CatsMenuTarget alloc] init];
@@ -133,6 +143,45 @@ void installAppMenu(const char *cAppName) {
                                 action:@selector(zoomActual:)
                          keyEquivalent:@"0"];
         [zoomActual setTarget:gMenuTarget];
+
+        // --- Connect menu -----------------------------------------------------
+        // The thin client's saved catways. hostCount < 0 means this mode has
+        // none to offer (the self-contained app runs its own catway), and the
+        // menu is left out entirely rather than shown empty.
+        //
+        // The whole menu bar is rebuilt whenever the list or the current
+        // connection changes — see installConnectMenu. That is also how the
+        // checkmark moves: NSMenu has no cheaper way to keep a marker in step,
+        // and rebuilding a menu of a handful of items costs nothing next to a
+        // marker that says you are somewhere you are not.
+        if (hostCount >= 0) {
+            NSMenuItem *connectItem = [[NSMenuItem alloc] init];
+            [mainMenu addItem:connectItem];
+            NSMenu *connectMenu = [[NSMenu alloc] initWithTitle:@"Connect"];
+            [connectItem setSubmenu:connectMenu];
+
+            for (int i = 0; i < hostCount; i++) {
+                NSString *title = [NSString stringWithUTF8String:hostNames[i]];
+                // ⌘1..⌘9 for the first nine, which is as far as a number row
+                // goes; the rest are click-only rather than sharing a shortcut.
+                NSString *key = i < 9 ? [NSString stringWithFormat:@"%d", i + 1] : @"";
+                NSMenuItem *it = [connectMenu addItemWithTitle:title
+                                                       action:@selector(connect:)
+                                                keyEquivalent:key];
+                [it setTarget:gMenuTarget];
+                [it setTag:i];
+                [it setState:(i == currentHost) ? NSControlStateValueOn
+                                                : NSControlStateValueOff];
+            }
+            if (hostCount > 0) {
+                [connectMenu addItem:[NSMenuItem separatorItem]];
+            }
+            NSMenuItem *other = [connectMenu addItemWithTitle:@"Connect to Another…"
+                                                      action:@selector(connect:)
+                                               keyEquivalent:@"k"];
+            [other setTarget:gMenuTarget];
+            [other setTag:-1];
+        }
 
         [NSApp setMainMenu:mainMenu];
     }

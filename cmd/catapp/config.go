@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // appConfig is the launcher's own persisted settings — deliberately separate
@@ -20,14 +22,85 @@ type appConfig struct {
 	// to a catway URL). An empty value falls back to the build-time defaultMode.
 	Mode   string       `json:"mode"`
 	Remote remoteTarget `json:"remote"`
+	// Presets are the catways this client knows how to reach, in the order the
+	// user added them. Remote is whichever one it is pointing at now, and is
+	// kept as its own field rather than as an index because it is the only thing
+	// a launch actually needs: the app must open on the last-used catway even if
+	// the preset list is empty or was hand-edited into nonsense.
+	//
+	// A thin client that could only remember ONE address was the awkward part of
+	// mode 2. People who use it have a laptop that follows them between a home
+	// server, a work VPN and a relay, and switching meant deleting app.json.
+	Presets []remoteTarget `json:"presets,omitempty"`
 }
 
-// remoteTarget is the catway a thin client connects to: a relay host
+// remoteTarget is a catway a thin client can connect to: a relay host
 // (https://<home-id>.relay.herdr.dev) or a direct LAN/VPN address. Only URL is
-// load-bearing; Label is a friendly name for any future UI.
+// load-bearing; Label is what the menu and the connect form show, defaulting to
+// the URL's host.
 type remoteTarget struct {
 	URL   string `json:"url"`
 	Label string `json:"label"`
+}
+
+// name is what to show for this target: the label the user gave it, else the
+// host, else the raw URL. Never empty for a target with a URL, because an
+// unnamed row in a menu is unclickable in practice.
+func (t remoteTarget) name() string {
+	if l := strings.TrimSpace(t.Label); l != "" {
+		return l
+	}
+	if u, err := url.Parse(t.URL); err == nil && u.Host != "" {
+		return u.Host
+	}
+	return t.URL
+}
+
+// upsertPreset records a target, replacing an existing entry with the same URL
+// rather than adding a second one — reconnecting to a catway you already know
+// is the common case, and it is how a label gets corrected.
+//
+// Order is insertion order and is preserved on update: the list becomes the
+// menu, and a menu whose items move when you use them is a menu you cannot
+// build muscle memory for.
+func (c *appConfig) upsertPreset(t remoteTarget) {
+	t.URL = strings.TrimSpace(t.URL)
+	t.Label = strings.TrimSpace(t.Label)
+	if t.URL == "" {
+		return
+	}
+	for i, p := range c.Presets {
+		if p.URL == t.URL {
+			c.Presets[i] = t
+			return
+		}
+	}
+	c.Presets = append(c.Presets, t)
+}
+
+// removePreset forgets a target. The current connection is deliberately NOT
+// cleared with it: the window is pointed at that catway right now, and yanking
+// it out from under a live session to tidy a list is not what "forget" means.
+func (c *appConfig) removePreset(rawURL string) {
+	rawURL = strings.TrimSpace(rawURL)
+	out := c.Presets[:0]
+	for _, p := range c.Presets {
+		if p.URL != rawURL {
+			out = append(out, p)
+		}
+	}
+	c.Presets = out
+}
+
+// currentPreset is the index of the preset the client is pointing at, -1 when
+// the current URL is not a saved one (or there is none).
+func (c appConfig) currentPreset() int {
+	for i, p := range c.Presets {
+		if p.URL == c.Remote.URL {
+			return i
+		}
+	}
+	return -1
 }
 
 // appConfigFile is the launcher settings filename inside appDataDir.

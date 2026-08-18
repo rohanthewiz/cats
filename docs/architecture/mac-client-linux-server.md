@@ -76,9 +76,9 @@ sequenceDiagram
 
   U->>APP: open Cats Client.app
   APP->>APP: loadAppConfig() -> mode "remote", Remote.URL ""
-  APP->>WK: SetHtml(connect form), Bind("catsConnect")
+  APP->>WK: SetHtml(connect page), Bind("catsConnect"/"catsForget"/"catsCancel")
   U->>WK: enter https://host:8421
-  WK->>APP: catsConnect(url)
+  WK->>APP: catsConnect(url, label)
   APP->>APP: saveAppConfig -> app.json (0600 in a 0700 dir)
   APP->>WK: Dispatch: SetTitle("cats — host"), Navigate(url)
   WK->>GW: GET /
@@ -95,6 +95,43 @@ re-launch is one click until the cookie's TTL expires — or until `catway`
 restarts, which invalidates outstanding sessions because the cookie signing key
 is per-process.
 
+### Host presets
+
+The client remembers every catway it has connected to, not just the last one — a
+laptop that follows its owner between a home server, a work VPN and a relay used
+to mean editing `app.json` to move between them.
+
+Each one becomes a **preset** (`app.json`'s `presets`), and they appear in two
+places:
+
+* a native **Connect** menu, one item per catway with ⌘1–⌘9 for the first nine,
+  a checkmark on the one the window is showing, and **Connect to Another…**
+  (⌘K) at the bottom;
+* the connect page itself, which is now reachable at any time rather than only
+  on a first run — it lists the saved catways, takes a new URL and an optional
+  name, and lets a row be forgotten.
+
+Switching is a **navigation in the same window**, not a relaunch, so the session
+cookie WKWebView holds for each host survives being away from it: moving back to
+a catway you were signed into does not ask for the password again.
+
+Two rules worth stating:
+
+* **Forgetting is not disconnecting.** Removing a row leaves the window where it
+  is. The current connection is a live session, and tidying a list is not a
+  reason to end it.
+* **The current URL is stored on its own**, not as an index into the list. The
+  app must open on the last-used catway even if `presets` is empty or was
+  hand-edited into nonsense.
+
+The whole menu bar is rebuilt whenever the list or the current connection
+changes. `NSMenu` has no cheaper way to keep a checkmark in step, and rebuilding
+a handful of items costs nothing next to a marker that says you are somewhere you
+are not.
+
+The self-contained `Cats.app` gets **no** Connect menu at all rather than an
+empty one: its catway is the one it started itself, so it has nothing to offer.
+
 Note the launcher spawns **no daemons** in this mode. It still installs the
 signal handler (so a clean quit behaves uniformly), the native menu, and the
 clipboard bridge — the clipboard bridge matters *more* here, since the Mac
@@ -105,9 +142,18 @@ pasteboard is the only clipboard the user actually has.
 ```json
 {
   "mode": "remote",
-  "remote": { "url": "https://host.example:8421", "label": "home" }
+  "remote": { "url": "https://host.example:8421", "label": "home" },
+  "presets": [
+    { "url": "https://host.example:8421", "label": "home" },
+    { "url": "https://box.lan:8421", "label": "work" }
+  ]
 }
 ```
+
+`remote` is where the window is pointing now; `presets` is everything the
+Connect menu offers, in the order they were added. Whatever the app opens on is
+folded into `presets` on launch, so a client that connected once before presets
+existed finds that catway in the menu rather than having to type it again.
 
 Written `0600` inside a `0700` directory. It lives in
 `~/Library/Application Support/cats/`, deliberately separate from the daemons'

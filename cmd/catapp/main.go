@@ -105,43 +105,153 @@ func runLocal(_ appConfig) {
 	w.Run()
 }
 
-// runRemote is the thin-client path: no local daemons, just point the window at
-// a remote catway. On first run (no saved URL) it shows a small connect form;
-// the bound catsConnect callback persists the entered URL and navigates the
-// same window to it, so subsequent launches connect straight away.
+// runRemote is the thin-client path: no local daemons, just a window pointed at
+// a catway.
+//
+// It keeps a list of them (appConfig.Presets) rather than one address, and a
+// Connect menu to move between them. The window is the same window throughout:
+// switching catways is a navigation, not a relaunch, so the session cookie the
+// webview holds for each host survives being away from it.
 func runRemote(cfg appConfig) {
 	installSignalHandler() // no daemons to reap, but honour a clean quit uniformly
 
+	// Whatever the app opens on becomes a preset. Someone who connected once,
+	// before presets existed, should find that catway in the menu rather than
+	// have to type it again to "add" it.
 	if cfg.Remote.URL != "" {
-		w := newWindow(remoteTitle(cfg.Remote.URL))
-		defer w.Destroy()
-		w.Navigate(cfg.Remote.URL)
-		w.Run()
-		return
+		cfg.upsertPreset(cfg.Remote)
 	}
+	rt := &remoteRuntime{cfg: cfg}
+	activeRemote = rt
 
 	w := newWindow(windowTitle)
 	defer w.Destroy()
-	if err := w.Bind("catsConnect", func(rawURL string) {
-		u := strings.TrimSpace(rawURL)
-		if u == "" {
-			return
-		}
-		cfg.Remote.URL = u
-		if err := saveAppConfig(cfg); err != nil {
-			log.Printf("could not save connection choice: %v", err)
-		}
-		// Navigate on the UI thread; the callback runs off it.
-		w.Dispatch(func() {
-			w.SetTitle(remoteTitle(u))
-			w.Navigate(u)
-		})
-	}); err != nil {
+	rt.w = w
+	if err := rt.bind(); err != nil {
 		showError("Could not initialise the connect form", err.Error())
 		return
 	}
-	w.SetHtml(connectPageHTML)
+	if cfg.Remote.URL != "" {
+		rt.show(cfg.Remote.URL)
+	} else {
+		rt.showConnect()
+	}
 	w.Run()
+}
+
+// remoteRuntime is the thin client's state while the window is open: which
+// catways it knows, which one it is on, and the window to drive.
+//
+// It exists because three things now change together — the persisted config,
+// the window, and the native Connect menu — and any two of them out of step is
+// a visible bug (a checkmark on the wrong host, a menu missing what you just
+// added). One place that changes all three is the only way they cannot drift.
+type remoteRuntime struct {
+	cfg appConfig
+	w   webview.WebView
+}
+
+// connect saves a target, makes it current, and navigates to it.
+func (r *remoteRuntime) connect(rawURL, label string) {
+	u := strings.TrimSpace(rawURL)
+	if u == "" {
+		return
+	}
+	r.cfg.Remote = remoteTarget{URL: u, Label: strings.TrimSpace(label)}
+	r.cfg.upsertPreset(r.cfg.Remote)
+	r.save()
+	r.show(u)
+}
+
+// forget drops a target from the list. The window is left where it is — see
+// appConfig.removePreset for why forgetting is not disconnecting.
+func (r *remoteRuntime) forget(rawURL string) {
+	r.cfg.removePreset(rawURL)
+	r.save()
+	r.w.Dispatch(func() {
+		r.refreshMenu()
+		r.w.SetHtml(connectPage(r.cfg.Presets, r.cfg.Remote.URL, r.cfg.Remote.URL != ""))
+	})
+}
+
+// show points the window at a catway and re-titles it. Dispatched, because the
+// callers are a JS binding and a menu action, neither on the UI thread.
+func (r *remoteRuntime) show(rawURL string) {
+	r.w.Dispatch(func() {
+		r.refreshMenu()
+		r.w.SetTitle(remoteTitle(rawURL))
+		r.w.Navigate(rawURL)
+	})
+}
+
+// showConnect renders the picker. Cancelling is offered only when there is a
+// session to go back to, so a first run cannot end up on a page with a button
+// that does nothing.
+func (r *remoteRuntime) showConnect() {
+	r.w.Dispatch(func() {
+		r.refreshMenu()
+		r.w.SetTitle(windowTitle)
+		r.w.SetHtml(connectPage(r.cfg.Presets, r.cfg.Remote.URL, r.cfg.Remote.URL != ""))
+	})
+}
+
+// save persists the config, logging rather than failing: losing a preset is
+// annoying, and refusing to connect over it would be worse.
+func (r *remoteRuntime) save() {
+	if err := saveAppConfig(r.cfg); err != nil {
+		log.Printf("could not save connection settings: %v", err)
+	}
+}
+
+// refreshMenu rebuilds the native menu so the Connect list and its checkmark
+// match the config. Must be on the UI thread; every caller is already
+// dispatched there.
+func (r *remoteRuntime) refreshMenu() {
+	installConnectMenu(presetNames(r.cfg.Presets), r.cfg.currentPreset())
+}
+
+// bind wires the connect page's three callbacks. They arrive off the UI thread,
+// which is why everything they reach dispatches.
+func (r *remoteRuntime) bind() error {
+	if err := r.w.Bind("catsConnect", r.connect); err != nil {
+		return err
+	}
+	if err := r.w.Bind("catsForget", r.forget); err != nil {
+		return err
+	}
+	return r.w.Bind("catsCancel", func() {
+		if r.cfg.Remote.URL != "" {
+			r.show(r.cfg.Remote.URL)
+		}
+	})
+}
+
+func presetNames(presets []remoteTarget) []string {
+	out := make([]string, 0, len(presets))
+	for _, p := range presets {
+		out = append(out, p.name())
+	}
+	return out
+}
+
+// activeRemote is the runtime the Connect menu's actions reach (menu_darwin.go's
+// cgo export cannot carry a receiver). Nil in local mode, where no Connect menu
+// is installed at all.
+var activeRemote *remoteRuntime
+
+// selectPreset is what a Connect menu item does: index into the preset list, or
+// -1 for "Connect to Another…".
+func selectPreset(index int) {
+	r := activeRemote
+	if r == nil {
+		return
+	}
+	if index < 0 || index >= len(r.cfg.Presets) {
+		r.showConnect()
+		return
+	}
+	p := r.cfg.Presets[index]
+	r.connect(p.URL, p.Label)
 }
 
 // newWindow builds the shared webview window (title + size) and installs the
