@@ -72,6 +72,7 @@ abstract final class MsgType {
   static const String usage = 'usage';
   static const String clients = 'clients';
   static const String cmdResult = 'cmd_result';
+  static const String history = 'history';
 
   /// Chat surface (the ACP side panel). Added within protocol v1: an old
   /// client ignores unknown types, and a new client learns the server serves
@@ -965,6 +966,38 @@ class Focus {
       };
 }
 
+/// History is the command ledger's recent entries, pushed rather than polled.
+///
+/// A push because a command finishing is a moment only the server knows about:
+/// records come from the pane's own cathost, and a client polling for them would
+/// either lag a command it is looking at or ask on a timer for a section most
+/// sessions never open. Sent on client init and again whenever a command is
+/// recorded, carrying the whole recent list rather than a delta — the list is
+/// short, and one message that is always the complete answer costs less than a
+/// delta protocol the client could fall out of step with.
+///
+/// Wire type: `history`.
+class History {
+  const History({
+    required this.entries,
+  });
+
+  /// The `t` discriminator this class always carries. It is a property of
+  /// the type, not a field: a caller who could set it could set it wrong.
+  static const String type = 'history';
+
+  final List<LedgerEntry> entries;
+
+  factory History.fromJson(Map<String, Object?> j) => History(
+        entries: asList(j['entries'], (e) => LedgerEntry.fromJson(asObj(e))),
+      );
+
+  Map<String, Object?> toJson() => {
+        't': type,
+        'entries': [for (final e in entries) e.toJson()],
+      };
+}
+
 /// HostItem is one cathost in the roster.
 class HostItem {
   const HostItem({
@@ -1262,6 +1295,69 @@ class Layout {
         'tabs': [for (final e in tabs) e.toJson()],
         'panes': [for (final e in panes) e.toJson()],
         'borders': [for (final e in borders) e.toJson()],
+      };
+}
+
+/// LedgerEntry is one recorded command on the wire. At is RFC3339 with
+/// nanoseconds — a string rather than a number because two commands a millisecond
+/// apart must still sort, and because every consumer of this either renders it or
+/// compares it lexically.
+class LedgerEntry {
+  const LedgerEntry({
+    required this.at,
+    required this.host,
+    required this.pane,
+    this.handle = '',
+    required this.cmd,
+    this.cwd = '',
+    this.exit,
+    this.durationMs = 0,
+    this.origin = '',
+    this.block = 0,
+  });
+
+  final String at;
+  final String host;
+  final int pane;
+  final String handle;
+  final String cmd;
+  final String cwd;
+  final int? exit;
+  final int durationMs;
+
+  /// "human", or the agent's label
+  final String origin;
+
+  /// Block addresses this command's output in its pane's scrollback
+  /// (ledger.output / ledger.jump). Absent when the daemon could not pin it,
+  /// which is also what an entry from a previous session looks like: a block is
+  /// live terminal state, and a restarted pane has none.
+  final int block;
+
+  factory LedgerEntry.fromJson(Map<String, Object?> j) => LedgerEntry(
+        at: asString(j['at']),
+        host: asString(j['host']),
+        pane: asInt(j['pane']),
+        handle: asString(j['handle']),
+        cmd: asString(j['cmd']),
+        cwd: asString(j['cwd']),
+        exit: asIntOrNull(j['exit']),
+        durationMs: asInt(j['duration_ms']),
+        origin: asString(j['origin']),
+        block: asInt(j['block']),
+      );
+
+  Map<String, Object?> toJson() => {
+        'at': at,
+        'host': host,
+        'pane': pane,
+        if (handle.isNotEmpty) 'handle': handle,
+        'cmd': cmd,
+        if (cwd.isNotEmpty) 'cwd': cwd,
+        if (exit != null) 'exit': exit,
+        if (durationMs != 0) 'duration_ms': durationMs,
+        if (origin.isNotEmpty) 'origin': origin,
+        if (block != 0) 'block': block,
       };
 }
 
@@ -2352,6 +2448,8 @@ Object? decodeDown(Map<String, Object?> j) {
       return Clients.fromJson(j);
     case CmdResult.type:
       return CmdResult.fromJson(j);
+    case History.type:
+      return History.fromJson(j);
     case ChatState.type:
       return ChatState.fromJson(j);
     case ChatSnapshot.type:

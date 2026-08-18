@@ -931,6 +931,12 @@ func (d *daemon) dispatch(mt orchestration.MessageType, payload []byte) {
 			return
 		}
 		o.post(func() { o.noteCommandEnd(d.id, ev) })
+	case orchestration.MsgBlockResult:
+		var ev orchestration.BlockResult
+		if err := json.Unmarshal(payload, &ev); err != nil {
+			return
+		}
+		o.post(func() { o.resolvePending(blockKey(d.id, ev.ID), ev) })
 	case orchestration.MsgHostStats:
 		var ev orchestration.HostStats
 		if err := json.Unmarshal(payload, &ev); err != nil {

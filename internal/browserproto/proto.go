@@ -51,6 +51,7 @@ const (
 	MsgUsage       Type = "usage"
 	MsgClients     Type = "clients"
 	MsgCmdResult   Type = "cmd_result"
+	MsgHistory     Type = "history"
 	// Chat surface (the ACP side panel). Added within protocol v1: an old
 	// client ignores unknown types, and a new client learns the server serves
 	// chat from CapChat rather than by probing.
@@ -184,6 +185,8 @@ func DecodeDown(data []byte) (any, error) {
 		return decodeAs[Clients](data)
 	case MsgCmdResult:
 		return decodeAs[CmdResult](data)
+	case MsgHistory:
+		return decodeAs[History](data)
 	case MsgChatState:
 		return decodeAs[ChatState](data)
 	case MsgChatSnapshot:

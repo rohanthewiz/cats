@@ -139,6 +139,17 @@ const (
 	// type into a shell that writes one.
 	CmdLedgerList = "ledger.list"
 
+	// ledger.output and ledger.jump act on a recorded command's BLOCK — the
+	// extent of its output in its pane's scrollback, which the cathost holds as
+	// two marks it moves as the buffer shifts under them.
+	//
+	// They are separate commands rather than flags on ledger.list because they
+	// are different kinds of thing: one is a read with a reply, the other is an
+	// effect on a viewport. A block whose rows have scrolled out of the buffer
+	// answers "gone" rather than the text that now occupies those rows.
+	CmdLedgerOutput = "ledger.output"
+	CmdLedgerJump   = "ledger.jump"
+
 	// Host commands (the HOSTS section's buttons + catctl): attach a cathost to
 	// the running session, or detach one. They are §7 commands rather than a
 	// config-file-only setting for the same reason config.set is one — a browser
@@ -304,6 +315,8 @@ var commandSpecs = []CommandSpec{
 	// The command history is a query: no effects, and reply-gated because a
 	// listing with nowhere to go is not worth producing.
 	{Name: CmdLedgerList, Params: LedgerListParams{}, Result: LedgerListResult{}, ReplyRequired: true},
+	{Name: CmdLedgerOutput, Params: LedgerBlockParams{}, Result: LedgerOutputResult{}, ReplyRequired: true, ParamsRequired: true},
+	{Name: CmdLedgerJump, Params: LedgerBlockParams{}, ParamsRequired: true},
 
 	// Hosts. Both writers echo the new roster, so a client repaints from the
 	// reply instead of waiting for the hosts push that also follows.
@@ -1491,11 +1504,42 @@ type LedgerEntry struct {
 	Exit       *int   `json:"exit,omitempty"`
 	DurationMs int64  `json:"duration_ms,omitempty"`
 	Origin     string `json:"origin,omitempty"` // "human", or the agent's label
+	// Block addresses this command's output in its pane's scrollback
+	// (ledger.output / ledger.jump). Absent when the daemon could not pin it,
+	// which is also what an entry from a previous session looks like: a block is
+	// live terminal state, and a restarted pane has none.
+	Block uint64 `json:"block,omitempty"`
 }
 
 // LedgerListResult is CmdResult.Data for ledger.list.
 type LedgerListResult struct {
 	Entries []LedgerEntry `json:"entries"`
+}
+
+// LedgerBlockParams addresses one recorded command's block: ledger.output and
+// ledger.jump. Both fields are required — a block id is allocated by the pane's
+// own cathost, so it means nothing without the pane.
+type LedgerBlockParams struct {
+	Pane  uint32 `json:"pane"`
+	Block uint64 `json:"block"`
+}
+
+// LedgerOutputResult is CmdResult.Data for ledger.output.
+//
+// Found false is the ordinary answer for a block whose rows have been discarded
+// — a pane's scrollback is finite, and a command from an hour ago is usually
+// gone. It is a state, not a failure, which is why it is a field rather than an
+// error: a caller walking a history wants to know which entries are still
+// readable, not to have the walk stop.
+type LedgerOutputResult struct {
+	Found bool   `json:"found"`
+	Text  string `json:"text,omitempty"`
+	// StartRow/EndRow are screen-buffer rows AT THE MOMENT OF THE ANSWER, which
+	// is the only moment they mean anything: the marks behind them move as the
+	// buffer shifts. Reported so a caller that wants to draw or scroll to the
+	// block does not need a second round trip against a buffer that has moved.
+	StartRow uint32 `json:"start_row,omitempty"`
+	EndRow   uint32 `json:"end_row,omitempty"`
 }
 
 // --- Editor params & results (§7, pane.open_file) ----------------------------

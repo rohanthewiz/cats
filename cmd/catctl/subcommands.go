@@ -127,6 +127,8 @@ var subcommands = []subcommand{
 	// Command history. Named `history` rather than `ledger` because that is the
 	// word for it; the §7 method keeps the storage-flavoured name.
 	{"history", app.CmdLedgerList, "history [count]", nil, "recent commands across every pane and host", buildHistory},
+	{"output", app.CmdLedgerOutput, "output <pane> <block>", []argKind{argPane}, "print a recorded command's output, if it is still in the pane", buildBlock},
+	{"jump", app.CmdLedgerJump, "jump <pane> <block>", []argKind{argPane}, "put a recorded command's output on screen", buildBlock},
 
 	// Misc.
 	{"agent", app.CmdAgentFocus, "agent <pane>", []argKind{argPane}, "reveal an agent's pane", buildPane},
@@ -297,6 +299,24 @@ func buildHistory(args []string) (json.RawMessage, error) {
 		return nil, usageErr{"history [count]"}
 	}
 	return marshal(p)
+}
+
+// buildBlock: output|jump <pane> <block>. Both ids come from `catctl history`,
+// which is the only place a block number exists — it is allocated by the pane's
+// own cathost and means nothing without the pane.
+func buildBlock(args []string) (json.RawMessage, error) {
+	if len(args) != 2 {
+		return nil, usageErr{"output <pane> <block>"}
+	}
+	pane, err := parsePane(args[0])
+	if err != nil {
+		return nil, err
+	}
+	blockID, err := strconv.ParseUint(args[1], 10, 64)
+	if err != nil || blockID == 0 {
+		return nil, fmt.Errorf("block %q is not a block id (see catctl history)", args[1])
+	}
+	return marshal(app.LedgerBlockParams{Pane: pane, Block: blockID})
 }
 
 // buildResize: resize <border> <ratio>.

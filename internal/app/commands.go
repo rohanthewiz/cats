@@ -165,6 +165,13 @@ type Backend interface {
 	// dataset is an in-memory B-tree, so the scan is a filtered walk rather than
 	// anything worth waiting on.
 	LedgerList(r Responder, p LedgerListParams)
+	// LedgerOutput reads a recorded command's output out of its pane's live
+	// scrollback (ledger.output), and LedgerJump scrolls that pane's viewport to
+	// it (ledger.jump). Both are round trips to the pane's cathost — the marks
+	// that bound a block are the terminal's, and only it can say where they are
+	// now — so both resolve r later.
+	LedgerOutput(r Responder, p LedgerBlockParams)
+	LedgerJump(r Responder, p LedgerBlockParams)
 
 	// RefreshUsage asks the backend's rate-limit poller to take a reading now
 	// (usage.refresh). It returns immediately: the read is one network round
@@ -993,6 +1000,26 @@ func (d *Dispatcher) Dispatch(name string, dec ParamDecoder, r Responder) {
 		}
 		d.backend.LedgerList(r, p)
 
+	case CmdLedgerOutput:
+		// The reply gate comes FIRST, before any validation: a reply-required
+		// command sent with nowhere to answer is a no-op, not a refusal nobody
+		// can read.
+		if !r.WantsReply() {
+			return
+		}
+		p, ok := d.decodeBlockParams(dec, r)
+		if !ok {
+			return
+		}
+		d.backend.LedgerOutput(r, p)
+
+	case CmdLedgerJump:
+		p, ok := d.decodeBlockParams(dec, r)
+		if !ok {
+			return
+		}
+		d.backend.LedgerJump(r, p)
+
 	case CmdUsageRefresh:
 		// Ack the ask, not the answer: the reading lands later, on every client
 		// at once, as a `usage` push.
@@ -1194,6 +1221,31 @@ func (d *Dispatcher) inheritedSplitCwd(target *layout.PaneID, host string) strin
 		return ""
 	}
 	return meta.Cwd
+}
+
+// decodeBlockParams decodes and checks the params ledger.output and ledger.jump
+// share. Both refusals are about the PANE rather than the block, because a
+// block is live terminal state: a closed pane has no blocks at all, and a
+// disconnected host cannot be asked where one is.
+func (d *Dispatcher) decodeBlockParams(dec ParamDecoder, r Responder) (LedgerBlockParams, bool) {
+	var p LedgerBlockParams
+	if err := dec.Decode(&p); err != nil {
+		r.Fail("bad params: " + err.Error())
+		return p, false
+	}
+	if p.Pane == 0 || p.Block == 0 {
+		r.Fail("pane and block are both required")
+		return p, false
+	}
+	if !d.backend.PaneExists(p.Pane) {
+		r.Fail(fmt.Sprintf("pane %d not found: its scrollback is gone", p.Pane))
+		return p, false
+	}
+	if !d.backend.PaneHostConnected(p.Pane) {
+		r.Fail("cathost daemon not connected")
+		return p, false
+	}
+	return p, true
 }
 
 // openFile implements pane.open_file: find the editor that should open Path,

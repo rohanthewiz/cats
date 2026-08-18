@@ -81,6 +81,7 @@ without racing the daemon's own post-hello replay. Unknown pane ids are ignored.
 | `set_output_stream` | `pane_id`, `enabled` | arms the raw-byte stream for `pane.wait_for_output` |
 | `ping` | `id` | round-trip probe; answered with `pong` carrying the same `id`. Sent only to a daemon advertising the `ping` capability |
 | `request_host_stats` | `interval_ms` | subscribe to the daemon's readings of its own machine, one `host_stats` per interval; `0` cancels. Capability: `host_stats` |
+| `request_block` | `id`, `pane_id`, `block`, `text` | where a recorded command's output is NOW, and optionally its text; answered with `block_result` carrying the same `id`. Capability: `command_ledger` |
 | `request_command_marks` | `on` | turn shell-integration scanning on or off for this connection. Capability: `command_ledger` |
 | `request_list_dir` | `pane_id`, `dir`, `base`, `recents`, `live` | list a directory **on the daemon's filesystem**; answered with `dir_listing`. Capability: `list_dir` |
 | `request_worktree` | `id`, `req` (`op`, `cwd`, `path`, `branch`, `root`, `force`) | run one git-worktree operation **on the daemon's machine**; answered with `worktree_result` carrying the same `id`. Capability: `worktree` |
@@ -107,6 +108,7 @@ without racing the daemon's own post-hello replay. Unknown pane ids are ignored.
 | `pong` | `id` | reply to `ping`, echoing its `id`. The only event with no pane |
 | `host_stats` | `rows` | one reading of the daemon's machine — memory, CPU, disk — display-ready. Only while a subscription is live |
 | `command_start` | `pane_id`, `cmd`, `cwd` | a shell began running a command. Only while a `request_command_marks` subscription is on. Capability: `command_ledger` |
+| `block_result` | `id`, `found`, `start_row`, `end_row`, `top_row`, `text` | reply to `request_block`. `found:false` for a block whose rows have been discarded — never a row number that now points at other output |
 | `command_end` | `pane_id`, `exit`, `duration_ms` | it finished. `exit` is **absent** when the shell reported none — deliberately distinct from `0` |
 | `dir_listing` | `pane_id`, `listing` | reply to `request_list_dir`, one per request. A path that does not resolve is `exists:false` with a reason, not an error event |
 | `worktree_result` | `id`, `result` | reply to `request_worktree`, matched by `id` rather than by order — git runs off the dispatch goroutine, so two operations finish in whichever order git finishes them. A git failure is `result.error` (with `result.dirty` for the escalation), not an error event |
@@ -375,6 +377,22 @@ empty Enter every shell emits a full `A`-`B`-`C`-`D` cycle for, guarantees a
 record always has the field a history exists for, and makes the feature's
 precondition one legible sentence — *your shell has to tell us what it ran* —
 rather than a history quietly full of blank rows.
+
+**A block is two marks, not two row numbers.** `command_start` / `command_end`
+carry a `block` id, and the daemon holds that block as a pair of tracked
+references the terminal moves as its scrollback shifts. Recording screen-buffer
+rows instead would be wrong in a way that only shows up later: those rows count
+from the top of the scrollback, so every evicted line shifts them by one, and a
+stored row would quietly address somebody else's output. `request_block`
+therefore resolves rows at the moment it is asked, and answers `found:false`
+once the rows are gone.
+
+Two consequences worth knowing when reading the code. The emulator is fed **up
+to each mark and no further** before the cursor is pinned there — feed the whole
+chunk first and every mark in it pins the same final position, which makes every
+block empty. And a block's end is pulled back to the previous row when its mark
+sits at column 0, because `133;D` comes from the shell's prompt hook, by which
+time the cursor has already moved past the output.
 
 A command whose `D` never arrives (its shell was replaced, the integration is
 half-installed) is closed at the next prompt with **no** status: a record saying

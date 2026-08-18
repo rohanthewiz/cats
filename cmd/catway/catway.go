@@ -195,7 +195,11 @@ type orch struct {
 	// store could not be opened. openCmds holds the commands that have started
 	// and not yet ended, keyed by pane — a pane runs one foreground command at a
 	// time, which is what makes the pairing a map rather than a queue.
-	ledger       *ledger.Ledger
+	ledger *ledger.Ledger
+	// nextBlockReq allocates ids for block lookups (ledger.output / ledger.jump),
+	// which are id-correlated rather than pane-FIFO — two can be in flight for
+	// one pane and the daemon answers them in whichever order it resolves them.
+	nextBlockReq uint64
 	openCmds     map[uint32]*openCmd
 	ledgerLogged map[string]bool
 	// structPanes (pane id → public handle) and structFocus snapshot the model's
@@ -373,6 +377,7 @@ const (
 	reqText                     // capture → pane_text
 	reqListDir                  // path.list on a remote host → dir_listing
 	reqWorktree                 // worktree.* on any host → worktree_result
+	reqBlock                    // ledger.output / ledger.jump → block_result
 )
 
 // label names the command for user-facing errors ("<label> timed out").
@@ -384,6 +389,8 @@ func (k reqKind) label() string {
 		return "directory listing"
 	case reqWorktree:
 		return "worktree command"
+	case reqBlock:
+		return "block lookup"
 	}
 	return "read"
 }
@@ -423,6 +430,14 @@ func paneKey(pane uint32, kind reqKind) reqKey { return reqKey{kind: kind, pane:
 // hostKey is the key for a host-addressed, id-correlated round trip.
 func hostKey(host string, id uint64) reqKey {
 	return reqKey{kind: reqWorktree, id: id, host: host}
+}
+
+// blockKey is the key for a block lookup. Id-correlated like a worktree request
+// rather than pane-FIFO like read and capture: two can be in flight for one pane
+// — the browser jumping to a block while a script copies another — and the
+// daemon answers them in whichever order it resolves them.
+func blockKey(host string, id uint64) reqKey {
+	return reqKey{kind: reqBlock, id: id, host: host}
 }
 
 // keyHost is the host whose link a pending request depends on — the one whose
@@ -2231,6 +2246,12 @@ func (o *orch) registerConn(c *client, init *browserproto.Init) {
 	// already carries are only drawn once the client knows how many hosts there
 	// are, so sending it later would flash them in.
 	o.send(c, o.hostsMsg())
+	// The command history, when there is one. Gated on non-empty so a session
+	// with no shell integration installed never sends the message at all, which
+	// is what keeps its sidebar section from appearing empty.
+	if m, ok := o.historyMsg(); ok {
+		o.send(c, m)
+	}
 	if m, ok := o.usageMsg(); ok {
 		o.send(c, m)
 	}

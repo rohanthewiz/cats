@@ -149,6 +149,10 @@ abstract final class CmdName {
 
   static const String ledgerList = 'ledger.list';
 
+  static const String ledgerOutput = 'ledger.output';
+
+  static const String ledgerJump = 'ledger.jump';
+
   static const String hostAttach = 'host.attach';
 
   static const String hostDetach = 'host.detach';
@@ -677,57 +681,26 @@ class HostListResult {
       };
 }
 
-/// LedgerEntry is one recorded command on the wire. At is RFC3339 with
-/// nanoseconds — a string rather than a number because two commands a millisecond
-/// apart must still sort, and because every consumer of this either renders it or
-/// compares it lexically.
-class LedgerEntry {
-  const LedgerEntry({
-    required this.at,
-    required this.host,
+/// LedgerBlockParams addresses one recorded command's block: ledger.output and
+/// ledger.jump. Both fields are required — a block id is allocated by the pane's
+/// own cathost, so it means nothing without the pane.
+class LedgerBlockParams {
+  const LedgerBlockParams({
     required this.pane,
-    this.handle = '',
-    required this.cmd,
-    this.cwd = '',
-    this.exit,
-    this.durationMs = 0,
-    this.origin = '',
+    required this.block,
   });
 
-  final String at;
-  final String host;
   final int pane;
-  final String handle;
-  final String cmd;
-  final String cwd;
-  final int? exit;
-  final int durationMs;
+  final int block;
 
-  /// "human", or the agent's label
-  final String origin;
-
-  factory LedgerEntry.fromJson(Map<String, Object?> j) => LedgerEntry(
-        at: asString(j['at']),
-        host: asString(j['host']),
+  factory LedgerBlockParams.fromJson(Map<String, Object?> j) => LedgerBlockParams(
         pane: asInt(j['pane']),
-        handle: asString(j['handle']),
-        cmd: asString(j['cmd']),
-        cwd: asString(j['cwd']),
-        exit: asIntOrNull(j['exit']),
-        durationMs: asInt(j['duration_ms']),
-        origin: asString(j['origin']),
+        block: asInt(j['block']),
       );
 
   Map<String, Object?> toJson() => {
-        'at': at,
-        'host': host,
         'pane': pane,
-        if (handle.isNotEmpty) 'handle': handle,
-        'cmd': cmd,
-        if (cwd.isNotEmpty) 'cwd': cwd,
-        if (exit != null) 'exit': exit,
-        if (durationMs != 0) 'duration_ms': durationMs,
-        if (origin.isNotEmpty) 'origin': origin,
+        'block': block,
       };
 }
 
@@ -794,6 +767,46 @@ class LedgerListResult {
 
   Map<String, Object?> toJson() => {
         'entries': [for (final e in entries) e.toJson()],
+      };
+}
+
+/// LedgerOutputResult is CmdResult.Data for ledger.output.
+///
+/// Found false is the ordinary answer for a block whose rows have been discarded
+/// — a pane's scrollback is finite, and a command from an hour ago is usually
+/// gone. It is a state, not a failure, which is why it is a field rather than an
+/// error: a caller walking a history wants to know which entries are still
+/// readable, not to have the walk stop.
+class LedgerOutputResult {
+  const LedgerOutputResult({
+    required this.found,
+    this.text = '',
+    this.startRow = 0,
+    this.endRow = 0,
+  });
+
+  final bool found;
+  final String text;
+
+  /// StartRow/EndRow are screen-buffer rows AT THE MOMENT OF THE ANSWER, which
+  /// is the only moment they mean anything: the marks behind them move as the
+  /// buffer shifts. Reported so a caller that wants to draw or scroll to the
+  /// block does not need a second round trip against a buffer that has moved.
+  final int startRow;
+  final int endRow;
+
+  factory LedgerOutputResult.fromJson(Map<String, Object?> j) => LedgerOutputResult(
+        found: asBool(j['found']),
+        text: asString(j['text']),
+        startRow: asInt(j['start_row']),
+        endRow: asInt(j['end_row']),
+      );
+
+  Map<String, Object?> toJson() => {
+        'found': found,
+        if (text.isNotEmpty) 'text': text,
+        if (startRow != 0) 'start_row': startRow,
+        if (endRow != 0) 'end_row': endRow,
       };
 }
 
@@ -2712,6 +2725,8 @@ const List<CommandSpec> kCommandSpecs = <CommandSpec>[
   CommandSpec('ui.action', paramsRequired: true),
   CommandSpec('pane.open_file', paramsRequired: true),
   CommandSpec('ledger.list', replyRequired: true),
+  CommandSpec('ledger.output', paramsRequired: true, replyRequired: true),
+  CommandSpec('ledger.jump', paramsRequired: true),
   CommandSpec('host.attach', paramsRequired: true),
   CommandSpec('host.detach', paramsRequired: true),
   CommandSpec('session.get'),
@@ -3026,6 +3041,18 @@ mixin CatsCommands implements CatsCommandTransport {
   /// This method always correlates, so it always runs.
   Future<LedgerListResult> ledgerList([LedgerListParams? params]) async =>
       LedgerListResult.fromJson(asObj(await invoke(CmdName.ledgerList, params?.toJson())));
+
+  /// `ledger.output`
+  ///
+  /// Reply-gated server-side: a `cmd` with no id is dropped without running.
+  /// This method always correlates, so it always runs.
+  Future<LedgerOutputResult> ledgerOutput(LedgerBlockParams params) async =>
+      LedgerOutputResult.fromJson(asObj(await invoke(CmdName.ledgerOutput, params.toJson())));
+
+  /// `ledger.jump`
+  Future<void> ledgerJump(LedgerBlockParams params) async {
+    await invoke(CmdName.ledgerJump, params.toJson());
+  }
 
   /// `host.attach`
   Future<HostListResult> hostAttach(HostAttachParams params) async =>

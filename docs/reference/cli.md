@@ -208,6 +208,19 @@ It needs the shell integration below, and answers with the cwd, exit status,
 duration and whether a human or an agent ran it — see
 [the control API](../protocols/control-api.md#command-history).
 
+Each row carries a `block`, which addresses that command's output where it still
+is, in its pane:
+
+```bash
+catctl output 3 12        # print it — raw, so `catctl output 3 12 | grep FAIL` works
+catctl jump 3 12          # scroll that pane's viewport to it
+```
+
+A block is live terminal state: its cathost holds it as two marks that move with
+the scrollback, so `output` on a command whose lines have finally been discarded
+says so on stderr and exits 1 rather than printing whatever now occupies those
+rows.
+
 Editors:
 
 ```bash

@@ -380,36 +380,86 @@ subscription's shape and why the daemon does the scanning),
 catgen-dart goldens regenerated (`LedgerListParams`/`LedgerEntry`/`LedgerListResult`);
 **cats-mobile has not been regenerated** — still owed from slice 1.
 
-### Phase 5 — semantic scrollback blocks — **NOT STARTED; scoped, and one item needs a
-decision**
+### Phase 5a — blocks: jump to a command, copy its output — **DONE**
 
-The ledger's marks give the browser block boundaries. Scoping this against the code turned
-up two things worth writing down before anybody starts.
+As built, and the scoping note above was right about the two hard parts and wrong about
+the fix for one of them.
 
-**Row positions need the feed split at each mark.** `readPump` feeds the whole 32 KiB chunk
-to the emulator and *then* scans it, so the cursor position at scan time is the position
-after the whole chunk — fine for a mark at the end of a read (the common case: the shell
-prints its prompt and waits), wrong for `133;C` followed immediately by output in the same
-read, where a block would start below its own first lines. The fix is to have the scanner
-report each mark's byte offset and feed the chunk in pieces, taking the screen-space row
-between them. Rows are `ScrollMetrics.MaxOffsetFromBottom + cursor.Y` — the same
-screen-buffer space `request_selection` already uses, so a block's text is a `read` away.
+**A block is two MARKS, not two row numbers**, and that is the whole design. libghostty's
+`TrackedGridRef` is a pin: it follows its cell as the terminal changes and reports
+`HasValue() == false` once the row is discarded. Recording screen-buffer rows — what the
+scoping note proposed — is wrong in a way that only shows up later: those rows count from
+the top of the scrollback, so every line evicted when the buffer wraps shifts them by one,
+and a stored row would quietly address somebody else's output. Nothing about the result
+would look wrong. With marks, a block whose rows are gone says so.
 
-**Collapse does not fit the rendering model, and the plan should say so.** cats renders a
-grid of cells server-side and ships frames; the browser draws what it is given. "Collapse
-this block" therefore is not a client-side fold — it would mean the daemon rendering a
-viewport with rows elided, which is deep inside libghostty's screen model. The other three
-verbs need none of that:
+`internal/terminal` grew a `Mark` interface and `Emulator.MarkCursor()`; the daemon keeps a
+bounded ring of 64 blocks per pane (two C-owned pins each, freed on eviction and on pane
+teardown, which the emulator's own `Close` does not do); `request_block` / `block_result`
+resolve one on demand, id-correlated because two can be in flight for one pane.
 
-* **jump to previous/next command** — scroll the viewport to a block's start row
-  (`scroll_viewport`, which exists)
-* **copy just the output** — `read` over `[output_start_row, end_row]` (exists)
-* **send a block to chat/agent/note** — the same read, then `chat.send` (exists)
+Three things the live run found:
 
-Suggested split: **5a** = row positions on the seam and in the ledger, plus a
-`ledger.output` convenience that reads a recorded command's output, plus the browser's jump
-and copy affordances. **5b** = collapse, only if it is worth the rendering work, and with
-that cost understood rather than assumed away.
+* **Every block's text was empty.** `readPump` fed the whole 32 KiB chunk to the emulator
+  and *then* scanned it, so every mark in a chunk pinned the same final cursor position.
+  The scanner now reports each mark's byte offset and the ledger scan owns the feed,
+  interleaving it: feed up to the mark, pin, continue. This was predicted in the scoping
+  note and is the part that would have been easy to get subtly wrong instead of visibly.
+* **Every block's text ended in a stray `b`.** `OSC 133;D` comes from the shell's *prompt*
+  hook, by which point the cursor has moved to the line after the output — so the block
+  ended at column 0 of the next line and picked up the first character of `bash-5.2$`. A
+  mark at column 0 now ends the block at the end of the row above, which needed the pane's
+  width tracked (`p.cols`).
+* **The jump landed the block at the BOTTOM of the viewport**, i.e. scrolled to a command
+  whose output was entirely off-screen. `BlockResult` carries `top_row` — the viewport's
+  *current* top — rather than a buffer total, so the scroll is one signed subtraction
+  (`start_row - top_row`) that works upward, downward, and from an already-scrolled pane.
+
+The sidebar gained a **History** section, pushed rather than polled (`history`
+down-message, sent on client init and on each recorded command). A command finishing is a
+moment only the server knows about; a client polling would either lag the command it is
+watching or ask on a timer for a section most sessions never open. The whole recent list
+travels rather than a delta — it is 40 short rows, and one message that is always the
+complete answer beats a delta protocol the client could fall out of step with. A click
+jumps; the context menu copies the output or the command. The section stays hidden until
+there is something in it, so a session with no shell integration sees the sidebar it always
+had.
+
+`catctl output` prints raw so it pipes, and exits 1 with a stderr line when the block is
+gone — an empty stdout that meant "scrolled away" would be indistinguishable from a command
+that printed nothing.
+
+Tests added: `internal/orchestration/ledger_test.go` (a block resolving to its own output,
+two commands in one pane giving distinct blocks over distinct text, `text:false` skipping
+the extraction, and unknown block / unknown pane both answering "not found" rather than
+erroring), `cmd/catway/ledger_test.go` (the round trip and its request shape, a gone block
+answering `found:false` from `output` but refusing from `jump`, the scroll computed up and
+down and skipped when already at the top, an incapable host refused by name, and the block
+id being taken from the END so a half-pinned command is not offered).
+
+Verified live (a 12-row pane, so output genuinely scrolls away): three recorded commands
+get blocks 1/2/3; `catctl output 1 1` prints exactly `ALPHA-OUTPUT\nsecond-line\n` — byte
+checked, with no stray prompt character — and block 2 prints `1`…`30` in full though none
+of it is on screen; an unknown block exits 1 saying its output has scrolled out;
+`catctl jump 1 1` scrolls the pane so `ALPHA-OUTPUT` sits at the top of the viewport
+(confirmed by dumping the grid from a second viewer client before and after); and a viewer
+attached across a command sees two `history` pushes — one on init, one when the command was
+recorded.
+
+Docs updated: `docs/protocols/control-api.md` (a Blocks subsection under Command history),
+`docs/protocols/orchestration-seam.md` (both messages, why marks rather than rows, and the
+two implementation consequences), `docs/protocols/browser-protocol.md` (the `history`
+push), `docs/reference/cli.md` (`catctl output` / `catctl jump`).
+catgen-dart goldens regenerated; **cats-mobile has not been regenerated** — still owed from
+slice 1.
+
+### Phase 5b — collapse — **NOT STARTED, and deliberately deferred**
+
+cats renders the grid server-side and ships frames, so "collapse this block" is not a
+client-side fold: it would mean the daemon rendering a viewport with rows elided, inside
+libghostty's screen model. Worth doing only with that cost understood rather than assumed
+away — and the three verbs people actually reach for (jump, copy, send to chat) are shipped
+without it.
 
 ### Phase 6 — runbooks
 

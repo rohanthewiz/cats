@@ -63,13 +63,22 @@ type pane struct {
 
 	// OSC passthrough scanners, owned exclusively by this pane's readPump goroutine
 	// (libghostty-vt does not surface OSC 7 cwd, so we scan the raw byte stream).
-	osc      oscScanner
-	osc133   osc133Scanner    // OSC 133/633 shell-integration marks, for the command ledger
-	cmds     cmdTracker       // pairs those marks into commands; readPump-owned like the scanners
+	osc    oscScanner
+	osc133 osc133Scanner // OSC 133/633 shell-integration marks, for the command ledger
+	cmds   cmdTracker    // pairs those marks into commands; readPump-owned like the scanners
+	// blockFields is this pane's ring of command blocks (ledger.go): two
+	// terminal marks each, so a recorded command's output stays addressable as
+	// the scrollback moves under it.
+	blockFields
 	osc52    osc52Scanner     // OSC 52 clipboard writes (also not surfaced by go-libghostty)
 	osc9     osc9Scanner      // OSC 9 progress, owned by readPump; latest published to progress
 	oscTitle oscTitleScanner  // OSC 0/2 window title, for the pane_title chrome event
 	xtmod    xtmodkeysScanner // XTMODKEYS modifyOtherKeys (also not surfaced)
+
+	// cols is the pane's current width, kept because the block resolver needs
+	// "the end of a row" and the emulator only offers a whole snapshot to find
+	// it in. Written by createPane and resizePane, read by resolveBlock.
+	cols atomic.Uint32
 
 	// modifyOtherKeys is the scanner's current state, published by readPump and
 	// read by the flusher/resync when reporting pane_modes.
@@ -614,6 +623,13 @@ func (h *Host) dispatch(typ MessageType, payload []byte) error {
 		go func() {
 			h.emit(NewWorktreeResult(c.ID, worktree.Do(c.Req)))
 		}()
+	case MsgRequestBlock:
+		var c RequestBlock
+		if err := json.Unmarshal(payload, &c); err != nil {
+			h.emit(NewError(0, "bad request_block: "+err.Error()))
+			return nil
+		}
+		h.resolveBlock(c)
 	case MsgRequestCommandMarks:
 		var c RequestCommandMarks
 		if err := json.Unmarshal(payload, &c); err != nil {
@@ -814,6 +830,7 @@ func (h *Host) createPane(c CreatePane) error {
 		spawnDir, _ = os.Getwd()
 	}
 	p.lastPwd = spawnDir
+	p.cols.Store(uint32(c.Cols))
 	emu, err := terminal.New(c.Cols, c.Rows, terminal.WithWritePTY(func(d []byte) {
 		_ = p.writePTY(d)
 	}))
@@ -859,7 +876,15 @@ func (h *Host) readPump(p *pane) {
 	for {
 		n, err := p.ptmx.Read(buf)
 		if n > 0 {
-			h.feed(p, buf[:n])
+			// The ledger scan owns the feed when it is on, because a block's
+			// boundaries are the cursor position AT a mark — which means feeding
+			// up to the mark and no further before pinning it (see
+			// scanCommandMarks). Off, this is the plain single feed it always was.
+			if h.commandMarksOn() {
+				h.scanCommandMarks(p, buf[:n])
+			} else {
+				h.feed(p, buf[:n])
+			}
 			p.dirty.Store(true)
 			p.detectSeq.Add(1) // mark new content for the detector's content-skip
 			// Stream the raw chunk to a subscribed orchestrator (pane.wait_for_output).
@@ -893,11 +918,6 @@ func (h *Host) readPump(p *pane) {
 			}
 			if v, changed := p.xtmod.scan(buf[:n]); changed {
 				p.modifyOtherKeys.Store(v)
-			}
-			// Last, and only on a subscription: the ledger scan is the one pass
-			// here that most sessions never ask for.
-			if h.commandMarksOn() {
-				h.scanCommandMarks(p, buf[:n])
 			}
 		}
 		if err != nil { // EOF / EIO when the child exits or the PTY closes
@@ -1180,6 +1200,7 @@ func (h *Host) resizePane(c Resize) error {
 
 	p.emuMu.Lock()
 	if !p.closed {
+		p.cols.Store(uint32(c.Cols))
 		err = p.emu.Resize(c.Cols, c.Rows)
 	}
 	p.emuMu.Unlock()
@@ -1313,6 +1334,9 @@ func (h *Host) closePane(p *pane) {
 		return
 	}
 	p.closed = true
+	// Before the emulator goes: its Close does not free the tracked references
+	// a block holds, and nothing else will.
+	p.closeBlocks()
 	p.emu.Close()
 	p.emuMu.Unlock()
 

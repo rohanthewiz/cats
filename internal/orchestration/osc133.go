@@ -53,10 +53,17 @@ const (
 
 // shellMark is one decoded mark. Exit is meaningful only for markCommandEnd and
 // is nil when the shell reported none; Cmd only for markCommandLine.
+//
+// Offset is the index in the scanned chunk just past this mark's terminator,
+// and it is what makes a block's boundaries exact. The emulator has to be fed
+// UP TO a mark and no further before the cursor is pinned there: feed the whole
+// chunk first and every mark in it pins the same final cursor position, which
+// is how a command's output range comes out empty.
 type shellMark struct {
-	Kind shellMarkKind
-	Exit *int
-	Cmd  string
+	Kind   shellMarkKind
+	Exit   *int
+	Cmd    string
+	Offset int
 }
 
 // osc133Scanner extracts shell-integration marks from a raw terminal output
@@ -74,12 +81,15 @@ type osc133Scanner struct {
 // back, and a fast command can produce its whole A-B-E-C-D cycle in one read.
 func (s *osc133Scanner) scan(b []byte) []shellMark {
 	var out []shellMark
+	pos := 0 // index of the byte being scanned, so a mark can report where it ended
 	emit := func() {
 		if m, ok := parseShellMark(s.buf); ok {
+			m.Offset = pos + 1
 			out = append(out, m)
 		}
 	}
-	for _, c := range b {
+	for i, c := range b {
+		pos = i
 		switch s.state {
 		case oscNormal:
 			if c == 0x1b {

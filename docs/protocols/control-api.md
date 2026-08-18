@@ -456,6 +456,7 @@ new panes rather than a location.
 | `path.list` | — |
 | `ui.notify` / `ui.action` | `notify <title...>` / — |
 | `ledger.list` | `history [count]` |
+| `ledger.output` / `ledger.jump` | `output <pane> <block>` / `jump <pane> <block>` |
 | `pane.open_file` | `open <path> [line]` |
 | `agent.focus` | `agent <pane>` |
 | `usage.refresh` | — |
@@ -516,6 +517,37 @@ is a palette that wants the recent list and will rank it itself, which is the
 same division `path.list` draws. `failed` means *known* to have failed — a
 command whose shell reported no status is not counted, since that is exactly the
 case somebody is using the filter to investigate.
+
+#### Blocks — a command's output, after the fact
+
+Each record carries a `block`: a handle for the extent of that command's output
+in its pane's scrollback.
+
+```bash
+catctl output 3 12        # print it (raw, so it pipes)
+catctl jump 3 12          # scroll that pane's viewport to it
+```
+
+**A block is live terminal state, not a stored copy.** Its cathost holds it as
+two *marks* that the terminal itself moves as the scrollback shifts — which is
+why both verbs are round trips rather than reads of a stored row number. The
+naive design (record the screen-buffer rows) is wrong in a way that only shows
+up later: those rows count from the top of the scrollback, so every line evicted
+when the buffer wraps shifts them by one, and a stored row would quietly address
+somebody else's output. Nothing about the result would look wrong.
+
+So a block whose rows have finally been discarded says so. `ledger.output`
+answers `found: false` — a state, not a failure, because a caller walking a
+history wants to know which entries are still readable rather than have the walk
+stop — while `ledger.jump` refuses by name, since it has nowhere to go.
+
+`start_row` / `end_row` in the reply are screen-buffer rows **at the moment of
+the answer**, which is the only moment they mean anything. An entry with no
+`block` is one whose pane never pinned it, or one that outlived the pane it ran
+in; it still lists, it just cannot be opened.
+
+In the browser this is the sidebar's **History** section: a click jumps, and the
+row's context menu copies the output.
 
 It needs [shell integration](../reference/cli.md#verbs) installed
 (`catctl integration install shell`): the records come from the OSC 133 marks a

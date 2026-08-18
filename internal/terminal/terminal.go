@@ -152,6 +152,30 @@ func (s *Snapshot) At(col, row uint16) Cell {
 	return s.Cells[row][col]
 }
 
+// Mark is a position that FOLLOWS its cell as the terminal changes — the
+// primitive that makes a command's output addressable after the fact.
+//
+// The naive alternative is to record a screen-buffer row number, and it is
+// wrong in a way that only shows up later: screen-buffer rows count from the
+// top of the scrollback, so every line evicted when the buffer wraps shifts
+// every recorded row by one. A stored row would then quietly address different
+// text — the worst possible failure for "copy exactly this command's output",
+// because nothing about the result looks wrong.
+//
+// A mark is the terminal's own tracked reference instead. It moves with its
+// row, and when that row is finally discarded it says so (ok=false) rather than
+// resolving to whatever now occupies that position.
+//
+// Marks hold terminal-owned resources: every one obtained must be Closed, and
+// closing the Emulator does not close them.
+type Mark interface {
+	// Point reports the mark's current screen-buffer position (row from the top
+	// of the scrollback, column). ok is false once the row has been discarded.
+	Point() (row uint32, col uint16, ok bool)
+	// Close releases the mark. Safe to call more than once.
+	Close()
+}
+
 // Emulator is a VT terminal owned entirely by Go. Phase B feeds PTY/agent
 // output in via Write and renders the resulting Snapshot in the browser.
 //
@@ -184,6 +208,9 @@ type Emulator interface {
 	// is true the range is a block region rather than a linear reading-order range.
 	// Returns "" when the range has no selectable content.
 	FormatSelection(anchor, cursor SelectionEndpoint, rectangle bool) (string, error)
+
+	// MarkCursor returns a Mark pinned to the cursor's current cell.
+	MarkCursor() (Mark, error)
 
 	// InputModes reports the terminal's current input-affecting DEC mode state.
 	InputModes() (InputModes, error)

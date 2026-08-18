@@ -83,6 +83,7 @@ import (
 	"os"
 	"os/signal"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/rohanthewiz/cats/internal/app"
@@ -246,6 +247,11 @@ func run() int {
 		// text is reproduced byte for byte, with no added newline, because a
 		// clipboard that did not end in one did not end in one.
 		printClipboard(resp)
+	case method == app.CmdLedgerOutput && resp.OK:
+		// Same rule as the clipboard: the useful form of a command's output is
+		// the output. `catctl output 3 12 | grep FAIL` only works if what comes
+		// out is the text.
+		printBlockOutput(resp)
 	default:
 		printResult(resp)
 	}
@@ -272,6 +278,26 @@ func printResult(resp ctlproto.Response) {
 		return
 	}
 	fmt.Println(buf.String())
+}
+
+// printBlockOutput writes a ledger.output payload to stdout as raw text, with
+// the "it has scrolled away" case going to stderr so it never contaminates a
+// pipe — and exiting non-zero, because a caller piping this needs to know the
+// empty output was an absence rather than a command that printed nothing.
+func printBlockOutput(resp ctlproto.Response) {
+	var data app.LedgerOutputResult
+	if err := json.Unmarshal(resp.Data, &data); err != nil {
+		printResult(resp)
+		return
+	}
+	if !data.Found {
+		fmt.Fprintln(os.Stderr, "catctl: that command's output has scrolled out of the pane's buffer")
+		os.Exit(1)
+	}
+	fmt.Print(data.Text)
+	if data.Text != "" && !strings.HasSuffix(data.Text, "\n") {
+		fmt.Println()
+	}
 }
 
 // printClipboard writes a clipboard.read payload to stdout as raw text. A

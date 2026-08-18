@@ -131,6 +131,16 @@ func (b *fakeBackend) UIAction(r Responder, p UIActionParams) {
 
 func (b *fakeBackend) EditorConfig() EditorInfo { return b.editor }
 
+func (b *fakeBackend) LedgerOutput(r Responder, p LedgerBlockParams) {
+	b.rec("ledgerOutput:" + strconv.FormatUint(uint64(p.Pane), 10) + ":" + strconv.FormatUint(p.Block, 10))
+	r.OK(LedgerOutputResult{Found: true, Text: "output"})
+}
+
+func (b *fakeBackend) LedgerJump(r Responder, p LedgerBlockParams) {
+	b.rec("ledgerJump:" + strconv.FormatUint(uint64(p.Pane), 10) + ":" + strconv.FormatUint(p.Block, 10))
+	r.OK(nil)
+}
+
 func (b *fakeBackend) LedgerList(r Responder, p LedgerListParams) {
 	b.rec("ledgerList:" + p.Host + ":" + p.Contains)
 	b.lastLedger = p

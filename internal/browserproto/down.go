@@ -435,6 +435,24 @@ func NewNotify(kind, message, body string) Notify {
 	return Notify{T: MsgNotify, Kind: kind, Message: message, Body: body}
 }
 
+// History is the command ledger's recent entries, pushed rather than polled.
+//
+// A push because a command finishing is a moment only the server knows about:
+// records come from the pane's own cathost, and a client polling for them would
+// either lag a command it is looking at or ask on a timer for a section most
+// sessions never open. Sent on client init and again whenever a command is
+// recorded, carrying the whole recent list rather than a delta — the list is
+// short, and one message that is always the complete answer costs less than a
+// delta protocol the client could fall out of step with.
+type History struct {
+	T       Type              `json:"t"`
+	Entries []app.LedgerEntry `json:"entries"`
+}
+
+func NewHistory(entries []app.LedgerEntry) History {
+	return History{T: MsgHistory, Entries: entries}
+}
+
 // Title sets the browser-tab title (app-level).
 type Title struct {
 	T     Type   `json:"t"`

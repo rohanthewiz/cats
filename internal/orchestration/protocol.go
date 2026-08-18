@@ -89,10 +89,13 @@ const (
 	// scanner is one more pass over every pane's output bytes, and a session
 	// that keeps no ledger should not pay for it.
 	MsgRequestCommandMarks MessageType = "request_command_marks"
-	MsgRequestListDir      MessageType = "request_list_dir"
-	MsgRequestWorktree     MessageType = "request_worktree"
-	MsgHookReply           MessageType = "hook_reply"
-	MsgControlReply        MessageType = "control_reply"
+	// MsgRequestBlock asks for one recorded command's block: where its output
+	// is now, and optionally its text.
+	MsgRequestBlock    MessageType = "request_block"
+	MsgRequestListDir  MessageType = "request_list_dir"
+	MsgRequestWorktree MessageType = "request_worktree"
+	MsgHookReply       MessageType = "hook_reply"
+	MsgControlReply    MessageType = "control_reply"
 
 	// Go → Rust (events).
 	MsgWelcome        MessageType = "welcome"
@@ -111,6 +114,7 @@ const (
 	MsgHostStats      MessageType = "host_stats"
 	MsgCommandStart   MessageType = "command_start"
 	MsgCommandEnd     MessageType = "command_end"
+	MsgBlockResult    MessageType = "block_result"
 	MsgDirListing     MessageType = "dir_listing"
 	MsgWorktreeResult MessageType = "worktree_result"
 	MsgHookReport     MessageType = "hook_report"
@@ -176,7 +180,8 @@ const (
 	FeatureControlRelay = "control_relay"
 	// FeatureCommandLedger: the daemon can read OSC 133 shell-integration marks
 	// out of a pane's output and report each command as MsgCommandStart /
-	// MsgCommandEnd, on a subscription (MsgRequestCommandMarks).
+	// MsgCommandEnd, on a subscription (MsgRequestCommandMarks) — and can answer
+	// MsgRequestBlock for where a recorded command's output is now.
 	//
 	// It is the daemon's job for the reason every other per-pane reading is: the
 	// marks are in that pane's byte stream, which is on that machine. It also
@@ -836,15 +841,19 @@ func NewRequestCommandMarks(on bool) RequestCommandMarks {
 // There is no id: a pane runs one foreground command at a time, so the pairing
 // is "this pane's open command", and the daemon has already done it (see
 // cmdTracker) rather than shipping raw marks for the client to re-derive.
+// Block is set when the daemon could pin the command's output — see
+// RequestBlock. Zero means it could not, and the command is recorded without an
+// addressable block rather than with a wrong one.
 type CommandStart struct {
 	Type   MessageType `json:"type"`
 	PaneID uint32      `json:"pane_id"`
 	Cmd    string      `json:"cmd"`
 	Cwd    string      `json:"cwd,omitempty"`
+	Block  uint64      `json:"block,omitempty"`
 }
 
-func NewCommandStart(paneID uint32, cmd, cwd string) CommandStart {
-	return CommandStart{Type: MsgCommandStart, PaneID: paneID, Cmd: cmd, Cwd: cwd}
+func NewCommandStart(paneID uint32, cmd, cwd string, block uint64) CommandStart {
+	return CommandStart{Type: MsgCommandStart, PaneID: paneID, Cmd: cmd, Cwd: cwd, Block: block}
 }
 
 // CommandEnd closes the pane's open command. Exit is nil when the shell reported
@@ -856,11 +865,62 @@ type CommandEnd struct {
 	PaneID     uint32      `json:"pane_id"`
 	Exit       *int        `json:"exit,omitempty"`
 	DurationMs int64       `json:"duration_ms"`
+	Block      uint64      `json:"block,omitempty"`
 }
 
-func NewCommandEnd(paneID uint32, exit *int, duration time.Duration) CommandEnd {
+func NewCommandEnd(paneID uint32, exit *int, duration time.Duration, block uint64) CommandEnd {
 	return CommandEnd{Type: MsgCommandEnd, PaneID: paneID, Exit: exit,
-		DurationMs: duration.Milliseconds()}
+		DurationMs: duration.Milliseconds(), Block: block}
+}
+
+// RequestBlock asks where a recorded command's output is NOW, and optionally
+// for its text.
+//
+// "Now" is the load-bearing word. A block is held as two marks the terminal
+// itself moves as its scrollback shifts (see terminal.Mark), so its rows are
+// only meaningful at the instant they are read — which is why this is a request
+// rather than a pair of numbers recorded alongside the command. A block whose
+// rows have been discarded answers Found false, never a row number that now
+// points at somebody else's output.
+//
+// ID correlates the reply, because two of these can be in flight for one pane:
+// the browser jumps to a block while a script copies another.
+type RequestBlock struct {
+	Type   MessageType `json:"type"`
+	ID     uint64      `json:"id"`
+	PaneID uint32      `json:"pane_id"`
+	Block  uint64      `json:"block"`
+	Text   bool        `json:"text,omitempty"`
+}
+
+func NewRequestBlock(id uint64, paneID uint32, block uint64, text bool) RequestBlock {
+	return RequestBlock{Type: MsgRequestBlock, ID: id, PaneID: paneID, Block: block, Text: text}
+}
+
+// BlockResult answers a RequestBlock, echoing its ID.
+//
+// StartRow/EndRow are screen-buffer rows (from the top of the scrollback), the
+// same space request_selection uses.
+//
+// TopRow is the row CURRENTLY at the top of that pane's viewport, which turns
+// "put this block on screen" into one subtraction: scroll by StartRow - TopRow.
+// It is the current top rather than the buffer's total because the viewport may
+// already be scrolled, and scroll_viewport applies a delta — a client working
+// from a total would compute the right answer only for a pane sitting at the
+// bottom.
+type BlockResult struct {
+	Type     MessageType `json:"type"`
+	ID       uint64      `json:"id"`
+	Found    bool        `json:"found"`
+	StartRow uint32      `json:"start_row,omitempty"`
+	EndRow   uint32      `json:"end_row,omitempty"`
+	TopRow   uint32      `json:"top_row,omitempty"`
+	Text     string      `json:"text,omitempty"`
+}
+
+func NewBlockResult(id uint64, found bool, startRow, endRow, topRow uint32, text string) BlockResult {
+	return BlockResult{Type: MsgBlockResult, ID: id, Found: found,
+		StartRow: startRow, EndRow: endRow, TopRow: topRow, Text: text}
 }
 
 // DirListing answers a RequestListDir, echoing its PaneID so the client can

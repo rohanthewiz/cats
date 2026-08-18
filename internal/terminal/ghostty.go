@@ -123,6 +123,53 @@ func (e *ghosttyEmulator) ScrollMetrics() (ScrollMetrics, error) {
 	}, nil
 }
 
+// MarkCursor pins the cursor's current cell, in ACTIVE coordinates — the area
+// the cursor can move in — which is what makes the pin land on the row the
+// shell is writing on rather than on wherever the viewport happens to be
+// scrolled to.
+func (e *ghosttyEmulator) MarkCursor() (Mark, error) {
+	x, err := e.term.CursorX()
+	if err != nil {
+		return nil, fmt.Errorf("terminal: cursor x: %w", err)
+	}
+	y, err := e.term.CursorY()
+	if err != nil {
+		return nil, fmt.Errorf("terminal: cursor y: %w", err)
+	}
+	ref, err := e.term.TrackGridRef(libghostty.Point{Tag: libghostty.PointTagActive, X: x, Y: uint32(y)})
+	if err != nil {
+		return nil, fmt.Errorf("terminal: track cursor: %w", err)
+	}
+	return &ghosttyMark{ref: ref}, nil
+}
+
+// ghosttyMark wraps libghostty's tracked grid reference. The nil check in every
+// method is not defensive padding: Close is called from a pane teardown that
+// may race a resolution, and a double free of a C handle is not a bug that
+// reports itself.
+type ghosttyMark struct{ ref *libghostty.TrackedGridRef }
+
+func (m *ghosttyMark) Point() (uint32, uint16, bool) {
+	if m == nil || m.ref == nil || !m.ref.HasValue() {
+		return 0, 0, false
+	}
+	// Screen coordinates: measured from the top of the scrollback, which is the
+	// space FormatSelection's endpoints are in.
+	pt, err := m.ref.Point(libghostty.PointTagScreen)
+	if err != nil {
+		return 0, 0, false
+	}
+	return pt.Y, pt.X, true
+}
+
+func (m *ghosttyMark) Close() {
+	if m == nil || m.ref == nil {
+		return
+	}
+	m.ref.Close()
+	m.ref = nil
+}
+
 // FormatSelection resolves the two screen-buffer endpoints to grid references and
 // formats the bounded selection as plain text. It mirrors cats's Rust extraction
 // (read_text_screen): order endpoints top-left → bottom-right, resolve each via

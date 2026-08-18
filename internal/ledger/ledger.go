@@ -61,6 +61,17 @@ type Entry struct {
 	Exit       *int  `json:"exit,omitempty"`
 	DurationMs int64 `json:"ms,omitempty"`
 
+	// Block is the daemon's handle for this command's extent in its pane's
+	// scrollback — two marks the terminal moves as the buffer shifts. Zero when
+	// the daemon could not pin it, or when its cathost is too old to; the record
+	// is then a history entry without an addressable block rather than one with
+	// a wrong one.
+	//
+	// It is meaningful only alongside Pane, and only until that pane's shell
+	// exits: a block is live terminal state, and this field is a key into it
+	// rather than a copy of it.
+	Block uint64 `json:"block,omitempty"`
+
 	// Origin is who ran it: "human", or the label of the agent that held the
 	// pane when it started. It is the field that makes an agent's work
 	// reviewable — "what did claude actually run while I was away" is not a
