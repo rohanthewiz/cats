@@ -488,6 +488,7 @@ class HostInfo {
     required this.connected,
     this.addrKind = '',
     this.isDefault = false,
+    this.local = false,
     required this.panes,
     this.error = '',
   });
@@ -501,6 +502,17 @@ class HostInfo {
   /// each key to an identifier, and `default` is a reserved word in Dart (see
   /// cmd/catgen-dart, which refuses it rather than silently mangling the name).
   final bool isDefault;
+
+  /// Local marks the host that is this catway's own machine — the synthesized
+  /// "local" host reached over server.cathost_socket. It is not derivable from
+  /// AddrKind: a unix address can be an ssh -L forward to another box, which is
+  /// exactly how the first real remote host is reached. Clients need it because
+  /// every path-shaped feature is local-only until cathost grows its own
+  /// filesystem commands: the directory picker, worktrees, and the branch/agent
+  /// readers all describe this machine's disk, so they are offered for a local
+  /// host and withheld for a remote one rather than silently answering about
+  /// the wrong filesystem.
+  final bool local;
   final int panes;
   final String error;
 
@@ -510,6 +522,7 @@ class HostInfo {
         connected: asBool(j['connected']),
         addrKind: asString(j['addr_kind']),
         isDefault: asBool(j['is_default']),
+        local: asBool(j['local']),
         panes: asInt(j['panes']),
         error: asString(j['error']),
       );
@@ -520,6 +533,7 @@ class HostInfo {
         'connected': connected,
         if (addrKind.isNotEmpty) 'addr_kind': addrKind,
         if (isDefault) 'is_default': isDefault,
+        if (local) 'local': local,
         'panes': panes,
         if (error.isNotEmpty) 'error': error,
       };
@@ -1329,6 +1343,12 @@ class SessionInfoResult {
 ///   - Env adds environment variables to the spawned process.
 ///
 /// Cwd/Env without Command still apply to the default shell spawn.
+/// Host puts the new pane on a named cathost instead of the workspace's own
+/// default (host.list names them). It is the one field that decides which
+/// *machine* the spawn lands on, so everything else here — Cwd especially — is
+/// interpreted on that machine: a cwd from the pane being split means nothing on
+/// another host, which is why the inherited cwd is dropped when the split
+/// crosses hosts (Dispatcher.inheritedSplitCwd).
 class SplitParams {
   const SplitParams({
     this.pane,
@@ -1336,6 +1356,7 @@ class SplitParams {
     this.cwd = '',
     this.command = const <String>[],
     this.env = const <String, String>{},
+    this.host = '',
   });
 
   final int? pane;
@@ -1345,6 +1366,7 @@ class SplitParams {
   final String cwd;
   final List<String> command;
   final Map<String, String> env;
+  final String host;
 
   factory SplitParams.fromJson(Map<String, Object?> j) => SplitParams(
         pane: asIntOrNull(j['pane']),
@@ -1352,6 +1374,7 @@ class SplitParams {
         cwd: asString(j['cwd']),
         command: asList(j['command'], asString),
         env: asMap(j['env'], asString),
+        host: asString(j['host']),
       );
 
   Map<String, Object?> toJson() => {
@@ -1360,6 +1383,7 @@ class SplitParams {
         if (cwd.isNotEmpty) 'cwd': cwd,
         if (command.isNotEmpty) 'command': command,
         if (env.isNotEmpty) 'env': env,
+        if (host.isNotEmpty) 'host': host,
       };
 }
 
@@ -1439,6 +1463,9 @@ class SwapWithParams {
 /// operation that is not about the viewport at all. Empty — the ordinary case —
 /// means the active workspace, and the viewport does not move either way: the
 /// new tab becomes its *own* workspace's active tab, nothing more.
+/// Host puts the tab's root pane on a named cathost instead of the target
+/// workspace's default (see SplitParams.Host — same field, same meaning, and the
+/// same reason the neighbor tab's cwd is not inherited across a host boundary).
 class TabCreateParams {
   const TabCreateParams({
     this.title = '',
@@ -1446,6 +1473,7 @@ class TabCreateParams {
     this.command = const <String>[],
     this.env = const <String, String>{},
     this.workspace = '',
+    this.host = '',
   });
 
   final String title;
@@ -1453,6 +1481,7 @@ class TabCreateParams {
   final List<String> command;
   final Map<String, String> env;
   final String workspace;
+  final String host;
 
   factory TabCreateParams.fromJson(Map<String, Object?> j) => TabCreateParams(
         title: asString(j['title']),
@@ -1460,6 +1489,7 @@ class TabCreateParams {
         command: asList(j['command'], asString),
         env: asMap(j['env'], asString),
         workspace: asString(j['workspace']),
+        host: asString(j['host']),
       );
 
   Map<String, Object?> toJson() => {
@@ -1468,6 +1498,7 @@ class TabCreateParams {
         if (command.isNotEmpty) 'command': command,
         if (env.isNotEmpty) 'env': env,
         if (workspace.isNotEmpty) 'workspace': workspace,
+        if (host.isNotEmpty) 'host': host,
       };
 }
 
@@ -1797,27 +1828,40 @@ class WaitForOutputResult {
 /// flag rather than the default because a typo must stay an error on the first
 /// attempt — the dialog offers creation only after the user confirms the missing
 /// path is intentional, then retries with Mkdir set.
+///
+/// Host pins the workspace to a cathost: it becomes the workspace's default for
+/// every pane created in it, so "a workspace on devbox" is one field rather than
+/// a host choice repeated at each split. It also changes how Path is read —
+/// on a non-local host the path is passed through verbatim, because the
+/// directory being named lives on *that* machine and this process cannot expand
+/// "~", stat it, or create it (see workspaceStartDir). Mkdir is therefore
+/// ignored for a remote workspace: the cwd fallback that keeps a bad path from
+/// producing a dead pane belongs to cathost.
 class WorkspaceCreateParams {
   const WorkspaceCreateParams({
     this.name = '',
     this.path,
     this.mkdir = false,
+    this.host = '',
   });
 
   final String name;
   final String? path;
   final bool mkdir;
+  final String host;
 
   factory WorkspaceCreateParams.fromJson(Map<String, Object?> j) => WorkspaceCreateParams(
         name: asString(j['name']),
         path: asStringOrNull(j['path']),
         mkdir: asBool(j['mkdir']),
+        host: asString(j['host']),
       );
 
   Map<String, Object?> toJson() => {
         if (name.isNotEmpty) 'name': name,
         if (path != null) 'path': path,
         if (mkdir) 'mkdir': mkdir,
+        if (host.isNotEmpty) 'host': host,
       };
 }
 

@@ -353,12 +353,19 @@ func BorderPath(id string) ([]bool, bool) {
 //   - Env adds environment variables to the spawned process.
 //
 // Cwd/Env without Command still apply to the default shell spawn.
+// Host puts the new pane on a named cathost instead of the workspace's own
+// default (host.list names them). It is the one field that decides which
+// *machine* the spawn lands on, so everything else here — Cwd especially — is
+// interpreted on that machine: a cwd from the pane being split means nothing on
+// another host, which is why the inherited cwd is dropped when the split
+// crosses hosts (Dispatcher.inheritedSplitCwd).
 type SplitParams struct {
 	Pane      *uint32           `json:"pane,omitempty"`
 	Direction string            `json:"direction"` // SplitH | SplitV
 	Cwd       string            `json:"cwd,omitempty"`
 	Command   []string          `json:"command,omitempty"`
 	Env       map[string]string `json:"env,omitempty"`
+	Host      string            `json:"host,omitempty"`
 }
 
 // Validate rejects a present-but-unusable Command, the same rule tab.create
@@ -637,10 +644,20 @@ type WorkspaceParams struct {
 // flag rather than the default because a typo must stay an error on the first
 // attempt — the dialog offers creation only after the user confirms the missing
 // path is intentional, then retries with Mkdir set.
+//
+// Host pins the workspace to a cathost: it becomes the workspace's default for
+// every pane created in it, so "a workspace on devbox" is one field rather than
+// a host choice repeated at each split. It also changes how Path is read —
+// on a non-local host the path is passed through verbatim, because the
+// directory being named lives on *that* machine and this process cannot expand
+// "~", stat it, or create it (see workspaceStartDir). Mkdir is therefore
+// ignored for a remote workspace: the cwd fallback that keeps a bad path from
+// producing a dead pane belongs to cathost.
 type WorkspaceCreateParams struct {
 	Name  string  `json:"name,omitempty"`
 	Path  *string `json:"path,omitempty"`
 	Mkdir bool    `json:"mkdir,omitempty"`
+	Host  string  `json:"host,omitempty"`
 }
 
 // WorkspaceCreateResult is CmdResult.Data for workspace.create: the new
@@ -794,12 +811,16 @@ type PaneMeta struct {
 // operation that is not about the viewport at all. Empty — the ordinary case —
 // means the active workspace, and the viewport does not move either way: the
 // new tab becomes its *own* workspace's active tab, nothing more.
+// Host puts the tab's root pane on a named cathost instead of the target
+// workspace's default (see SplitParams.Host — same field, same meaning, and the
+// same reason the neighbor tab's cwd is not inherited across a host boundary).
 type TabCreateParams struct {
 	Title     string            `json:"title,omitempty"`
 	Cwd       string            `json:"cwd,omitempty"`
 	Command   []string          `json:"command,omitempty"`
 	Env       map[string]string `json:"env,omitempty"`
 	Workspace string            `json:"workspace,omitempty"`
+	Host      string            `json:"host,omitempty"`
 }
 
 // Validate rejects a present-but-unusable Command (an empty argv slot cannot be
@@ -911,9 +932,19 @@ type HostInfo struct {
 	// Default is "is_default" on the wire, not "default": generated clients bind
 	// each key to an identifier, and `default` is a reserved word in Dart (see
 	// cmd/catgen-dart, which refuses it rather than silently mangling the name).
-	Default bool   `json:"is_default,omitempty"`
-	Panes   int    `json:"panes"`
-	Error   string `json:"error,omitempty"`
+	Default bool `json:"is_default,omitempty"`
+	// Local marks the host that is this catway's own machine — the synthesized
+	// "local" host reached over server.cathost_socket. It is not derivable from
+	// AddrKind: a unix address can be an ssh -L forward to another box, which is
+	// exactly how the first real remote host is reached. Clients need it because
+	// every path-shaped feature is local-only until cathost grows its own
+	// filesystem commands: the directory picker, worktrees, and the branch/agent
+	// readers all describe this machine's disk, so they are offered for a local
+	// host and withheld for a remote one rather than silently answering about
+	// the wrong filesystem.
+	Local bool   `json:"local,omitempty"`
+	Panes int    `json:"panes"`
+	Error string `json:"error,omitempty"`
 }
 
 // HostListResult is CmdResult.Data for host.list.

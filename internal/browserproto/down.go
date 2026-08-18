@@ -211,7 +211,12 @@ type HostItem struct {
 	// the same reason app.HostInfo's is: `default` is reserved in Dart, and the
 	// mobile client's types are generated from these keys.
 	Default bool `json:"is_default,omitempty"`
-	Panes   int  `json:"panes"` // live panes currently on this host
+	// Local marks this catway's own machine (the synthesized "local" host). The
+	// UI gates every path-shaped affordance on it — the start-path picker, the
+	// worktree dialogs — because those describe the catway machine's disk and a
+	// unix address is no proof of localness (an ssh -L forward has one too).
+	Local bool `json:"local,omitempty"`
+	Panes int  `json:"panes"` // live panes currently on this host
 	// Error is the last transport-level reason this host is unreachable, when
 	// one is known ("dial: connection refused"). Empty while connected.
 	Error string `json:"error,omitempty"`

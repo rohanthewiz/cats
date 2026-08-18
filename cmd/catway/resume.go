@@ -96,7 +96,16 @@ func resumeDedupeKey(s persist.AgentSession) string {
 //
 // With resume disabled, every valid ref is kept (metadata preserved, exactly
 // as cats rehydrates refs it will not act on) and no plans are built.
-func planResume(saved map[uint32]persist.AgentSession, resume bool) (
+//
+// local reports whether a pane runs on this machine, and a pane where it does
+// not is treated exactly as resume-disabled: the ref is kept but no argv is
+// planned. A resume argv is a command line for the machine holding the
+// transcript — `claude --resume <id>` means nothing on a box whose ~/.claude
+// never saw that conversation, and running it there would replace the pane's
+// saved scrollback (suppressHist) with a fresh agent that has no history. The
+// ref survives the round trip so the pane can resume properly once the transcript
+// lives beside it (agent migration, Appendix A).
+func planResume(saved map[uint32]persist.AgentSession, resume bool, local func(uint32) bool) (
 	kept map[uint32]persist.AgentSession, plans map[uint32][]string, suppressHist map[uint32]bool) {
 	kept = make(map[uint32]persist.AgentSession)
 	plans = make(map[uint32][]string)
@@ -108,7 +117,7 @@ func planResume(saved map[uint32]persist.AgentSession, resume bool) (
 		if argv == nil {
 			continue // invalid or unresumable — not rehydrated
 		}
-		if !resume {
+		if !resume || (local != nil && !local(pid)) {
 			kept[pid] = s
 			continue
 		}

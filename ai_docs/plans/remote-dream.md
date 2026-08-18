@@ -124,7 +124,49 @@ back; `catctl probe` tallies the `hosts` push on connect; `catctl panes` reports
 - `cmd/catctl/subcommands.go`: `hosts` verb (`host.list`). catgen-dart golden regen.
 - Ship gate: one host ⇒ no section/badge; two local cathosts on two sockets show roster + badges; kill one → only its panes report loss.
 
-### Phase 3 — host pickers, params, restore-on-host end to end
+### Phase 3 — host pickers, params, restore-on-host end to end — **DONE**
+
+As built (deltas from the plan below): there is no `Backend.HostExists` — every host
+question (exists? which is default? same machine as that pane?) is answered from the
+`Backend.Hosts()` roster that already exists, through `Dispatcher.hostInfo/checkHost/sameHost`,
+so the seam did not widen and "listed" and "exists" cannot disagree. `HostInfo`/`HostItem`
+gained **`local`**, set by catway as `id == localHostID`: localness is the host id, never the
+transport (a `unix://` address is exactly how the first real remote host is reached, over
+`ssh -L`), and the browser needs the flag to decide whether to offer the start-path picker.
+Session routing goes through new one-field wrappers `SplitPaneOn`/`CreateTabInOn` rather than
+building a `workspace.SpawnSpec` inside the dispatcher. `workspaceStartDir` takes `local`: a
+remote workspace's path is passed through verbatim and both defaulted states become `""`
+(no directory named ⇒ cathost's own default), so `mkdir` never fires for a remote path.
+`paneCwd` became host-scoped in *both* fallbacks — the workspace identity cwd is only sent
+when the pane runs on the workspace's own host (a "split here on devbox" guest pane inside a
+local workspace must not receive this machine's path), and the process cwd only for a local
+pane; found live, where the guest pane was spawning in the catway machine's directory.
+Beyond the planned skips, `worktree.open` now pins its new workspace to `local` explicitly
+(the checkout was just stat'ed here) and `workspaceForPath` ignores remote workspaces (the
+same path string on two machines is two directories). The context menu grew real submenus
+(`{label, sub:[…]}`, hover/click, chain-aware close) instead of flat per-host rows, and
+`dialogFields` grew a per-field `onChange` so the new-workspace dialog's host choice can
+switch the path picker off (`picker.setEnabled`) and re-word its placeholder. catctl was left
+alone — `--params` already carries `host`.
+Verified live (two cathosts, one config, `catctl`): `pane.split --host` / `tab.create --host`
+/ `workspace.create --host` land on the named host; an unknown host is refused before
+anything is created; a cross-host pane spawns in *its* host's directory instead of inheriting
+one from this machine; a remote workspace's `path` reaches cathost verbatim; worktree verbs
+and `path.list` refuse a remote pane by name; catway restart re-adopts every pane on its own
+host; killing one host leaves the other streaming and flips back on restart.
+Known gap, as the plan predicted: a remote `path` that does not exist on that host still
+produces a dead pane (`host.go createPane` has no cwd fallback yet) — Phase 4's first item.
+Also unchanged from Phase 1 and worth a decision before Phase 5: an unqualified `pane.split`
+takes the *workspace's* default host, not the split pane's, so splitting a guest pane yields
+one on the workspace's host (its inherited cwd is correctly dropped in that case).
+Tests added: `internal/app/commands_test.go` (split/tab/workspace host routing, unknown-host
+refusals, cross-host cwd inheritance dropped both ways, remote path verbatim, workspace host
+flowing to new panes), `cmd/catway/hosts_test.go` (restore-on-the-right-host with per-host
+respawn, host-scoped `paneCwd`, `hostsMsg` local/default), `startdirs_test.go` (heal skips
+remote workspaces and panes), `resume_test.go` (no resume argv for a remote pane),
+`gitbranch_test.go`/`agentmodel_test.go` (no branch/model reads for a remote pane),
+`worktrees_test.go`/`paths_test.go` (local-only refusals).
+
 - `command_vocab.go`: `Host` on `SplitParams`/`TabCreateParams`/`WorkspaceCreateParams`, validated against `Backend.HostExists`; `commands.go` routes into the `*With/*On` session methods; `inheritedSplitCwd/inheritedTabCwd` inherit only when neighbour host == target host; `workspaceStartDir` passes path verbatim for non-local; `main.go` heal guards skip non-local; `refreshPaneBranch`, agentmodel, resume plans skip non-local panes; worktrees `Fail("worktrees are local-host only")` when host ≠ local; `path.list` picker hidden for non-local hosts.
 - `index.html`: host `<select>` in `openNewWorkspaceDialog` (`dialogFields choices` precedent = plugin picker); "split here on…" submenu in `paneMenuItems`/tab menu; shown only when >1 host.
 - Tests: `commands_test.go` param routing; `persist_test.go` snapshot with `host` restores `rt.host` and `CreatePane` reaches that pipe host.

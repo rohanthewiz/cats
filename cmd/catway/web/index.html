@@ -889,6 +889,11 @@
   #ctxmenu .item:hover { background:var(--chrome-focus); color:var(--fg-bright); }
   #ctxmenu .item.danger:hover { background:var(--err); }
   #ctxmenu .sep { height:1px; background:var(--line); margin:4px 6px; }
+  /* A row that opens a submenu (the host pickers, drawn only in a multi-host
+     session): the arrow is pushed to the right edge so the row still reads as
+     one label, and the child menu is an ordinary #ctxmenu positioned beside it. */
+  #ctxmenu .item.sub::after { content:"▸"; margin-left:auto; color:var(--muted); }
+  #ctxmenu .item.sub:hover::after { color:var(--fg-bright); }
 
   /* ---- Pane-list hover tooltip ----
      The sidebar pane rows truncate title/agent to fit their narrow column, so
@@ -4469,7 +4474,15 @@
     if (modalEl) { modalEl.remove(); modalEl = null; }
     if (modalCleanup) { const fn = modalCleanup; modalCleanup = null; fn(); }
   }
-  function closeCtx() { if (ctxEl) { ctxEl.remove(); ctxEl = null; } }
+  // Menus form a chain (a menu's open submenu hangs off _sub), so closing means
+  // walking it: a submenu is a sibling in the DOM, not a descendant, and would
+  // otherwise be orphaned on screen when its parent goes.
+  function closeCtx() { if (ctxEl) { closeCtxChain(ctxEl); ctxEl = null; } }
+  function closeCtxChain(m) { if (m._sub) closeCtxChain(m._sub); m.remove(); }
+  function ctxChainHas(m, node) {
+    for (; m; m = m._sub) if (m.contains(node)) return true;
+    return false;
+  }
 
   // openOverlay mounts a fresh overlay; build receives the overlay element and
   // appends its .modal. A mousedown on the backdrop dismisses.
@@ -4526,6 +4539,9 @@
     const cache = new Map(); // typed base ("" | "~/projs/" | "/usr/") -> path.list result
     const inflight = new Set();
     let rows = [], sel = -1;
+    // enabled is the picker's own on/off switch (see setEnabled): a field whose
+    // directory lives on another machine keeps the input and loses the picker.
+    let enabled = true;
     // A prefilled field arrives naming a directory the user never typed, so its
     // text is not a fragment being completed — it is where they already are.
     // While it stays untouched the picker lists *inside* it and offers the
@@ -4611,6 +4627,7 @@
     }
 
     function render(keepSel) {
+      if (!enabled) return; // switched off for a remote path — nothing to list
       const text = input.value;
       const [base, frag] = splitBase(text);
       const next = rowsFor(text);
@@ -4674,9 +4691,22 @@
     input.addEventListener("blur", () => wrap.classList.remove("focus"));
 
     return {
+      // setEnabled turns the picker off for a field whose path is no longer
+      // this machine's to complete — the new-workspace dialog does it the
+      // moment a remote host is chosen. Off means: no listing requests, no
+      // drop-down, no key capture, and no commit rewriting what was typed, so
+      // the field becomes a plain text box carrying the path verbatim to the
+      // host that will interpret it (path.list is local-only until cathost
+      // grows a list_dir of its own).
+      setEnabled(on) {
+        enabled = on;
+        if (!on) { listEl.innerHTML = ""; rows = []; sel = -1; }
+        else render();
+      },
       // key handles the picker's own keys and reports whether it consumed the
       // event; Enter stays with the dialog (see commit).
       key(e) {
+        if (!enabled) return false;
         if (e.key === "ArrowDown" || (e.ctrlKey && e.key === "n")) { move(1); return true; }
         if (e.key === "ArrowUp" || (e.ctrlKey && e.key === "p")) { move(-1); return true; }
         if (e.key === "Tab" && !e.shiftKey && rows[sel]) { drill(rows[sel]); return true; }
@@ -4688,7 +4718,7 @@
       // it is how a caller asks for its own default.
       commit() {
         const text = input.value;
-        if (!text.trim()) return;
+        if (!enabled || !text.trim()) return;
         if (rows[sel]) { input.value = rows[sel].path; return; }
         const [base, frag] = splitBase(text);
         const d = cache.get(base);
@@ -4738,6 +4768,19 @@
         wrap.appendChild(input); body.appendChild(wrap);
         if (f.pick && !f.choices) pickers.set(input, attachPathPicker(input, wrap));
         return input;
+      });
+      // onChange lets one field reshape another — the new-workspace dialog's
+      // host choice switching the start-path picker off, which it can only do
+      // once both fields exist. The callback gets the field's value and the
+      // dialog's rows ({input, picker}), and runs once up front so the initial
+      // selection is applied rather than only the first change.
+      opts.fields.forEach((f, i) => {
+        if (!f.onChange) return;
+        const rows = inputs.map((inp) => ({ input: inp, picker: pickers.get(inp) || null }));
+        const fire = () => f.onChange(inputs[i].value, rows);
+        inputs[i].addEventListener("change", fire);
+        inputs[i].addEventListener("input", fire);
+        fire();
       });
       if (opts.hint) { const t = document.createElement("div"); t.className = "hint"; t.textContent = opts.hint; body.appendChild(t); }
       m.appendChild(body);
@@ -4876,8 +4919,40 @@
       { label: "name", value: "", placeholder: "optional — auto-named after the start directory" },
       { label: "start path", value: focusedPaneCwd(), placeholder: "empty starts in your home directory", pick: true },
     ];
+    // The host a workspace is pinned to is where every pane created in it runs,
+    // so it belongs in the dialog that creates it rather than being re-chosen at
+    // each split. Offered only when there is a choice to make.
+    //
+    // Choosing a remote host changes what the start path means: it is a path on
+    // that machine, which this browser cannot complete or verify, so the picker
+    // is switched off and the field's placeholder says whose filesystem the text
+    // will be read against. A prefilled local cwd would be a wrong path there,
+    // so it is cleared on the way out.
+    let hostIdx = -1; // -1 = no host field, so its slot is never read below
+    if (multiHost()) {
+      hostIdx = fields.length;
+      fields.push({
+        label: "host",
+        value: (hostItems.find((h) => h.is_default) || hostItems[0] || {}).id || "",
+        choices: hostItems.map((h) => ({
+          value: h.id,
+          label: (h.label || h.id) + (h.connected ? "" : " (offline)"),
+        })),
+        onChange: (id, rows) => {
+          const h = hostItems.find((x) => x.id === id);
+          const local = !h || !!h.local;
+          const path = rows[1];
+          if (path.picker) path.picker.setEnabled(local);
+          path.input.placeholder = local
+            ? "empty starts in your home directory"
+            : "path on " + (h ? (h.label || h.id) : id) + " — empty starts where that host starts panes";
+          if (!local && path.input.value === focusedPaneCwd()) path.input.value = "";
+        },
+      });
+    }
     // The runner is passed by index, dialogFields carrying strings only. "" is
     // the default option, so an untouched dialog behaves exactly as before.
+    const plugIdx = fields.length;
     if (runners.length) {
       fields.push({
         label: "start plugin",
@@ -4892,10 +4967,15 @@
       fields,
       hint: "↑↓ picks a directory · tab drills in · enter creates · esc cancels",
       submitLabel: "create",
-      // sel is "" for "none" and undefined when the field was dropped; the
-      // truthiness test covers both, and "0" — a real index — is a truthy
-      // string, so the first plugin in the list is not swallowed by it.
-      onSubmit: (name, path, sel) => createWorkspace(name, path, sel ? runners[Number(sel)] : null),
+      // Read by index rather than by positional parameters: two of the fields
+      // are conditional (host, plugin), so their slots move. sel is "" for
+      // "none" and undefined when the field was dropped; the truthiness test
+      // covers both, and "0" — a real index — is a truthy string, so the first
+      // plugin in the list is not swallowed by it.
+      onSubmit: (...vs) => {
+        const sel = vs[plugIdx];
+        createWorkspace(vs[0], vs[1], sel ? runners[Number(sel)] : null, hostIdx < 0 ? "" : vs[hostIdx]);
+      },
     });
   }
 
@@ -4910,12 +4990,17 @@
   // started in the workspace once it exists — see startPluginInWorkspace. It
   // rides both attempts because the mkdir retry is the *same* create: a user who
   // asked for a plugin and then confirmed the folder still asked for the plugin.
-  function createWorkspace(name, path, runner) {
+  // host (optional) pins the workspace to a cathost — every pane created in it
+  // then runs there. It rides the mkdir retry for the same reason the runner
+  // does: it is the same create, and the server reads the path against the host
+  // it was given (a remote path is never stat'ed here, so the mkdir escalation
+  // simply never fires for one).
+  function createWorkspace(name, path, runner, host) {
     const created = (res) => {
       if (!runner) return;
       startPluginInWorkspace(runner, (res.data || {}).id);
     };
-    sendCmdAwait("workspace.create", { name, path }, (res) => {
+    sendCmdAwait("workspace.create", { name, path, host }, (res) => {
       if (res.ok) { created(res); return; }
       const err = res.error || "";
       if (err.startsWith("no such directory: ")) {
@@ -4924,7 +5009,7 @@
           message: err.slice("no such directory: ".length) +
             " does not exist — create it and start the workspace there?",
           confirmLabel: "create folder",
-          onConfirm: () => sendCmdAwait("workspace.create", { name, path, mkdir: true }, (r2) => {
+          onConfirm: () => sendCmdAwait("workspace.create", { name, path, host, mkdir: true }, (r2) => {
             if (!r2.ok) { toast("new workspace: " + (r2.error || "unknown")); return; }
             created(r2);
           }),
@@ -4992,19 +5077,48 @@
   }
 
   // ---- Context menus (WS8): pane / tab / workspace ----
+  //
+  // An item is {label, fn, danger?} or {label, sub:[items]} for a submenu — the
+  // shape the host pickers need, where one row would otherwise become one row
+  // per host and bury the ordinary actions. A submenu is a second menu element
+  // built by the same function, so nesting costs nothing and every item type
+  // (separators, danger rows) works at any depth.
   function openCtx(x, y, items) {
     closeCtx();
+    ctxEl = buildCtx(x, y, items);
+  }
+
+  // buildCtx mounts one menu and returns it. Its child submenu, when one is
+  // open, hangs off el._sub so closeCtx can tear the whole chain down — a
+  // detached submenu left behind after the parent closes is the one failure
+  // mode of hover-opened menus.
+  function buildCtx(x, y, items) {
     const m = document.createElement("div");
     m.id = "ctxmenu";
+    const closeSub = () => { if (m._sub) { m._sub.remove(); m._sub = null; } };
     for (const it of items) {
       if (it === "-") {
         const s = document.createElement("div"); s.className = "sep"; m.appendChild(s);
         continue;
       }
       const el = document.createElement("div");
-      el.className = "item" + (it.danger ? " danger" : "");
+      el.className = "item" + (it.danger ? " danger" : "") + (it.sub ? " sub" : "");
       el.textContent = it.label;
-      el.addEventListener("click", () => { closeCtx(); it.fn(); });
+      if (it.sub) {
+        // Hover opens it (and closes any sibling's), which is what a pointer
+        // expects; click does the same so a tap reaches it too. The child is
+        // placed at the row's right edge and clamped by buildCtx itself.
+        const open = () => {
+          closeSub();
+          const r = el.getBoundingClientRect();
+          m._sub = buildCtx(r.right - 2, r.top - 4, it.sub);
+        };
+        el.addEventListener("mouseenter", open);
+        el.addEventListener("click", open);
+      } else {
+        el.addEventListener("mouseenter", closeSub);
+        el.addEventListener("click", () => { closeCtx(); it.fn(); });
+      }
       m.appendChild(el);
     }
     document.body.appendChild(m);
@@ -5012,10 +5126,10 @@
     const r = m.getBoundingClientRect();
     m.style.left = Math.min(x, window.innerWidth - r.width - 4) + "px";
     m.style.top = Math.min(y, window.innerHeight - r.height - 4) + "px";
-    ctxEl = m;
+    return m;
   }
   window.addEventListener("mousedown", (e) => {
-    if (ctxEl && !ctxEl.contains(e.target)) closeCtx();
+    if (ctxEl && !ctxChainHas(ctxEl, e.target)) closeCtx();
   }, true);
   window.addEventListener("blur", () => closeCtx());
 
@@ -5033,6 +5147,15 @@
       { label: "split left/right", fn: () => sendCmd("pane.split", { pane: id, direction: "h" }) },
       { label: "split top/bottom", fn: () => sendCmd("pane.split", { pane: id, direction: "v" }) },
     );
+    // Where the pane lands is a second question, and only worth asking when the
+    // session actually spans machines — so it is a submenu rather than two more
+    // top-level rows, and it is absent entirely in the single-host case.
+    if (multiHost()) {
+      items.push(
+        { label: "split left/right on…", sub: hostChoices((h) => sendCmd("pane.split", { pane: id, direction: "h", host: h })) },
+        { label: "split top/bottom on…", sub: hostChoices((h) => sendCmd("pane.split", { pane: id, direction: "v", host: h })) },
+      );
+    }
     if (onScreen) items.push({ label: "toggle zoom", fn: () => sendCmd("pane.zoom", { pane: id }) });
     items.push("-");
     if (onScreen) items.push({ label: "copy mode", fn: () => enterCopyMode(id) });
@@ -5047,10 +5170,25 @@
   function tabMenuItems(t, count) {
     const items = [
       { label: "new tab", fn: () => sendCmd("tab.create", {}) },
-      { label: "rename tab…", fn: () => renameTab(t) },
     ];
+    if (multiHost()) {
+      items.push({ label: "new tab on…", sub: hostChoices((h) => sendCmd("tab.create", { host: h })) });
+    }
+    items.push({ label: "rename tab…", fn: () => renameTab(t) });
     if (count > 1) items.push({ label: "close tab", danger: true, fn: () => sendCmd("tab.close", { num: t.num }) });
     return items;
+  }
+
+  // hostChoices turns the roster into submenu rows, one per host, calling fn
+  // with the host id. A host that is down is still offered — the pane is created
+  // in the model either way and the daemon's reconnect reconciles it, which is
+  // the same contract a pane already has when its host drops mid-session — but
+  // it is marked, so choosing one is a decision rather than a surprise.
+  function hostChoices(fn) {
+    return hostItems.map((h) => ({
+      label: (h.label || h.id) + (h.connected ? "" : " (offline)"),
+      fn: () => fn(h.id),
+    }));
   }
   function wsMenuItems(w) {
     return [

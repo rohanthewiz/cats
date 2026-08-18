@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rohanthewiz/cats/internal/app"
 	"github.com/rohanthewiz/cats/internal/pathpick"
 )
 
@@ -104,5 +105,31 @@ func TestAnchorPaneCwd(t *testing.T) {
 	var unknown uint32 = 9999
 	if got := o.anchorPaneCwd(&unknown); !strings.HasPrefix(got, "/") {
 		t.Fatalf("anchorPaneCwd(unknown) = %q, want an absolute fallback", got)
+	}
+}
+
+// path.list lists this machine's disk. Anchored on a remote pane it would offer
+// a drop-down of directories that do not exist where the pane is, so it answers
+// with the reason instead — a listing error, not a failed command, because the
+// picker shows those inline and keeps taking keystrokes.
+func TestPathListRefusesRemotePanes(t *testing.T) {
+	o, localPane, remotePane, _, _ := twoHostOrch(t)
+
+	r := &hostGuardResponder{}
+	o.StartPathList(r, app.PathListParams{Pane: &remotePane, Dir: "~/src"})
+	if !r.ok {
+		t.Fatalf("remote path.list should resolve with a reason, not fail: %+v", r)
+	}
+	res, isRes := r.data.(app.PathListResult)
+	if !isRes || res.Exists || !strings.Contains(res.Error, "local-host only") {
+		t.Fatalf("remote path.list result = %+v", r.data)
+	}
+
+	// The local pane goes down the ordinary (asynchronous) path — nothing is
+	// resolved inline, which is how this test tells the guard did not fire.
+	r = &hostGuardResponder{}
+	o.StartPathList(r, app.PathListParams{Pane: &localPane, Dir: "/"})
+	if r.ok || r.fail {
+		t.Fatalf("a local path.list must not resolve synchronously: %+v", r)
 	}
 }

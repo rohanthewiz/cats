@@ -83,7 +83,10 @@ func (b *fakeBackend) PaneMeta(p uint32) PaneMeta { return b.paneMeta[p] }
 // single-host session has: one connected local host.
 func (b *fakeBackend) Hosts() []HostInfo {
 	if b.hosts == nil {
-		return []HostInfo{{ID: "local", Label: "local", Connected: b.daemonUp, AddrKind: "unix", Default: true}}
+		return []HostInfo{{
+			ID: "local", Label: "local", Connected: b.daemonUp,
+			AddrKind: "unix", Default: true, Local: true,
+		}}
 	}
 	return b.hosts
 }
@@ -1709,5 +1712,206 @@ func TestDispatchHostListSingleHost(t *testing.T) {
 	got := okDataFor[HostListResult](t, h, CmdHostList).Hosts
 	if len(got) != 1 || !got[0].Default || !got[0].Connected {
 		t.Fatalf("single-host roster = %+v", got)
+	}
+}
+
+// --- Host params (Phase 3): which machine a new pane lands on ----------------
+//
+// twoHostBackend installs a roster with a local default and one remote host,
+// the shape every host-param rule below is about: the difference between "the
+// workspace's host" and "the machine whose filesystem a path names".
+func twoHostBackend(h cmdHarness) {
+	h.b.hosts = []HostInfo{
+		{ID: "local", Label: "studio", Connected: true, AddrKind: "unix", Default: true, Local: true},
+		{ID: "devbox", Label: "devbox", Connected: true, AddrKind: "tls"},
+	}
+}
+
+// pane.split's host param puts the new pane on another machine, and the model
+// is where that has to land — it is what the runtime reads when it picks a
+// connection, and what a restore replays. An unknown host is refused outright:
+// creating the pane on the default machine instead would look like success and
+// put a shell somewhere nobody asked for.
+func TestDispatchSplitHost(t *testing.T) {
+	h := newCmdHarness(t)
+	twoHostBackend(h)
+	src, _ := h.s.FocusedPane()
+
+	r := h.resp()
+	h.d.Dispatch(CmdPaneSplit, params(t, SplitParams{Direction: SplitH, Host: "devbox"}), r)
+	got := okData[SplitResult](t, r)
+
+	if h.s.PaneHost(layout.PaneID(got.Pane)) != "devbox" {
+		t.Fatalf("new pane host = %q, want devbox", h.s.PaneHost(layout.PaneID(got.Pane)))
+	}
+	if h.s.PaneHost(src) == "devbox" {
+		t.Fatal("the pane being split must stay where it was")
+	}
+
+	// A split naming no host keeps the workspace's own default.
+	r = h.resp()
+	h.d.Dispatch(CmdPaneSplit, params(t, SplitParams{Direction: SplitV}), r)
+	if got := okData[SplitResult](t, r); h.s.PaneHost(layout.PaneID(got.Pane)) != "" {
+		t.Fatalf("unqualified split host = %q, want the workspace default", h.s.PaneHost(layout.PaneID(got.Pane)))
+	}
+
+	before := len(h.s.VisiblePaneIDs())
+	r = h.resp()
+	h.d.Dispatch(CmdPaneSplit, params(t, SplitParams{Direction: SplitH, Host: "nope"}), r)
+	if !r.failCall || !strings.Contains(r.errMsg, "unknown host") {
+		t.Fatalf("unknown host: fail=%v err=%q", r.failCall, r.errMsg)
+	}
+	if len(h.s.VisiblePaneIDs()) != before {
+		t.Fatal("a refused split must not create a pane")
+	}
+}
+
+// The cwd a new pane inherits describes a directory in one machine's
+// filesystem. When the split crosses hosts it must not be carried over: the
+// path either does not exist there — a dead pane — or names a different
+// directory that happens to share its spelling, which is worse.
+func TestDispatchSplitCrossHostDropsInheritedCwd(t *testing.T) {
+	h := newCmdHarness(t)
+	twoHostBackend(h)
+	src, _ := h.s.FocusedPane()
+	h.b.paneMeta = map[uint32]PaneMeta{uint32(src): {Cwd: "/home/me/proj", Host: "local"}}
+
+	// Same host: inherited, as it always was.
+	r := h.resp()
+	h.d.Dispatch(CmdPaneSplit, params(t, SplitParams{Direction: SplitH}), r)
+	same := okData[SplitResult](t, r)
+	if ov := h.b.staged[same.Pane]; ov.Cwd != "/home/me/proj" {
+		t.Fatalf("same-host split cwd = %q, want the source pane's", ov.Cwd)
+	}
+
+	// Across hosts: nothing staged at all, so the pane spawns wherever its own
+	// host starts panes.
+	r = h.resp()
+	h.d.Dispatch(CmdPaneSplit, params(t, SplitParams{Direction: SplitH, Host: "devbox"}), r)
+	cross := okData[SplitResult](t, r)
+	if ov, ok := h.b.staged[cross.Pane]; ok {
+		t.Fatalf("cross-host split staged %+v, want no spawn override", ov)
+	}
+
+	// An explicit cwd still crosses: the caller named a path knowing where the
+	// pane is going, which is the one thing this rule must not second-guess.
+	r = h.resp()
+	h.d.Dispatch(CmdPaneSplit, params(t, SplitParams{Direction: SplitH, Host: "devbox", Cwd: "/srv/app"}), r)
+	pinned := okData[SplitResult](t, r)
+	if ov := h.b.staged[pinned.Pane]; ov.Cwd != "/srv/app" {
+		t.Fatalf("explicit cross-host cwd = %q, want /srv/app", ov.Cwd)
+	}
+}
+
+// tab.create takes the same param, with the same two rules: the tab's root pane
+// lands on the named host, and the neighbor tab's cwd is inherited only when it
+// is on that same machine.
+func TestDispatchTabCreateHost(t *testing.T) {
+	h := newCmdHarness(t)
+	twoHostBackend(h)
+	root := h.s.ActiveWorkspace().Tabs[0].RootPane
+	h.b.paneMeta = map[uint32]PaneMeta{uint32(root): {Cwd: "/home/me/proj", Host: "local"}}
+
+	r := h.resp()
+	h.d.Dispatch(CmdTabCreate, params(t, TabCreateParams{Host: "devbox"}), r)
+	got := okData[TabCreateResult](t, r)
+
+	if h.s.PaneHost(layout.PaneID(got.Pane)) != "devbox" {
+		t.Fatalf("new tab's pane host = %q, want devbox", h.s.PaneHost(layout.PaneID(got.Pane)))
+	}
+	if ov, ok := h.b.staged[got.Pane]; ok {
+		t.Fatalf("cross-host tab staged %+v, want no inherited cwd", ov)
+	}
+
+	r = h.resp()
+	h.d.Dispatch(CmdTabCreate, params(t, TabCreateParams{Host: "nope"}), r)
+	if !r.failCall || !strings.Contains(r.errMsg, "unknown host") {
+		t.Fatalf("unknown host: fail=%v err=%q", r.failCall, r.errMsg)
+	}
+}
+
+// workspace.create pins a whole workspace to a host — and with it, how its path
+// is read. A remote path is passed through exactly as typed: this process
+// cannot expand "~" for another machine's user, cannot stat the directory, and
+// must not refuse a path that is perfectly real over there.
+func TestDispatchWorkspaceCreateHost(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	h := newCmdHarness(t)
+	twoHostBackend(h)
+	ptr := func(s string) *string { return &s }
+
+	identity := func(t *testing.T, p WorkspaceCreateParams) (string, string) {
+		t.Helper()
+		r := h.resp()
+		h.d.Dispatch(CmdWorkspaceCreate, params(t, p), r)
+		id := okData[WorkspaceCreateResult](t, r).ID
+		for _, ws := range h.s.Workspaces() {
+			if ws.ID == id {
+				return ws.HostID, ws.IdentityCwd
+			}
+		}
+		t.Fatalf("workspace %s missing after create", id)
+		return "", ""
+	}
+
+	host, cwd := identity(t, WorkspaceCreateParams{Host: "devbox", Path: ptr("~/src/api")})
+	if host != "devbox" {
+		t.Fatalf("workspace host = %q, want devbox", host)
+	}
+	if cwd != "~/src/api" {
+		t.Fatalf("remote start path = %q, want it verbatim", cwd)
+	}
+
+	// A remote workspace naming no path leaves the directory to its cathost
+	// rather than inheriting this machine's session cwd.
+	if _, cwd := identity(t, WorkspaceCreateParams{Host: "devbox"}); cwd != "" {
+		t.Fatalf("remote default start path = %q, want empty", cwd)
+	}
+
+	// The local host keeps every bit of the old resolution, including the
+	// refusal that drives the dialog's "create folder?" escalation.
+	if _, cwd := identity(t, WorkspaceCreateParams{Path: ptr("")}); cwd != home {
+		t.Fatalf("local empty path = %q, want home %q", cwd, home)
+	}
+	r := h.resp()
+	h.d.Dispatch(CmdWorkspaceCreate, params(t, WorkspaceCreateParams{Path: ptr("/no/such/dir")}), r)
+	if !r.failCall || !strings.Contains(r.errMsg, "no such directory") {
+		t.Fatalf("local bad path: fail=%v err=%q", r.failCall, r.errMsg)
+	}
+
+	r = h.resp()
+	h.d.Dispatch(CmdWorkspaceCreate, params(t, WorkspaceCreateParams{Host: "nope"}), r)
+	if !r.failCall || !strings.Contains(r.errMsg, "unknown host") {
+		t.Fatalf("unknown host: fail=%v err=%q", r.failCall, r.errMsg)
+	}
+}
+
+// A pane created in a host-pinned workspace inherits that host without anyone
+// naming it again — the point of the workspace-level field. The dispatcher's
+// cwd rules have to agree: a pane on the workspace's own host inherits its
+// neighbor's directory even though neither side named a host.
+func TestDispatchWorkspaceHostFlowsToNewPanes(t *testing.T) {
+	h := newCmdHarness(t)
+	twoHostBackend(h)
+
+	r := h.resp()
+	h.d.Dispatch(CmdWorkspaceCreate, params(t, WorkspaceCreateParams{Host: "devbox"}), r)
+	wsID := okData[WorkspaceCreateResult](t, r).ID
+
+	root := h.s.ActiveWorkspace().Tabs[0].RootPane
+	if got := h.s.PaneHost(root); got != "devbox" {
+		t.Fatalf("root pane host = %q, want devbox", got)
+	}
+	h.b.paneMeta = map[uint32]PaneMeta{uint32(root): {Cwd: "/srv/app", Host: "devbox"}}
+
+	r = h.resp()
+	h.d.Dispatch(CmdTabCreate, params(t, TabCreateParams{Workspace: wsID}), r)
+	got := okData[TabCreateResult](t, r)
+	if h.s.PaneHost(layout.PaneID(got.Pane)) != "devbox" {
+		t.Fatalf("tab in a pinned workspace = %q, want devbox", h.s.PaneHost(layout.PaneID(got.Pane)))
+	}
+	if ov := h.b.staged[got.Pane]; ov.Cwd != "/srv/app" {
+		t.Fatalf("same-host inherit = %q, want the neighbor's /srv/app", ov.Cwd)
 	}
 }

@@ -369,11 +369,20 @@ func (d *Dispatcher) Dispatch(name string, dec ParamDecoder, r Responder) {
 				return
 			}
 		}
+		// A host that is not in the roster has to fail here: the alternative is a
+		// pane silently created on the default machine, which looks like a
+		// success and puts the user's shell somewhere they did not ask for.
+		if err := d.checkHost(sp.Host); err != nil {
+			r.Fail(err.Error())
+			return
+		}
 		// Resolve the source pane's cwd before the split, for the same reason a new
 		// tab takes its neighbor's: the new pane is another shell in the work the
-		// user is already doing.
-		inherited := d.inheritedSplitCwd(optPaneID(sp.Pane))
-		np, err := d.session.SplitPane(optPaneID(sp.Pane), dir)
+		// user is already doing. Scoped to the host the new pane will run on —
+		// with no host param that is the workspace's own default, which is what
+		// SplitPane fills in below.
+		inherited := d.inheritedSplitCwd(optPaneID(sp.Pane), sp.Host)
+		np, err := d.session.SplitPaneOn(optPaneID(sp.Pane), dir, sp.Host)
 		if err != nil {
 			r.Fail(err.Error())
 			return
@@ -543,10 +552,20 @@ func (d *Dispatcher) Dispatch(name string, dec ParamDecoder, r Responder) {
 			r.Fail(workspaceLockedErr(ws.ID, "run a command in"))
 			return
 		}
+		if err := d.checkHost(p.Host); err != nil {
+			r.Fail(err.Error())
+			return
+		}
 		// Resolve the left-hand neighbor before the create, while it is still the
-		// workspace's last tab.
-		inherited := d.inheritedTabCwd(p.Workspace)
-		num, root, err := d.session.CreateTabIn(p.Workspace)
+		// workspace's last tab. The host the tab will actually run on decides
+		// whether that neighbor's directory means anything: the param when one
+		// was given, else the workspace's own default.
+		tabHost := p.Host
+		if tabHost == "" {
+			tabHost = ws.HostID
+		}
+		inherited := d.inheritedTabCwd(p.Workspace, tabHost)
+		num, root, err := d.session.CreateTabInOn(p.Workspace, p.Host)
 		if err != nil {
 			r.Fail(err.Error())
 			return
@@ -637,12 +656,19 @@ func (d *Dispatcher) Dispatch(name string, dec ParamDecoder, r Responder) {
 			bad(err)
 			return
 		}
-		cwd, err := workspaceStartDir(p.Path, d.session.Cwd(), p.Mkdir)
+		host, ok := d.hostInfo(p.Host)
+		if !ok {
+			r.Fail(unknownHostErr(p.Host))
+			return
+		}
+		// Path resolution is this machine's filesystem, so it only applies to a
+		// workspace that will live on this machine (see workspaceStartDir).
+		cwd, err := workspaceStartDir(p.Path, d.session.Cwd(), p.Mkdir, host.Local)
 		if err != nil {
 			r.Fail(err.Error())
 			return
 		}
-		id, err := d.session.CreateWorkspaceAt(cwd)
+		id, err := d.session.CreateWorkspaceAtOn(cwd, p.Host)
 		if err != nil {
 			r.Fail(err.Error())
 			return
@@ -984,24 +1010,108 @@ func (d *Dispatcher) Dispatch(name string, dec ParamDecoder, r Responder) {
 // elsewhere is the one way this can go quietly wrong: the pane would open in a
 // directory belonging to a different project, which is precisely the mistake a
 // per-workspace plugin launch exists to avoid.
-func (d *Dispatcher) inheritedTabCwd(wsID string) string {
+// host is the cathost the new tab will run on ("" = the backend's default). A
+// neighbor on another machine hands back nothing: its cwd names a directory in
+// a filesystem the new pane cannot see, and spawning there would either fail or
+// — worse — land on a same-named directory that is not the one the user is
+// looking at.
+func (d *Dispatcher) inheritedTabCwd(wsID, host string) string {
 	pane, ok := d.session.NewTabNeighborPaneIn(wsID)
 	if !ok {
 		return ""
 	}
-	return d.backend.PaneMeta(uint32(pane)).Cwd
+	meta := d.backend.PaneMeta(uint32(pane))
+	if !d.sameHost(meta.Host, host) {
+		return ""
+	}
+	return meta.Cwd
 }
 
 // inheritedSplitCwd is where a pane split off target opens: the live cwd of the
 // pane being split, which is the tab-level rule (inheritedTabCwd) applied to the
 // one pane a split unambiguously comes from. "" — an unresolvable target, or a
 // pane the backend does not know — leaves the workspace's spawn cwd in place.
-func (d *Dispatcher) inheritedSplitCwd(target *layout.PaneID) string {
+// host is pane.split's host param — "" meaning the workspace's own default,
+// which is what the model fills in for a split that named no host. The cwd is
+// inherited only when the pane being split is on that same machine, for the
+// reason inheritedTabCwd gives.
+func (d *Dispatcher) inheritedSplitCwd(target *layout.PaneID, host string) string {
 	src, err := d.session.ResolvePaneTarget(target)
 	if err != nil {
 		return ""
 	}
-	return d.backend.PaneMeta(uint32(src)).Cwd
+	if host == "" {
+		if ws := d.session.PaneWorkspace(src); ws != nil {
+			host = ws.HostID
+		}
+	}
+	meta := d.backend.PaneMeta(uint32(src))
+	if !d.sameHost(meta.Host, host) {
+		return ""
+	}
+	return meta.Cwd
+}
+
+// --- host resolution (the roster is the Backend's; the rules are here) -------
+//
+// Every host question a command asks — does this id exist, is it this machine,
+// is it the same machine as that pane's — is answered from Backend.Hosts(), the
+// roster host.list already reports. That is deliberately the only seam: a
+// separate HostExists/DefaultHost pair would be two more methods every fake has
+// to implement and two more chances for "exists" and "listed" to disagree.
+
+// hostInfo resolves a host id against the live roster, following the model's
+// own "" = the default host rule. ok is false only for a non-empty id the
+// roster does not list — an empty roster (a backend with no hosts at all, which
+// only a fake produces) resolves "" to the zero HostInfo and reports ok, since
+// "no host named, none configured" is not a caller error.
+func (d *Dispatcher) hostInfo(id string) (HostInfo, bool) {
+	hosts := d.backend.Hosts()
+	for _, h := range hosts {
+		if h.ID == id {
+			return h, true
+		}
+	}
+	if id != "" {
+		return HostInfo{}, false
+	}
+	for _, h := range hosts {
+		if h.Default {
+			return h, true
+		}
+	}
+	if len(hosts) > 0 {
+		return hosts[0], true // no host marked default: first configured wins
+	}
+	return HostInfo{}, true
+}
+
+// checkHost turns an unknown host id into the command's error. A command that
+// names no host can never fail here — the default host always exists.
+func (d *Dispatcher) checkHost(id string) error {
+	if _, ok := d.hostInfo(id); !ok {
+		return errors.New(unknownHostErr(id))
+	}
+	return nil
+}
+
+// sameHost reports whether two host ids name the same machine once both are
+// resolved: "" is the default host on either side, and an id the roster has
+// dropped compares equal only to itself. Used by the cwd-inheritance rules,
+// where the wrong answer means a spawn directory from the wrong filesystem.
+func (d *Dispatcher) sameHost(a, b string) bool {
+	if a == b {
+		return true
+	}
+	ha, aok := d.hostInfo(a)
+	hb, bok := d.hostInfo(b)
+	return aok && bok && ha.ID == hb.ID
+}
+
+// unknownHostErr phrases the refusal so a scripted caller can see which id was
+// rejected and where the valid ones come from.
+func unknownHostErr(id string) string {
+	return fmt.Sprintf("unknown host %q (see host.list)", id)
 }
 
 // workspaceLockedErr phrases a refusal from a workspace lock. verb names what
@@ -1022,7 +1132,22 @@ func workspaceLockedErr(id, verb string) string {
 // they want that directory brought into existence, in which case it is created
 // parents-and-all. The two defaulted states ignore mkdir: there is nothing to
 // create when the answer is the session cwd or home.
-func workspaceStartDir(path *string, sessionCwd string, mkdir bool) (string, error) {
+//
+// local says whether the workspace will live on this machine. When it does not,
+// none of that resolution applies: "~" is the remote user's home, the stat
+// would answer about the wrong filesystem, and mkdir would create the directory
+// on the wrong machine. A typed path is passed through verbatim for cathost to
+// interpret, and both defaulted states become "" — no directory named, so the
+// remote pane starts wherever its cathost starts panes. That is also why a bad
+// remote path cannot be reported here: the cwd fallback that keeps it from
+// becoming a dead pane is host-side work (Phase 4).
+func workspaceStartDir(path *string, sessionCwd string, mkdir, local bool) (string, error) {
+	if !local {
+		if path == nil {
+			return "", nil
+		}
+		return *path, nil
+	}
 	if path == nil {
 		return sessionCwd, nil
 	}

@@ -666,6 +666,21 @@ func (o *orch) paneHostID(pid uint32) string {
 	return id
 }
 
+// paneIsLocal reports whether a pane's terminal runs on this catway's own
+// machine. It is the gate on every feature that reads the filesystem behind a
+// pane — the git branch badge, the agent-model transcript readers, the worktree
+// commands, the directory picker, the restore-time cwd healing — because all of
+// those open paths with this process's own syscalls, and a remote pane's cwd
+// names a directory in another machine's filesystem. Answering about the wrong
+// disk is worse than answering nothing: a same-named directory here would give
+// a confidently wrong branch or model, and worktree create would write a
+// checkout on the wrong box.
+//
+// Localness is the host *id*, not its transport: the first real remote host is
+// reached over `ssh -L` with a unix address, so a unix socket proves nothing.
+// Only the synthesized local host (server.cathost_socket) is this machine.
+func (o *orch) paneIsLocal(pid uint32) bool { return o.paneHostID(pid) == localHostID }
+
 // --- host roster (the browser's HOSTS section and §7 host.list) --------------
 
 // hostPaneCounts is how many live panes each host currently holds, resolved the
@@ -699,6 +714,7 @@ func (o *orch) Hosts() []app.HostInfo {
 			Connected: connected,
 			AddrKind:  d.kind,
 			Default:   id == o.defaultHost,
+			Local:     id == localHostID,
 			Panes:     counts[id],
 			Error:     lastErr,
 		})
@@ -716,7 +732,8 @@ func (o *orch) hostsMsg() browserproto.Hosts {
 	for _, h := range infos {
 		items = append(items, browserproto.HostItem{
 			ID: h.ID, Label: h.Label, Connected: h.Connected,
-			AddrKind: h.AddrKind, Default: h.Default, Panes: h.Panes, Error: h.Error,
+			AddrKind: h.AddrKind, Default: h.Default, Local: h.Local,
+			Panes: h.Panes, Error: h.Error,
 		})
 	}
 	return browserproto.NewHosts(items)
@@ -869,9 +886,23 @@ func (o *orch) createPane(rt *paneRuntime) {
 // paneCwd is the directory a pane's PTY spawns in: its owning workspace's
 // identity cwd (set for worktree-checkout workspaces) when present, else the
 // process cwd. A restored pane's saved cwd still overrides this in createPane.
+// A directory only means something on the machine it lives on, so both
+// fallbacks are host-scoped: the workspace's identity cwd is used when the pane
+// runs on the workspace's own host (a pane placed elsewhere — "split here on
+// devbox" inside a local workspace — must not be sent a path from this
+// filesystem), and the process cwd only for a local pane.
 func (o *orch) paneCwd(pid uint32) string {
-	if ws := o.session.PaneWorkspace(layout.PaneID(pid)); ws != nil && ws.IdentityCwd != "" {
+	host := o.paneHostID(pid)
+	if ws := o.session.PaneWorkspace(layout.PaneID(pid)); ws != nil && ws.IdentityCwd != "" &&
+		o.workspaceHostID(ws) == host {
 		return ws.IdentityCwd
+	}
+	if host != localHostID {
+		// o.cwd is where *this* process was started — a directory that need not
+		// exist on the other box, and if it does is almost certainly not the
+		// same project. Naming nothing lets cathost spawn the pane in its own
+		// default directory, which is a working shell rather than a dead pane.
+		return ""
 	}
 	return o.cwd
 }

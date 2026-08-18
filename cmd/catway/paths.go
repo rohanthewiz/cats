@@ -32,6 +32,20 @@ const maxPickerRecents = 200
 // machine without cdx still gets a useful list, seeded with the projects that
 // are open right now.
 func (o *orch) StartPathList(r app.Responder, p app.PathListParams) {
+	// The listing is of this machine's disk. Anchored on a remote pane it would
+	// answer about the wrong filesystem while looking authoritative — a picker
+	// full of local directories that do not exist where the pane is. Reported as
+	// a listing error rather than a failed command so the picker shows the
+	// reason and keeps taking keystrokes, exactly as it does for a path that is
+	// half typed. (The UI hides the picker for a non-local host; this is the
+	// backstop for the clients that do not, and for `catctl`.)
+	if id := o.paneHostID(o.anchorPane(p.Pane)); id != localHostID {
+		r.OK(app.PathListResult{
+			Dir:   p.Dir,
+			Error: "directory listing is local-host only (that pane is on host " + id + ")",
+		})
+		return
+	}
 	cwd := o.anchorPaneCwd(p.Pane)
 	var live []string
 	if p.Recents {

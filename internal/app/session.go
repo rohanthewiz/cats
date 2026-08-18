@@ -353,6 +353,15 @@ func (s *Session) SplitPane(target *layout.PaneID, dir layout.Direction) (layout
 	return s.SplitPaneWith(target, dir, workspace.SpawnSpec{})
 }
 
+// SplitPaneOn is SplitPane placing the new pane on a named cathost ("" = the
+// workspace's own default host). It exists so the §7 dispatcher can route
+// pane.split's host param without building a workspace.SpawnSpec of its own —
+// the host is the only spec field a command may set, the rest being the
+// backend's business via StageSpawn.
+func (s *Session) SplitPaneOn(target *layout.PaneID, dir layout.Direction, hostID string) (layout.PaneID, error) {
+	return s.SplitPaneWith(target, dir, workspace.SpawnSpec{HostID: hostID})
+}
+
 // SplitPaneWith is SplitPane with an explicit spawn spec — today only its
 // HostID matters (which machine the new pane lands on), the rest of the spec
 // being the backend's business via StageSpawn. An empty spec reproduces
@@ -454,6 +463,13 @@ func (s *Session) CreateTab() (int, error) {
 // active one. Returning it here keeps the answer right for both cases.
 func (s *Session) CreateTabIn(wsID string) (int, layout.PaneID, error) {
 	return s.CreateTabInWith(wsID, workspace.SpawnSpec{})
+}
+
+// CreateTabInOn is CreateTabIn placing the tab's root pane on a named cathost
+// ("" = the workspace's own default host) — the tab.create counterpart of
+// SplitPaneOn, and the same reasoning for its existence.
+func (s *Session) CreateTabInOn(wsID, hostID string) (int, layout.PaneID, error) {
+	return s.CreateTabInWith(wsID, workspace.SpawnSpec{HostID: hostID})
 }
 
 // CreateTabInWith is CreateTabIn with an explicit spawn spec (its HostID picks

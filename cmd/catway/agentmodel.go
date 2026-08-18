@@ -116,7 +116,13 @@ const (
 func (o *orch) refreshAgentModel(rt *paneRuntime, agent string) {
 	resolver, known := modelResolvers[agent]
 	root := o.modelRoots[agent]
-	if !known || root == "" {
+	// The readers walk this machine's ~/.claude and copilot state, keyed by the
+	// pane's cwd. For a pane on another host both halves are wrong — the
+	// transcripts live beside the agent, on that box — and the slug match would
+	// happily land on a same-named project here and report someone else's model.
+	// A remote pane therefore carries no model at all (see orch.paneIsLocal);
+	// the hook relay that would carry the real one is Phase 6.
+	if !known || root == "" || !o.paneIsLocal(rt.id) {
 		rt.agentModel = ""
 		rt.modelAt = time.Time{}
 		return

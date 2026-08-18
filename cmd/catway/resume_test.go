@@ -83,7 +83,9 @@ func TestPlanResume(t *testing.T) {
 		7: idRef("custom:claude", "claude", "nope"), // unofficial — dropped
 	}
 
-	kept, plans, suppress := planResume(saved, true)
+	// nil locality predicate = every pane is on this machine, the single-host
+	// case this test is about (the remote rule has its own test below).
+	kept, plans, suppress := planResume(saved, true, nil)
 	if len(plans) != 2 || plans[1] == nil || plans[5] == nil {
 		t.Fatalf("plans: %+v", plans)
 	}
@@ -97,12 +99,38 @@ func TestPlanResume(t *testing.T) {
 		t.Fatalf("invalid entry must drop entirely: kept=%+v suppress=%+v", kept, suppress)
 	}
 
-	kept, plans, suppress = planResume(saved, false)
+	kept, plans, suppress = planResume(saved, false, nil)
 	if len(plans) != 0 || len(suppress) != 0 {
 		t.Fatalf("resume off must not plan: plans=%+v suppress=%+v", plans, suppress)
 	}
 	if len(kept) != 3 { // refs preserved (minus the invalid one), no dedupe
 		t.Fatalf("resume off keeps valid refs: %+v", kept)
+	}
+}
+
+// A pane on another host must not be handed a resume argv: the transcript that
+// argv names lives on the machine that wrote it, so running `claude --resume`
+// on a remote box starts a fresh agent — and, because a planned resume also
+// suppresses the pane's saved scrollback, the user would lose the screen they
+// had and gain an agent with no memory. The ref itself survives, so nothing is
+// forgotten; only the relaunch is withheld.
+func TestPlanResumeSkipsRemotePanes(t *testing.T) {
+	saved := map[uint32]persist.AgentSession{
+		1: idRef("cats:claude", "claude", "here"),
+		2: idRef("cats:claude", "claude", "there"),
+	}
+	local := func(pid uint32) bool { return pid == 1 }
+
+	kept, plans, suppress := planResume(saved, true, local)
+
+	if len(plans) != 1 || plans[1] == nil {
+		t.Fatalf("only the local pane may be planned: %+v", plans)
+	}
+	if _, ok := kept[2]; !ok {
+		t.Fatalf("the remote pane's ref must be preserved: %+v", kept)
+	}
+	if suppress[2] {
+		t.Fatalf("an unplanned remote pane keeps its saved scrollback: %+v", suppress)
 	}
 }
 

@@ -450,3 +450,31 @@ func waitFor(t *testing.T, o *orch, cond func() bool) {
 		}
 	}
 }
+
+// The model readers walk this machine's agent state (~/.claude and friends),
+// keyed by the pane's cwd. A pane on another host has neither there — the
+// transcripts live beside the agent — and the cwd-slug match would happily land
+// on a same-named project here and report a model from someone else's session.
+// So a remote pane carries no model, and drops one it was holding.
+func TestRefreshAgentModelSkipsRemotePanes(t *testing.T) {
+	o, localPane, remotePane, _, _ := twoHostOrch(t)
+	projects := t.TempDir()
+	o.modelRoots = map[string]string{"claude": projects}
+
+	remote := o.panes[remotePane]
+	remote.cwd, remote.agentModel = "/srv/app", "opus"
+	o.refreshAgentModel(remote, "claude")
+	if remote.agentModel != "" {
+		t.Fatalf("remote pane model = %q, want it cleared", remote.agentModel)
+	}
+	if remote.modelBusy {
+		t.Fatal("a remote pane must not start a transcript read")
+	}
+
+	local := o.panes[localPane]
+	local.cwd = t.TempDir()
+	o.refreshAgentModel(local, "claude")
+	if !local.modelBusy {
+		t.Fatal("a local pane should have started a transcript read")
+	}
+}

@@ -74,6 +74,7 @@ import (
 	"github.com/rohanthewiz/cats/internal/ctlproto"
 	"github.com/rohanthewiz/cats/internal/gwauth"
 	"github.com/rohanthewiz/cats/internal/gwtls"
+	"github.com/rohanthewiz/cats/internal/layout"
 	"github.com/rohanthewiz/cats/internal/persist"
 	"github.com/rohanthewiz/cats/internal/push"
 	"github.com/rohanthewiz/cats/internal/startdir"
@@ -366,22 +367,61 @@ func spawnRoot() string {
 // directory can simply be deleted between runs. Restore is a pure model
 // conversion, so the repair belongs here — without it a single bad launch
 // pins every future workspace to the filesystem root forever.
-func healStartDirs(sess *app.Session, root string) {
+//
+// hosts scopes the workspace half to this machine: a workspace pinned to a
+// remote host holds a path in *that* machine's filesystem, where every test
+// startdir.Usable makes — does it exist, is it a directory — is being asked of
+// the wrong disk. Rewriting it to this session's cwd would silently move a
+// remote workspace's panes to a directory that only exists here, so those are
+// left exactly as saved (a bad remote path is cathost's fallback to handle).
+func healStartDirs(sess *app.Session, root string, hosts []config.Host) {
 	if cwd := startdir.Usable(sess.Cwd(), root); cwd != sess.Cwd() {
 		log.Printf("catway: restored session cwd %q unusable, using %q", sess.Cwd(), cwd)
 		sess.SetCwd(cwd)
 	}
 	for _, ws := range sess.Workspaces() {
+		if !hostIsLocal(hosts, ws.HostID) {
+			continue
+		}
 		ws.IdentityCwd = startdir.Usable(ws.IdentityCwd, sess.Cwd())
 	}
+}
+
+// hostIsLocal answers "is this stored host id this machine's own cathost", with
+// "" meaning the roster's default host. It exists alongside orch.paneIsLocal
+// rather than reusing it because the restore-time repairs below run *before*
+// the orchestrator is constructed — the session model and the configured roster
+// are all that exist at that point.
+func hostIsLocal(hosts []config.Host, id string) bool {
+	if id == "" {
+		for _, h := range hosts {
+			if h.Default {
+				id = h.ID
+				break
+			}
+		}
+		if id == "" && len(hosts) > 0 {
+			id = hosts[0].ID // EffectiveHosts always marks one; never depend on it
+		}
+	}
+	return id == config.LocalHostID
 }
 
 // healPaneCwds drops saved per-pane directories that are no longer worth
 // respawning in (the same "/" and deleted-directory cases healStartDirs covers).
 // A dropped entry is not an error: createPane simply falls back to the pane's
 // workspace identity cwd, which healStartDirs has already made usable.
-func healPaneCwds(cwds map[uint32]string) map[uint32]string {
+//
+// A remote pane's saved cwd is kept untouched, for the reason healStartDirs
+// gives: it was reported by a shell on another machine, so the local stat that
+// decides "worth respawning in" is being asked of the wrong filesystem — and
+// its answer is nearly always "no", which would drop every remote pane's
+// directory on every restart.
+func healPaneCwds(cwds map[uint32]string, sess *app.Session, hosts []config.Host) map[uint32]string {
 	for pid, cwd := range cwds {
+		if !hostIsLocal(hosts, sess.PaneHost(layout.PaneID(pid))) {
+			continue
+		}
 		if startdir.Usable(cwd) != cwd {
 			delete(cwds, pid)
 		}
@@ -423,8 +463,8 @@ func buildOrch(hosts []config.Host, cwd string, pc config.Persistence) (*orch, e
 			log.Printf("catway: session restore failed, starting fresh: %v", err)
 			sess = nil
 		} else {
-			healStartDirs(sess, cwd)
-			savedCwds = healPaneCwds(cwds)
+			healStartDirs(sess, cwd, hosts)
+			savedCwds = healPaneCwds(cwds, sess, hosts)
 			savedAgents = paneAgents
 			total := len(snap.Workspaces)
 			log.Printf("catway: restored session from %s (%d workspaces, %d panes)",
@@ -458,7 +498,7 @@ func buildOrch(hosts []config.Host, cwd string, pc config.Persistence) (*orch, e
 	// cold-start pane's resume argv, and drop the saved scrollback of every
 	// resuming pane — the relaunched agent owns that screen, and replaying a
 	// stale transcript under it would masquerade as live output.
-	kept, plans, suppress := planResume(savedAgents, pc.ResumeAgents)
+	kept, plans, suppress := planResume(savedAgents, pc.ResumeAgents, o.paneIsLocal)
 	o.restoredAgents, o.resumePlans = kept, plans
 	for pid := range suppress {
 		delete(o.seeds, pid)

@@ -61,7 +61,13 @@ const (
 // resolve against, and one that had a branch and then lost its cwd drops it
 // rather than keeping a label for a directory nobody can name.
 func (o *orch) refreshPaneBranch(rt *paneRuntime) {
-	if rt.cwd == "" {
+	// A remote pane's cwd is a path on its own machine; resolving it here would
+	// read this machine's repositories and label the pane with a branch from a
+	// directory that merely shares a name (see orch.paneIsLocal). Branch
+	// resolution moves host-side in Phase 4; until then a remote pane simply
+	// carries no branch, and one that had one before it was restored onto a
+	// remote host drops it through the same clearing path below.
+	if rt.cwd == "" || !o.paneIsLocal(rt.id) {
 		if rt.branch != "" {
 			rt.branch = ""
 			if o.visible[rt.id] {

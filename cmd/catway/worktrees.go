@@ -22,6 +22,10 @@ import (
 // focused) pane's cwd. The workspace-membership match runs back on the loop so
 // it reflects the model at reply time, not request time.
 func (o *orch) StartWorktreeList(r app.Responder, p app.WorktreeListParams) {
+	if err := o.requireLocalAnchor(p.Pane); err != "" {
+		r.Fail(err)
+		return
+	}
 	cwd := o.anchorPaneCwd(p.Pane)
 	go func() {
 		checkout, err := worktree.RepoRoot(cwd)
@@ -41,6 +45,10 @@ func (o *orch) StartWorktreeList(r app.Responder, p app.WorktreeListParams) {
 // StartWorktreeCreate creates a new branch + checkout (`git worktree add -b`)
 // and opens a new workspace on it, focused and named after the branch.
 func (o *orch) StartWorktreeCreate(r app.Responder, p app.WorktreeCreateParams) {
+	if err := o.requireLocalAnchor(p.Pane); err != "" {
+		r.Fail(err)
+		return
+	}
 	cwd := o.anchorPaneCwd(p.Pane)
 	branch := p.Branch
 	if branch == "" {
@@ -101,7 +109,10 @@ func (o *orch) StartWorktreeOpen(r app.Responder, p app.WorktreeOpenParams) {
 		r.Fail("worktree path is not a directory: " + p.Path)
 		return
 	}
-	id, err := o.session.CreateWorkspaceAt(p.Path)
+	// Pinned to the local host, not left to the default: the checkout was just
+	// stat'ed on this machine's disk, so the workspace rooted on it has to spawn
+	// its panes here even in a session whose default host is a remote one.
+	id, err := o.session.CreateWorkspaceAtOn(p.Path, localHostID)
 	if err != nil {
 		r.Fail(err.Error())
 		return
@@ -118,6 +129,13 @@ func (o *orch) StartWorktreeRemove(r app.Responder, p app.WorktreeRemoveParams) 
 	var path string
 	for _, ws := range o.session.Workspaces() {
 		if ws.ID == p.Workspace {
+			// Its checkout is on the machine its panes run on; `git worktree
+			// remove` here would either miss or, on a coincidental path match,
+			// delete the wrong checkout.
+			if id := o.workspaceHostID(ws); id != localHostID {
+				r.Fail(worktreeRemoteErr(id))
+				return
+			}
 			path = ws.IdentityCwd
 			break
 		}
@@ -165,16 +183,47 @@ func (o *orch) StartWorktreeRemove(r app.Responder, p app.WorktreeRemoveParams) 
 // identity and then the process cwd. The worktree commands anchor their repo on
 // it and path.list resolves relative paths against it. Loop-goroutine only.
 func (o *orch) anchorPaneCwd(pane *uint32) string {
-	var pid uint32
-	if pane != nil {
-		pid = *pane
-	} else if id, ok := o.session.FocusedPane(); ok {
-		pid = uint32(id)
-	}
+	pid := o.anchorPane(pane)
 	if rt := o.panes[pid]; rt != nil && rt.cwd != "" {
 		return rt.cwd
 	}
 	return o.paneCwd(pid)
+}
+
+// anchorPane is which pane a pane-addressed command anchors on: the one it
+// names, else the focused one. Split out of anchorPaneCwd so the host guard
+// below asks about the same pane the cwd will come from — resolving the anchor
+// twice by two rules is how a guard ends up protecting a different pane than
+// the one that gets used.
+func (o *orch) anchorPane(pane *uint32) uint32 {
+	if pane != nil {
+		return *pane
+	}
+	if id, ok := o.session.FocusedPane(); ok {
+		return uint32(id)
+	}
+	return 0
+}
+
+// requireLocalAnchor refuses a filesystem command anchored on a remote pane,
+// returning the failure text ("" = allowed). git runs as a subprocess of *this*
+// process, so every worktree verb operates on this machine's disk; anchoring
+// one on a pane whose repository lives on another box would at best fail with a
+// confusing "not a git worktree" and at worst find a same-named checkout here
+// and act on it. Remote worktrees need cathost-side git, which is not this
+// slice's work.
+func (o *orch) requireLocalAnchor(pane *uint32) string {
+	if id := o.paneHostID(o.anchorPane(pane)); id != localHostID {
+		return worktreeRemoteErr(id)
+	}
+	return ""
+}
+
+// worktreeRemoteErr names the host that made the command local-only, so the
+// dialog (and `catctl`) can say which machine it was pointed at rather than
+// just refusing.
+func worktreeRemoteErr(hostID string) string {
+	return "worktrees are local-host only (this one is on host " + hostID + ")"
 }
 
 // worktreeListResult assembles the worktree.list reply: entry flags plus which
@@ -211,6 +260,12 @@ func (o *orch) worktreeListResult(checkout string, entries []worktree.Entry) app
 func (o *orch) workspaceForPath(path string) string {
 	cp := canonPath(path)
 	for _, ws := range o.session.Workspaces() {
+		// Paths only compare within one filesystem: a workspace on another host
+		// can hold the very same path string and mean a different directory, so
+		// a remote workspace is never the one open on a local checkout.
+		if o.workspaceHostID(ws) != localHostID {
+			continue
+		}
 		if ws.IdentityCwd != "" && canonPath(ws.IdentityCwd) == cp {
 			return ws.ID
 		}

@@ -3,11 +3,16 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"path/filepath"
 	"testing"
+	"time"
 
+	"github.com/rohanthewiz/cats/internal/app"
 	"github.com/rohanthewiz/cats/internal/config"
+	"github.com/rohanthewiz/cats/internal/layout"
+	"github.com/rohanthewiz/cats/internal/orchestration"
 )
 
 // The roster is what every host-aware surface reads from: the sidebar section,
@@ -139,5 +144,153 @@ func TestNewOrchHostsRejectsUnsupportedTransport(t *testing.T) {
 	_, err := newOrchHosts(hosts, dir)
 	if err == nil {
 		t.Fatal("a tls:// host should fail to build until the transport exists")
+	}
+}
+
+// Restore has to put every pane back on the machine it was on. This is the one
+// promise a multi-host session cannot fudge: a pane restored onto the wrong
+// host is a shell in the wrong filesystem with the previous machine's
+// scrollback replayed above it, which reads as a working pane until the first
+// command lands somewhere unexpected.
+func TestRestorePlacesPanesOnTheirOwnHost(t *testing.T) {
+	o, localPane, remotePane, _, _ := twoHostOrch(t)
+	snap := o.session.Snapshot()
+
+	sess, err := app.RestoreSession(modelSpawner{}, snap)
+	if err != nil {
+		t.Fatalf("RestoreSession: %v", err)
+	}
+	// A fresh orchestrator over the same roster — the cold start a catway
+	// restart performs, where nothing but the snapshot says where a pane lives.
+	r, err := newOrchHostsWith(twoHostConfig(), t.TempDir(), sess)
+	if err != nil {
+		t.Fatalf("newOrchHostsWith: %v", err)
+	}
+	if got := r.panes[remotePane].host; got != testRemoteHost {
+		t.Fatalf("restored remote pane host = %q, want %q", got, testRemoteHost)
+	}
+	if got := r.panes[localPane].host; got != localHostID {
+		t.Fatalf("restored local pane host = %q, want %q", got, localHostID)
+	}
+
+	// And the respawn goes down that host's connection, not the default one.
+	pdLocal := newPipeDaemonFor(t, r, r.defaultHost)
+	pdRemote := newPipeDaemonFor(t, r, testRemoteHost)
+	for _, rt := range r.panes {
+		rt.created = false // cold start: no PTY exists on either host yet
+	}
+	synced := make(chan struct{})
+	go func() { r.syncDaemon(); close(synced) }() // pipe writes block until pumped
+
+	// Both pipes have to be drained concurrently: syncDaemon writes to each host
+	// in turn and a full pipe would block it (and so the create the other host
+	// is waiting for).
+	remoteCreates := createdPanes(t, pdRemote, 100*time.Millisecond)
+	localCreates := createdPanes(t, pdLocal, 100*time.Millisecond)
+	<-synced
+
+	if !(<-remoteCreates)[remotePane] {
+		t.Fatalf("remote host was not asked to create pane %d", remotePane)
+	}
+	local := <-localCreates
+	if local[remotePane] {
+		t.Fatalf("the remote pane's PTY was created on the local host: %v", local)
+	}
+	if !local[localPane] {
+		t.Fatalf("local host was not asked to create pane %d (got %v)", localPane, local)
+	}
+}
+
+// createdPanes drains a pipe for a settling window and reports which pane ids
+// that host was told to create. Returned over a channel so both hosts' pipes
+// can be pumped at once — see the call site.
+func createdPanes(t *testing.T, pd *pipeDaemon, d time.Duration) <-chan map[uint32]bool {
+	t.Helper()
+	out := make(chan map[uint32]bool, 1)
+	go func() {
+		got := map[uint32]bool{}
+		deadline := time.After(d)
+		for {
+			select {
+			case m, ok := <-pd.msgs:
+				if !ok {
+					out <- got
+					return
+				}
+				if m.mt != orchestration.MsgCreatePane {
+					continue
+				}
+				var cp orchestration.CreatePane
+				if err := json.Unmarshal(m.payload, &cp); err == nil {
+					got[cp.PaneID] = true
+				}
+			case <-deadline:
+				out <- got
+				return
+			}
+		}
+	}()
+	return out
+}
+
+// A pane on a remote host must not be handed this machine's process cwd. It is
+// where catway was started, a path that either does not exist over there or is
+// a different directory with the same name; naming nothing instead lets cathost
+// spawn the pane in its own default directory — a working shell rather than a
+// dead pane. A workspace identity cwd, being a path chosen *for* that host, is
+// still sent.
+func TestPaneCwdSkipsLocalProcessDirForRemotePanes(t *testing.T) {
+	o, localPane, remotePane, _, _ := twoHostOrch(t)
+
+	if got := o.paneCwd(localPane); got != o.cwd {
+		t.Fatalf("local pane cwd = %q, want the process cwd %q", got, o.cwd)
+	}
+	// twoHostOrch's remote workspace carries an identity cwd, which is the
+	// host's own path and travels as-is.
+	ws := o.session.PaneWorkspace(layout.PaneID(remotePane))
+	if got := o.paneCwd(remotePane); got != ws.IdentityCwd {
+		t.Fatalf("remote pane cwd = %q, want the workspace identity %q", got, ws.IdentityCwd)
+	}
+	ws.IdentityCwd = "" // a remote workspace with nothing recorded
+	if got := o.paneCwd(remotePane); got != "" {
+		t.Fatalf("remote pane cwd = %q, want empty (let cathost choose)", got)
+	}
+
+	// A pane placed on another host *inside a local workspace* — what "split
+	// here on devbox" produces — must not inherit that workspace's directory
+	// either: it is a path in this machine's filesystem, and the workspace is
+	// not where the pane is.
+	local := o.session.PaneWorkspace(layout.PaneID(localPane))
+	if local.IdentityCwd == "" {
+		t.Fatal("the local workspace should have an identity cwd to test with")
+	}
+	target := layout.PaneID(localPane)
+	guest, err := o.session.SplitPaneOn(&target, layout.Horizontal, testRemoteHost)
+	if err != nil {
+		t.Fatalf("SplitPaneOn: %v", err)
+	}
+	o.syncDaemon() // resolves the new runtime's host
+	if got := o.paneCwd(uint32(guest)); got != "" {
+		t.Fatalf("cross-host pane cwd = %q, want empty rather than the workspace's local path", got)
+	}
+}
+
+// The browser's roster message is a translation of the same roster host.list
+// answers with, and the fields the UI *gates* on have to survive it: local
+// decides whether the start-path picker is offered, is_default which host an
+// unqualified create lands on.
+func TestHostsMsgCarriesLocalAndDefault(t *testing.T) {
+	o, _, _, _, _ := twoHostOrch(t)
+
+	msg := o.hostsMsg()
+	if len(msg.Items) != 2 {
+		t.Fatalf("hosts message = %+v", msg.Items)
+	}
+	local, remote := msg.Items[0], msg.Items[1]
+	if !local.Local || !local.Default {
+		t.Fatalf("local host item = %+v, want local+default", local)
+	}
+	if remote.Local || remote.Default {
+		t.Fatalf("remote host item = %+v, want neither local nor default", remote)
 	}
 }

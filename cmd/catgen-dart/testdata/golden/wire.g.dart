@@ -973,6 +973,7 @@ class HostItem {
     required this.connected,
     this.addrKind = '',
     this.isDefault = false,
+    this.local = false,
     required this.panes,
     this.error = '',
   });
@@ -991,6 +992,12 @@ class HostItem {
   /// mobile client's types are generated from these keys.
   final bool isDefault;
 
+  /// Local marks this catway's own machine (the synthesized "local" host). The
+  /// UI gates every path-shaped affordance on it — the start-path picker, the
+  /// worktree dialogs — because those describe the catway machine's disk and a
+  /// unix address is no proof of localness (an ssh -L forward has one too).
+  final bool local;
+
   /// live panes currently on this host
   final int panes;
 
@@ -1004,6 +1011,7 @@ class HostItem {
         connected: asBool(j['connected']),
         addrKind: asString(j['addr_kind']),
         isDefault: asBool(j['is_default']),
+        local: asBool(j['local']),
         panes: asInt(j['panes']),
         error: asString(j['error']),
       );
@@ -1014,6 +1022,7 @@ class HostItem {
         'connected': connected,
         if (addrKind.isNotEmpty) 'addr_kind': addrKind,
         if (isDefault) 'is_default': isDefault,
+        if (local) 'local': local,
         'panes': panes,
         if (error.isNotEmpty) 'error': error,
       };

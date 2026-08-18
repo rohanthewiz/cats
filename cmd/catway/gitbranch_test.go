@@ -152,3 +152,34 @@ func TestHeadBranchBoundedRead(t *testing.T) {
 		t.Errorf("headBranch(oversized) = %q, want \"\"", got)
 	}
 }
+
+// The branch badge is resolved by reading this machine's .git files against the
+// pane's cwd. For a pane on another host that cwd belongs to another
+// filesystem, where the answer is either nothing or — worse — a real branch
+// from a same-named checkout here. So a remote pane resolves no branch at all,
+// and one that carried a branch before its host changed drops it.
+func TestRefreshPaneBranchSkipsRemotePanes(t *testing.T) {
+	o, localPane, remotePane, _, _ := twoHostOrch(t)
+
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, ".git", "HEAD"), "ref: refs/heads/main\n")
+
+	remote := o.panes[remotePane]
+	remote.cwd, remote.branch = root, "stale"
+	o.refreshPaneBranch(remote)
+	if remote.branch != "" {
+		t.Fatalf("remote pane branch = %q, want it cleared", remote.branch)
+	}
+	if remote.branchBusy {
+		t.Fatal("a remote pane must not start a branch read")
+	}
+
+	// The local pane still resolves — the guard is about the host, not about
+	// branches going away once a second host exists.
+	local := o.panes[localPane]
+	local.cwd = root
+	o.refreshPaneBranch(local)
+	if !local.branchBusy {
+		t.Fatal("a local pane should have started a branch read")
+	}
+}
