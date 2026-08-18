@@ -3,6 +3,7 @@ package ctlproto
 import (
 	"bufio"
 	"encoding/json"
+	"io"
 	"log"
 	"net"
 	"sync"
@@ -49,14 +50,22 @@ func (s *Server) Serve(l net.Listener) error {
 		if err != nil {
 			return err
 		}
-		go s.handleConn(conn)
+		go s.ServeConn(conn)
 	}
 }
 
-// handleConn answers one request on conn. A unary request gets one Response and
-// the connection closes; a subscribe request keeps the connection open and streams
-// events (handleStream) until the client disconnects.
-func (s *Server) handleConn(conn net.Conn) {
+// ServeConn answers one request on an already-accepted connection, which is what
+// Serve does for each conn it accepts.
+//
+// It takes an io.ReadWriteCloser rather than a net.Conn because nothing here
+// needs an address or a deadline — the per-request backstop is this server's own
+// — and because the caller is no longer always a listener. A cathost relaying
+// the control socket from another machine hands over a synthetic connection
+// whose reads are the request that arrived there and whose writes go back across
+// the orchestration seam; running it through this same entry point is what makes
+// the relayed API the *same* API, streaming and all, rather than a second
+// implementation that agrees with this one until it doesn't.
+func (s *Server) ServeConn(conn io.ReadWriteCloser) {
 	defer conn.Close()
 	br := bufio.NewReader(conn)
 	req, err := readRequest(br)

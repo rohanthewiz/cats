@@ -71,6 +71,15 @@ both the correct division and what keeps the next field added here from needing 
 cathost release. A relayed report goes through exactly the same arbitration,
 idempotency and error codes as a local one — only the wire differs.
 
+One thing it does *not* share is reach. Pane handles are session-wide, and the
+reporting host is not otherwise consulted, so a relayed report is restricted to
+panes on the host that relayed it: without that, one compromised box could
+mislabel every agent in the session, including panes it cannot see. Nothing
+legitimate is lost — these hooks run inside panes, and a pane's hooks are on the
+pane's machine. A report naming a pane elsewhere is answered `pane_not_found`
+rather than "not yours", since the relaying host has no business learning which
+panes exist on the others.
+
 Two consequences worth knowing:
 
 * the relay path is stable for the **cathost's lifetime**, not the connection's.
@@ -80,17 +89,20 @@ Two consequences worth knowing:
   than a fallback. Dormant hooks beat hooks dialing whatever answers on the
   other machine.
 
-`CATS_CONTROL_SOCKET` is **not** exported to remote panes, for the same reason
-and with no relay standing in for it yet: the control API is a duplex protocol
-rather than this one-shot line, so carrying it across the seam is its own piece
-of work. In-pane `catctl` on a remote host fails to dial rather than quietly
-reaching a different `catway`.
+`CATS_CONTROL_SOCKET` gets the same treatment, with one difference: it is a
+**trust decision**, so it is off unless the operator says otherwise. A host with
+`control_relay` set in its config entry gets that cathost's control relay path
+and in-pane `catctl` works there; a host without it is given
+`CATS_CONTROL_SOCKET=-`, and `catctl` says why rather than quietly reaching a
+different `catway` through an inherited path. See the
+[control relay](orchestration-seam.md#control-relay).
 
 ## Transport
 
 | | |
 |---|---|
 | Socket | `/tmp/cats-hooks.sock` by default; `server.hook_socket`; `--hook-socket`; `none` disables. On a cathost the relay picks `/tmp/cats-hookrelay-<pid>-<n>.sock`; `cathost --hook-socket` overrides it and `-` disables it |
+| Scope | a report on `catway`'s own socket may name any pane; one **relayed** by a cathost may only name panes on that host |
 | Permissions | `0600`, owner-only — the hooks run as the same user, so the **path is the capability** |
 | Pattern | one connection, one newline-terminated JSON request, one reply, close |
 | Read timeout | 5 s |

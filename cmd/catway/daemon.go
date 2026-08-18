@@ -130,6 +130,13 @@ type daemon struct {
 	// that went away on a reconnect would leave catway unable to give a
 	// respawned pane the same socket its neighbours have.
 	hookSocket string
+	// ctlSocket is the path, on this host's machine, of the socket its cathost
+	// relays this catway's control API through. Same lifetime rules as
+	// hookSocket, and kept across a disconnect for the same reason.
+	//
+	// Holding it says nothing about whether it may be used: that is
+	// config.Host.ControlRelay, checked on every relayed open.
+	ctlSocket string
 }
 
 // unixDialer builds the dial func for a unix-socket cathost — the only
@@ -437,6 +444,24 @@ func (d *daemon) hookRelaySocket() string {
 	return d.hookSocket
 }
 
+// setControlSocket records the control-relay path this cathost advertised,
+// ignoring an empty advertisement for the reason setHookSocket does.
+func (d *daemon) setControlSocket(path string) {
+	if path == "" {
+		return
+	}
+	d.mu.Lock()
+	d.ctlSocket = path
+	d.mu.Unlock()
+}
+
+// controlSocket is the advertised control-relay path, "" if this host has none.
+func (d *daemon) controlSocket() string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.ctlSocket
+}
+
 // latencyMs is the roster's round-trip figure in milliseconds, 0 for "unknown"
 // — never measured, not connected, or a daemon too old to answer a ping.
 //
@@ -659,6 +684,9 @@ func (d *daemon) run() {
 			// Its meters described a machine that has stopped answering; that is
 			// exactly the reading not to leave on screen as if it were current.
 			d.o.dropHostStats(d.id)
+			// And every relayed control caller on that machine is waiting for an
+			// answer that can no longer reach it.
+			d.o.dropHostRelays(d.id)
 			d.o.broadcast(browserproto.NewError(0, d.lostMessage()))
 			d.o.broadcastHosts()
 		})
@@ -734,6 +762,7 @@ func (d *daemon) session(conn net.Conn) error {
 	d.setPeerVersion(w.ProtocolVersion)
 	d.setFeatures(w.Features)
 	d.setHookSocket(w.HookSocket)
+	d.setControlSocket(w.ControlSocket)
 	d.o.post(func() { d.o.broadcastHosts() }) // the roster's dot goes green
 	d.reconcile(w.Panes)
 	// The probe is per-session and dies with the connection: it holds the conn
@@ -834,6 +863,24 @@ func (d *daemon) dispatch(mt orchestration.MessageType, payload []byte) {
 		if d.notePong(ev.ID) {
 			o.post(func() { o.broadcastHosts() })
 		}
+	case orchestration.MsgControlOpen:
+		var ev orchestration.ControlOpen
+		if err := json.Unmarshal(payload, &ev); err != nil {
+			return
+		}
+		o.post(func() { o.openControlRelay(d, ev.ID) })
+	case orchestration.MsgControlData:
+		var ev orchestration.ControlData
+		if err := json.Unmarshal(payload, &ev); err != nil {
+			return
+		}
+		o.post(func() { o.feedControlRelay(d, ev.ID, ev.Payload) })
+	case orchestration.MsgControlClose:
+		var ev orchestration.ControlClose
+		if err := json.Unmarshal(payload, &ev); err != nil {
+			return
+		}
+		o.post(func() { o.closeControlRelay(d, ev.ID) })
 	case orchestration.MsgHookReport:
 		var ev orchestration.HookReport
 		if err := json.Unmarshal(payload, &ev); err != nil {
@@ -844,7 +891,9 @@ func (d *daemon) dispatch(mt orchestration.MessageType, payload []byte) {
 		// arrives through. Blocking it to arbitrate one agent's state would
 		// stall every terminal on this host.
 		go func() {
-			d.send(orchestration.NewHookReply(ev.ID, o.answerHook(ev.Payload)))
+			// Scoped to this host: a relayed report may only move the state of a
+			// pane running on the machine that relayed it.
+			d.send(orchestration.NewHookReply(ev.ID, o.answerHookFrom(d.id, ev.Payload)))
 		}()
 	case orchestration.MsgDirListing:
 		var ev orchestration.DirListing

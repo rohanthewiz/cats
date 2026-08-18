@@ -504,3 +504,48 @@ func TestRemotePaneGetsNoControlSocket(t *testing.T) {
 		t.Errorf("remote pane hook socket = %q, want that host's relay", remote["CATS_SOCKET_PATH"])
 	}
 }
+
+// A relayed hook report may only move the state of a pane on the machine that
+// relayed it. Pane handles are session-wide and the reporting host is not
+// otherwise consulted, so without this one compromised box could mislabel every
+// agent in the session — including panes it cannot see.
+func TestRelayedHookReportIsScopedToItsHost(t *testing.T) {
+	o, localPane, remotePane, _, _ := twoHostOrch(t)
+	go o.run()
+
+	localPub, _ := o.session.PublicPaneID(layout.PaneID(localPane))
+	remotePub, _ := o.session.PublicPaneID(layout.PaneID(remotePane))
+
+	report := func(fromHost, pub string) string {
+		req := `{"id":"h","method":"pane.report_agent","params":{"pane_id":"` + pub +
+			`","source":"hooks","agent":"codex","state":"working"}}`
+		return string(o.answerHookFrom(fromHost, []byte(req+"\n")))
+	}
+
+	// The remote host reporting for its own pane: accepted.
+	if reply := report(testRemoteHost, remotePub); !strings.Contains(reply, `"ok"`) {
+		t.Fatalf("own-pane report = %s, want ok", reply)
+	}
+	// The same host reporting for a pane on the LOCAL machine: refused, and
+	// refused as "not found" — the relaying host has no business learning which
+	// panes exist elsewhere.
+	reply := report(testRemoteHost, localPub)
+	if !strings.Contains(reply, "pane_not_found") {
+		t.Fatalf("cross-host report = %s, want pane_not_found", reply)
+	}
+	var state string
+	syncPost(o, func() {
+		if rt := o.panes[localPane]; rt != nil && rt.hook != nil {
+			state = rt.hook.state
+		}
+	})
+	if state != "" {
+		t.Fatalf("the local pane's agent state was moved to %q by another host", state)
+	}
+
+	// The local socket keeps its reach: it is this machine's own, and a hook
+	// there may address any pane in the session as it always could.
+	if reply := report("", localPub); !strings.Contains(reply, `"ok"`) {
+		t.Fatalf("local-socket report = %s, want ok", reply)
+	}
+}

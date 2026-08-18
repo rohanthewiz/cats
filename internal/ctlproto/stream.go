@@ -44,7 +44,7 @@ func (s *Server) SetStreamDispatch(sd StreamDispatch) { s.stream = sd }
 // handleStream serves one events.subscribe connection: register the subscriber,
 // ack, then pump its events to the socket until the client closes the connection
 // (its read side reaching EOF) or a write fails. cancel unregisters on the way out.
-func (s *Server) handleStream(conn net.Conn, br *bufio.Reader, req Request) {
+func (s *Server) handleStream(conn io.ReadWriteCloser, br *bufio.Reader, req Request) {
 	if s.stream == nil {
 		_ = writeMessage(conn, newResponse(req.ID, false, "streaming not supported", nil))
 		return
@@ -107,8 +107,10 @@ func (s *connSubscriber) Send(event string, data any) bool {
 func (s *connSubscriber) close() { s.closeOnce.Do(func() { close(s.done) }) }
 
 // pump drains queued events to conn until the subscription closes or a write
-// fails. Runs on the connection's own goroutine.
-func (s *connSubscriber) pump(conn net.Conn) {
+// fails. Runs on the connection's own goroutine. An io.Writer, not a net.Conn:
+// a relayed control connection is a synthetic one (see Server.ServeConn) and
+// events reach it the same way they reach a socket.
+func (s *connSubscriber) pump(conn io.Writer) {
 	for {
 		select {
 		case ev := <-s.ch:

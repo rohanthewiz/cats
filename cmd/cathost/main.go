@@ -52,6 +52,8 @@ func main() {
 		"in persistent mode, exit if no client is attached for this long (0 disables)")
 	hookSocket := flag.String("hook-socket", "",
 		"path for the agent hook-relay socket this daemon opens for its panes; empty picks /tmp/cats-hookrelay-<pid>-<n>.sock, \"-\" disables the relay")
+	controlSocket := flag.String("control-socket", "",
+		"path for the control-API relay socket this daemon opens for its panes; empty picks /tmp/cats-ctlrelay-<pid>-<n>.sock, \"-\" disables the relay (the orchestrator must also enable it per host)")
 	manifestUpdate := flag.Bool("manifest-update", true,
 		"fetch agent-detection manifest updates from the herdr.dev catalog at startup (env "+detect.CatalogURLEnv+" overrides the URL)")
 	flag.Parse()
@@ -93,9 +95,9 @@ func main() {
 	defer cleanup()
 
 	if *persistent {
-		err = runPersistent(ln, desc, token, *idleTimeout, *hookSocket)
+		err = runPersistent(ln, desc, token, *idleTimeout, *hookSocket, *controlSocket)
 	} else {
-		err = run(ln, desc, token, *exitOnDisconnect, *hookSocket)
+		err = run(ln, desc, token, *exitOnDisconnect, *hookSocket, *controlSocket)
 	}
 	if err != nil {
 		cleanup() // os.Exit skips the defer
@@ -104,7 +106,7 @@ func main() {
 	}
 }
 
-func run(ln net.Listener, desc, token string, exitOnDisconnect bool, hookSocket string) error {
+func run(ln net.Listener, desc, token string, exitOnDisconnect bool, hookSocket, controlSocket string) error {
 	defer ln.Close()
 
 	// SIGHUP too: in managed mode the orchestrator is our parent, so its exit (or a
@@ -135,6 +137,7 @@ func run(ln net.Listener, desc, token string, exitOnDisconnect bool, hookSocket 
 			h := orchestration.NewHost()
 			h.RequireToken = token
 			h.HookSocketPath = hookSocket
+			h.ControlSocketPath = controlSocket
 			if err := h.Serve(ctx, conn); err != nil {
 				log.Printf("session ended: %v", err)
 			} else {
@@ -165,7 +168,7 @@ func run(ln net.Listener, desc, token string, exitOnDisconnect bool, hookSocket 
 // client. A cats that restarts or hands off reconnects to this same daemon and
 // resyncs its surviving panes (the create_pane-less path). The daemon exits on a
 // clean-quit shutdown command, on the idle timeout, or on a signal.
-func runPersistent(ln net.Listener, desc, token string, idleTimeout time.Duration, hookSocket string) error {
+func runPersistent(ln net.Listener, desc, token string, idleTimeout time.Duration, hookSocket, controlSocket string) error {
 	defer ln.Close()
 
 	// Persistent mode must outlive the orchestrator. When cats dies its controlling
@@ -182,6 +185,7 @@ func runPersistent(ln net.Listener, desc, token string, idleTimeout time.Duratio
 	h.Persistent = true
 	h.IdleTimeout = idleTimeout
 	h.HookSocketPath = hookSocket
+	h.ControlSocketPath = controlSocket
 	h.RequireToken = token
 	h.Start(ctx)
 	defer h.Stop()

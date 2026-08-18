@@ -95,6 +95,24 @@ type Host struct {
 	// host a pane whose recorded host has vanished falls back to. At most one
 	// entry may set it; with none set, the local host is the default.
 	Default bool `yaml:"default,omitempty"`
+	// ControlRelay lets panes on this host reach the control API — in-pane
+	// catctl, cats-todo, plugin binaries — by relaying it through that machine's
+	// cathost.
+	//
+	// Off by default, and it is the one host setting that is a trust decision
+	// rather than a connection detail. The control API can create panes, run
+	// commands in them, read any pane's contents on ANY host, rewrite this
+	// config and attach or detach cathosts. Turning this on for a host says:
+	// anything that can open a unix socket on that machine may do all of that.
+	//
+	// There is deliberately no partial version. A caller holding the control
+	// socket can type `pbpaste` into a local pane with pane.send_input and read
+	// the answer back with pane.capture, so a denylist of the "sensitive"
+	// methods would gate nothing it does not already have by a longer route —
+	// the same argument ctlproto.MethodClipboardRead already makes about the
+	// local socket. Enable it for a machine you trust as much as the one running
+	// catway, and leave it off otherwise.
+	ControlRelay bool `yaml:"control_relay,omitempty"`
 }
 
 // DisplayLabel is the host's human name: its label, or its id when unlabelled.

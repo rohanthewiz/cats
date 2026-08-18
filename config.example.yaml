@@ -63,6 +63,15 @@ server:
 #     addr: "tls://box.lan:8422"
 #     token_file: "~/.config/cats/box.token"   # matches the daemon's -token-file
 #     fingerprint: "dd7d9b31…"            # from cathost's startup log
+#     # control_relay: true               # let in-pane catctl on that box drive
+#                                         # this session. OFF by default, and a
+#                                         # trust decision rather than a
+#                                         # connection detail: it grants that
+#                                         # machine every command, on every host
+#                                         # — including panes it cannot see.
+#                                         # Without it, panes there get
+#                                         # CATS_CONTROL_SOCKET=- and catctl
+#                                         # says why.
 
 # Session persistence & restore: the workspace/tab/pane model survives a
 # catway restart, and scrollback seeds survive a cathost daemon loss.

@@ -525,6 +525,15 @@ own and is never exposed over the network — including in
 host. Anything that can open the socket can run any command, so treat it exactly
 as you treat write access to your home directory.
 
+"Local" has one deliberate exception, and it is opt-in per host. A cathost can
+relay this API to panes running on **its** machine, so in-pane tooling there
+works as it does here — see
+[`control_relay`](../reference/configuration.md#control_relay-letting-a-host-drive-the-session).
+It is off by default because it hands that machine the whole session: every
+command, on every host, including the ones it cannot otherwise see. The relay is
+still an owner-only unix socket, just an owner-only unix socket on somebody
+else's box.
+
 That is also the boundary `pair` is drawn against. "Anything that can open the
 socket can run any command" is already true, and pairing does not widen it — but
 a command that *returned the password* would, because a command's blast radius

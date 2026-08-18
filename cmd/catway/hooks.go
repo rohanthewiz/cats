@@ -162,7 +162,9 @@ func (o *orch) serveHookConn(conn *net.UnixConn) {
 	if len(line) == 0 && err != nil {
 		return
 	}
-	if reply := o.answerHook(line); reply != nil {
+	// "" — this socket is the local machine's, so a report on it may name any
+	// pane in the session, exactly as it always could.
+	if reply := o.answerHookFrom("", line); reply != nil {
 		_, _ = conn.Write(reply)
 	}
 }
@@ -177,9 +179,13 @@ func (o *orch) serveHookConn(conn *net.UnixConn) {
 // from a local one — only the wire it came in on differs — so the arbitration,
 // the idempotency token and the error codes all have to be the same code.
 //
+// fromHost scopes the report. "" is the local hook socket, which may address
+// any pane in the session; a host id is a report relayed by that cathost, and
+// may only address panes running there — see applyHookReport.
+//
 // It runs on the caller's goroutine (a connection handler, or the daemon pump)
 // and never on the loop, because it waits for the loop.
-func (o *orch) answerHook(line []byte) []byte {
+func (o *orch) answerHookFrom(fromHost string, line []byte) []byte {
 	var req hookRequest
 	if err := json.Unmarshal(line, &req); err != nil {
 		return hookReplyBytes("", &hookError{Code: "invalid_request", Message: "invalid request: " + err.Error()})
@@ -195,7 +201,7 @@ func (o *orch) answerHook(line []byte) []byte {
 		return hookReplyBytes(req.ID, &hookError{Code: "invalid_request", Message: "invalid request: " + err.Error()})
 	}
 	done := make(chan *hookError, 1)
-	o.post(func() { done <- o.applyHookReport(req.Method, p) })
+	o.post(func() { done <- o.applyHookReportFrom(req.Method, p, fromHost) })
 	select {
 	case herr := <-done:
 		return hookReplyBytes(req.ID, herr)
@@ -286,7 +292,20 @@ func sourcePairIs(m map[string]bool, source, agent string) bool {
 // return is the ok reply — including silent drops (stale seq, suppressed or
 // mismatched release), which cats also answers with ok so a hook never
 // distinguishes "applied" from "ignored".
+// fromHost is the machine the report arrived from: "" for this one's own hook
+// socket, or a host id for one relayed by that cathost.
+//
+// A relayed report may only address panes on the host that relayed it. Without
+// that scope, a cathost could move the agent state of a pane on a DIFFERENT
+// machine — pane handles are session-wide and the reporting host is not
+// otherwise consulted — which turns one compromised box into a way of
+// mislabelling the whole session. Nothing legitimate is lost: the hooks that
+// send these run inside panes, and a pane's hooks are on the pane's machine.
 func (o *orch) applyHookReport(method string, p hookReportParams) *hookError {
+	return o.applyHookReportFrom(method, p, "")
+}
+
+func (o *orch) applyHookReportFrom(method string, p hookReportParams, fromHost string) *hookError {
 	source := strings.TrimSpace(p.Source)
 	if p.PaneID == "" || source == "" {
 		return &hookError{Code: "invalid_request", Message: "invalid request: pane_id and source are required"}
@@ -300,6 +319,14 @@ func (o *orch) applyHookReport(method string, p hookReportParams) *hookError {
 		rt = o.panes[uint32(id)]
 	}
 	if rt == nil {
+		return &hookError{Code: "pane_not_found", Message: fmt.Sprintf("pane %s not found", p.PaneID)}
+	}
+	if fromHost != "" && o.paneHostID(rt.id) != fromHost {
+		// Reported as "not found" rather than "not yours": the relaying host has
+		// no business learning which panes exist elsewhere in the session, and
+		// from where the hook sits the two are the same answer.
+		log.Printf("catway: host %s reported agent state for pane %s, which is not on it — ignored",
+			fromHost, p.PaneID)
 		return &hookError{Code: "pane_not_found", Message: fmt.Sprintf("pane %s not found", p.PaneID)}
 	}
 	if !rt.acceptHookSeq(source, p.Seq) {

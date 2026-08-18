@@ -85,6 +85,7 @@ const (
 	MsgRequestHostStats MessageType = "request_host_stats"
 	MsgRequestListDir   MessageType = "request_list_dir"
 	MsgHookReply        MessageType = "hook_reply"
+	MsgControlReply     MessageType = "control_reply"
 
 	// Go → Rust (events).
 	MsgWelcome       MessageType = "welcome"
@@ -103,6 +104,9 @@ const (
 	MsgHostStats     MessageType = "host_stats"
 	MsgDirListing    MessageType = "dir_listing"
 	MsgHookReport    MessageType = "hook_report"
+	MsgControlOpen   MessageType = "control_open"
+	MsgControlData   MessageType = "control_data"
+	MsgControlClose  MessageType = "control_close"
 	MsgError         MessageType = "error"
 )
 
@@ -145,6 +149,16 @@ const (
 	// every pane's environment — but the name is here so a client can reason
 	// about the capability without special-casing an empty string.
 	FeatureHookRelay = "hook_relay"
+	// FeatureControlRelay: the daemon runs a control-API socket on its own
+	// machine and relays it to the client, so in-pane tooling (catctl,
+	// cats-todo, plugin binaries) on that machine can drive the session.
+	//
+	// Advertising it is not permission. The client decides per host whether to
+	// accept anything from that socket — see config.Host.ControlRelay — because
+	// the control API can drive every pane on every host, and the machine
+	// offering the relay is exactly the one that should not get to make that
+	// call.
+	FeatureControlRelay = "control_relay"
 )
 
 // --- Commands (Rust → Go) ---------------------------------------------------
@@ -379,6 +393,57 @@ func NewRequestListDir(paneID uint32, dir, base string, recents bool, live []str
 	return RequestListDir{Type: MsgRequestListDir, PaneID: paneID, Dir: dir, Base: base, Recents: recents, Live: live}
 }
 
+// The control relay carries the client's control API to a socket on the
+// daemon's machine, so in-pane tooling there can drive the session.
+//
+// Unlike the hook relay this is a *conversation*, not a request and an answer,
+// and the difference is the streaming half of the control protocol: a
+// subscription is one request followed by an ack and then events for as long as
+// the caller stays connected. So the relay models a connection rather than a
+// message pair — open, data in both directions, close from either end — and the
+// client can then run the whole thing through its ordinary control server with
+// a synthetic connection, which is what keeps the relayed API the same API.
+//
+// ID identifies one relayed connection for its lifetime. It is the daemon's to
+// allocate, because the daemon is the side that accepts the connections.
+
+// ControlOpen announces a new connection on the daemon's control relay socket.
+// No payload: the request line follows as ControlData, because a subscription's
+// later frames arrive the same way and one shape for "bytes from the client" is
+// simpler than an open that carries the first line and a data frame for the
+// rest.
+type ControlOpen struct {
+	Type MessageType `json:"type"`
+	ID   uint64      `json:"id"`
+}
+
+func NewControlOpen(id uint64) ControlOpen { return ControlOpen{Type: MsgControlOpen, ID: id} }
+
+// ControlData carries bytes from the relayed client to the orchestrator,
+// verbatim. The daemon parses none of it: the control protocol is the
+// orchestrator's, and relaying bytes is what lets a method added there work
+// through the relay without a daemon release.
+type ControlData struct {
+	Type    MessageType `json:"type"`
+	ID      uint64      `json:"id"`
+	Payload []byte      `json:"payload"`
+}
+
+func NewControlData(id uint64, payload []byte) ControlData {
+	return ControlData{Type: MsgControlData, ID: id, Payload: payload}
+}
+
+// ControlClose ends a relayed connection. Sent by the daemon when its client
+// disconnects — which is how a subscription is cancelled, since a streaming
+// client says nothing else — and by the orchestrator when the server side is
+// done. Idempotent: whichever end speaks first, the other simply stops.
+type ControlClose struct {
+	Type MessageType `json:"type"`
+	ID   uint64      `json:"id"`
+}
+
+func NewControlClose(id uint64) ControlClose { return ControlClose{Type: MsgControlClose, ID: id} }
+
 // HookReply carries a hook reply back to the daemon, which writes it to the
 // waiting hook client and closes. ID matches the report it answers.
 type HookReply struct {
@@ -389,6 +454,18 @@ type HookReply struct {
 
 func NewHookReply(id uint64, payload []byte) HookReply {
 	return HookReply{Type: MsgHookReply, ID: id, Payload: payload}
+}
+
+// ControlReply carries bytes from the orchestrator's control server back to the
+// relayed client — a response line, an ack, or a streamed event.
+type ControlReply struct {
+	Type    MessageType `json:"type"`
+	ID      uint64      `json:"id"`
+	Payload []byte      `json:"payload"`
+}
+
+func NewControlReply(id uint64, payload []byte) ControlReply {
+	return ControlReply{Type: MsgControlReply, ID: id, Payload: payload}
 }
 
 type RequestHostStats struct {
@@ -437,6 +514,14 @@ type Welcome struct {
 	// outlive a reconnect in persistent mode, and their environment cannot be
 	// rewritten after the fact.
 	HookSocket string `json:"hook_socket,omitempty"`
+	// ControlSocket is the path, on the daemon's machine, of the socket that
+	// relays the client's control API back to it. Same lifetime rules as
+	// HookSocket, and the same reason for being in the welcome.
+	//
+	// Its presence says the daemon *can* relay, not that the client will let it:
+	// the client refuses anything arriving on it for a host it was not told to
+	// trust, so a daemon that opens the socket uninvited gains nothing by it.
+	ControlSocket string `json:"control_socket,omitempty"`
 }
 
 func NewWelcome(errMsg string, panes []uint32) Welcome {
@@ -462,7 +547,7 @@ func NewWelcomeAt(version int, errMsg string, panes []uint32) Welcome {
 // Features is what this build can answer. Returned as a fresh slice so a caller
 // cannot alter the daemon's advertisement by holding onto it.
 func Features() []string {
-	return []string{FeaturePing, FeatureHostStats, FeatureListDir, FeatureHookRelay}
+	return []string{FeaturePing, FeatureHostStats, FeatureListDir, FeatureHookRelay, FeatureControlRelay}
 }
 
 type PaneFrame struct {

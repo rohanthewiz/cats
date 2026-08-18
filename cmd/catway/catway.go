@@ -268,6 +268,16 @@ type orch struct {
 	// compiled-in default path. Wired by main before the loop starts; "" skips
 	// the export.
 	controlSocket string
+	// control is the control-API server, nil when the control socket is
+	// disabled. It is held because a second front door now reaches it: a
+	// connection relayed from a cathost's own socket is served by this same
+	// server (controlrelay.go), so the relayed API cannot drift from the local
+	// one. Nil here therefore also turns the relay off — disabling the control
+	// API should disable it everywhere, not just on this machine.
+	control *ctlproto.Server
+	// ctlRelays are the live relayed control connections, keyed by host and the
+	// daemon-allocated id (ids are only unique within a host).
+	ctlRelays map[relayKey]*relayConn
 	// baseHTML is the un-injected served page; cfgPath is the config file to
 	// re-read on server.reload_config; page holds the config-injected page the
 	// HTTP handler serves. The handler (rweb goroutine) and ReloadConfig (loop
@@ -892,20 +902,28 @@ func (o *orch) createPane(rt *paneRuntime) {
 	// from CATS_CONTROL_SOCKET, which must hold even when catway listens on a
 	// non-default path.
 	//
-	// A remote pane gets the variable EXPLICITLY DISABLED rather than left
-	// alone. The control API is a duplex protocol rather than the hook API's
-	// one-shot line, so carrying it across the seam is its own piece of work,
-	// and until then there is nothing on that machine for catctl to dial.
+	// The control socket, which for a remote pane is that host's relay when the
+	// operator trusts it with one and an explicit "nothing here" when they do
+	// not.
 	//
-	// Silence would not be neutral. A pane inherits the cathost's environment,
+	// Silence is never the answer. A pane inherits the cathost's environment,
 	// and a cathost launched from inside another cats session carries that
 	// session's CATS_CONTROL_SOCKET — so an in-pane catctl would quietly drive
 	// somebody else's terminals. (Observed, not theorised.) An unset variable
 	// falls back to the conventional /tmp path, which is the same hazard by a
-	// more predictable route. SocketNone makes catctl say why instead.
+	// more predictable route. Both cases must be overwritten, so every branch
+	// below sets the variable to something.
 	ctlVal := o.controlSocket
 	if !o.paneIsLocal(rt.id) {
-		ctlVal = ctlproto.SocketNone
+		// The relay path is a convenience, not the permission: the gate is
+		// checked again when a connection actually arrives (openControlRelay),
+		// which is what makes turning the flag off effective on panes that were
+		// told the path while it was on.
+		if relay := o.controlRelaySocket(o.hostOf(rt)); relay != "" {
+			ctlVal = relay
+		} else {
+			ctlVal = ctlproto.SocketNone
+		}
 	}
 	if ctlVal != "" {
 		if cp.Env == nil {

@@ -63,7 +63,8 @@ The terminal backend daemon: PTYs plus VT emulation per pane.
 ```
 cathost [-socket /tmp/cats-cathost.sock] [-listen unix://…|tcp://…|tls://…]
         [-token-file PATH] [-tls-dir DIR] [-tls-san a,b]
-        [-persistent] [-idle-timeout 10m] [-hook-socket PATH]
+        [-persistent] [-idle-timeout 10m]
+        [-hook-socket PATH] [-control-socket PATH]
         [-exit-on-disconnect] [-manifest-update=false]
 ```
 
@@ -77,6 +78,7 @@ cathost [-socket /tmp/cats-cathost.sock] [-listen unix://…|tcp://…|tls://…
 | `-persistent` | off | keep panes alive across client disconnects. **Use this.** Overrides `-exit-on-disconnect` |
 | `-idle-timeout` | `10m` | in persistent mode, exit if no client attaches for this long. `0` disables |
 | `-hook-socket` | `/tmp/cats-hookrelay-<pid>-<n>.sock` | where this daemon opens the agent [hook relay](../protocols/hook-api.md#panes-on-another-machine) its panes report through. `-` disables it, so those panes report nowhere |
+| `-control-socket` | `/tmp/cats-ctlrelay-<pid>-<n>.sock` | where this daemon opens the [control relay](../protocols/orchestration-seam.md#control-relay) its panes reach the session through. `-` disables it from this machine's side; the orchestrator must **also** enable it per host, and its default is off |
 | `-exit-on-disconnect` | off | managed mode: exit after the first client disconnects |
 | `-manifest-update` | `true` | fetch agent-detection manifest updates at startup |
 

@@ -21,14 +21,18 @@ const SocketEnvVar = "CATS_CONTROL_SOCKET"
 // to DefaultSocket.
 //
 // It exists because "unset" is the wrong answer in one real case: a pane running
-// on a remote cathost. catway cannot export its own path there (it names a file
-// in a filesystem the pane cannot see) and the control API has no relay yet, so
-// the pane must be told there is nothing to dial. Leaving the variable alone is
-// worse than it sounds — the pane inherits whatever the CATHOST's environment
-// had, which on a box where somebody launched it from inside another cats
-// session is a DIFFERENT session's control socket. Falling back to DefaultSocket
-// is the same hazard by a more predictable route. Either way an in-pane catctl
-// would drive the wrong terminals; this makes it say so instead.
+// on a remote cathost that the session has not been told to trust with the
+// control API. catway cannot export its own path there (it names a file in a
+// filesystem the pane cannot see), and unless that host has the relay enabled
+// there is nothing on that machine to dial. Leaving the variable alone is worse
+// than it sounds — the pane inherits whatever the CATHOST's environment had,
+// which on a box where somebody launched it from inside another cats session is
+// a DIFFERENT session's control socket. Falling back to DefaultSocket is the
+// same hazard by a more predictable route. Either way an in-pane catctl would
+// drive the wrong terminals; this makes it say so instead.
+//
+// A host with control_relay enabled gets its cathost's relay path here instead,
+// and the API works as it does locally.
 const SocketNone = "-"
 
 // ResolveSocket picks the control socket path with the standard precedence: an
@@ -64,7 +68,8 @@ func Call(socket string, req Request, timeout time.Duration) (Response, error) {
 		// looking for a dead server instead of telling them this pane is on a
 		// machine the session's control socket does not reach.
 		return Response{}, fmt.Errorf("no control socket reachable from here (%s=%s): "+
-			"this pane runs on a remote cathost, and the control API has no relay yet",
+			"this pane runs on a remote cathost that the session does not relay the "+
+			"control API to (set control_relay on that host to allow it)",
 			SocketEnvVar, SocketNone)
 	}
 	dialTimeout := timeout

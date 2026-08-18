@@ -256,6 +256,10 @@ type Host struct {
 	// The hook relay (hookrelay.go): a socket on this machine that carries
 	// agent hook reports back to the orchestrator.
 	relayFields
+	// The control relay (controlrelay.go): a socket on this machine that
+	// carries the orchestrator's own control API, when the orchestrator has
+	// been told to trust this host with it.
+	controlFields
 }
 
 // NewHost creates an empty Host.
@@ -275,8 +279,9 @@ func NewHost() *Host {
 func (h *Host) Start(ctx context.Context) {
 	h.startOnce.Do(func() {
 		// Before the first welcome can be written, since the welcome advertises
-		// its path and a pane created off that welcome must find it there.
+		// their paths and a pane created off that welcome must find them there.
 		h.startHookRelay()
+		h.startControlRelay()
 		h.armIdle() // exit if a persistent daemon is spawned but no client ever attaches
 		go h.branchPump(ctx)
 		go func() {
@@ -399,6 +404,7 @@ func (h *Host) Stop() {
 	h.closedOnce.Do(func() { close(h.closed) })
 	h.stopHostStats()
 	h.stopHookRelay()
+	h.stopControlRelay()
 	h.shutdownAll()
 }
 
@@ -538,6 +544,20 @@ func (h *Host) dispatch(typ MessageType, payload []byte) error {
 		if err := h.requestText(c); err != nil {
 			h.emit(NewError(c.PaneID, err.Error()))
 		}
+	case MsgControlReply:
+		var c ControlReply
+		if err := json.Unmarshal(payload, &c); err != nil {
+			h.emit(NewError(0, "bad control_reply: "+err.Error()))
+			return nil
+		}
+		h.deliverControlReply(c)
+	case MsgControlClose:
+		var c ControlClose
+		if err := json.Unmarshal(payload, &c); err != nil {
+			h.emit(NewError(0, "bad control_close: "+err.Error()))
+			return nil
+		}
+		h.closeControlConn(c)
 	case MsgHookReply:
 		var c HookReply
 		if err := json.Unmarshal(payload, &c); err != nil {
@@ -632,6 +652,7 @@ func (h *Host) handleHello(payload []byte) error {
 	// the way out rather than by NewWelcomeAt, which knows nothing about this
 	// daemon's sockets.
 	w.HookSocket = h.hookSocketPath()
+	w.ControlSocket = h.controlSocketPath()
 	h.emit(w)
 	for _, p := range ps {
 		h.resyncPane(p)

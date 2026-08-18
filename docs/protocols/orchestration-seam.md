@@ -83,13 +83,14 @@ without racing the daemon's own post-hello replay. Unknown pane ids are ignored.
 | `request_host_stats` | `interval_ms` | subscribe to the daemon's readings of its own machine, one `host_stats` per interval; `0` cancels. Capability: `host_stats` |
 | `request_list_dir` | `pane_id`, `dir`, `base`, `recents`, `live` | list a directory **on the daemon's filesystem**; answered with `dir_listing`. Capability: `list_dir` |
 | `hook_reply` | `id`, `payload` | the answer to a `hook_report`, written back to the waiting hook client verbatim |
+| `control_reply` | `id`, `payload` | bytes from the orchestrator's control server, written to the relayed client verbatim |
 | `shutdown` | — | ask a persistent daemon to exit and tear down all panes |
 
 ### Events — `cathost` → `catway`
 
 | Type | Payload | Notes |
 |------|---------|-------|
-| `welcome` | `protocol_version`, `panes`, `features`, `hook_socket` | the surviving pane ids — the input to reconciliation — the optional requests this daemon can answer, and the path of its agent hook relay |
+| `welcome` | `protocol_version`, `panes`, `features`, `hook_socket`, `control_socket` | the surviving pane ids — the input to reconciliation — the optional requests this daemon can answer, and the paths of its agent-hook and control relays |
 | `pane_frame` | `Frame` (see below) | full or skip-flagged diff |
 | `pane_output` | `pane_id`, `data` (base64) | raw PTY bytes, only while streaming is enabled. **Not** browser-facing |
 | `pane_cwd` | `pane_id`, `cwd` | from OSC 7, or the process probe |
@@ -105,6 +106,9 @@ without racing the daemon's own post-hello replay. Unknown pane ids are ignored.
 | `host_stats` | `rows` | one reading of the daemon's machine — memory, CPU, disk — display-ready. Only while a subscription is live |
 | `dir_listing` | `pane_id`, `listing` | reply to `request_list_dir`, one per request. A path that does not resolve is `exists:false` with a reason, not an error event |
 | `hook_report` | `id`, `payload` | one agent hook request that arrived on the daemon's own hook socket, forwarded **verbatim**. Capability: `hook_relay` |
+| `control_open` | `id` | a connection arrived on the daemon's control relay socket. Capability: `control_relay` |
+| `control_data` | `id`, `payload` | bytes from that connection, forwarded **verbatim** |
+| `control_close` | `id` | the relayed connection ended. Sent by **either** side — the daemon when its client hangs up, the orchestrator when it is done |
 | `error` | code, message | |
 
 ## Versioning
@@ -149,6 +153,7 @@ reads correctly as "the base protocol only".
 | `host_stats` | `request_host_stats` / `host_stats` | the sidebar's per-host meters — see below |
 | `list_dir` | `request_list_dir` / `dir_listing` | the start-path picker completing a path on another machine — see below |
 | `hook_relay` | `hook_report` / `hook_reply`, plus `welcome.hook_socket` | agent hook reports from panes on this machine — see below |
+| `control_relay` | `control_open` / `control_data` / `control_reply` / `control_close`, plus `welcome.control_socket` | the orchestrator's control API, for in-pane tooling on this machine — see below |
 
 ### Liveness
 
@@ -252,6 +257,49 @@ daemon's lifetime, not the connection's: panes outlive a reconnect in persistent
 mode and their environment cannot be rewritten afterwards.
 
 See [the hook API](hook-api.md#panes-on-another-machine) for the rest.
+
+### Control relay
+
+The same problem one level up. A pane also carries `CATS_CONTROL_SOCKET` so
+in-pane tooling — `catctl`, cats-todo, a plugin binary — can drive the session it
+belongs to, and for a pane on another machine that path was equally wrong. The
+daemon opens a control socket of its own, advertises it as
+`welcome.control_socket`, and relays what arrives.
+
+**It relays a connection, not a message pair.** The control protocol has a
+streaming half: `events.subscribe` is one request, an ack, and then events for as
+long as the caller stays connected. So the relay models a connection —
+`control_open`, `control_data`/`control_reply` in either direction,
+`control_close` from whichever end finishes first — and a client hanging up is
+carried across as a close, because that is how a subscription is cancelled and a
+streaming client says nothing else.
+
+On the orchestrator's side those frames become a synthetic `io.ReadWriteCloser`
+handed to `ctlproto.Server.ServeConn` — the same entry point a real socket goes
+through. Nothing about the command table, the streaming method, the per-request
+backstops or the cancellation is reimplemented, which is the point: a second
+implementation would agree with the first until the day it didn't, and what it
+would be disagreeing about is who may run commands against every pane in the
+session.
+
+**Advertising the socket is not permission.** The orchestrator decides, per host,
+with `control_relay` in that host's config entry, default off — and it checks
+that flag when a connection *arrives*, not when a pane's environment is filled
+in. That placement is the whole of it: the environment variable is a convenience,
+turning the flag off cannot unset it in panes already running, and the socket on
+the far machine goes on existing regardless. A host without the flag has its
+opens refused and logged, whatever its panes were told earlier.
+
+Granting it is a trust decision, and a total one. The control API can create
+panes, run commands in them, read any pane's contents on **any** host, rewrite
+the config and attach or detach cathosts. There is deliberately no partial
+version: a caller holding the socket can type `pbpaste` into a local pane with
+`pane.send_input` and read the answer back with `pane.capture`, so a denylist of
+the "sensitive" methods would gate nothing it does not already have by a longer
+route. Enable it for a machine you trust as much as the one running `catway`.
+
+Disabling the orchestrator's own control socket disables the relay too — one
+switch, not two.
 
 ## Why the daemon resolves cwd and branch
 

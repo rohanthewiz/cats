@@ -104,6 +104,11 @@ func serveControl(o *orch, socket string) (cleanup func(), err error) {
 	}
 	srv := ctlproto.NewServer(o.controlDispatch, controlTimeout, "catway")
 	srv.SetStreamDispatch(o.controlStream) // events.subscribe
+	// Held for the relay: a control connection that arrived on a cathost's
+	// socket is served by this very server, so the two front doors cannot drift
+	// apart. It is set only on the path where the socket actually opened, which
+	// is what makes "no local control API" mean "no relayed one either".
+	o.control = srv
 	go func() {
 		if err := srv.Serve(l); err != nil {
 			log.Printf("catway: control server stopped: %v", err)

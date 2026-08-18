@@ -530,9 +530,87 @@ host meters, directory listing, hook relay, message catalogue), `hook-api.md`
 catgen-dart goldens regenerated; **cats-mobile has not been regenerated** — that
 needs cats pushed first (see memory: cats-mobile regen flow).
 
-Left for later: a **control-socket relay** (the one thing 6e could not finish —
-`catctl`, cats-todo and plugins inside a remote pane have nothing to dial), and
-remote worktrees, which stay local-only for the same reason they always did.
+### Phase 7 — the control relay — **DONE**
+
+The one thing 6e could not finish. `catctl`, cats-todo and plugins inside a
+remote pane now reach the session, through a control socket its cathost opens and
+relays.
+
+The characterisation in 6e was wrong and worth correcting: the control API is not
+"duplex". Its base is one newline-framed request and one response — the hook
+relay's shape exactly — and what it *does* have is a streaming method,
+`events.subscribe`, where one request is followed by an ack and then events for
+as long as the caller stays connected. That is why the relay models a
+**connection** (`control_open` / `control_data` / `control_reply` /
+`control_close`) rather than a message pair, and why a client hanging up has to
+travel across as a close: that is how a subscription is cancelled, and a
+streaming client says nothing else.
+
+The design is one idea. The relayed frames become a synthetic
+`io.ReadWriteCloser` handed to `ctlproto.Server.ServeConn` — the same entry point
+a real socket goes through — so the command table, the streaming method, the
+per-request backstops and the cancellation are all the existing ones. `ServeConn`
+and two widened signatures (`handleStream`, `pump`) were the whole cost, and they
+are honest on their own terms: nothing there ever needed an address or a
+deadline. A second dispatch implementation would have agreed with the first until
+the day it didn't, and what it would have been disagreeing about is who may run
+commands against every pane in the session.
+
+**Permission is the interesting part.** Advertising the socket is not permission:
+`config.Host.ControlRelay` decides, per host, default off, and it is checked when
+a connection *arrives* rather than when a pane's environment is written. That
+placement is the whole security story — the environment variable is a
+convenience, turning the flag off cannot unset it in panes already running, and
+the socket on the far machine exists regardless. So the environment cannot be the
+boundary and the arriving-connection check must be. A refusal is logged with the
+host id, because somebody on that machine tried to drive this session and that is
+worth a line either way.
+
+There is deliberately **no denylist** of "sensitive" methods, and the reason is
+already written down in `ctlproto.MethodClipboardRead`: a caller holding the
+socket can type `pbpaste` into a local pane with `pane.send_input` and read the
+answer back with `pane.capture`. Gating the direct route would gate nothing it
+does not already have by a longer one, and would make the honest path look more
+privileged than the dishonest one. So the flag is all-or-nothing and the docs say
+plainly what it grants: every command, on every host, including panes that
+machine cannot otherwise see. Disabling `server.control_socket` disables the
+relay too — one switch, not two — and `cathost -control-socket -` lets a machine
+refuse from its own side.
+
+Thinking about that blast radius turned up an escalation already shipped in 6e:
+a **relayed hook report could name a pane on another host**. Pane handles are
+session-wide and the reporting host was not consulted, so one compromised box
+could mislabel every agent in the session. Relayed reports are now scoped to
+panes on the host that relayed them (the local socket keeps its full reach), and
+a report naming a pane elsewhere is answered `pane_not_found` rather than "not
+yours" — the relaying host has no business learning which panes exist on the
+others. Nothing legitimate is lost: these hooks run inside panes, and a pane's
+hooks are on the pane's machine.
+
+Tests added: `internal/orchestration/controlrelay_test.go` (the path and its
+0600 mode in the welcome, a whole conversation with two replies on one
+connection, a client hanging up arriving as a close, no-client and disabled
+cases), `cmd/catway/controlrelay_test.go` (a trusted host served end to end
+through the real control server, an untrusted one refused at the open and
+unserved afterwards, the gate following a live config change, the pane
+environment, the local host never being relayed, and relays dropped with their
+host), `cmd/catway/hooks_test.go` (the cross-host report refused while the local
+socket keeps its reach).
+
+Verified live — three cathosts, one catway, one of them trusted:
+with the flag off everywhere, a request written straight into a cathost's relay
+socket is refused and logged by host id; after adding `control_relay: true` for
+devbox and `catctl reload` (no redial), a pane created there gets
+`CATS_CONTROL_SOCKET=/tmp/cats-ctlrelay-…` and in-pane `catctl ping` and `catctl
+panes` answer from this catway. The streaming half was the one worth proving: a
+`catctl events` subscription running **inside a devbox pane** received
+`pane_added`/`pane_cwd` for a pane created on the *local* host, stopped when the
+in-pane process was killed (the cancel reaching catway as a close), and a fresh
+subscription afterwards worked. A pane on the untrusted host meanwhile reports
+`CATS_CONTROL_SOCKET=-` and its `catctl` prints the reason and the flag to set.
+
+Left for later: remote worktrees, which stay local-only for the same reason they
+always did.
 
 ## Verification
 - Every phase: `make test` and `make test-ghostty` (`-tags ghostty ./...`); regen catgen-dart goldens whenever `internal/app`, `browserproto`, or `orchestration` wire structs change and `go test ./cmd/catgen-dart`; `TestCommandSpecsRouted` for each new command; then cats-mobile regen per memory.

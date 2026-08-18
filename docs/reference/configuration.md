@@ -111,6 +111,7 @@ hosts:
     addr: "tls://box.lan:8422"
     token_file: "~/.config/cats/box.token"       # must match the daemon's -token-file
     fingerprint: "dd7d9b31…"                     # printed by cathost at startup
+    # control_relay: true                        # let panes there drive the session
 ```
 
 | Key | Notes |
@@ -119,6 +120,7 @@ hosts:
 | `label` | display name in the sidebar and in error toasts |
 | `addr` | `unix://path`, `tcp://host:port`, or `tls://host:port` |
 | `default` | where a pane that names no host lands. At most one entry; with none, `local` is the default |
+| `control_relay` | let panes on this host reach the control API. **Off by default, and a trust decision** — see below |
 | `token` / `token_file` | credential for a cathost that requires one (set one, not both) |
 | `fingerprint` | pinned TLS certificate for a `tls://` host |
 
@@ -196,6 +198,52 @@ it is where everything else falls back to.
 A live edit that only changes a host's `label` (or moves `default`) keeps the
 connection — a rename must not interrupt the streams a machine is carrying. A
 changed `addr` redials, keeping that host's panes: same host, new route.
+`control_relay` is applied live too, and takes effect on the next connection from
+that host rather than needing one.
+
+### `control_relay`: letting a host drive the session
+
+Off by default, and the one host setting that is a trust decision rather than a
+connection detail.
+
+Panes carry `CATS_CONTROL_SOCKET` so in-pane tooling — `catctl`, cats-todo, a
+plugin binary — can drive the session they belong to. On a remote host there is
+nothing to point it at unless that host's cathost relays the control API back
+(see the [control relay](../protocols/orchestration-seam.md#control-relay)), so a
+pane there is told `CATS_CONTROL_SOCKET=-` and `catctl` explains why.
+
+```yaml
+hosts:
+  - id: devbox
+    addr: "tls://devbox.lan:8422"
+    control_relay: true      # in-pane catctl on devbox drives this session
+```
+
+**What you are granting.** The control API can create panes, run commands in
+them, read any pane's contents on *any* host, rewrite this config, and attach or
+detach cathosts. Turning this on for a host says: anything that can open a unix
+socket on that machine may do all of that.
+
+There is deliberately no partial version — no denylist of the "sensitive"
+methods. A caller holding the socket can type `pbpaste` into a local pane with
+`pane.send_input` and read the answer back with `pane.capture`, so a switch on
+the direct route would gate nothing it does not already have by a longer one. It
+would only make the honest path look more privileged than the dishonest one.
+Enable it for a machine you trust as much as the one running `catway`, and leave
+it off otherwise.
+
+Two smaller points worth knowing:
+
+* the flag is checked when a connection **arrives**, not when a pane's
+  environment is written. Turning it off cannot unset the variable in panes
+  already running, and the socket on the far machine goes on existing either
+  way — so the arriving-connection check is the boundary, and turning the flag
+  off is effective immediately regardless of what those panes were told.
+* disabling `server.control_socket` disables the relay too. One switch, not two.
+
+A cathost can also refuse from its own side with `cathost -control-socket -`,
+which is how a machine says it must never be able to drive a session whatever an
+orchestrator's config claims.
 
 ## `persistence`
 
