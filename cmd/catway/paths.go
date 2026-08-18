@@ -3,27 +3,26 @@
 package main
 
 import (
-	"errors"
-	"io/fs"
-	"os"
-	"path/filepath"
-
 	"github.com/rohanthewiz/cats/internal/app"
+	"github.com/rohanthewiz/cats/internal/orchestration"
 	"github.com/rohanthewiz/cats/internal/pathpick"
-	"github.com/rohanthewiz/cats/internal/startdir"
 )
 
 // path.list (app.Backend seam): the directory listing behind the start-path
-// picker in the new-workspace dialog. Same shape as the worktree and plugin
-// commands — resolve loop-owned state (the anchor cwd, the session's live pane
-// cwds) on the loop goroutine, do the filesystem work on its own goroutine, and
-// post the reply back — so a listing of a cold network mount cannot stall the
-// orchestrator.
-
-// maxPickerRecents caps the frecency list sent to a picker. It sees sixty rows
-// at a time and fuzzy-filters the rest locally, so a few hundred directories is
-// already more history than anyone scrolls through.
-const maxPickerRecents = 200
+// picker in the new-workspace dialog.
+//
+// There are two ways to answer it and one rule that picks between them: the
+// listing must be produced by the machine that owns the paths. For a pane on
+// this catway's own box that is this process, off the loop goroutine so a cold
+// network mount cannot stall the orchestrator. For a pane on another machine it
+// is that machine's cathost, over the seam, because "~" is the remote user's
+// home, "." is a directory only its kernel can resolve, and whether something
+// is a directory at all is not a question this side can answer about a disk it
+// cannot see.
+//
+// A host too old to list still gets the old answer — a listing error naming the
+// host — rather than a wrong one. The picker shows it under the field and keeps
+// taking keystrokes, exactly as it does for a path that is half typed.
 
 // StartPathList lists one directory's subdirectories and, when asked, the
 // directories the user works in most: cdx's frecency memory first (their real
@@ -32,65 +31,124 @@ const maxPickerRecents = 200
 // machine without cdx still gets a useful list, seeded with the projects that
 // are open right now.
 func (o *orch) StartPathList(r app.Responder, p app.PathListParams) {
-	// The listing is of this machine's disk. Anchored on a remote pane it would
-	// answer about the wrong filesystem while looking authoritative — a picker
-	// full of local directories that do not exist where the pane is. Reported as
-	// a listing error rather than a failed command so the picker shows the
-	// reason and keeps taking keystrokes, exactly as it does for a path that is
-	// half typed. (The UI hides the picker for a non-local host; this is the
-	// backstop for the clients that do not, and for `catctl`.)
-	if id := o.paneHostID(o.anchorPane(p.Pane)); id != localHostID {
-		r.OK(app.PathListResult{
-			Dir:   p.Dir,
-			Error: "directory listing is local-host only (that pane is on host " + id + ")",
-		})
+	pane := o.anchorPane(p.Pane)
+	// Which machine is being asked. The Host param wins because the picker may
+	// be completing a path for a host this session has no pane on at all — the
+	// new-workspace dialog's host field is chosen before anything exists there —
+	// and in that case the anchor pane says nothing about the answer.
+	hostID := p.Host
+	if hostID == "" {
+		hostID = o.paneHostID(pane)
+	} else if o.hosts[hostID] == nil {
+		r.OK(app.PathListResult{Dir: p.Dir, Error: unknownHostListErr(hostID)})
 		return
 	}
-	cwd := o.anchorPaneCwd(p.Pane)
+
+	// The anchor's cwd is only an anchor if it is on the same filesystem the
+	// listing will be taken from. A path from a pane on another box would be
+	// resolved against a directory that does not exist there, which is worse
+	// than having no anchor: with none, the answering machine falls back to its
+	// own home.
+	var cwd string
+	if o.paneHostID(pane) == hostID {
+		cwd = o.anchorPaneCwd(p.Pane)
+	}
 	var live []string
 	if p.Recents {
-		live = o.liveCwds() // loop-owned; gathered here, stat'ed off-loop below
+		live = o.liveCwdsOn(hostID) // loop-owned; stat'ed by whoever owns the disk
 	}
-	go func() {
-		res := app.PathListResult{
-			Dir:  pathpick.Expand(p.Dir, cwd),
-			Cwd:  cwd,
-			Home: startdir.Home(),
-		}
-		dirs, truncated, err := pathpick.Subdirs(res.Dir)
-		if err != nil {
-			// A path half-way through being typed is not a failed command: the
-			// picker shows the reason and keeps taking keystrokes.
-			res.Error = listErr(res.Dir, err)
-		} else {
-			res.Exists, res.Dirs, res.Truncated = true, dirs, truncated
-		}
-		if p.Recents {
-			res.Recents = mergeDirs(pathpick.Recents(maxPickerRecents), live)
-		}
-		o.post(func() { r.OK(res) })
-	}()
+
+	if hostID == localHostID {
+		go func() {
+			res := fromListing(pathpick.List(p.Dir, cwd, p.Recents, live), cwd)
+			o.post(func() { r.OK(res) })
+		}()
+		return
+	}
+
+	d := o.hosts[hostID]
+	if !d.supports(orchestration.FeatureListDir) {
+		r.OK(app.PathListResult{Dir: p.Dir, Cwd: cwd, Error: cannotListErr(d)})
+		return
+	}
+	// Keyed on the anchor pane like every other daemon round trip, and resolved
+	// by the same FIFO: a pane's picker requests go out one at a time, and the
+	// daemon answers in order over one connection. It also means a host that
+	// drops mid-listing fails this request through flushPendingFor rather than
+	// leaving the picker waiting for a reply that cannot come.
+	o.registerPending(pathListResponder{r: r, cwd: cwd}, reqKey{pane, reqListDir})
+	d.send(orchestration.NewRequestListDir(pane, p.Dir, cwd, p.Recents, live))
 }
 
-// listErr turns a ReadDir failure into something worth showing under a text
-// field, keeping the raw error only for cases we have no better words for.
-func listErr(dir string, err error) string {
-	switch {
-	case errors.Is(err, fs.ErrNotExist):
-		return "no such directory: " + dir
-	case errors.Is(err, fs.ErrPermission):
-		return "not readable: " + dir
-	}
-	if fi, serr := os.Stat(dir); serr == nil && !fi.IsDir() {
-		return "not a directory: " + dir // a file whose name shares a prefix with one
-	}
-	return err.Error()
+// pathListResponder turns the daemon's Listing into the command's result on the
+// way back. It exists because the pending queue carries one Responder and knows
+// nothing about the shape of what it is resolving, while the anchor cwd is
+// catway's own knowledge and never crosses the wire in the reply.
+type pathListResponder struct {
+	r   app.Responder
+	cwd string
 }
 
-// liveCwds collects the directories this session is actually sitting in — every
-// live pane's cwd plus each workspace's identity cwd — in workspace order,
-// deduplicated. Loop-goroutine only.
-func (o *orch) liveCwds() []string {
+// WantsReply follows the wrapped responder: a caller that cannot receive a
+// result should not cause a round trip to another machine either.
+func (p pathListResponder) WantsReply() bool { return p.r.WantsReply() }
+
+func (p pathListResponder) OK(data any) {
+	l, ok := data.(pathpick.Listing)
+	if !ok {
+		p.r.Fail("bad directory listing reply")
+		return
+	}
+	p.r.OK(fromListing(l, p.cwd))
+}
+
+func (p pathListResponder) Fail(msg string) {
+	// A failed round trip is still a picker answer rather than a failed command:
+	// the field keeps its text and shows why nothing is listed, which is what it
+	// already does for a path half-way through being typed.
+	p.r.OK(app.PathListResult{Error: msg})
+}
+
+// fromListing maps one machine's answer onto the command's result. Cwd is the
+// anchor the request was made against — the client shows it, and it is the one
+// field the answering machine was told rather than asked.
+func fromListing(l pathpick.Listing, cwd string) app.PathListResult {
+	return app.PathListResult{
+		Dir:       l.Dir,
+		Cwd:       cwd,
+		Home:      l.Home,
+		Exists:    l.Exists,
+		Error:     l.Error,
+		Dirs:      l.Dirs,
+		Truncated: l.Truncated,
+		Recents:   l.Recents,
+	}
+}
+
+// cannotListErr explains a host that cannot answer. Named rather than inlined
+// because it is the one sentence a user sees when a picker goes dark, and the
+// reason matters: a cathost that has not been upgraded is a different fix from
+// one that is unreachable.
+func cannotListErr(d *daemon) string {
+	if !d.connected() {
+		return "host " + d.label + " is not connected"
+	}
+	return "host " + d.label + " cannot list directories (its cathost predates the list_dir capability)"
+}
+
+func unknownHostListErr(id string) string {
+	return "unknown host " + id + " (see host.list)"
+}
+
+// liveCwdsOn collects the directories this session is actually sitting in on one
+// host — every live pane's cwd plus each workspace's identity cwd — in workspace
+// order, deduplicated. Loop-goroutine only.
+//
+// Scoped by host, because these paths are handed to whichever machine is
+// answering and are stat'ed there. An unfiltered list would offer a picker on
+// devbox the local machine's project directories, and any of them that happened
+// to exist on devbox too would be offered as if they were the ones on screen.
+func (o *orch) liveCwdsOn(hostID string) []string {
 	var out []string
 	seen := map[string]bool{}
 	add := func(dir string) {
@@ -101,32 +159,19 @@ func (o *orch) liveCwds() []string {
 		out = append(out, dir)
 	}
 	for _, ws := range o.session.Workspaces() {
-		add(ws.IdentityCwd)
+		if o.workspaceHostOwns(ws, hostID) {
+			add(ws.IdentityCwd)
+		}
 		for _, tab := range ws.Tabs {
 			for _, id := range tab.Layout.PaneIDs() {
-				if rt := o.panes[uint32(id)]; rt != nil {
+				pid := uint32(id)
+				if o.paneHostID(pid) != hostID {
+					continue
+				}
+				if rt := o.panes[pid]; rt != nil {
 					add(rt.cwd)
 				}
 			}
-		}
-	}
-	return out
-}
-
-// mergeDirs appends extra onto base, dropping duplicates and anything that is no
-// longer a directory. Order is significant: base is cdx's frecency ranking, and
-// the session's own directories fill in behind it rather than displacing it.
-func mergeDirs(base, extra []string) []string {
-	out := make([]string, 0, len(base)+len(extra))
-	seen := make(map[string]bool, len(base)+len(extra))
-	for _, list := range [][]string{base, extra} {
-		for _, dir := range list {
-			dir = filepath.Clean(dir)
-			if !filepath.IsAbs(dir) || seen[dir] || !pathpick.IsDir(dir) {
-				continue
-			}
-			seen[dir] = true
-			out = append(out, dir)
 		}
 	}
 	return out

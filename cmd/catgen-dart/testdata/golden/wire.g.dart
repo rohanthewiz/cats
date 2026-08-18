@@ -977,6 +977,7 @@ class HostItem {
     required this.panes,
     this.error = '',
     this.latencyMs = 0,
+    this.listsDirs = false,
   });
 
   final String id;
@@ -1013,6 +1014,12 @@ class HostItem {
   /// separates them.
   final double latencyMs;
 
+  /// ListsDirs reports that the start-path picker works against this host: true
+  /// for the local machine, and for a remote one whose cathost can list its own
+  /// directories. Separate from Local because the two answers used to coincide
+  /// and no longer do.
+  final bool listsDirs;
+
   factory HostItem.fromJson(Map<String, Object?> j) => HostItem(
         id: asString(j['id']),
         label: asString(j['label']),
@@ -1023,6 +1030,7 @@ class HostItem {
         panes: asInt(j['panes']),
         error: asString(j['error']),
         latencyMs: asDouble(j['latency_ms']),
+        listsDirs: asBool(j['lists_dirs']),
       );
 
   Map<String, Object?> toJson() => {
@@ -1035,6 +1043,7 @@ class HostItem {
         'panes': panes,
         if (error.isNotEmpty) 'error': error,
         if (latencyMs != 0) 'latency_ms': latencyMs,
+        if (listsDirs) 'lists_dirs': listsDirs,
       };
 }
 

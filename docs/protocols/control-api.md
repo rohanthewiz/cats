@@ -381,7 +381,7 @@ session rather than only the ones on screen. Every field is omitted when empty.
 `host.list` is the exception that proves the rule: the cathost roster is a set of
 live connections, not domain state, so it is the backend that answers. Each entry
 carries `id`, `label`, `connected`, `addr_kind`, `is_default`, `panes`, an
-`error` explaining a host that is down, and `latency_ms`. A session with no
+`error` explaining a host that is down, `latency_ms`, and `lists_dirs`. A session with no
 `hosts:` block answers with the single synthesized `local` host — which is how a
 client distinguishes "one machine here" from "the remote one is unreachable".
 
@@ -391,6 +391,11 @@ never measured, not connected, or a daemon too old to answer a ping. It is
 fractional because a local unix socket lands well under a millisecond, and it is
 the one number that separates a slow *session* from a slow *machine*: the same
 keystroke feels the same whether the box is loaded or three thousand miles away.
+
+`lists_dirs` reports that `path.list` can complete a path on that host — always
+true for the local machine, and true for a remote one whose cathost speaks
+`list_dir`. It is a separate flag from `local` because the two used to be the
+same answer and are not any more.
 
 `host.attach` and `host.detach` are the writers, and they edit the RUNNING
 session: attach builds the daemon and starts dialing, detach stops it. Both also
@@ -470,6 +475,26 @@ caller fuzzy-matches the listing locally, which keeps completion *inside* a
 directory instant for a browser that may be a long way from the server and costs
 one round trip per directory walked into. The directory read runs off the
 orchestrator loop, like the git and plugin work above.
+
+`host` names the machine to list on, overriding the anchor pane's. It exists
+because the new-workspace dialog picks a host *before* anything exists there:
+with only a pane to go by, a path typed for `devbox` would be completed against
+the local disk and every suggestion would name a directory that does not exist
+where the workspace is about to be created.
+
+**The listing is always produced by the machine that owns the paths.** For a
+remote host it is taken by that cathost, over the seam — `~` is that user's
+home, `.` is a directory only that kernel can resolve, and whether something is
+a directory at all is not a question this side can answer about a disk it cannot
+see. `cwd` is the anchor the request was made against, and it is dropped when
+the anchor pane is on a different machine from the one being listed: a relative
+path resolved against a directory from another filesystem is worse than no
+anchor, and with none the answering machine starts at its own home.
+
+A host whose cathost predates the `list_dir` capability answers with an `error`
+naming the host rather than with this machine's directories. `host.list`'s
+`lists_dirs` is how a client knows in advance, and is what the browser gates its
+picker on.
 
 ## Raw vs ergonomic
 

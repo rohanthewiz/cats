@@ -435,3 +435,71 @@ func TestHostStatsResubscribeReplaces(t *testing.T) {
 		t.Fatal("the superseded pump was left running")
 	}
 }
+
+// Listing a directory is answered by the machine that owns the paths, which is
+// the whole reason this request exists: "~" is the daemon's user's home and "."
+// is a directory only its kernel can resolve, so expanding either on the client
+// would complete a path against the wrong filesystem.
+func TestListDirAnswersFromTheDaemonsFilesystem(t *testing.T) {
+	c := dialHost(t, nil)
+	w := handshake(t, c, NewHello())
+	if !slices.Contains(w.Features, FeatureListDir) {
+		t.Fatalf("welcome features = %v, want %q among them", w.Features, FeatureListDir)
+	}
+
+	root := t.TempDir()
+	for _, name := range []string{"alpha", "beta"} {
+		if err := os.Mkdir(filepath.Join(root, name), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A relative path against a base, so the resolution is the daemon's too.
+	if err := WriteMessage(c, NewRequestListDir(42, ".", root, false, nil)); err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	typ, payload := readEvent(t, c)
+	if typ != MsgDirListing {
+		t.Fatalf("answer = %q, want dir_listing", typ)
+	}
+	var dl DirListing
+	if err := json.Unmarshal(payload, &dl); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	// The pane id is a correlation handle: the client matches replies to
+	// requests per pane, so a reply that lost it could not be matched at all.
+	if dl.PaneID != 42 {
+		t.Errorf("pane id = %d, want the request's 42", dl.PaneID)
+	}
+	if !dl.Listing.Exists {
+		t.Fatalf("listing = %+v, want the temp dir to exist", dl.Listing)
+	}
+	if len(dl.Listing.Dirs) != 2 || dl.Listing.Dirs[0] != "alpha" || dl.Listing.Dirs[1] != "beta" {
+		t.Fatalf("dirs = %v, want [alpha beta]", dl.Listing.Dirs)
+	}
+	if dl.Listing.Home == "" {
+		t.Error("no home in the listing; a client cannot shorten ~ without the daemon's")
+	}
+}
+
+// A path half-way through being typed is the common case, not a failure: the
+// listing says it does not exist and why, and the session carries on.
+func TestListDirReportsAMissingPathWithoutFailing(t *testing.T) {
+	c := dialHost(t, nil)
+	handshake(t, c, NewHello())
+
+	missing := filepath.Join(t.TempDir(), "nope")
+	if err := WriteMessage(c, NewRequestListDir(1, missing, "", false, nil)); err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	typ, payload := readEvent(t, c)
+	if typ != MsgDirListing {
+		t.Fatalf("answer = %q, want dir_listing (an error event would end the picker)", typ)
+	}
+	var dl DirListing
+	if err := json.Unmarshal(payload, &dl); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if dl.Listing.Exists || !strings.Contains(dl.Listing.Error, "no such directory") {
+		t.Fatalf("listing = %+v, want exists=false with a reason", dl.Listing)
+	}
+}

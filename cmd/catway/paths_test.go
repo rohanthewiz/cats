@@ -3,6 +3,7 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -10,12 +11,15 @@ import (
 	"testing"
 
 	"github.com/rohanthewiz/cats/internal/app"
+	"github.com/rohanthewiz/cats/internal/orchestration"
 	"github.com/rohanthewiz/cats/internal/pathpick"
 )
 
-// mergeDirs keeps cdx's ranking in front, fills in behind it with the session's
-// own directories, and drops duplicates and anything that is not a directory —
-// a remembered path can be deleted between the recording and the picker.
+// pathpick.Merge keeps cdx's ranking in front, fills in behind it with the
+// session's own directories, and drops duplicates and anything that is not a
+// directory — a remembered path can be deleted between the recording and the
+// picker. It lives in pathpick because the machine that owns the disk is the one
+// that has to do the stat'ing, and that is no longer always this one.
 func TestMergeDirs(t *testing.T) {
 	root := t.TempDir()
 	mk := func(name string) string {
@@ -32,37 +36,39 @@ func TestMergeDirs(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got := mergeDirs(
+	got := pathpick.Merge(
 		[]string{hot, shared, gone, file, ""},
 		[]string{live, shared + "/", live, "relative/dir"},
 	)
 	want := []string{hot, shared, live}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("mergeDirs = %v, want %v", got, want)
+		t.Fatalf("pathpick.Merge = %v, want %v", got, want)
 	}
 }
 
-// The picker shows listErr's text under a field while the user is still typing,
-// so the common misses read as sentences rather than as syscall wrappers.
+// The picker shows pathpick.ListError's text under a field while the user is
+// still typing, so the common misses read as sentences rather than as syscall
+// wrappers.
 func TestListErr(t *testing.T) {
 	root := t.TempDir()
 	missing := filepath.Join(root, "nope")
-	if _, _, err := pathpick.Subdirs(missing); listErr(missing, err) != "no such directory: "+missing {
-		t.Errorf("missing dir: %q", listErr(missing, err))
+	if _, _, err := pathpick.Subdirs(missing); pathpick.ListError(missing, err) != "no such directory: "+missing {
+		t.Errorf("missing dir: %q", pathpick.ListError(missing, err))
 	}
 
 	file := filepath.Join(root, "f")
 	if err := os.WriteFile(file, nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := pathpick.Subdirs(file); listErr(file, err) != "not a directory: "+file {
-		t.Errorf("file: %q", listErr(file, err))
+	if _, _, err := pathpick.Subdirs(file); pathpick.ListError(file, err) != "not a directory: "+file {
+		t.Errorf("file: %q", pathpick.ListError(file, err))
 	}
 }
 
-// liveCwds is the session half of the recents list: every workspace identity and
-// live pane cwd, deduplicated, with no empty entries for panes whose cwd has not
-// been reported yet.
+// liveCwdsOn is the session half of the recents list: every workspace identity
+// and live pane cwd on ONE host, deduplicated, with no empty entries for panes
+// whose cwd has not been reported yet. Host-scoped because these paths are
+// handed to whichever machine is answering, and stat'ed there.
 func TestLiveCwds(t *testing.T) {
 	o, err := newOrch("", "/base")
 	if err != nil {
@@ -73,16 +79,16 @@ func TestLiveCwds(t *testing.T) {
 		t.Fatalf("CreateWorkspaceAt: %v", err)
 	}
 
-	got := o.liveCwds()
+	got := o.liveCwdsOn(o.defaultHost)
 	seen := map[string]int{}
 	for _, d := range got {
 		if d == "" {
-			t.Fatalf("liveCwds includes an empty entry: %v", got)
+			t.Fatalf("liveCwdsOn includes an empty entry: %v", got)
 		}
 		seen[d]++
 	}
 	if seen[dir] != 1 {
-		t.Fatalf("liveCwds = %v, want the new workspace's cwd %q exactly once", got, dir)
+		t.Fatalf("liveCwdsOn = %v, want the new workspace's cwd %q exactly once", got, dir)
 	}
 }
 
@@ -108,21 +114,21 @@ func TestAnchorPaneCwd(t *testing.T) {
 	}
 }
 
-// path.list lists this machine's disk. Anchored on a remote pane it would offer
-// a drop-down of directories that do not exist where the pane is, so it answers
-// with the reason instead — a listing error, not a failed command, because the
-// picker shows those inline and keeps taking keystrokes.
-func TestPathListRefusesRemotePanes(t *testing.T) {
+// A host whose cathost cannot list its own directories answers with the reason
+// rather than with THIS machine's directories, which would be a drop-down of
+// paths that do not exist where the pane is. A listing error, not a failed
+// command: the picker shows those inline and keeps taking keystrokes.
+func TestPathListRefusesAHostThatCannotList(t *testing.T) {
 	o, localPane, remotePane, _, _ := twoHostOrch(t)
 
 	r := &hostGuardResponder{}
 	o.StartPathList(r, app.PathListParams{Pane: &remotePane, Dir: "~/src"})
 	if !r.ok {
-		t.Fatalf("remote path.list should resolve with a reason, not fail: %+v", r)
+		t.Fatalf("path.list on an unlistable host should resolve with a reason, not fail: %+v", r)
 	}
 	res, isRes := r.data.(app.PathListResult)
-	if !isRes || res.Exists || !strings.Contains(res.Error, "local-host only") {
-		t.Fatalf("remote path.list result = %+v", r.data)
+	if !isRes || res.Exists || !strings.Contains(res.Error, "cannot list directories") {
+		t.Fatalf("path.list result = %+v", r.data)
 	}
 
 	// The local pane goes down the ordinary (asynchronous) path — nothing is
@@ -131,5 +137,87 @@ func TestPathListRefusesRemotePanes(t *testing.T) {
 	o.StartPathList(r, app.PathListParams{Pane: &localPane, Dir: "/"})
 	if r.ok || r.fail {
 		t.Fatalf("a local path.list must not resolve synchronously: %+v", r)
+	}
+}
+
+// A capable host is asked, and its answer comes back as the command's result.
+// This is the whole point of the capability: the picker completes a path on the
+// machine the pane is on rather than being switched off with an apology.
+func TestPathListRoundTripsToARemoteHost(t *testing.T) {
+	o, _, remotePane, _, pdRemote := twoHostOrch(t)
+	go o.run() // the reply comes back through the loop, as it does in a live session
+	d := o.hosts[testRemoteHost]
+	d.setFeatures([]string{orchestration.FeatureListDir})
+
+	r := &hostGuardResponder{}
+	syncPost(o, func() {
+		o.StartPathList(r, app.PathListParams{Pane: &remotePane, Dir: "~/src", Recents: true})
+	})
+	if r.ok || r.fail {
+		t.Fatalf("a remote path.list must not resolve before the daemon answers: %+v", r)
+	}
+
+	payload := pdRemote.expect(t, orchestration.MsgRequestListDir)
+	var req orchestration.RequestListDir
+	if err := json.Unmarshal(payload, &req); err != nil {
+		t.Fatalf("decode request: %v", err)
+	}
+	if req.PaneID != remotePane {
+		t.Errorf("request pane = %d, want the anchor pane %d", req.PaneID, remotePane)
+	}
+	// Unexpanded on purpose: "~" is the REMOTE user's home, and expanding it
+	// here would send a path from this machine's account.
+	if req.Dir != "~/src" {
+		t.Errorf("request dir = %q, want the untouched %q", req.Dir, "~/src")
+	}
+	if !req.Recents {
+		t.Error("the recents flag did not travel")
+	}
+
+	d.dispatch(orchestration.MsgDirListing, mustJSON(t, orchestration.NewDirListing(remotePane, pathpick.Listing{
+		Dir: "/home/remote/src", Home: "/home/remote", Exists: true, Dirs: []string{"a", "b"},
+	})))
+	syncPost(o, func() {}) // the dispatch's closure is ahead of this one
+
+	res, isRes := r.data.(app.PathListResult)
+	if !r.ok || !isRes {
+		t.Fatalf("no result after the daemon answered: %+v", r)
+	}
+	if !res.Exists || res.Dir != "/home/remote/src" || res.Home != "/home/remote" {
+		t.Fatalf("result = %+v, want the remote machine's answer verbatim", res)
+	}
+	if len(res.Dirs) != 2 {
+		t.Fatalf("dirs = %v, want the two the daemon listed", res.Dirs)
+	}
+}
+
+// The host param overrides the anchor pane's host, because the new-workspace
+// dialog picks a host before anything exists there: without it, a path typed for
+// devbox would be completed against the local disk.
+func TestPathListHostParamOverridesTheAnchor(t *testing.T) {
+	o, localPane, _, _, pdRemote := twoHostOrch(t)
+	o.hosts[testRemoteHost].setFeatures([]string{orchestration.FeatureListDir})
+
+	r := &hostGuardResponder{}
+	o.StartPathList(r, app.PathListParams{Pane: &localPane, Host: testRemoteHost, Dir: "src"})
+	payload := pdRemote.expect(t, orchestration.MsgRequestListDir)
+	var req orchestration.RequestListDir
+	if err := json.Unmarshal(payload, &req); err != nil {
+		t.Fatalf("decode request: %v", err)
+	}
+	// And the local pane's cwd is NOT sent as the anchor: a relative path
+	// resolved against a directory from another filesystem is worse than no
+	// anchor at all, which the answering machine resolves to its own home.
+	if req.Base != "" {
+		t.Fatalf("base = %q, want none — the anchor pane is on another machine", req.Base)
+	}
+
+	// An id nobody is attached to is refused with a reason rather than silently
+	// answered by the local machine.
+	r = &hostGuardResponder{}
+	o.StartPathList(r, app.PathListParams{Host: "ghost", Dir: "/"})
+	res, isRes := r.data.(app.PathListResult)
+	if !r.ok || !isRes || !strings.Contains(res.Error, "unknown host") {
+		t.Fatalf("unknown host result = %+v", r.data)
 	}
 }

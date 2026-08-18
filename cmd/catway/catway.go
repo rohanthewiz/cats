@@ -333,12 +333,16 @@ type reqKind uint8
 const (
 	reqSelection reqKind = iota // read → pane_selection
 	reqText                     // capture → pane_text
+	reqListDir                  // path.list on a remote host → dir_listing
 )
 
 // label names the command for user-facing errors ("<label> timed out").
 func (k reqKind) label() string {
-	if k == reqText {
+	switch k {
+	case reqText:
 		return "capture"
+	case reqListDir:
+		return "directory listing"
 	}
 	return "read"
 }
@@ -738,6 +742,10 @@ func (o *orch) Hosts() []app.HostInfo {
 			Panes:     counts[id],
 			Error:     lastErr,
 			LatencyMs: d.latencyMs(),
+			// The local machine is always listable — this process reads its own
+			// disk — so it does not depend on a capability the local cathost
+			// happens to advertise.
+			ListsDirs: id == localHostID || d.supports(orchestration.FeatureListDir),
 		})
 	}
 	return out
@@ -755,6 +763,7 @@ func (o *orch) hostsMsg() browserproto.Hosts {
 			ID: h.ID, Label: h.Label, Connected: h.Connected,
 			AddrKind: h.AddrKind, Default: h.Default, Local: h.Local,
 			Panes: h.Panes, Error: h.Error, LatencyMs: h.LatencyMs,
+			ListsDirs: h.ListsDirs,
 		})
 	}
 	return browserproto.NewHosts(items)

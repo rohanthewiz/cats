@@ -18,7 +18,9 @@ package pathpick
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -171,4 +173,110 @@ func frecency(e entry, now int64) float64 {
 		w = 0.5
 	}
 	return float64(e.Count) * w
+}
+
+// --- One whole listing --------------------------------------------------------
+//
+// A picker's answer is assembled the same way wherever the disk is: expand what
+// was typed, read the directory, and — when asked — rank the directories the
+// user actually works in. It lives here rather than in the caller because two
+// processes now produce it for two different machines. catway answers for its
+// own filesystem; a cathost answers for the box it runs on, which is the only
+// way a picker can complete a path for a pane that is not on this machine.
+//
+// Every path decision in here is made by the process that owns the filesystem,
+// and that is the point. "~" and "$HOME" are the *daemon's* user's, "." is the
+// daemon's notion of the anchor, and whether something is a directory is a
+// question only its own kernel can answer. Sending the numbers home and
+// re-deriving them beside a different filesystem is how a picker starts
+// confidently completing paths that do not exist.
+
+// MaxRecents caps the frecency list sent to a picker. It sees sixty rows at a
+// time and fuzzy-filters the rest locally, so a few hundred directories is
+// already more history than anyone scrolls through.
+const MaxRecents = 200
+
+// Listing is one answer: the resolved directory, its subdirectories, and the
+// context a front-end needs to keep completing (the home directory it should
+// shorten against, the recents it should offer).
+//
+// Exists false with Error set is the normal state of a path mid-typing, not a
+// failure: Dirs is empty and the picker shows nothing until the path resolves
+// again.
+type Listing struct {
+	Dir       string   `json:"dir"`
+	Home      string   `json:"home"`
+	Exists    bool     `json:"exists"`
+	Error     string   `json:"error,omitempty"`
+	Dirs      []string `json:"dirs,omitempty"`
+	Truncated bool     `json:"truncated,omitempty"`
+	Recents   []string `json:"recents,omitempty"`
+}
+
+// List answers one picker request against this process's filesystem.
+//
+// dir is what the user has typed, base the directory a relative path resolves
+// against — the anchor pane's cwd, or "" when the caller has no anchor on this
+// machine, which resolves to the home directory. live is the caller's own set
+// of interesting directories (the session's live pane cwds); they are merged
+// behind the frecency ranking rather than displacing it, and stat'ed here
+// because only this machine can say whether they are still directories.
+//
+// It does blocking filesystem work — a listing of a cold network mount can take
+// as long as the mount does — so every caller runs it off its event loop.
+func List(dir, base string, recents bool, live []string) Listing {
+	if base == "" {
+		// No anchor on this machine: "here" is the user's home, which is where a
+		// shell would have started and what an empty path means everywhere else
+		// in the picker.
+		base, _ = os.UserHomeDir()
+	}
+	res := Listing{Dir: Expand(dir, base)}
+	if home, err := os.UserHomeDir(); err == nil {
+		res.Home = home
+	}
+	dirs, truncated, err := Subdirs(res.Dir)
+	if err != nil {
+		res.Error = ListError(res.Dir, err)
+	} else {
+		res.Exists, res.Dirs, res.Truncated = true, dirs, truncated
+	}
+	if recents {
+		res.Recents = Merge(Recents(MaxRecents), live)
+	}
+	return res
+}
+
+// ListError turns a ReadDir failure into something worth showing under a text
+// field, keeping the raw error only for cases we have no better words for.
+func ListError(dir string, err error) string {
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return "no such directory: " + dir
+	case errors.Is(err, fs.ErrPermission):
+		return "not readable: " + dir
+	}
+	if fi, serr := os.Stat(dir); serr == nil && !fi.IsDir() {
+		return "not a directory: " + dir // a file whose name shares a prefix with one
+	}
+	return err.Error()
+}
+
+// Merge appends extra onto base, dropping duplicates and anything that is no
+// longer a directory. Order is significant: base is cdx's frecency ranking, and
+// the caller's own directories fill in behind it rather than displacing it.
+func Merge(base, extra []string) []string {
+	out := make([]string, 0, len(base)+len(extra))
+	seen := make(map[string]bool, len(base)+len(extra))
+	for _, list := range [][]string{base, extra} {
+		for _, dir := range list {
+			dir = filepath.Clean(dir)
+			if !filepath.IsAbs(dir) || seen[dir] || !IsDir(dir) {
+				continue
+			}
+			seen[dir] = true
+			out = append(out, dir)
+		}
+	}
+	return out
 }

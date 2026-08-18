@@ -81,6 +81,7 @@ without racing the daemon's own post-hello replay. Unknown pane ids are ignored.
 | `set_output_stream` | `pane_id`, `enabled` | arms the raw-byte stream for `pane.wait_for_output` |
 | `ping` | `id` | round-trip probe; answered with `pong` carrying the same `id`. Sent only to a daemon advertising the `ping` capability |
 | `request_host_stats` | `interval_ms` | subscribe to the daemon's readings of its own machine, one `host_stats` per interval; `0` cancels. Capability: `host_stats` |
+| `request_list_dir` | `pane_id`, `dir`, `base`, `recents`, `live` | list a directory **on the daemon's filesystem**; answered with `dir_listing`. Capability: `list_dir` |
 | `shutdown` | — | ask a persistent daemon to exit and tear down all panes |
 
 ### Events — `cathost` → `catway`
@@ -101,6 +102,7 @@ without racing the daemon's own post-hello replay. Unknown pane ids are ignored.
 | `pane_exited` | `pane_id`, exit status | |
 | `pong` | `id` | reply to `ping`, echoing its `id`. The only event with no pane |
 | `host_stats` | `rows` | one reading of the daemon's machine — memory, CPU, disk — display-ready. Only while a subscription is live |
+| `dir_listing` | `pane_id`, `listing` | reply to `request_list_dir`, one per request. A path that does not resolve is `exists:false` with a reason, not an error event |
 | `error` | code, message | |
 
 ## Versioning
@@ -143,6 +145,7 @@ reads correctly as "the base protocol only".
 |---------|------|----------|
 | `ping` | `ping` / `pong` | the roster's per-host round-trip figure, and liveness — see below |
 | `host_stats` | `request_host_stats` / `host_stats` | the sidebar's per-host meters — see below |
+| `list_dir` | `request_list_dir` / `dir_listing` | the start-path picker completing a path on another machine — see below |
 
 ### Liveness
 
@@ -197,6 +200,29 @@ rather than as raw byte counts. Both halves of the section are built by the same
 `internal/hostmeter` code that way; sending numbers and re-deriving the captions
 on the far side is how the local and remote halves of one section start
 disagreeing about what "used" means.
+
+### Directory listing
+
+`request_list_dir` is the same principle applied to paths: the listing is
+produced by the machine that owns them. `dir` travels **unexpanded** — `~` is
+the daemon's user's home, `$VAR` is its environment, `.` is a directory only its
+kernel can resolve — and `base` is the anchor a relative `dir` resolves against,
+`""` meaning the daemon's home directory. `live` carries the client's own
+interesting directories (this session's pane cwds on that host); the daemon
+merges them behind cdx's frecency ranking and stats them, since only its kernel
+can say whether they are still directories.
+
+`pane_id` is a correlation handle rather than a subject. The daemon echoes it and
+the client matches replies to requests per pane, in order — the same arrangement
+`request_text` and `pane_text` use, and sound for the same reason: a pane's
+picker asks one question at a time over one connection.
+
+The listing runs on its own goroutine daemon-side. A cold network mount takes as
+long as the mount does, and the connection's reader is what every keystroke in
+every pane arrives through.
+
+Both halves of `path.list` — local and remote — call the same
+`internal/pathpick` code. The only difference is which process runs it.
 
 ## Why the daemon resolves cwd and branch
 

@@ -19,6 +19,7 @@ import (
 	"github.com/creack/pty"
 	"github.com/rohanthewiz/cats/internal/detect"
 	"github.com/rohanthewiz/cats/internal/gitbranch"
+	"github.com/rohanthewiz/cats/internal/pathpick"
 	"github.com/rohanthewiz/cats/internal/terminal"
 )
 
@@ -530,6 +531,21 @@ func (h *Host) dispatch(typ MessageType, payload []byte) error {
 		if err := h.requestText(c); err != nil {
 			h.emit(NewError(c.PaneID, err.Error()))
 		}
+	case MsgRequestListDir:
+		var c RequestListDir
+		if err := json.Unmarshal(payload, &c); err != nil {
+			h.emit(NewError(0, "bad request_list_dir: "+err.Error()))
+			return nil
+		}
+		// Off the dispatch goroutine: a listing of a cold network mount takes as
+		// long as the mount does, and the connection's reader is what every
+		// keystroke in every pane arrives through. The reply is emitted from
+		// there, which is fine — emit is the queue, and a client matches replies
+		// to requests per pane in order, so two listings for one pane cannot
+		// overtake each other because a pane's requests arrive one at a time.
+		go func() {
+			h.emit(NewDirListing(c.PaneID, pathpick.List(c.Dir, c.Base, c.Recents, c.Live)))
+		}()
 	case MsgRequestHostStats:
 		var c RequestHostStats
 		if err := json.Unmarshal(payload, &c); err != nil {

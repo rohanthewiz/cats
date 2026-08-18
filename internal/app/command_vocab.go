@@ -973,6 +973,16 @@ type HostInfo struct {
 	// report every healthy session as "0" — a number that reads as broken rather
 	// than as instant.
 	LatencyMs float64 `json:"latency_ms,omitempty"`
+	// ListsDirs reports that path.list can complete a path on this host: always
+	// true for the local machine, and true for a remote one whose cathost speaks
+	// the list_dir capability.
+	//
+	// It is a separate flag from Local because the two used to be the same
+	// answer and are not any more. A client gates its start-path picker on this:
+	// with it, the picker works against the remote filesystem; without it, the
+	// field takes a typed path that this session cannot verify, and saying so
+	// beats offering a picker full of the wrong machine's directories.
+	ListsDirs bool `json:"lists_dirs,omitempty"`
 }
 
 // HostListResult is CmdResult.Data for host.list.
@@ -1248,10 +1258,23 @@ type PluginUninstallResult struct {
 //
 // Recents asks for the frecency list too. A picker wants it once when it opens,
 // not on every keystroke of directory navigation, so it is opt-in per request.
+//
+// Host names the machine to list on, overriding the anchor pane's. It exists
+// because the picker in the new-workspace dialog chooses a host BEFORE anything
+// exists there: with only a pane to go by, a path being typed for devbox would
+// be completed against the local disk and every suggestion would be a directory
+// that does not exist where the workspace is about to be created. "" keeps the
+// anchor pane's host, which is what every other caller wants.
+//
+// A path is only ever completed by the machine that owns it. When Host is a
+// remote cathost the listing is taken there — "~" is that user's home, "." is a
+// directory only that kernel can resolve — and a host whose cathost is too old
+// to list answers with an Error rather than with this machine's directories.
 type PathListParams struct {
 	Dir     string  `json:"dir,omitempty"`
 	Pane    *uint32 `json:"pane,omitempty"`
 	Recents bool    `json:"recents,omitempty"`
+	Host    string  `json:"host,omitempty"`
 }
 
 // PathListResult is CmdResult.Data for path.list.

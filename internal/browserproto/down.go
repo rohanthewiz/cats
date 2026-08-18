@@ -226,6 +226,11 @@ type HostItem struct {
 	// whether the box is loaded or three thousand miles away, and only this
 	// separates them.
 	LatencyMs float64 `json:"latency_ms,omitempty"`
+	// ListsDirs reports that the start-path picker works against this host: true
+	// for the local machine, and for a remote one whose cathost can list its own
+	// directories. Separate from Local because the two answers used to coincide
+	// and no longer do.
+	ListsDirs bool `json:"lists_dirs,omitempty"`
 }
 
 func NewHosts(items []HostItem) Hosts { return Hosts{T: MsgHosts, Items: items} }

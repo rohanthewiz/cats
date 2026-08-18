@@ -740,6 +740,15 @@ func (d *daemon) dispatch(mt orchestration.MessageType, payload []byte) {
 		if d.notePong(ev.ID) {
 			o.post(func() { o.broadcastHosts() })
 		}
+	case orchestration.MsgDirListing:
+		var ev orchestration.DirListing
+		if err := json.Unmarshal(payload, &ev); err != nil {
+			return
+		}
+		// Resolved through the same per-pane FIFO as read and capture: the
+		// listing carries no request id because it does not need one — a pane's
+		// picker asks one question at a time and this daemon answers in order.
+		o.post(func() { o.resolvePending(reqKey{ev.PaneID, reqListDir}, ev.Listing) })
 	case orchestration.MsgHostStats:
 		var ev orchestration.HostStats
 		if err := json.Unmarshal(payload, &ev); err != nil {

@@ -578,6 +578,7 @@ class HostInfo {
     required this.panes,
     this.error = '',
     this.latencyMs = 0,
+    this.listsDirs = false,
   });
 
   final String id;
@@ -613,6 +614,17 @@ class HostInfo {
   /// than as instant.
   final double latencyMs;
 
+  /// ListsDirs reports that path.list can complete a path on this host: always
+  /// true for the local machine, and true for a remote one whose cathost speaks
+  /// the list_dir capability.
+  ///
+  /// It is a separate flag from Local because the two used to be the same
+  /// answer and are not any more. A client gates its start-path picker on this:
+  /// with it, the picker works against the remote filesystem; without it, the
+  /// field takes a typed path that this session cannot verify, and saying so
+  /// beats offering a picker full of the wrong machine's directories.
+  final bool listsDirs;
+
   factory HostInfo.fromJson(Map<String, Object?> j) => HostInfo(
         id: asString(j['id']),
         label: asString(j['label']),
@@ -623,6 +635,7 @@ class HostInfo {
         panes: asInt(j['panes']),
         error: asString(j['error']),
         latencyMs: asDouble(j['latency_ms']),
+        listsDirs: asBool(j['lists_dirs']),
       );
 
   Map<String, Object?> toJson() => {
@@ -635,6 +648,7 @@ class HostInfo {
         'panes': panes,
         if (error.isNotEmpty) 'error': error,
         if (latencyMs != 0) 'latency_ms': latencyMs,
+        if (listsDirs) 'lists_dirs': listsDirs,
       };
 }
 
@@ -960,27 +974,43 @@ class PaneParams {
 ///
 /// Recents asks for the frecency list too. A picker wants it once when it opens,
 /// not on every keystroke of directory navigation, so it is opt-in per request.
+///
+/// Host names the machine to list on, overriding the anchor pane's. It exists
+/// because the picker in the new-workspace dialog chooses a host BEFORE anything
+/// exists there: with only a pane to go by, a path being typed for devbox would
+/// be completed against the local disk and every suggestion would be a directory
+/// that does not exist where the workspace is about to be created. "" keeps the
+/// anchor pane's host, which is what every other caller wants.
+///
+/// A path is only ever completed by the machine that owns it. When Host is a
+/// remote cathost the listing is taken there — "~" is that user's home, "." is a
+/// directory only that kernel can resolve — and a host whose cathost is too old
+/// to list answers with an Error rather than with this machine's directories.
 class PathListParams {
   const PathListParams({
     this.dir = '',
     this.pane,
     this.recents = false,
+    this.host = '',
   });
 
   final String dir;
   final int? pane;
   final bool recents;
+  final String host;
 
   factory PathListParams.fromJson(Map<String, Object?> j) => PathListParams(
         dir: asString(j['dir']),
         pane: asIntOrNull(j['pane']),
         recents: asBool(j['recents']),
+        host: asString(j['host']),
       );
 
   Map<String, Object?> toJson() => {
         if (dir.isNotEmpty) 'dir': dir,
         if (pane != null) 'pane': pane,
         if (recents) 'recents': recents,
+        if (host.isNotEmpty) 'host': host,
       };
 }
 

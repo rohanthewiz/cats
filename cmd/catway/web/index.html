@@ -4657,8 +4657,16 @@
     const inflight = new Set();
     let rows = [], sel = -1;
     // enabled is the picker's own on/off switch (see setEnabled): a field whose
-    // directory lives on another machine keeps the input and loses the picker.
+    // directory lives on a machine that cannot list it keeps the input and
+    // loses the picker.
     let enabled = true;
+    // host is the machine the listing is taken on ("" = the anchor pane's own).
+    // It is carried on the request rather than inferred server-side because the
+    // new-workspace dialog chooses a host BEFORE anything exists there: with
+    // only a pane to go by, a path being typed for devbox would be completed
+    // against the local disk and every suggestion would be a directory that
+    // does not exist where the workspace is about to be created.
+    let host = "";
     // A prefilled field arrives naming a directory the user never typed, so its
     // text is not a fragment being completed — it is where they already are.
     // While it stays untouched the picker lists *inside* it and offers the
@@ -4688,7 +4696,7 @@
         inflight.add(base);
         const wantRecents = !recentsAsked;
         recentsAsked = true;
-        sendCmdAwait("path.list", { dir: base, recents: wantRecents }, (res) => {
+        sendCmdAwait("path.list", { dir: base, recents: wantRecents, host }, (res) => {
           inflight.delete(base);
           if (!res.ok) { if (wantRecents) recentsAsked = false; return; }
           const d = res.data || {};
@@ -4808,17 +4816,29 @@
     input.addEventListener("blur", () => wrap.classList.remove("focus"));
 
     return {
-      // setEnabled turns the picker off for a field whose path is no longer
-      // this machine's to complete — the new-workspace dialog does it the
-      // moment a remote host is chosen. Off means: no listing requests, no
-      // drop-down, no key capture, and no commit rewriting what was typed, so
-      // the field becomes a plain text box carrying the path verbatim to the
-      // host that will interpret it (path.list is local-only until cathost
-      // grows a list_dir of its own).
+      // setEnabled turns the picker off for a field whose path nobody here can
+      // complete — a host whose cathost is too old to list its own directories,
+      // or one that is offline. Off means: no listing requests, no drop-down, no
+      // key capture, and no commit rewriting what was typed, so the field
+      // becomes a plain text box carrying the path verbatim to the host that
+      // will interpret it.
       setEnabled(on) {
         enabled = on;
         if (!on) { listEl.innerHTML = ""; rows = []; sel = -1; }
         else render();
+      },
+      // setHost points the picker at another machine. Everything cached
+      // describes the previous one — its directories, its home, its recents —
+      // so all of it is dropped rather than filtered: a listing of /home/me on
+      // this laptop says nothing about /home/me on devbox, and the two are
+      // indistinguishable once they are in the same map.
+      setHost(id) {
+        if (host === id) return;
+        host = id;
+        cache.clear(); inflight.clear();
+        recents = []; recentsAsked = false; home = "";
+        rows = []; sel = -1;
+        if (enabled) render();
       },
       // key handles the picker's own keys and reports whether it consumed the
       // event; Enter stays with the dialog (see commit).
@@ -5040,11 +5060,12 @@
     // so it belongs in the dialog that creates it rather than being re-chosen at
     // each split. Offered only when there is a choice to make.
     //
-    // Choosing a remote host changes what the start path means: it is a path on
-    // that machine, which this browser cannot complete or verify, so the picker
-    // is switched off and the field's placeholder says whose filesystem the text
-    // will be read against. A prefilled local cwd would be a wrong path there,
-    // so it is cleared on the way out.
+    // Choosing another host changes what the start path means: it is a path on
+    // that machine. A host whose cathost can list its own directories completes
+    // it there — the picker keeps working, against the right filesystem — and
+    // one that cannot loses the picker and says whose disk the text will be read
+    // against. Either way a prefilled local cwd is a wrong path there, so it is
+    // cleared on the way out.
     let hostIdx = -1; // -1 = no host field, so its slot is never read below
     if (multiHost()) {
       hostIdx = fields.length;
@@ -5058,11 +5079,20 @@
         onChange: (id, rows) => {
           const h = hostItems.find((x) => x.id === id);
           const local = !h || !!h.local;
+          const lists = !h || !!h.lists_dirs;
           const path = rows[1];
-          if (path.picker) path.picker.setEnabled(local);
+          if (path.picker) {
+            // Point it first, switch it on second: enabling re-renders, and a
+            // render against the old machine's cache would flash the wrong
+            // directories before the first reply for the new one lands.
+            path.picker.setHost(local ? "" : id);
+            path.picker.setEnabled(lists);
+          }
           path.input.placeholder = local
             ? "empty starts in your home directory"
-            : "path on " + (h ? (h.label || h.id) : id) + " — empty starts where that host starts panes";
+            : (lists
+              ? "path on " + (h.label || h.id) + " — empty starts in that host's home directory"
+              : "path on " + (h.label || h.id) + " — empty starts where that host starts panes");
           if (!local && path.input.value === focusedPaneCwd()) path.input.value = "";
         },
       });

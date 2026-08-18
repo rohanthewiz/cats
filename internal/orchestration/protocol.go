@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/rohanthewiz/cats/internal/hostmeter"
+	"github.com/rohanthewiz/cats/internal/pathpick"
 	"github.com/rohanthewiz/cats/internal/terminal"
 )
 
@@ -82,6 +83,7 @@ const (
 	MsgShutdown         MessageType = "shutdown"
 	MsgPing             MessageType = "ping"
 	MsgRequestHostStats MessageType = "request_host_stats"
+	MsgRequestListDir   MessageType = "request_list_dir"
 
 	// Go → Rust (events).
 	MsgWelcome       MessageType = "welcome"
@@ -98,6 +100,7 @@ const (
 	MsgPaneExited    MessageType = "pane_exited"
 	MsgPong          MessageType = "pong"
 	MsgHostStats     MessageType = "host_stats"
+	MsgDirListing    MessageType = "dir_listing"
 	MsgError         MessageType = "error"
 )
 
@@ -128,6 +131,11 @@ const (
 	// pane's memory and disk pressure can be shown for a machine that is not
 	// this one.
 	FeatureHostStats = "host_stats"
+	// FeatureListDir: the daemon can list a directory on its own filesystem
+	// (MsgRequestListDir → MsgDirListing). It is what lets the start-path picker
+	// complete a path for a pane on another machine, instead of being switched
+	// off with an apology.
+	FeatureListDir = "list_dir"
 )
 
 // --- Commands (Rust → Go) ---------------------------------------------------
@@ -331,6 +339,37 @@ func NewPing(id uint64) Ping { return Ping{Type: MsgPing, ID: id} }
 // looking. Re-sending it re-paces an existing subscription rather than adding a
 // second one — there is one per connection, and the connection is the
 // subscription's lifetime.
+// RequestListDir asks the daemon to list a directory on ITS filesystem.
+//
+// Dir is what the user has typed, unexpanded: "~", "$HOME/src" and a relative
+// path all have to be resolved by the machine that owns the paths, because "~"
+// is the daemon's user's home and "." is a directory only its kernel can
+// resolve. Base is the anchor a relative Dir resolves against — the addressed
+// pane's live cwd — and "" means the daemon's home directory, which is what a
+// picker opened on a host this session has no pane on should start at.
+//
+// Live carries the client's own set of interesting directories (this session's
+// live pane cwds on this host). They are merged behind the frecency ranking
+// rather than displacing it, and are stat'ed by the daemon, since only its
+// kernel can say whether they are still directories.
+//
+// PaneID is a correlation handle rather than a subject: the daemon echoes it in
+// the reply, and the client matches replies to requests per pane in order, the
+// same way request_text and pane_text are matched. It names the pane the picker
+// is anchored on.
+type RequestListDir struct {
+	Type    MessageType `json:"type"`
+	PaneID  uint32      `json:"pane_id"`
+	Dir     string      `json:"dir,omitempty"`
+	Base    string      `json:"base,omitempty"`
+	Recents bool        `json:"recents,omitempty"`
+	Live    []string    `json:"live,omitempty"`
+}
+
+func NewRequestListDir(paneID uint32, dir, base string, recents bool, live []string) RequestListDir {
+	return RequestListDir{Type: MsgRequestListDir, PaneID: paneID, Dir: dir, Base: base, Recents: recents, Live: live}
+}
+
 type RequestHostStats struct {
 	Type       MessageType `json:"type"`
 	IntervalMs int         `json:"interval_ms"`
@@ -389,7 +428,7 @@ func NewWelcomeAt(version int, errMsg string, panes []uint32) Welcome {
 // Features is what this build can answer. Returned as a fresh slice so a caller
 // cannot alter the daemon's advertisement by holding onto it.
 func Features() []string {
-	return []string{FeaturePing, FeatureHostStats}
+	return []string{FeaturePing, FeatureHostStats, FeatureListDir}
 }
 
 type PaneFrame struct {
@@ -604,6 +643,20 @@ type HostStats struct {
 
 func NewHostStats(rows []hostmeter.Row) HostStats {
 	return HostStats{Type: MsgHostStats, Rows: rows}
+}
+
+// DirListing answers a RequestListDir, echoing its PaneID so the client can
+// match it to the request. A directory that could not be read is not an error
+// here — the Listing carries Exists false and the reason, because a half-typed
+// path is the common case and the picker keeps taking keystrokes.
+type DirListing struct {
+	Type    MessageType      `json:"type"`
+	PaneID  uint32           `json:"pane_id"`
+	Listing pathpick.Listing `json:"listing"`
+}
+
+func NewDirListing(paneID uint32, l pathpick.Listing) DirListing {
+	return DirListing{Type: MsgDirListing, PaneID: paneID, Listing: l}
 }
 
 type Error struct {
