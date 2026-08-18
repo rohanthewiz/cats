@@ -156,10 +156,16 @@ type orch struct {
 	// tab) — the panes whose frames stream to browsers (§8). Recomputed by
 	// refreshViewport whenever the viewport changes.
 	visible map[uint32]bool
-	// pendingReqs holds in-flight daemon round-trip commands (read, capture)
-	// awaiting their reply, FIFO per (pane, kind). Both replies carry no command
-	// id, so the kind picks the queue and per-pane order does the correlation.
+	// pendingReqs holds in-flight daemon round-trip commands (read, capture,
+	// directory listing, worktree) awaiting their reply, FIFO per key. The
+	// pane-addressed replies carry no command id, so the kind picks the queue and
+	// per-pane order does the correlation; a worktree reply carries an id, since
+	// its git runs off the daemon's dispatch goroutine and finishes out of order.
 	pendingReqs map[reqKey][]*pending
+	// nextWorktreeReq allocates those ids. Monotonic across hosts (a reply is
+	// matched on the host it came back from as well as the id), and never
+	// persisted: an id means nothing beyond the life of the request.
+	nextWorktreeReq uint64
 	// waiters holds active pane.wait_for_output waiters per pane; each matches the
 	// pane's live output stream (plus a one-shot seed of the current screen) and
 	// resolves on a match, its own timeout, or the pane exiting. waiterCheck marks
@@ -294,8 +300,10 @@ type orch struct {
 	pairing atomic.Pointer[pairing]
 	// cfg is the loaded config-file state (defaults + file, not flag overrides —
 	// config.set marshals it back to disk, so flag values must never leak in).
-	// worktreeDir is the tilde-expanded worktrees root new checkouts land under.
-	// Both wired by main; loop-goroutine only after the loop starts.
+	// worktreeDir is the configured worktrees root new checkouts land under, as
+	// written — a leading "~" is expanded by the machine that will hold the
+	// checkout, not by this one. Both wired by main; loop-goroutine only after
+	// the loop starts.
 	cfg         config.Config
 	worktreeDir string
 	// --- session persistence (WS3), wired by main; zero values disable it ---
@@ -334,7 +342,7 @@ type orch struct {
 	finalCap *finalCapture
 }
 
-// reqKind distinguishes the two §7 commands that need a daemon round-trip: read
+// reqKind distinguishes the §7 commands that need a daemon round-trip: read
 // (RequestSelection → pane_selection) and capture (RequestText → pane_text). A
 // pane may have both in flight at once, and the daemon's replies carry no command
 // id, so the reply's message type — not just per-pane order — picks the queue.
@@ -344,6 +352,7 @@ const (
 	reqSelection reqKind = iota // read → pane_selection
 	reqText                     // capture → pane_text
 	reqListDir                  // path.list on a remote host → dir_listing
+	reqWorktree                 // worktree.* on any host → worktree_result
 )
 
 // label names the command for user-facing errors ("<label> timed out").
@@ -353,14 +362,57 @@ func (k reqKind) label() string {
 		return "capture"
 	case reqListDir:
 		return "directory listing"
+	case reqWorktree:
+		return "worktree command"
 	}
 	return "read"
 }
 
-// reqKey identifies a per-pane FIFO queue of in-flight requests of one kind.
+// timeout bounds how long the kind waits for its reply. The default exists so a
+// browser's cmd never hangs when a reply is lost without the connection itself
+// dropping; the worktree kind needs its own because it is the one request whose
+// answer legitimately takes minutes — `git worktree add` checks out a tree, and
+// failing it at five seconds would report a failure for work that then quietly
+// succeeds.
+func (k reqKind) timeout() time.Duration {
+	if k == reqWorktree {
+		return worktreeTimeout
+	}
+	return reqTimeout
+}
+
+// reqKey identifies a FIFO queue of in-flight requests of one kind, scoped by
+// whatever the daemon echoes back with the answer.
+//
+// Most kinds are pane-addressed: the pane is the subject, the daemon answers a
+// pane's requests in the order they arrive, and that ordering is the whole
+// correlation. The worktree kind cannot work that way — its git runs off the
+// daemon's dispatch goroutine, so replies come back in completion order — so it
+// carries an explicit request id, and names its host directly since the
+// operation is addressed to a machine rather than to a pane.
 type reqKey struct {
-	pane uint32
 	kind reqKind
+	pane uint32 // pane-correlated kinds
+	id   uint64 // id-correlated kinds (worktree)
+	host string // set only when the key is not pane-scoped
+}
+
+// paneKey is the key for a pane-addressed round trip.
+func paneKey(pane uint32, kind reqKind) reqKey { return reqKey{kind: kind, pane: pane} }
+
+// hostKey is the key for a host-addressed, id-correlated round trip.
+func hostKey(host string, id uint64) reqKey {
+	return reqKey{kind: reqWorktree, id: id, host: host}
+}
+
+// keyHost is the host whose link a pending request depends on — the one whose
+// disconnect can no longer deliver it. A pane-scoped key answers with its pane's
+// host; a host-scoped key already knows.
+func (o *orch) keyHost(key reqKey) string {
+	if key.host != "" {
+		return key.host
+	}
+	return o.paneHostID(key.pane)
 }
 
 // pending is one in-flight daemon round-trip (read or capture). The dispatch
@@ -376,8 +428,12 @@ type pending struct {
 
 // reqTimeout bounds how long a read/capture waits for the daemon's reply, so a
 // browser's cmd never hangs if the daemon errors or the reply is lost without the
-// connection itself dropping.
-const reqTimeout = 5 * time.Second
+// connection itself dropping. worktreeTimeout is the same backstop for a
+// worktree command, where the wait is git's rather than a buffer read's.
+const (
+	reqTimeout      = 5 * time.Second
+	worktreeTimeout = 5 * time.Minute
+)
 
 // modelSpawner satisfies workspace.PaneSpawner without touching the daemon: the
 // orchestrator syncs the daemon's PTYs to the model separately (syncDaemon), so
@@ -702,9 +758,9 @@ func (o *orch) paneHostID(pid uint32) string {
 
 // paneIsLocal reports whether a pane's terminal runs on this catway's own
 // machine. It is the gate on every feature that reads the filesystem behind a
-// pane — the git branch badge, the agent-model transcript readers, the worktree
-// commands, the directory picker, the restore-time cwd healing — because all of
-// those open paths with this process's own syscalls, and a remote pane's cwd
+// pane — the git branch badge, the agent-model transcript readers, the
+// restore-time cwd healing — because all of those open paths with this
+// process's own syscalls, and a remote pane's cwd
 // names a directory in another machine's filesystem. Answering about the wrong
 // disk is worse than answering nothing: a same-named directory here would give
 // a confidently wrong branch or model, and worktree create would write a
@@ -1093,7 +1149,7 @@ func (o *orch) agentsMsg() browserproto.Agents {
 // StartRead registers an in-flight read (app.Backend) and asks the daemon to
 // extract the selection. The pane_selection reply completes r in resolvePending.
 func (o *orch) StartRead(r app.Responder, p app.ReadParams) {
-	o.registerPending(r, reqKey{p.Pane, reqSelection})
+	o.registerPending(r, paneKey(p.Pane, reqSelection))
 	o.hostForPane(p.Pane).send(orchestration.NewRequestSelection(p.Pane,
 		orchestration.SelectionPoint{Row: p.Anchor[0], Col: uint16(p.Anchor[1])},
 		orchestration.SelectionPoint{Row: p.Cursor[0], Col: uint16(p.Cursor[1])},
@@ -1103,7 +1159,7 @@ func (o *orch) StartRead(r app.Responder, p app.ReadParams) {
 // StartCapture registers an in-flight capture (app.Backend) and asks the daemon
 // to extract the pane's buffer text. The pane_text reply completes r.
 func (o *orch) StartCapture(r app.Responder, p app.CaptureParams) {
-	o.registerPending(r, reqKey{p.Pane, reqText})
+	o.registerPending(r, paneKey(p.Pane, reqText))
 	o.hostForPane(p.Pane).send(orchestration.NewRequestText(p.Pane, p.Scope, p.Lines, p.Ansi, p.Unwrap))
 }
 
@@ -1112,7 +1168,7 @@ func (o *orch) StartCapture(r app.Responder, p app.CaptureParams) {
 func (o *orch) registerPending(resp app.Responder, key reqKey) {
 	pr := &pending{resp: resp}
 	o.pendingReqs[key] = append(o.pendingReqs[key], pr)
-	pr.timer = time.AfterFunc(reqTimeout, func() {
+	pr.timer = time.AfterFunc(key.kind.timeout(), func() {
 		o.post(func() { o.timeoutPending(key, pr) })
 	})
 }
@@ -1150,12 +1206,12 @@ func (o *orch) timeoutPending(key reqKey, pr *pending) {
 func (o *orch) flushPending(errMsg string) { o.flushPendingFor("", errMsg) }
 
 // flushPendingFor fails the in-flight requests belonging to one host — what a
-// single cathost dropping means. hostID "" flushes every host. Requests are
-// keyed by pane, and a pane's host is exactly what decides whether its reply
-// can still arrive.
+// single cathost dropping means. hostID "" flushes every host. Which host a
+// request belongs to is keyHost's question: a pane's host for the pane-addressed
+// kinds, and the named one for a worktree command.
 func (o *orch) flushPendingFor(hostID, errMsg string) {
 	for key, q := range o.pendingReqs {
-		if hostID != "" && o.paneHostID(key.pane) != hostID {
+		if hostID != "" && o.keyHost(key) != hostID {
 			continue
 		}
 		for _, pr := range q {
@@ -1258,7 +1314,7 @@ func (o *orch) triggerWaiterCheck(pane uint32) {
 		return // nothing to capture from; a reconnect's frames re-trigger
 	}
 	o.waiterCheck[pane] = true
-	o.registerPending(waiterResponder{o: o, pane: pane}, reqKey{pane, reqText})
+	o.registerPending(waiterResponder{o: o, pane: pane}, paneKey(pane, reqText))
 	d.send(orchestration.NewRequestText(pane, uint8(terminal.TextRecent), o.waiterScanLines(pane), false, false))
 }
 

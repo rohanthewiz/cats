@@ -449,8 +449,17 @@ git and a build, whose output you want to **watch**, so the UI launches those as
 `catctl plugin …` in a fresh tab rather than hiding minutes of subprocess work
 behind one `cmd_result`.
 
-Git work for worktree commands runs **off** the orchestrator loop, so a slow
-`git worktree add` never stalls input.
+The worktree commands act on the machine the addressed pane is on — `worktree.remove`
+on the one its workspace's checkout belongs to — because git is a subprocess
+acting on a filesystem. `worktree.list` reports that machine as `host`, and every
+path in its answer (`repo_root`, `worktree_root`, each checkout) is a path there.
+A host whose cathost predates the `worktree` capability is refused by name rather
+than answered from the wrong disk, and a workspace whose host has been detached
+cannot have its checkout removed at all — the directory is on a filesystem this
+catway can no longer reach.
+
+Git work runs **off** the orchestrator loop at both ends, so a slow
+`git worktree add` never stalls input on either machine.
 
 `path.list` is what a front-end completes a directory against — the start-path
 picker in the new-workspace dialog is its only caller today:

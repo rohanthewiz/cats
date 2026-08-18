@@ -67,8 +67,8 @@ func resultText(t *testing.T, r *browserproto.CmdResult) string {
 }
 
 // selKey/txtKey are the two round-trip queues for a pane.
-func selKey(pane uint32) reqKey { return reqKey{pane, reqSelection} }
-func txtKey(pane uint32) reqKey { return reqKey{pane, reqText} }
+func selKey(pane uint32) reqKey { return paneKey(pane, reqSelection) }
+func txtKey(pane uint32) reqKey { return paneKey(pane, reqText) }
 
 // resolvePending completes the oldest pending request for a (pane, kind), in FIFO
 // order — the daemon replies to requests in the order it received them, and the

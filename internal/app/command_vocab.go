@@ -1047,12 +1047,19 @@ type WorktreeInfo struct {
 }
 
 // WorktreeListResult is CmdResult.Data for worktree.list. WorktreeRoot is the
-// configured (tilde-expanded) directory new checkouts land under, so the
-// new-worktree dialog can preview the derived checkout path client-side.
+// directory new checkouts land under, tilde-expanded by the machine that will
+// hold them, so the new-worktree dialog can preview the derived checkout path
+// client-side.
+//
+// Host is the machine the whole answer describes — every path in it is a path
+// on that filesystem. The dialogs name it when the session has more than one
+// host, because "new worktree — cats" is otherwise the same sentence whichever
+// machine's repository is about to grow a checkout.
 type WorktreeListResult struct {
 	RepoRoot     string         `json:"repo_root"`
 	RepoName     string         `json:"repo_name"`
 	WorktreeRoot string         `json:"worktree_root"`
+	Host         string         `json:"host,omitempty"`
 	Worktrees    []WorktreeInfo `json:"worktrees"`
 }
 

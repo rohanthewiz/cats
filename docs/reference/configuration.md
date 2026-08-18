@@ -319,8 +319,15 @@ worktrees:
   directory: "~/.cats/worktrees"
 ```
 
-Where new checkouts are created. A leading `~` is expanded. Checkouts land at
+Where new checkouts are created. Checkouts land at
 `<directory>/<repoName>/<branch-slug>`.
+
+A leading `~` is expanded **on the machine that will hold the checkout**, not
+here. A worktree command runs on the host the pane is on, so with the default
+value a checkout made from a pane on `devbox` lands in devbox's
+`~/.cats/worktrees` — which is almost always what you meant. An absolute path,
+by contrast, is one path applied to every host, and has to exist (or be
+creatable) on each of them.
 
 ## `theme`
 

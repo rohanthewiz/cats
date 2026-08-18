@@ -68,7 +68,7 @@ func (o *orch) StartPathList(r app.Responder, p app.PathListParams) {
 
 	d := o.hosts[hostID]
 	if !d.supports(orchestration.FeatureListDir) {
-		r.OK(app.PathListResult{Dir: p.Dir, Cwd: cwd, Error: cannotListErr(d)})
+		r.OK(app.PathListResult{Dir: p.Dir, Cwd: cwd, Error: o.hostCapabilityErr(hostID, "list directories", orchestration.FeatureListDir)})
 		return
 	}
 	// Keyed on the anchor pane like every other daemon round trip, and resolved
@@ -76,7 +76,7 @@ func (o *orch) StartPathList(r app.Responder, p app.PathListParams) {
 	// daemon answers in order over one connection. It also means a host that
 	// drops mid-listing fails this request through flushPendingFor rather than
 	// leaving the picker waiting for a reply that cannot come.
-	o.registerPending(pathListResponder{r: r, cwd: cwd}, reqKey{pane, reqListDir})
+	o.registerPending(pathListResponder{r: r, cwd: cwd}, paneKey(pane, reqListDir))
 	d.send(orchestration.NewRequestListDir(pane, p.Dir, cwd, p.Recents, live))
 }
 
@@ -123,17 +123,6 @@ func fromListing(l pathpick.Listing, cwd string) app.PathListResult {
 		Truncated: l.Truncated,
 		Recents:   l.Recents,
 	}
-}
-
-// cannotListErr explains a host that cannot answer. Named rather than inlined
-// because it is the one sentence a user sees when a picker goes dark, and the
-// reason matters: a cathost that has not been upgraded is a different fix from
-// one that is unreachable.
-func cannotListErr(d *daemon) string {
-	if !d.connected() {
-		return "host " + d.label + " is not connected"
-	}
-	return "host " + d.label + " cannot list directories (its cathost predates the list_dir capability)"
 }
 
 func unknownHostListErr(id string) string {

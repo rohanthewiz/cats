@@ -609,8 +609,101 @@ in-pane process was killed (the cancel reaching catway as a close), and a fresh
 subscription afterwards worked. A pane on the untrusted host meanwhile reports
 `CATS_CONTROL_SOCKET=-` and its `catctl` prints the reason and the flag to set.
 
-Left for later: remote worktrees, which stay local-only for the same reason they
-always did.
+### Phase 8 — remote worktrees — **DONE**
+
+The last thing Phase 7 left standing, and the same shape as every follow-up
+before it: not a missing feature, but catway answering a question about another
+machine with this machine's answer. `git` is a subprocess acting on a
+filesystem, so while catway was the only process that could run it, every
+worktree verb acted on *this* disk — which is why they were refused for a remote
+pane rather than allowed to find a same-named checkout here and act on it.
+
+**The operation moved, not just the request.** `worktree.Do(OpRequest) OpResult`
+in `internal/worktree` is the whole sequence — resolve the repo root, list, derive
+the default path, add, remove, stat — and both processes call it, the way both
+halves of `path.list` call `pathpick`. The seam carries the shared request and
+result structs rather than wire-local copies (`request_worktree` / `worktree_result`,
+capability `worktree`, `ProtocolVersion` still 3), because a request shape only
+one end defined is a second implementation of the operation waiting to happen.
+Paths travel **unexpanded** for the reason a listing's do: `~/.cats/worktrees`
+names the home of the account that will own the checkout, and the expanded value
+comes back in the result so the dialog can preview the real path. Found live —
+the first run still showed *this* machine's home, because `main.go` was still
+calling `ExpandTilde` on the configured value before it ever left; `o.worktreeDir`
+now holds the config verbatim.
+
+**Two things differ from every other round trip in the seam.** The reply is
+matched on an **explicit id**, not on per-pane FIFO order: git runs off the
+daemon's dispatch goroutine (blocking the reader would freeze every terminal on
+that machine while a checkout copies), so two operations started in one order
+finish in whichever order git finishes them. `reqKey` grew that id and a host
+field — one queue, not a second copy of the timeout-and-flush machinery — with
+`keyHost` answering the one question `flushPendingFor` ever asked of a key. And
+the timeout is five minutes rather than five seconds, because the wait is git's:
+failing a checkout at five seconds reports a failure for work that then quietly
+succeeds.
+
+**catway asks the daemon for every host, including its own.** That is the Phase 4
+branch-resolution argument applied to the other thing that reads a repository:
+one path through the code beats a local one and a remote one that agree until the
+day one is fixed alone. The single fallback is a *local* cathost that cannot
+answer — an older build, or a test orch with no connection — where catway runs
+the same `worktree.Do` in-process; for any other host there is nothing that could
+stand in, so it is refused by name with the reason (unreachable and un-upgraded
+are different fixes; `hostCapabilityErr` is now shared with `path.list`).
+
+**A path is only half an identity.** `workspaceForPath` became
+`workspaceForPathOn(path, host)`: two machines can hold the same path string and
+mean two different directories, so the workspace "open on this checkout" is a
+per-host question — otherwise `worktree.open` focuses a workspace on the wrong
+machine instead of opening the checkout that was pointed at. `canonPathOn` only
+resolves symlinks for a local path, since `EvalSymlinks` says nothing about
+another host's disk and can rewrite a remote path into a coincidental local one.
+`WorktreeListResult` gained `host`, and the dialogs put it in their title once a
+session has more than one host: a remote checkout path under a title that reads
+as local is exactly the mistake this invites.
+
+The one refusal that stays is a workspace pinned to a host that has been
+**detached**. `workspaceHostID` resolves an unknown host to the default, and
+`git worktree remove` on the default machine would either miss or, on a
+coincidental path match, delete the wrong checkout — the same trap
+`workspaceHostOwns` was introduced for in Phase 5. The branch name also stays on
+this side: it is the name the workspace takes and the value the command reports
+back, so generating it on whichever machine ran the op would make the answer
+depend on the route.
+
+Tests added: `internal/worktree/ops_test.go` (the create → list → remove round
+trip against real git, the default path keyed on the main repo, the dirty
+refusal flagged rather than failed and then forced, stat of a file, and every
+refusal as text rather than a Go error), `internal/orchestration/handshake_test.go`
+(the capability advertised, a real daemon creating a checkout under the root
+*it* expanded, the id echoed, and a git failure arriving as a result rather than
+an error event), `cmd/catway/worktrees_test.go` (a remote list routed to that
+pane's host with the root untouched, two in-flight requests told apart by id —
+the second answered first — the bare entry dropped and the current flag set from
+the remote checkout, a remote create pinning its workspace to that host, the
+incapable and disconnected refusals, the local in-process fallback against a real
+repository, the departed-host remove refusal, and the per-host path lookup).
+
+Verified live (two cathosts on two unix sockets, one catway, the second cathost
+under a different `HOME`): `worktree.list` on a devbox pane reports
+`host: devbox` and a `worktree_root` under **B's** home while the local pane's
+list reports this machine's; `worktree.create` on that pane puts the checkout in
+B's `~/.cats/worktrees/repoB/feature-remote-wt` and pins the new workspace to
+devbox; `worktree.open` on the same path answers `already_open` for the devbox
+anchor and creates a *separate* local workspace for the local one; a dirtied
+remote checkout comes back `dirty_worktree_requires_force:` and then removes
+under force, taking its workspace with it; a local `worktree.list` still works,
+now answered by the local cathost; and after `detach-host devbox force`, removing
+its workspace's checkout is refused by name.
+Docs updated: `docs/subsystems/worktrees.md` (a new "Which machine runs git"
+section, `Do` in the package shape, the off-loop rule at both ends, and `git` now
+required per host rather than on the catway box), `docs/protocols/orchestration-seam.md`
+(the capability, both messages, and why id-matching), `docs/protocols/control-api.md`,
+`docs/reference/configuration.md` (`~` expanded on the machine that holds the
+checkout).
+catgen-dart goldens regenerated (`WorktreeListResult.host`); **cats-mobile has not
+been regenerated** — that needs cats pushed first (see memory: cats-mobile regen flow).
 
 ## Verification
 - Every phase: `make test` and `make test-ghostty` (`-tags ghostty ./...`); regen catgen-dart goldens whenever `internal/app`, `browserproto`, or `orchestration` wire structs change and `go test ./cmd/catgen-dart`; `TestCommandSpecsRouted` for each new command; then cats-mobile regen per memory.

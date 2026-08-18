@@ -78,7 +78,6 @@ import (
 	"github.com/rohanthewiz/cats/internal/persist"
 	"github.com/rohanthewiz/cats/internal/push"
 	"github.com/rohanthewiz/cats/internal/startdir"
-	"github.com/rohanthewiz/cats/internal/worktree"
 )
 
 //go:embed web/index.html
@@ -200,7 +199,11 @@ func main() {
 	o.baseHTML = indexHTML
 	o.cfgPath = cfgPath
 	o.cfg = cfg
-	o.worktreeDir = worktree.ExpandTilde(cfg.Worktrees.Directory)
+	// Stored as configured, NOT expanded here: a worktree command runs on the
+	// host the pane is on, and "~/.cats/worktrees" names the home of the account
+	// that will own the checkout. Whoever runs git expands it (worktree.Do), and
+	// worktree.list reports back the value that machine resolved.
+	o.worktreeDir = cfg.Worktrees.Directory
 	// Outbound push bridge: an agent that blocks while nobody is watching still
 	// reaches a phone. Deliberately independent of every client-facing path — it
 	// is an ordinary outbound POST, so it keeps working when no client is

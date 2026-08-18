@@ -2215,25 +2215,34 @@ class WorktreeListParams {
 }
 
 /// WorktreeListResult is CmdResult.Data for worktree.list. WorktreeRoot is the
-/// configured (tilde-expanded) directory new checkouts land under, so the
-/// new-worktree dialog can preview the derived checkout path client-side.
+/// directory new checkouts land under, tilde-expanded by the machine that will
+/// hold them, so the new-worktree dialog can preview the derived checkout path
+/// client-side.
+///
+/// Host is the machine the whole answer describes — every path in it is a path
+/// on that filesystem. The dialogs name it when the session has more than one
+/// host, because "new worktree — cats" is otherwise the same sentence whichever
+/// machine's repository is about to grow a checkout.
 class WorktreeListResult {
   const WorktreeListResult({
     required this.repoRoot,
     required this.repoName,
     required this.worktreeRoot,
+    this.host = '',
     required this.worktrees,
   });
 
   final String repoRoot;
   final String repoName;
   final String worktreeRoot;
+  final String host;
   final List<WorktreeInfo> worktrees;
 
   factory WorktreeListResult.fromJson(Map<String, Object?> j) => WorktreeListResult(
         repoRoot: asString(j['repo_root']),
         repoName: asString(j['repo_name']),
         worktreeRoot: asString(j['worktree_root']),
+        host: asString(j['host']),
         worktrees: asList(j['worktrees'], (e) => WorktreeInfo.fromJson(asObj(e))),
       );
 
@@ -2241,6 +2250,7 @@ class WorktreeListResult {
         'repo_root': repoRoot,
         'repo_name': repoName,
         'worktree_root': worktreeRoot,
+        if (host.isNotEmpty) 'host': host,
         'worktrees': [for (final e in worktrees) e.toJson()],
       };
 }

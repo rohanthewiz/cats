@@ -159,8 +159,8 @@ func TestFlushForHostIsScoped(t *testing.T) {
 
 	c := &client{o: o, out: make(chan []byte, 8)}
 	o.conns[c] = struct{}{}
-	o.pendingReqs[reqKey{localPane, reqText}] = []*pending{pend(o, c, "local-req")}
-	o.pendingReqs[reqKey{remotePane, reqText}] = []*pending{pend(o, c, "remote-req")}
+	o.pendingReqs[paneKey(localPane, reqText)] = []*pending{pend(o, c, "local-req")}
+	o.pendingReqs[paneKey(remotePane, reqText)] = []*pending{pend(o, c, "remote-req")}
 
 	localWaiter, remoteWaiter := &recWaiter{}, &recWaiter{}
 	o.waiters[localPane] = []*waiter{{resp: localWaiter, match: matcher(t, "x")}}
@@ -169,10 +169,10 @@ func TestFlushForHostIsScoped(t *testing.T) {
 	o.flushPendingFor(testRemoteHost, "cathost connection lost")
 	o.flushWaitersFor(testRemoteHost, "cathost connection lost")
 
-	if _, ok := o.pendingReqs[reqKey{localPane, reqText}]; !ok {
+	if _, ok := o.pendingReqs[paneKey(localPane, reqText)]; !ok {
 		t.Fatal("the local host's request was flushed by the remote host's disconnect")
 	}
-	if _, ok := o.pendingReqs[reqKey{remotePane, reqText}]; ok {
+	if _, ok := o.pendingReqs[paneKey(remotePane, reqText)]; ok {
 		t.Fatal("the remote host's request survived its own disconnect")
 	}
 	if r := recvResult(t, c); r.ID != "remote-req" || r.Ok {

@@ -165,7 +165,7 @@ func (o *orch) captureHistory(final bool) int {
 			continue
 		}
 		rt.histDirty = false
-		o.registerPending(histResponder{o: o, pane: pid, final: final}, reqKey{pid, reqText})
+		o.registerPending(histResponder{o: o, pane: pid, final: final}, paneKey(pid, reqText))
 		d.send(orchestration.NewRequestText(pid, uint8(terminal.TextRecent), o.histLines, true, false))
 		n++
 	}

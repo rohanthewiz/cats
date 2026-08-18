@@ -82,6 +82,7 @@ without racing the daemon's own post-hello replay. Unknown pane ids are ignored.
 | `ping` | `id` | round-trip probe; answered with `pong` carrying the same `id`. Sent only to a daemon advertising the `ping` capability |
 | `request_host_stats` | `interval_ms` | subscribe to the daemon's readings of its own machine, one `host_stats` per interval; `0` cancels. Capability: `host_stats` |
 | `request_list_dir` | `pane_id`, `dir`, `base`, `recents`, `live` | list a directory **on the daemon's filesystem**; answered with `dir_listing`. Capability: `list_dir` |
+| `request_worktree` | `id`, `req` (`op`, `cwd`, `path`, `branch`, `root`, `force`) | run one git-worktree operation **on the daemon's machine**; answered with `worktree_result` carrying the same `id`. Capability: `worktree` |
 | `hook_reply` | `id`, `payload` | the answer to a `hook_report`, written back to the waiting hook client verbatim |
 | `control_reply` | `id`, `payload` | bytes from the orchestrator's control server, written to the relayed client verbatim |
 | `shutdown` | — | ask a persistent daemon to exit and tear down all panes |
@@ -105,6 +106,7 @@ without racing the daemon's own post-hello replay. Unknown pane ids are ignored.
 | `pong` | `id` | reply to `ping`, echoing its `id`. The only event with no pane |
 | `host_stats` | `rows` | one reading of the daemon's machine — memory, CPU, disk — display-ready. Only while a subscription is live |
 | `dir_listing` | `pane_id`, `listing` | reply to `request_list_dir`, one per request. A path that does not resolve is `exists:false` with a reason, not an error event |
+| `worktree_result` | `id`, `result` | reply to `request_worktree`, matched by `id` rather than by order — git runs off the dispatch goroutine, so two operations finish in whichever order git finishes them. A git failure is `result.error` (with `result.dirty` for the escalation), not an error event |
 | `hook_report` | `id`, `payload` | one agent hook request that arrived on the daemon's own hook socket, forwarded **verbatim**. Capability: `hook_relay` |
 | `control_open` | `id` | a connection arrived on the daemon's control relay socket. Capability: `control_relay` |
 | `control_data` | `id`, `payload` | bytes from that connection, forwarded **verbatim** |
@@ -152,6 +154,7 @@ reads correctly as "the base protocol only".
 | `ping` | `ping` / `pong` | the roster's per-host round-trip figure, and liveness — see below |
 | `host_stats` | `request_host_stats` / `host_stats` | the sidebar's per-host meters — see below |
 | `list_dir` | `request_list_dir` / `dir_listing` | the start-path picker completing a path on another machine — see below |
+| `worktree` | `request_worktree` / `worktree_result` | the git-worktree dialogs acting on another machine's checkouts — see below |
 | `hook_relay` | `hook_report` / `hook_reply`, plus `welcome.hook_socket` | agent hook reports from panes on this machine — see below |
 | `control_relay` | `control_open` / `control_data` / `control_reply` / `control_close`, plus `welcome.control_socket` | the orchestrator's control API, for in-pane tooling on this machine — see below |
 
@@ -231,6 +234,40 @@ every pane arrives through.
 
 Both halves of `path.list` — local and remote — call the same
 `internal/pathpick` code. The only difference is which process runs it.
+
+### Git worktrees
+
+`request_worktree` is the same principle again, applied to a subprocess. git
+acts on a filesystem, so a checkout behind a pane on another machine can only be
+listed, created or removed by that machine — which is why the worktree commands
+were local-only until this capability existed, and why the fix was not "run git
+harder" but "ask the right box".
+
+The request carries a `worktree.OpRequest`: an `op` (`list`, `create`, `remove`,
+`stat`), the anchor `cwd`, an explicit `path`, the `branch` to create, the
+configured worktree `root`, and `force`. Both ends call the same
+`worktree.Do` with it, and paths travel **unexpanded** for the reason they do in
+a listing — `~/.cats/worktrees` names the home of the account the checkout will
+belong to, and the expanded value comes back in the result so a dialog can
+preview the real path.
+
+Two things differ from every other round trip in the seam:
+
+* **`id`, not order.** git runs off the dispatch goroutine — `git worktree add`
+  checks out a whole tree, and blocking the reader would freeze every terminal
+  on that machine for the duration — so two operations started in one order
+  finish in whichever order git finishes them. The reply echoes the request's
+  `id`, and the client matches on it.
+* **A failure is a result, not an event.** `result.error` carries git's stderr,
+  which is the text the dialog shows, and `result.dirty` marks the one refusal
+  that is an escalation rather than a fault: a checkout with uncommitted work,
+  which the front end re-offers as "delete anyway".
+
+`catway` sends this to *every* host including its own local one, so a worktree
+command is the same command everywhere. The only exception is a local cathost
+that cannot answer — an older build — where it runs `worktree.Do` in-process;
+for any other host there is nothing to fall back to, and the command is refused
+by name.
 
 ### Hook relay
 

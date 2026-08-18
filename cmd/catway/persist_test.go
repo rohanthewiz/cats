@@ -241,7 +241,7 @@ func TestFinalCaptureSweep(t *testing.T) {
 
 	// Deliver the reply the way the daemon dispatch would.
 	o.post(func() {
-		o.resolvePending(reqKey{pid, reqText}, browserproto.CaptureResult{Text: "FINAL\r\n"})
+		o.resolvePending(paneKey(pid, reqText), browserproto.CaptureResult{Text: "FINAL\r\n"})
 	})
 
 	select {

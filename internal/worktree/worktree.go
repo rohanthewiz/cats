@@ -5,6 +5,10 @@
 // Everything except the runners is deterministic and I/O-free; the runners are
 // thin exec wrappers whose errors carry git's stderr (the text the dialogs
 // surface). The orchestrator must call the runners off its loop goroutine.
+//
+// ops.go composes those pieces into the whole operations (Do), which is what
+// both catway and a remote cathost run — a worktree command has to execute on
+// the machine whose disk holds the checkout.
 package worktree
 
 import (
@@ -85,13 +89,25 @@ func ExpandTilde(path string) string {
 	return filepath.Join(home, path[2:])
 }
 
-// Entry is one checkout from `git worktree list --porcelain`.
+// Entry is one checkout from `git worktree list --porcelain`. It is a wire type
+// as well as a parse result — a worktree list taken on another machine crosses
+// the orchestration seam as these — hence the json tags.
 type Entry struct {
-	Path       string
-	Branch     string // "" when detached/bare
-	IsBare     bool
-	IsDetached bool
-	IsPrunable bool
+	Path       string `json:"path"`
+	Branch     string `json:"branch,omitempty"` // "" when detached/bare
+	IsBare     bool   `json:"bare,omitempty"`
+	IsDetached bool   `json:"detached,omitempty"`
+	IsPrunable bool   `json:"prunable,omitempty"`
+}
+
+// MainPath is the main checkout from a porcelain list (git lists it first); the
+// fallback covers a defensive empty list. It is what `git worktree remove` must
+// run from and what the default checkout path is named after.
+func MainPath(entries []Entry, fallback string) string {
+	if len(entries) > 0 {
+		return entries[0].Path
+	}
+	return fallback
 }
 
 // ParseWorktreeListPorcelain parses `git worktree list --porcelain` output.

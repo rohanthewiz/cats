@@ -5387,6 +5387,16 @@
     return "";
   }
 
+  // worktreeTitle names the dialog: the repository, and — only when the session
+  // has more than one host — the machine whose disk it is on. Every path in a
+  // worktree.list answer belongs to that machine, including the checkout path
+  // previewed below the branch field, so leaving the host out of a multi-host
+  // session would put a remote path under a title that reads as local.
+  function worktreeTitle(verb, info) {
+    const name = verb + " worktree — " + info.repo_name;
+    return multiHost() && info.host ? name + " @ " + hostLabel(info.host) : name;
+  }
+
   // withWorktreeList runs fn with the focused pane's worktree.list result,
   // toasting (not dialoging) when the pane isn't in a git repo.
   function withWorktreeList(fn) {
@@ -5400,7 +5410,7 @@
     withWorktreeList((info) => {
       openOverlay((ov) => {
         const m = document.createElement("div"); m.className = "modal";
-        const h = document.createElement("header"); h.textContent = "new worktree — " + info.repo_name; m.appendChild(h);
+        const h = document.createElement("header"); h.textContent = worktreeTitle("new", info); m.appendChild(h);
         const body = document.createElement("div"); body.className = "body";
         const input = document.createElement("input");
         input.type = "text"; input.spellcheck = false;
@@ -5496,7 +5506,7 @@
 
       openOverlay((ov) => {
         const m = document.createElement("div"); m.className = "modal pal";
-        const h = document.createElement("header"); h.textContent = "open worktree — " + info.repo_name; m.appendChild(h);
+        const h = document.createElement("header"); h.textContent = worktreeTitle("open", info); m.appendChild(h);
         const q = document.createElement("div"); q.className = "query";
         inputEl = document.createElement("input");
         inputEl.type = "text"; inputEl.placeholder = "filter by branch, path, or status"; inputEl.spellcheck = false;

@@ -903,7 +903,16 @@ func (d *daemon) dispatch(mt orchestration.MessageType, payload []byte) {
 		// Resolved through the same per-pane FIFO as read and capture: the
 		// listing carries no request id because it does not need one — a pane's
 		// picker asks one question at a time and this daemon answers in order.
-		o.post(func() { o.resolvePending(reqKey{ev.PaneID, reqListDir}, ev.Listing) })
+		o.post(func() { o.resolvePending(paneKey(ev.PaneID, reqListDir), ev.Listing) })
+	case orchestration.MsgWorktreeResult:
+		var ev orchestration.WorktreeResult
+		if err := json.Unmarshal(payload, &ev); err != nil {
+			return
+		}
+		// Matched on (host, id) rather than by order: this daemon runs its git
+		// off its dispatch goroutine, so a listing asked for second can answer
+		// first, and the id is what keeps the two answers apart.
+		o.post(func() { o.resolvePending(hostKey(d.id, ev.ID), ev.Result) })
 	case orchestration.MsgHostStats:
 		var ev orchestration.HostStats
 		if err := json.Unmarshal(payload, &ev); err != nil {
@@ -1039,7 +1048,7 @@ func (d *daemon) dispatch(mt orchestration.MessageType, payload []byte) {
 			return
 		}
 		o.post(func() {
-			o.resolvePending(reqKey{ev.PaneID, reqSelection}, browserproto.ReadResult{Text: ev.Text})
+			o.resolvePending(paneKey(ev.PaneID, reqSelection), browserproto.ReadResult{Text: ev.Text})
 		})
 
 	case orchestration.MsgPaneText:
@@ -1048,7 +1057,7 @@ func (d *daemon) dispatch(mt orchestration.MessageType, payload []byte) {
 			return
 		}
 		o.post(func() {
-			o.resolvePending(reqKey{ev.PaneID, reqText}, browserproto.CaptureResult{Text: ev.Text})
+			o.resolvePending(paneKey(ev.PaneID, reqText), browserproto.CaptureResult{Text: ev.Text})
 		})
 
 	case orchestration.MsgError:

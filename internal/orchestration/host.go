@@ -21,6 +21,7 @@ import (
 	"github.com/rohanthewiz/cats/internal/gitbranch"
 	"github.com/rohanthewiz/cats/internal/pathpick"
 	"github.com/rohanthewiz/cats/internal/terminal"
+	"github.com/rohanthewiz/cats/internal/worktree"
 )
 
 // DefaultFlushInterval coalesces dirty panes into frames at ~60 Hz, mirroring
@@ -579,6 +580,24 @@ func (h *Host) dispatch(typ MessageType, payload []byte) error {
 		// overtake each other because a pane's requests arrive one at a time.
 		go func() {
 			h.emit(NewDirListing(c.PaneID, pathpick.List(c.Dir, c.Base, c.Recents, c.Live)))
+		}()
+	case MsgRequestWorktree:
+		var c RequestWorktree
+		if err := json.Unmarshal(payload, &c); err != nil {
+			h.emit(NewError(0, "bad request_worktree: "+err.Error()))
+			return nil
+		}
+		// Off the dispatch goroutine, and for a stronger reason than the listing
+		// above: `git worktree add` checks out a whole tree, which on a large
+		// repository takes seconds to minutes. The connection's reader is what
+		// every keystroke in every pane arrives through, so running git here
+		// would freeze the machine's terminals for the duration.
+		//
+		// Which is also why the reply is id-matched rather than ordered: two
+		// operations started in one order finish in whichever order git
+		// finishes them.
+		go func() {
+			h.emit(NewWorktreeResult(c.ID, worktree.Do(c.Req)))
 		}()
 	case MsgRequestHostStats:
 		var c RequestHostStats

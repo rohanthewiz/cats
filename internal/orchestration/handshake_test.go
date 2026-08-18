@@ -7,11 +7,14 @@ import (
 	"encoding/json"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/rohanthewiz/cats/internal/worktree"
 )
 
 // The v3 handshake is the first one that judges its client: before a cathost
@@ -501,5 +504,103 @@ func TestListDirReportsAMissingPathWithoutFailing(t *testing.T) {
 	}
 	if dl.Listing.Exists || !strings.Contains(dl.Listing.Error, "no such directory") {
 		t.Fatalf("listing = %+v, want exists=false with a reason", dl.Listing)
+	}
+}
+
+// A worktree command is answered by the machine whose disk holds the checkout,
+// which is the whole reason this request exists: git is a subprocess acting on
+// a filesystem, so a checkout behind a pane on another box can only be listed,
+// created or removed by that box.
+func TestWorktreeAnswersFromTheDaemonsFilesystem(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	c := dialHost(t, nil)
+	w := handshake(t, c, NewHello())
+	if !slices.Contains(w.Features, FeatureWorktree) {
+		t.Fatalf("welcome features = %v, want %q among them", w.Features, FeatureWorktree)
+	}
+
+	repo := t.TempDir()
+	for _, args := range [][]string{{"init", "-q", "-b", "main"}, {"commit", "-q", "-m", "x", "--allow-empty"}} {
+		cmd := exec.Command("git", append([]string{"-C", repo}, args...)...)
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=cats", "GIT_AUTHOR_EMAIL=cats@example.invalid",
+			"GIT_COMMITTER_NAME=cats", "GIT_COMMITTER_EMAIL=cats@example.invalid")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+
+	root := filepath.Join(t.TempDir(), "wt")
+	if err := WriteMessage(c, NewRequestWorktree(7, worktree.OpRequest{
+		Op: worktree.OpCreate, Cwd: repo, Branch: "feature/x", Root: root,
+	})); err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	typ, payload := readEvent(t, c)
+	if typ != MsgWorktreeResult {
+		t.Fatalf("answer = %q, want worktree_result", typ)
+	}
+	var res WorktreeResult
+	if err := json.Unmarshal(payload, &res); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	// The id is the correlation handle, and unlike the pane-keyed round trips it
+	// cannot be replaced by order: git runs off the dispatch goroutine, so two
+	// operations finish in whichever order git finishes them.
+	if res.ID != 7 {
+		t.Fatalf("reply id = %d, want the request's 7", res.ID)
+	}
+	if res.Result.Error != "" {
+		t.Fatalf("create failed: %s", res.Result.Error)
+	}
+	// The checkout is on THIS machine's disk, under the root as this machine
+	// expanded it — the client never touched either path.
+	if !strings.HasPrefix(res.Result.Path, root) {
+		t.Fatalf("checkout path = %q, want it under the requested root %q", res.Result.Path, root)
+	}
+	if st, err := os.Stat(res.Result.Path); err != nil || !st.IsDir() {
+		t.Fatalf("no checkout at %q: %v", res.Result.Path, err)
+	}
+
+	// And a list, from the checkout the daemon just made, sees both.
+	if err := WriteMessage(c, NewRequestWorktree(8, worktree.OpRequest{Op: worktree.OpList, Cwd: res.Result.Path})); err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	typ, payload = readEvent(t, c)
+	if typ != MsgWorktreeResult {
+		t.Fatalf("answer = %q, want worktree_result", typ)
+	}
+	var listed WorktreeResult
+	if err := json.Unmarshal(payload, &listed); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if listed.ID != 8 || len(listed.Result.Entries) != 2 {
+		t.Fatalf("list = %+v, want two entries for request 8", listed.Result)
+	}
+}
+
+// A git failure comes back inside the result rather than as an error event: it
+// is the answer to that one command — the dialog shows the text, and a dirty
+// checkout is an escalation rather than a fault — where an error event is a
+// pane-level toast nobody asked for.
+func TestWorktreeFailureIsAResultNotAnEvent(t *testing.T) {
+	c := dialHost(t, nil)
+	handshake(t, c, NewHello())
+
+	if err := WriteMessage(c, NewRequestWorktree(3, worktree.OpRequest{Op: worktree.OpStat, Path: filepath.Join(t.TempDir(), "nope")})); err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	typ, payload := readEvent(t, c)
+	if typ != MsgWorktreeResult {
+		t.Fatalf("answer = %q, want worktree_result", typ)
+	}
+	var res WorktreeResult
+	if err := json.Unmarshal(payload, &res); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if res.ID != 3 || res.Result.IsDir || !strings.Contains(res.Result.Error, "not a directory") {
+		t.Fatalf("result = %+v, want a refusal carrying its reason", res.Result)
 	}
 }

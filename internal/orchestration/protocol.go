@@ -20,6 +20,7 @@ import (
 	"github.com/rohanthewiz/cats/internal/hostmeter"
 	"github.com/rohanthewiz/cats/internal/pathpick"
 	"github.com/rohanthewiz/cats/internal/terminal"
+	"github.com/rohanthewiz/cats/internal/worktree"
 )
 
 // ProtocolVersion is bumped on any breaking change to the message shapes. v2
@@ -84,30 +85,32 @@ const (
 	MsgPing             MessageType = "ping"
 	MsgRequestHostStats MessageType = "request_host_stats"
 	MsgRequestListDir   MessageType = "request_list_dir"
+	MsgRequestWorktree  MessageType = "request_worktree"
 	MsgHookReply        MessageType = "hook_reply"
 	MsgControlReply     MessageType = "control_reply"
 
 	// Go → Rust (events).
-	MsgWelcome       MessageType = "welcome"
-	MsgPaneFrame     MessageType = "pane_frame"
-	MsgPaneOutput    MessageType = "pane_output"
-	MsgPaneCwd       MessageType = "pane_cwd"
-	MsgPaneAgent     MessageType = "pane_agent"
-	MsgPaneClipboard MessageType = "pane_clipboard"
-	MsgPaneTitle     MessageType = "pane_title"
-	MsgPaneSelection MessageType = "pane_selection"
-	MsgPaneText      MessageType = "pane_text"
-	MsgPaneModes     MessageType = "pane_modes"
-	MsgPaneBranch    MessageType = "pane_branch"
-	MsgPaneExited    MessageType = "pane_exited"
-	MsgPong          MessageType = "pong"
-	MsgHostStats     MessageType = "host_stats"
-	MsgDirListing    MessageType = "dir_listing"
-	MsgHookReport    MessageType = "hook_report"
-	MsgControlOpen   MessageType = "control_open"
-	MsgControlData   MessageType = "control_data"
-	MsgControlClose  MessageType = "control_close"
-	MsgError         MessageType = "error"
+	MsgWelcome        MessageType = "welcome"
+	MsgPaneFrame      MessageType = "pane_frame"
+	MsgPaneOutput     MessageType = "pane_output"
+	MsgPaneCwd        MessageType = "pane_cwd"
+	MsgPaneAgent      MessageType = "pane_agent"
+	MsgPaneClipboard  MessageType = "pane_clipboard"
+	MsgPaneTitle      MessageType = "pane_title"
+	MsgPaneSelection  MessageType = "pane_selection"
+	MsgPaneText       MessageType = "pane_text"
+	MsgPaneModes      MessageType = "pane_modes"
+	MsgPaneBranch     MessageType = "pane_branch"
+	MsgPaneExited     MessageType = "pane_exited"
+	MsgPong           MessageType = "pong"
+	MsgHostStats      MessageType = "host_stats"
+	MsgDirListing     MessageType = "dir_listing"
+	MsgWorktreeResult MessageType = "worktree_result"
+	MsgHookReport     MessageType = "hook_report"
+	MsgControlOpen    MessageType = "control_open"
+	MsgControlData    MessageType = "control_data"
+	MsgControlClose   MessageType = "control_close"
+	MsgError          MessageType = "error"
 )
 
 // --- Capabilities ------------------------------------------------------------
@@ -142,6 +145,11 @@ const (
 	// complete a path for a pane on another machine, instead of being switched
 	// off with an apology.
 	FeatureListDir = "list_dir"
+	// FeatureWorktree: the daemon can run the git-worktree operations on its own
+	// machine (MsgRequestWorktree → MsgWorktreeResult). git is a subprocess acting
+	// on a filesystem, so a checkout behind a pane on another box can only be
+	// listed, created or removed by that box.
+	FeatureWorktree = "worktree"
 	// FeatureHookRelay: the daemon runs a hook-report socket on its own machine
 	// and relays what arrives there to the client (MsgHookReport →
 	// MsgHookReply). Advertised as a name AND as a path — Welcome.HookSocket is
@@ -393,6 +401,27 @@ func NewRequestListDir(paneID uint32, dir, base string, recents bool, live []str
 	return RequestListDir{Type: MsgRequestListDir, PaneID: paneID, Dir: dir, Base: base, Recents: recents, Live: live}
 }
 
+// RequestWorktree asks the daemon to run one git-worktree operation on its own
+// machine, and WorktreeResult answers it. The payload is the shared
+// worktree.OpRequest rather than a wire-local copy: both ends call worktree.Do
+// with it, and a request shape that only one end defined would be a second
+// implementation of the operation waiting to happen.
+//
+// ID is an explicit correlation handle, and unlike the pane-keyed round trips
+// it cannot be replaced by FIFO order. Those are answered from the daemon's
+// event queue in the order they arrive; a worktree op runs git off the dispatch
+// goroutine and takes as long as a checkout takes, so a list issued after an
+// add can — and should — come back first.
+type RequestWorktree struct {
+	Type MessageType        `json:"type"`
+	ID   uint64             `json:"id"`
+	Req  worktree.OpRequest `json:"req"`
+}
+
+func NewRequestWorktree(id uint64, req worktree.OpRequest) RequestWorktree {
+	return RequestWorktree{Type: MsgRequestWorktree, ID: id, Req: req}
+}
+
 // The control relay carries the client's control API to a socket on the
 // daemon's machine, so in-pane tooling there can drive the session.
 //
@@ -547,7 +576,7 @@ func NewWelcomeAt(version int, errMsg string, panes []uint32) Welcome {
 // Features is what this build can answer. Returned as a fresh slice so a caller
 // cannot alter the daemon's advertisement by holding onto it.
 func Features() []string {
-	return []string{FeaturePing, FeatureHostStats, FeatureListDir, FeatureHookRelay, FeatureControlRelay}
+	return []string{FeaturePing, FeatureHostStats, FeatureListDir, FeatureWorktree, FeatureHookRelay, FeatureControlRelay}
 }
 
 type PaneFrame struct {
@@ -776,6 +805,20 @@ type DirListing struct {
 
 func NewDirListing(paneID uint32, l pathpick.Listing) DirListing {
 	return DirListing{Type: MsgDirListing, PaneID: paneID, Listing: l}
+}
+
+// WorktreeResult answers a RequestWorktree, echoing its ID. A git failure is
+// carried inside the result rather than as an Error event: the text is the
+// answer to that one command (the dialog shows it, and a dirty checkout is an
+// escalation rather than a fault), where an Error event is a pane-level toast.
+type WorktreeResult struct {
+	Type   MessageType       `json:"type"`
+	ID     uint64            `json:"id"`
+	Result worktree.OpResult `json:"result"`
+}
+
+func NewWorktreeResult(id uint64, res worktree.OpResult) WorktreeResult {
+	return WorktreeResult{Type: MsgWorktreeResult, ID: id, Result: res}
 }
 
 // HookReport forwards one request that arrived on the daemon's hook socket,
