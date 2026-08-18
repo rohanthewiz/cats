@@ -147,6 +147,8 @@ abstract final class CmdName {
 
   static const String paneOpenFile = 'pane.open_file';
 
+  static const String ledgerList = 'ledger.list';
+
   static const String hostAttach = 'host.attach';
 
   static const String hostDetach = 'host.detach';
@@ -672,6 +674,126 @@ class HostListResult {
 
   Map<String, Object?> toJson() => {
         'hosts': [for (final e in hosts) e.toJson()],
+      };
+}
+
+/// LedgerEntry is one recorded command on the wire. At is RFC3339 with
+/// nanoseconds — a string rather than a number because two commands a millisecond
+/// apart must still sort, and because every consumer of this either renders it or
+/// compares it lexically.
+class LedgerEntry {
+  const LedgerEntry({
+    required this.at,
+    required this.host,
+    required this.pane,
+    this.handle = '',
+    required this.cmd,
+    this.cwd = '',
+    this.exit,
+    this.durationMs = 0,
+    this.origin = '',
+  });
+
+  final String at;
+  final String host;
+  final int pane;
+  final String handle;
+  final String cmd;
+  final String cwd;
+  final int? exit;
+  final int durationMs;
+
+  /// "human", or the agent's label
+  final String origin;
+
+  factory LedgerEntry.fromJson(Map<String, Object?> j) => LedgerEntry(
+        at: asString(j['at']),
+        host: asString(j['host']),
+        pane: asInt(j['pane']),
+        handle: asString(j['handle']),
+        cmd: asString(j['cmd']),
+        cwd: asString(j['cwd']),
+        exit: asIntOrNull(j['exit']),
+        durationMs: asInt(j['duration_ms']),
+        origin: asString(j['origin']),
+      );
+
+  Map<String, Object?> toJson() => {
+        'at': at,
+        'host': host,
+        'pane': pane,
+        if (handle.isNotEmpty) 'handle': handle,
+        'cmd': cmd,
+        if (cwd.isNotEmpty) 'cwd': cwd,
+        if (exit != null) 'exit': exit,
+        if (durationMs != 0) 'duration_ms': durationMs,
+        if (origin.isNotEmpty) 'origin': origin,
+      };
+}
+
+/// LedgerListParams filters the command history. Every field is optional and
+/// they AND together; the answer is newest first.
+///
+/// Contains is a plain case-insensitive substring rather than a regexp or a fuzzy
+/// match, and that is the same division path.list draws: the interesting matching
+/// belongs to the caller — a palette wants the recent list and will rank it
+/// itself — and a server-side ranking would have to be re-implemented in every
+/// front end that disagreed with it.
+class LedgerListParams {
+  const LedgerListParams({
+    this.host = '',
+    this.pane = 0,
+    this.cwd = '',
+    this.contains = '',
+    this.failed = false,
+    this.limit = 0,
+  });
+
+  final String host;
+  final int pane;
+  final String cwd;
+  final String contains;
+
+  /// Failed narrows to commands that are KNOWN to have failed. A command whose
+  /// shell reported no status is not one of them: "finished, status unknown" is
+  /// true, and counting it as a failure would make this filter lie in exactly
+  /// the case somebody is using it to investigate.
+  final bool failed;
+  final int limit;
+
+  factory LedgerListParams.fromJson(Map<String, Object?> j) => LedgerListParams(
+        host: asString(j['host']),
+        pane: asInt(j['pane']),
+        cwd: asString(j['cwd']),
+        contains: asString(j['contains']),
+        failed: asBool(j['failed']),
+        limit: asInt(j['limit']),
+      );
+
+  Map<String, Object?> toJson() => {
+        if (host.isNotEmpty) 'host': host,
+        if (pane != 0) 'pane': pane,
+        if (cwd.isNotEmpty) 'cwd': cwd,
+        if (contains.isNotEmpty) 'contains': contains,
+        if (failed) 'failed': failed,
+        if (limit != 0) 'limit': limit,
+      };
+}
+
+/// LedgerListResult is CmdResult.Data for ledger.list.
+class LedgerListResult {
+  const LedgerListResult({
+    required this.entries,
+  });
+
+  final List<LedgerEntry> entries;
+
+  factory LedgerListResult.fromJson(Map<String, Object?> j) => LedgerListResult(
+        entries: asList(j['entries'], (e) => LedgerEntry.fromJson(asObj(e))),
+      );
+
+  Map<String, Object?> toJson() => {
+        'entries': [for (final e in entries) e.toJson()],
       };
 }
 
@@ -2589,6 +2711,7 @@ const List<CommandSpec> kCommandSpecs = <CommandSpec>[
   CommandSpec('ui.notify', paramsRequired: true),
   CommandSpec('ui.action', paramsRequired: true),
   CommandSpec('pane.open_file', paramsRequired: true),
+  CommandSpec('ledger.list', replyRequired: true),
   CommandSpec('host.attach', paramsRequired: true),
   CommandSpec('host.detach', paramsRequired: true),
   CommandSpec('session.get'),
@@ -2894,6 +3017,15 @@ mixin CatsCommands implements CatsCommandTransport {
   /// `pane.open_file`
   Future<OpenFileResult> paneOpenFile(OpenFileParams params) async =>
       OpenFileResult.fromJson(asObj(await invoke(CmdName.paneOpenFile, params.toJson())));
+
+  /// `ledger.list`
+  ///
+  /// Params are optional: absent means the zero value, which is a real call.
+  ///
+  /// Reply-gated server-side: a `cmd` with no id is dropped without running.
+  /// This method always correlates, so it always runs.
+  Future<LedgerListResult> ledgerList([LedgerListParams? params]) async =>
+      LedgerListResult.fromJson(asObj(await invoke(CmdName.ledgerList, params?.toJson())));
 
   /// `host.attach`
   Future<HostListResult> hostAttach(HostAttachParams params) async =>

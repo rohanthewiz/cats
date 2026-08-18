@@ -360,6 +360,35 @@ delayed toast carrying the same choices would be noise in the one place the
 prompt is already reachable. A caller that wants buttons in the browser declares
 them on [`ui.notify`](../protocols/control-api.md#notifications).
 
+## Ledger
+
+The [command history](../protocols/control-api.md#command-history):
+
+```yaml
+ledger:
+  enabled: true
+  retention: 20000   # records; the oldest go first
+```
+
+| Key | Default | Notes |
+|-----|---------|-------|
+| `enabled` | `true` | whether cats asks its cathosts to report shell-integration marks |
+| `retention` | `20000` | records kept. A count, not an age |
+
+It costs nothing until a shell reports: scanning is a subscription each cathost
+only honours while asked, and a shell with no
+[integration installed](cli.md#the-shell-target) produces no marks at all. What
+the switch really controls is whether cats asks, and therefore whether any pane
+pays for the scan.
+
+Retention is a count rather than an age because it is the bound that keeps a
+query's backward scan honest — an age bound would let a quiet month and a
+frantic week differ by three orders of magnitude in how much a listing walks.
+
+The store lives beside the session state, in
+[`persistence.state_dir`](#persistence). A store that will not open is a logged
+line and a disabled feature, never a failure to start.
+
 ## Editor
 
 What cats knows about editors, which is deliberately almost nothing:

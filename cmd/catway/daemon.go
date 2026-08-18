@@ -120,6 +120,10 @@ type daemon struct {
 	// CPU and disk on (0 = nothing). Held across disconnects so the reconnect
 	// can re-establish it without asking the orchestrator what it wanted.
 	statsInterval time.Duration
+	// cmdMarks is whether this host has been asked to report shell-integration
+	// marks for the command ledger. Remembered across a disconnect for the same
+	// reason statsInterval is: the reconnect is what applies it.
+	cmdMarks bool
 	// hookSocket is the path, ON THIS HOST'S MACHINE, of the socket its cathost
 	// relays agent hook reports through (Welcome.HookSocket). It is what a pane
 	// created here gets as CATS_SOCKET_PATH.
@@ -684,6 +688,7 @@ func (d *daemon) run() {
 			// Its meters described a machine that has stopped answering; that is
 			// exactly the reading not to leave on screen as if it were current.
 			d.o.dropHostStats(d.id)
+			d.o.dropOpenCommands(d.id)
 			// And every relayed control caller on that machine is waiting for an
 			// answer that can no longer reach it.
 			d.o.dropHostRelays(d.id)
@@ -776,6 +781,7 @@ func (d *daemon) session(conn net.Conn) error {
 	// which is how a host that reconnects while no browser is open is told to
 	// stay quiet.
 	d.sendStatsRequest()
+	d.sendCommandMarksRequest()
 
 	for {
 		mt, payload, err := orchestration.ReadMessage(conn)
@@ -913,6 +919,18 @@ func (d *daemon) dispatch(mt orchestration.MessageType, payload []byte) {
 		// off its dispatch goroutine, so a listing asked for second can answer
 		// first, and the id is what keeps the two answers apart.
 		o.post(func() { o.resolvePending(hostKey(d.id, ev.ID), ev.Result) })
+	case orchestration.MsgCommandStart:
+		var ev orchestration.CommandStart
+		if err := json.Unmarshal(payload, &ev); err != nil {
+			return
+		}
+		o.post(func() { o.noteCommandStart(d.id, ev) })
+	case orchestration.MsgCommandEnd:
+		var ev orchestration.CommandEnd
+		if err := json.Unmarshal(payload, &ev); err != nil {
+			return
+		}
+		o.post(func() { o.noteCommandEnd(d.id, ev) })
 	case orchestration.MsgHostStats:
 		var ev orchestration.HostStats
 		if err := json.Unmarshal(payload, &ev); err != nil {

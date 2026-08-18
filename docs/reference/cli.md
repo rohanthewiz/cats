@@ -196,6 +196,18 @@ and an agent row inside it will not reveal its pane — revealing a pane *is* a
 switch, so the two refusals are the same one. Every deliberate route in still
 works: the row's context menu, the command palette, and the keyboard.
 
+Command history — one record per command, across every pane and host:
+
+```bash
+catctl history            # the last 100
+catctl history 20
+catctl ledger.list --params '{"contains":"go test","failed":true}'
+```
+
+It needs the shell integration below, and answers with the cwd, exit status,
+duration and whether a human or an agent ran it — see
+[the control API](../protocols/control-api.md#command-history).
+
 Editors:
 
 ```bash
@@ -366,6 +378,41 @@ catctl integration help
 
 Targets: `pi`, `omp`, `claude`, `codex`, `copilot`, `droid`, `kimi`, `opencode`,
 `kilo`, `hermes`, `qodercli`, `cursor`.
+
+#### The shell target
+
+```bash
+catctl integration install shell            # the shell behind $SHELL
+catctl integration install shell zsh        # ...or a named one
+catctl integration uninstall shell zsh
+```
+
+`shell` is the one target that is not an agent: it installs the OSC 133 marks a
+shell prints around its prompt and each command, which are what the
+[command history](../protocols/control-api.md#command-history) is built on.
+`bash`, `zsh` and `fish` are supported.
+
+It writes a script under `~/.config/cats/shell/` and **one guarded block** in
+your rc file:
+
+```sh
+# >>> cats shell integration >>>
+[ -f "$HOME/.config/cats/shell/cats.zsh" ] && . "$HOME/.config/cats/shell/cats.zsh"
+# <<< cats shell integration <<<
+```
+
+Nothing here ever edits a line it did not write. Reinstalling replaces the block
+*where it is* — if you put it before a prompt framework on purpose, it stays
+there — and an uninstall with no markers to find changes nothing rather than
+guessing. Updates rewrite only the script; the one line pointing at it is
+already correct.
+
+`zsh` honours `$ZDOTDIR`. `bash` writes to `~/.bashrc`, which is what a terminal
+starts even on macOS, where the conventional `~/.bash_profile` sources it.
+
+The marks are standard OSC 133, so any terminal that understands them (kitty,
+WezTerm, iTerm2, VS Code) benefits too, and one that does not skips them as
+unknown OSC strings. `integration status` lists the shells alongside the agents.
 
 ### `catctl plugin`
 

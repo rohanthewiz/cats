@@ -75,6 +75,7 @@ import (
 	"github.com/rohanthewiz/cats/internal/gwauth"
 	"github.com/rohanthewiz/cats/internal/gwtls"
 	"github.com/rohanthewiz/cats/internal/layout"
+	"github.com/rohanthewiz/cats/internal/ledger"
 	"github.com/rohanthewiz/cats/internal/persist"
 	"github.com/rohanthewiz/cats/internal/push"
 	"github.com/rohanthewiz/cats/internal/startdir"
@@ -229,6 +230,29 @@ func main() {
 				o.pushActionBase, notifyActionPath)
 		}
 	}
+	// The command ledger (ledger.go). Opened here rather than in newOrch because
+	// it needs the resolved state directory, which is a flag-and-config
+	// decision. A store that will not open is a logged line and a disabled
+	// feature, never a failure to start: a terminal that refuses to run because
+	// it could not open its history file would be the worse bug by far.
+	if cfg.Ledger.Enabled {
+		if dir := effPersist.StateDir; dir != "" || persist.DefaultDir() != "" {
+			if dir == "" {
+				dir = persist.DefaultDir()
+			}
+			if err := os.MkdirAll(dir, 0o700); err != nil {
+				log.Printf("catway: command ledger disabled (%v)", err)
+			} else if l, err := ledger.Open(filepath.Join(dir, "ledger.db"), cfg.Ledger.Retention); err != nil {
+				log.Printf("catway: command ledger disabled (%v)", err)
+			} else {
+				o.ledger = l
+				log.Printf("catway: command ledger at %s (%d records)",
+					filepath.Join(dir, "ledger.db"), l.Len())
+			}
+		}
+	}
+	o.syncCommandMarks()
+
 	initialPage := renderPage(indexHTML, cfg)
 	o.page.Store(&initialPage)
 	if cfgPath != "" {

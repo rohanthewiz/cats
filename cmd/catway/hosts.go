@@ -115,6 +115,7 @@ func (o *orch) applyHostRoster(configured []config.Host) error {
 			// session; leaving them in the sidebar would keep a subsection for a
 			// host with no row in the roster above it.
 			o.dropHostStats(id)
+			o.dropOpenCommands(id)
 		}
 		d.stop()
 	}
@@ -156,6 +157,10 @@ func (o *orch) applyHostRoster(configured []config.Host) error {
 		// call that does both plus the structural events and the save.
 		o.applyModel()
 	}
+	// A newly built daemon starts with no subscription state, so a host attached
+	// while the ledger is open has to be told. Its own post-welcome resend then
+	// applies whatever this stored.
+	o.syncCommandMarks()
 	o.broadcastHosts()
 	return nil
 }

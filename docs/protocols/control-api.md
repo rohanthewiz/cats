@@ -455,6 +455,7 @@ new panes rather than a location.
 | `plugin.list` / `plugin.uninstall` | — |
 | `path.list` | — |
 | `ui.notify` / `ui.action` | `notify <title...>` / — |
+| `ledger.list` | `history [count]` |
 | `pane.open_file` | `open <path> [line]` |
 | `agent.focus` | `agent <pane>` |
 | `usage.refresh` | — |
@@ -482,6 +483,46 @@ catway can no longer reach.
 
 Git work runs **off** the orchestrator loop at both ends, so a slow
 `git worktree add` never stalls input on either machine.
+
+### Command history
+
+`ledger.list` is one record per command a shell ran in any pane, on any host —
+newest first:
+
+```bash
+catctl history 20
+catctl ledger.list --params '{"contains":"go test","failed":true}'
+catctl ledger.list --params '{"host":"devbox","cwd":"/srv/app","limit":50}'
+```
+
+| Field | Meaning |
+|-------|---------|
+| `at` | when it started, RFC3339 with nanoseconds |
+| `host` / `pane` / `handle` | where. `handle` is the public label at the time, stored rather than resolved later so a closed pane is still nameable |
+| `cmd` / `cwd` | what ran, and the directory it started in |
+| `exit` | **absent** when the shell reported no status — deliberately distinct from `0` |
+| `duration_ms` | measured on the machine that ran it |
+| `origin` | `human`, or the label of the agent holding the pane when it started |
+
+**This is not your shell's history file.** Those record what was *typed*, per
+shell and per machine, with no cwd, no status, no duration and no pane — and an
+agent's commands are absent from them entirely, because an agent drives a PTY
+rather than typing into a shell that writes one. `origin` is the field that
+makes an agent's work reviewable.
+
+The filters AND together. `contains` is a plain case-insensitive substring
+rather than a regexp or a fuzzy match: the caller doing the interesting matching
+is a palette that wants the recent list and will rank it itself, which is the
+same division `path.list` draws. `failed` means *known* to have failed — a
+command whose shell reported no status is not counted, since that is exactly the
+case somebody is using the filter to investigate.
+
+It needs [shell integration](../reference/cli.md#verbs) installed
+(`catctl integration install shell`): the records come from the OSC 133 marks a
+shell prints around each command, which each cathost scans out of its own panes'
+output. A shell with no integration produces no records — and one that prints
+the marks but never the command line produces none either, since the field the
+history exists for would be missing.
 
 ### Opening a file in the editor
 

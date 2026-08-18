@@ -64,6 +64,8 @@ type pane struct {
 	// OSC passthrough scanners, owned exclusively by this pane's readPump goroutine
 	// (libghostty-vt does not surface OSC 7 cwd, so we scan the raw byte stream).
 	osc      oscScanner
+	osc133   osc133Scanner    // OSC 133/633 shell-integration marks, for the command ledger
+	cmds     cmdTracker       // pairs those marks into commands; readPump-owned like the scanners
 	osc52    osc52Scanner     // OSC 52 clipboard writes (also not surfaced by go-libghostty)
 	osc9     osc9Scanner      // OSC 9 progress, owned by readPump; latest published to progress
 	oscTitle oscTitleScanner  // OSC 0/2 window title, for the pane_title chrome event
@@ -148,6 +150,15 @@ func (p *pane) setCwdMeta(cwd string) (changed bool) {
 	}
 	p.lastPwd = cwd
 	return true
+}
+
+// cwdMeta reads the pane's last reported working directory. Held under metaMu
+// because readPump writes it and the ledger scanner (also readPump) and
+// resyncPane (dispatch goroutine) both read it.
+func (p *pane) cwdMeta() string {
+	p.metaMu.Lock()
+	defer p.metaMu.Unlock()
+	return p.lastPwd
 }
 
 // setTitleMeta records a new title and reports whether it changed.
@@ -261,6 +272,9 @@ type Host struct {
 	// carries the orchestrator's own control API, when the orchestrator has
 	// been told to trust this host with it.
 	controlFields
+	// The command-ledger subscription (ledger.go): off until a client asks for
+	// shell-integration marks, and off again when it stops.
+	ledgerFields
 }
 
 // NewHost creates an empty Host.
@@ -384,6 +398,7 @@ func (h *Host) Attach(ctx context.Context, conn io.ReadWriteCloser) error {
 	// running, a persistent daemon would go on sampling (and, on darwin, keep an
 	// iostat alive) for a client that has gone.
 	h.stopHostStats()
+	h.stopCommandMarks()
 	close(sessDone)
 	cancel()
 	wg.Wait()
@@ -599,6 +614,13 @@ func (h *Host) dispatch(typ MessageType, payload []byte) error {
 		go func() {
 			h.emit(NewWorktreeResult(c.ID, worktree.Do(c.Req)))
 		}()
+	case MsgRequestCommandMarks:
+		var c RequestCommandMarks
+		if err := json.Unmarshal(payload, &c); err != nil {
+			h.emit(NewError(0, "bad request_command_marks: "+err.Error()))
+			return nil
+		}
+		h.requestCommandMarks(c)
 	case MsgRequestHostStats:
 		var c RequestHostStats
 		if err := json.Unmarshal(payload, &c); err != nil {
@@ -871,6 +893,11 @@ func (h *Host) readPump(p *pane) {
 			}
 			if v, changed := p.xtmod.scan(buf[:n]); changed {
 				p.modifyOtherKeys.Store(v)
+			}
+			// Last, and only on a subscription: the ledger scan is the one pass
+			// here that most sessions never ask for.
+			if h.commandMarksOn() {
+				h.scanCommandMarks(p, buf[:n])
 			}
 		}
 		if err != nil { // EOF / EIO when the child exits or the PTY closes

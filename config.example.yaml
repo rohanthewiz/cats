@@ -173,3 +173,18 @@ editor:
   spawn: true                          # false makes pane.open_file a
                                        # "reveal it if the editor is open"
                                        # command instead.
+
+# --- Command ledger -----------------------------------------------------------
+# One durable record per command a shell ran in any pane, on any host: what ran,
+# where, how long it took, what it exited with, and whether a human or an agent
+# issued it (`catctl history`). It needs the shell integration installed —
+# `catctl integration install shell` — since the records come from the OSC 133
+# marks a shell prints around each command.
+ledger:
+  enabled: true                        # whether cats ASKS its cathosts to scan.
+                                       # A shell with no integration produces no
+                                       # marks, so this costs nothing until one
+                                       # is installed.
+  retention: 20000                     # records kept; the oldest go first. A
+                                       # count rather than an age, because it is
+                                       # what keeps a query's scan bounded.

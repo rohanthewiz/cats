@@ -160,6 +160,12 @@ type Backend interface {
 	EditorConfig() EditorInfo
 	OpenFileIn(pane uint32, p OpenFileParams)
 
+	// LedgerList answers a command-history query (ledger.list). On the Backend
+	// seam because the store is the backend's, and synchronous: the whole
+	// dataset is an in-memory B-tree, so the scan is a filtered walk rather than
+	// anything worth waiting on.
+	LedgerList(r Responder, p LedgerListParams)
+
 	// RefreshUsage asks the backend's rate-limit poller to take a reading now
 	// (usage.refresh). It returns immediately: the read is one network round
 	// trip on the poller's own goroutine, and its result reaches clients as a
@@ -975,6 +981,17 @@ func (d *Dispatcher) Dispatch(name string, dec ParamDecoder, r Responder) {
 			return
 		}
 		d.openFile(r, p)
+
+	case CmdLedgerList:
+		var p LedgerListParams
+		if err := decodeOptional(dec, &p); err != nil {
+			bad(err)
+			return
+		}
+		if !r.WantsReply() {
+			return // a listing yields only a result
+		}
+		d.backend.LedgerList(r, p)
 
 	case CmdUsageRefresh:
 		// Ack the ask, not the answer: the reading lands later, on every client

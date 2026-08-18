@@ -81,6 +81,7 @@ without racing the daemon's own post-hello replay. Unknown pane ids are ignored.
 | `set_output_stream` | `pane_id`, `enabled` | arms the raw-byte stream for `pane.wait_for_output` |
 | `ping` | `id` | round-trip probe; answered with `pong` carrying the same `id`. Sent only to a daemon advertising the `ping` capability |
 | `request_host_stats` | `interval_ms` | subscribe to the daemon's readings of its own machine, one `host_stats` per interval; `0` cancels. Capability: `host_stats` |
+| `request_command_marks` | `on` | turn shell-integration scanning on or off for this connection. Capability: `command_ledger` |
 | `request_list_dir` | `pane_id`, `dir`, `base`, `recents`, `live` | list a directory **on the daemon's filesystem**; answered with `dir_listing`. Capability: `list_dir` |
 | `request_worktree` | `id`, `req` (`op`, `cwd`, `path`, `branch`, `root`, `force`) | run one git-worktree operation **on the daemon's machine**; answered with `worktree_result` carrying the same `id`. Capability: `worktree` |
 | `hook_reply` | `id`, `payload` | the answer to a `hook_report`, written back to the waiting hook client verbatim |
@@ -105,6 +106,8 @@ without racing the daemon's own post-hello replay. Unknown pane ids are ignored.
 | `pane_exited` | `pane_id`, exit status | |
 | `pong` | `id` | reply to `ping`, echoing its `id`. The only event with no pane |
 | `host_stats` | `rows` | one reading of the daemon's machine — memory, CPU, disk — display-ready. Only while a subscription is live |
+| `command_start` | `pane_id`, `cmd`, `cwd` | a shell began running a command. Only while a `request_command_marks` subscription is on. Capability: `command_ledger` |
+| `command_end` | `pane_id`, `exit`, `duration_ms` | it finished. `exit` is **absent** when the shell reported none — deliberately distinct from `0` |
 | `dir_listing` | `pane_id`, `listing` | reply to `request_list_dir`, one per request. A path that does not resolve is `exists:false` with a reason, not an error event |
 | `worktree_result` | `id`, `result` | reply to `request_worktree`, matched by `id` rather than by order — git runs off the dispatch goroutine, so two operations finish in whichever order git finishes them. A git failure is `result.error` (with `result.dirty` for the escalation), not an error event |
 | `hook_report` | `id`, `payload` | one agent hook request that arrived on the daemon's own hook socket, forwarded **verbatim**. Capability: `hook_relay` |
@@ -157,6 +160,7 @@ reads correctly as "the base protocol only".
 | `worktree` | `request_worktree` / `worktree_result` | the git-worktree dialogs acting on another machine's checkouts — see below |
 | `hook_relay` | `hook_report` / `hook_reply`, plus `welcome.hook_socket` | agent hook reports from panes on this machine — see below |
 | `control_relay` | `control_open` / `control_data` / `control_reply` / `control_close`, plus `welcome.control_socket` | the orchestrator's control API, for in-pane tooling on this machine — see below |
+| `command_ledger` | `request_command_marks` / `command_start` / `command_end` | the command history, read out of this machine's panes — see below |
 
 ### Liveness
 
@@ -337,6 +341,44 @@ route. Enable it for a machine you trust as much as the one running `catway`.
 
 Disabling the orchestrator's own control socket disables the relay too — one
 switch, not two.
+
+### Command ledger
+
+A terminal receives an undifferentiated byte stream: it cannot see where one
+command ends and the next begins, because "the prompt" is just more output.
+[OSC 133](../reference/cli.md#the-shell-target) is the convention that fixes
+that — a shell brackets its prompt (`A`, `B`), the command's output (`C`) and
+its completion with a status (`D;N`) — and `OSC 633;E` carries the command line
+itself, which OSC 133 has no field for. The daemon scans for both and reports
+each command as a `command_start` / `command_end` pair.
+
+**The daemon does it because the marks are in that pane's byte stream**, and
+that stream is on that machine — the orchestrator seeing them at all would mean
+shipping every byte twice. Pairing them here also means the duration is measured
+where the command ran, on that machine's clock, rather than including a network
+hop whose size varies with the wifi. The `cwd` is captured at the moment the
+command starts, because by the time a record is written the pane may have `cd`'d
+twice.
+
+**It is a subscription, and off by default**, because scanning is a fifth state
+machine over every byte of every pane and produces nothing at all for a shell
+with no integration installed. Unlike the host-stats subscription it carries no
+interval — there is nothing to pace; marks arrive when somebody runs something —
+so it is a plain switch, and it belongs to the connection: a persistent daemon
+that kept scanning for an orchestrator that has gone would be doing bookkeeping
+for nobody. It is per connection rather than per pane because the client wants
+either all of it or none; a history with a hole in it where one pane was is
+worse than no history.
+
+**A command with no command line is not reported.** That one rule drops the
+empty Enter every shell emits a full `A`-`B`-`C`-`D` cycle for, guarantees a
+record always has the field a history exists for, and makes the feature's
+precondition one legible sentence — *your shell has to tell us what it ran* —
+rather than a history quietly full of blank rows.
+
+A command whose `D` never arrives (its shell was replaced, the integration is
+half-installed) is closed at the next prompt with **no** status: a record saying
+"finished, status unknown" is true, and one that stays running is not.
 
 ## Why the daemon resolves cwd and branch
 

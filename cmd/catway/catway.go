@@ -20,6 +20,7 @@ import (
 	"github.com/rohanthewiz/cats/internal/hostmeter"
 	"github.com/rohanthewiz/cats/internal/inputenc"
 	"github.com/rohanthewiz/cats/internal/layout"
+	"github.com/rohanthewiz/cats/internal/ledger"
 	"github.com/rohanthewiz/cats/internal/orchestration"
 	"github.com/rohanthewiz/cats/internal/persist"
 	"github.com/rohanthewiz/cats/internal/push"
@@ -190,6 +191,13 @@ type orch struct {
 	actionTokens   map[string]actionToken
 	pushActions    bool
 	pushActionBase string
+	// ledger is the command history (ledger.go), nil when disabled or when its
+	// store could not be opened. openCmds holds the commands that have started
+	// and not yet ended, keyed by pane — a pane runs one foreground command at a
+	// time, which is what makes the pairing a map rather than a queue.
+	ledger       *ledger.Ledger
+	openCmds     map[uint32]*openCmd
+	ledgerLogged map[string]bool
 	// structPanes (pane id → public handle) and structFocus snapshot the model's
 	// pane set and globally-focused pane at the last emit; emitStructuralEvents
 	// diffs against them after each mutation to derive pane_added / pane_removed /

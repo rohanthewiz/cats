@@ -129,6 +129,16 @@ const (
 	// commands are shaped the way they are.
 	CmdPaneOpenFile = "pane.open_file"
 
+	// ledger.list is the command history: one record per command a shell ran in
+	// any pane, on any host, with the cwd it ran in, what it exited with, how
+	// long it took, and whether a human or an agent issued it.
+	//
+	// It is not the shell's history file. Those record what was TYPED, per shell
+	// and per machine, with no cwd, no status, no duration and no pane — and an
+	// agent's commands are absent from them entirely, because an agent does not
+	// type into a shell that writes one.
+	CmdLedgerList = "ledger.list"
+
 	// Host commands (the HOSTS section's buttons + catctl): attach a cathost to
 	// the running session, or detach one. They are §7 commands rather than a
 	// config-file-only setting for the same reason config.set is one — a browser
@@ -290,6 +300,10 @@ var commandSpecs = []CommandSpec{
 	// start one), but is not reply-gated: "open this file" is worth doing for a
 	// caller that never listens, exactly like a split.
 	{Name: CmdPaneOpenFile, Params: OpenFileParams{}, Result: OpenFileResult{}, ParamsRequired: true},
+
+	// The command history is a query: no effects, and reply-gated because a
+	// listing with nowhere to go is not worth producing.
+	{Name: CmdLedgerList, Params: LedgerListParams{}, Result: LedgerListResult{}, ReplyRequired: true},
 
 	// Hosts. Both writers echo the new roster, so a client repaints from the
 	// reply instead of waiting for the hosts push that also follows.
@@ -1438,6 +1452,50 @@ func NotifyKindOK(kind string) bool {
 		return true
 	}
 	return false
+}
+
+// --- Command ledger params & results (§7, ledger.list) ------------------------
+
+// LedgerListParams filters the command history. Every field is optional and
+// they AND together; the answer is newest first.
+//
+// Contains is a plain case-insensitive substring rather than a regexp or a fuzzy
+// match, and that is the same division path.list draws: the interesting matching
+// belongs to the caller — a palette wants the recent list and will rank it
+// itself — and a server-side ranking would have to be re-implemented in every
+// front end that disagreed with it.
+type LedgerListParams struct {
+	Host     string `json:"host,omitempty"`
+	Pane     uint32 `json:"pane,omitempty"`
+	Cwd      string `json:"cwd,omitempty"`
+	Contains string `json:"contains,omitempty"`
+	// Failed narrows to commands that are KNOWN to have failed. A command whose
+	// shell reported no status is not one of them: "finished, status unknown" is
+	// true, and counting it as a failure would make this filter lie in exactly
+	// the case somebody is using it to investigate.
+	Failed bool `json:"failed,omitempty"`
+	Limit  int  `json:"limit,omitempty"`
+}
+
+// LedgerEntry is one recorded command on the wire. At is RFC3339 with
+// nanoseconds — a string rather than a number because two commands a millisecond
+// apart must still sort, and because every consumer of this either renders it or
+// compares it lexically.
+type LedgerEntry struct {
+	At         string `json:"at"`
+	Host       string `json:"host"`
+	Pane       uint32 `json:"pane"`
+	Handle     string `json:"handle,omitempty"`
+	Cmd        string `json:"cmd"`
+	Cwd        string `json:"cwd,omitempty"`
+	Exit       *int   `json:"exit,omitempty"`
+	DurationMs int64  `json:"duration_ms,omitempty"`
+	Origin     string `json:"origin,omitempty"` // "human", or the agent's label
+}
+
+// LedgerListResult is CmdResult.Data for ledger.list.
+type LedgerListResult struct {
+	Entries []LedgerEntry `json:"entries"`
 }
 
 // --- Editor params & results (§7, pane.open_file) ----------------------------

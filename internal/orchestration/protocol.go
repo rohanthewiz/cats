@@ -84,10 +84,15 @@ const (
 	MsgShutdown         MessageType = "shutdown"
 	MsgPing             MessageType = "ping"
 	MsgRequestHostStats MessageType = "request_host_stats"
-	MsgRequestListDir   MessageType = "request_list_dir"
-	MsgRequestWorktree  MessageType = "request_worktree"
-	MsgHookReply        MessageType = "hook_reply"
-	MsgControlReply     MessageType = "control_reply"
+	// MsgRequestCommandMarks turns the shell-integration scanner on or off for
+	// this connection. Off by default and per connection, not per pane: the
+	// scanner is one more pass over every pane's output bytes, and a session
+	// that keeps no ledger should not pay for it.
+	MsgRequestCommandMarks MessageType = "request_command_marks"
+	MsgRequestListDir      MessageType = "request_list_dir"
+	MsgRequestWorktree     MessageType = "request_worktree"
+	MsgHookReply           MessageType = "hook_reply"
+	MsgControlReply        MessageType = "control_reply"
 
 	// Go → Rust (events).
 	MsgWelcome        MessageType = "welcome"
@@ -104,6 +109,8 @@ const (
 	MsgPaneExited     MessageType = "pane_exited"
 	MsgPong           MessageType = "pong"
 	MsgHostStats      MessageType = "host_stats"
+	MsgCommandStart   MessageType = "command_start"
+	MsgCommandEnd     MessageType = "command_end"
 	MsgDirListing     MessageType = "dir_listing"
 	MsgWorktreeResult MessageType = "worktree_result"
 	MsgHookReport     MessageType = "hook_report"
@@ -167,6 +174,15 @@ const (
 	// offering the relay is exactly the one that should not get to make that
 	// call.
 	FeatureControlRelay = "control_relay"
+	// FeatureCommandLedger: the daemon can read OSC 133 shell-integration marks
+	// out of a pane's output and report each command as MsgCommandStart /
+	// MsgCommandEnd, on a subscription (MsgRequestCommandMarks).
+	//
+	// It is the daemon's job for the reason every other per-pane reading is: the
+	// marks are in that pane's byte stream, which is on that machine. It also
+	// means the DURATION is measured where the command ran, rather than
+	// including a network hop whose size varies with the wifi.
+	FeatureCommandLedger = "command_ledger"
 )
 
 // --- Commands (Rust → Go) ---------------------------------------------------
@@ -576,7 +592,8 @@ func NewWelcomeAt(version int, errMsg string, panes []uint32) Welcome {
 // Features is what this build can answer. Returned as a fresh slice so a caller
 // cannot alter the daemon's advertisement by holding onto it.
 func Features() []string {
-	return []string{FeaturePing, FeatureHostStats, FeatureListDir, FeatureWorktree, FeatureHookRelay, FeatureControlRelay}
+	return []string{FeaturePing, FeatureHostStats, FeatureListDir, FeatureWorktree,
+		FeatureHookRelay, FeatureControlRelay, FeatureCommandLedger}
 }
 
 type PaneFrame struct {
@@ -791,6 +808,59 @@ type HostStats struct {
 
 func NewHostStats(rows []hostmeter.Row) HostStats {
 	return HostStats{Type: MsgHostStats, Rows: rows}
+}
+
+// RequestCommandMarks turns shell-integration scanning on or off. Unlike the
+// host-stats subscription this carries no interval — there is nothing to pace,
+// the marks arrive when the user runs something — so it is a plain switch.
+//
+// A switch rather than always-on because scanning is not free: it is a fifth
+// state machine over every byte of every pane, and the answer is empty for any
+// shell without an integration installed. A switch rather than per-pane because
+// the client wants either all of it or none: a ledger with a hole in it where
+// one pane was is worse than no ledger.
+type RequestCommandMarks struct {
+	Type MessageType `json:"type"`
+	On   bool        `json:"on"`
+}
+
+func NewRequestCommandMarks(on bool) RequestCommandMarks {
+	return RequestCommandMarks{Type: MsgRequestCommandMarks, On: on}
+}
+
+// CommandStart reports that a pane's shell began running Cmd. Cwd is the pane's
+// working directory at that moment, resolved on the daemon's own filesystem —
+// the same OSC 7 the pane already reports, captured here so a ledger row does
+// not have to be joined against a cwd stream that moved on since.
+//
+// There is no id: a pane runs one foreground command at a time, so the pairing
+// is "this pane's open command", and the daemon has already done it (see
+// cmdTracker) rather than shipping raw marks for the client to re-derive.
+type CommandStart struct {
+	Type   MessageType `json:"type"`
+	PaneID uint32      `json:"pane_id"`
+	Cmd    string      `json:"cmd"`
+	Cwd    string      `json:"cwd,omitempty"`
+}
+
+func NewCommandStart(paneID uint32, cmd, cwd string) CommandStart {
+	return CommandStart{Type: MsgCommandStart, PaneID: paneID, Cmd: cmd, Cwd: cwd}
+}
+
+// CommandEnd closes the pane's open command. Exit is nil when the shell reported
+// no status — either it sent a bare OSC 133;D, or the command was abandoned and
+// the daemon closed it at the next prompt. Nil is deliberately distinct from 0:
+// "finished, status unknown" is true, and reporting success for it is not.
+type CommandEnd struct {
+	Type       MessageType `json:"type"`
+	PaneID     uint32      `json:"pane_id"`
+	Exit       *int        `json:"exit,omitempty"`
+	DurationMs int64       `json:"duration_ms"`
+}
+
+func NewCommandEnd(paneID uint32, exit *int, duration time.Duration) CommandEnd {
+	return CommandEnd{Type: MsgCommandEnd, PaneID: paneID, Exit: exit,
+		DurationMs: duration.Milliseconds()}
 }
 
 // DirListing answers a RequestListDir, echoing its PaneID so the client can

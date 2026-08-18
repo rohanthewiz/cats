@@ -124,6 +124,10 @@ var subcommands = []subcommand{
 	// trace and a grep hit all have in hand.
 	{"open", app.CmdPaneOpenFile, "open <path> [line]", nil, "open a file in the session's editor", buildOpenFile},
 
+	// Command history. Named `history` rather than `ledger` because that is the
+	// word for it; the §7 method keeps the storage-flavoured name.
+	{"history", app.CmdLedgerList, "history [count]", nil, "recent commands across every pane and host", buildHistory},
+
 	// Misc.
 	{"agent", app.CmdAgentFocus, "agent <pane>", []argKind{argPane}, "reveal an agent's pane", buildPane},
 	{"themes", app.CmdThemeList, "themes", nil, "list available UI themes", noParams},
@@ -272,6 +276,25 @@ func buildOpenFile(args []string) (json.RawMessage, error) {
 			return nil, fmt.Errorf("line %q is not a line number", args[1])
 		}
 		p.Line = line
+	}
+	return marshal(p)
+}
+
+// buildHistory: history [count]. Only the count is positional — filtering by
+// host, cwd, a substring or "only the ones that failed" goes through
+// `catctl ledger.list --params …`, which is the shape a script writes anyway.
+func buildHistory(args []string) (json.RawMessage, error) {
+	p := app.LedgerListParams{}
+	switch len(args) {
+	case 0:
+	case 1:
+		n, err := strconv.Atoi(args[0])
+		if err != nil || n <= 0 {
+			return nil, fmt.Errorf("count %q is not a positive number", args[0])
+		}
+		p.Limit = n
+	default:
+		return nil, usageErr{"history [count]"}
 	}
 	return marshal(p)
 }

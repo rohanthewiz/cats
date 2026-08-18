@@ -50,6 +50,7 @@ type Config struct {
 	Worktrees   Worktrees   `yaml:"worktrees"`
 	Push        Push        `yaml:"push"`
 	Editor      Editor      `yaml:"editor"`
+	Ledger      Ledger      `yaml:"ledger"`
 }
 
 // --- hosts --------------------------------------------------------------------
@@ -429,6 +430,23 @@ type Worktrees struct {
 	Directory string `yaml:"directory"`
 }
 
+// Ledger configures the command history — one durable record per command a
+// shell ran in any pane, on any host.
+//
+// It is on by default and costs nothing until a shell actually reports: the
+// scanning is a subscription each cathost only honours while asked, and a shell
+// with no OSC 133 integration installed produces no marks at all. What the
+// switch really controls is whether cats asks, and therefore whether any pane
+// pays for the scan.
+type Ledger struct {
+	Enabled bool `yaml:"enabled"`
+	// Retention is how many records are kept; the oldest go first. It is a count
+	// rather than an age because it is the bound that keeps a query's backward
+	// scan honest — an age bound would let a quiet month and a frantic week
+	// differ by three orders of magnitude in how much a listing walks.
+	Retention int `yaml:"retention,omitempty"`
+}
+
 // Editor is what cats knows about editors, which is deliberately almost
 // nothing: a set of agent labels that mark a pane as one, and an argv that
 // starts one. There is no editor integration behind this — pane.open_file emits
@@ -506,6 +524,7 @@ func Default() Config {
 		// was built for, and the list is the extension point for anything else
 		// that reports itself over the hook API.
 		Editor: Editor{Agents: []string{"ced"}, Command: []string{"ced"}, Spawn: true},
+		Ledger: Ledger{Enabled: true},
 		// Off by default, but with the shape filled in: a saved config then shows
 		// the operator the feature exists and what its knobs are, and the values
 		// round-trip equal to this default.

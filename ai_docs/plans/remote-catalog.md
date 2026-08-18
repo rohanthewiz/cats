@@ -285,14 +285,100 @@ Editor section), `docs/reference/cli.md` (`catctl open`), `config.example.yaml`.
 catgen-dart goldens regenerated (`OpenFileParams`/`OpenFileResult`, the new command);
 **cats-mobile has not been regenerated** — still owed from slice 1.
 
-### Phase 4 — shell integration + the command ledger
+### Phase 4 — shell integration + the command ledger — **DONE**
 
-`catctl integration install shell` (bash/zsh/fish) emitting OSC 133 A/B/C/D with `cmd`,
-`exit`, `duration`, plus OSC 7 which is already handled. cathost scans it
-(`osc133.go`), reports `command_start` / `command_end` behind a `command_ledger`
-capability; catway records `{host, pane, cwd, cmd, exit, duration, origin}` in bytdb.
-`origin` is human vs agent, from the pane's live hook/detection state at command start.
-`ledger.query` / `ledger.recent` §7 commands; `catctl history`.
+As built. Four pieces: a scanner in the daemon, a subscription on the seam, a store in
+catway, and an installer that puts the marks in a shell. The division of labour is the
+multi-host rule again — the daemon owns everything only that machine can answer (where the
+marks are in the byte stream, the cwd at that instant, how long it took on that clock) and
+catway owns everything only the SESSION can answer (which host, the public handle, and
+whether a human or an agent was driving).
+
+**The store is `btypedb`, not `bytdb`.** Asked and answered: the module cache holds two
+different products from the same author, and the ledger's shape is ordered range scans over
+a time-ordered key, which is the typed KV store's, not the relational engine's.
+
+Deltas from the plan above:
+
+* **A command with no command line is not recorded**, in the daemon, before it reaches the
+  seam. One rule, three jobs: it drops the empty Enter that every shell emits a full
+  A-B-C-D cycle for; it guarantees a row always has the field the ledger exists for; and it
+  makes the precondition one sentence rather than a history quietly full of blank rows.
+* **The command line rides `OSC 633;E`** — VSCode's spelling — because OSC 133 has no field
+  for it and that choice means an existing VSCode shell integration feeds the ledger with
+  nothing installed.
+* **`exit` is a pointer all the way through.** "Finished, status unknown" is true and
+  "succeeded" is not, and this is the field somebody filters *what failed* on. A command
+  whose `D` never arrives is closed at the next prompt with no status rather than left open
+  forever.
+* **Retention is a count, enforced on write**, which is what keeps a backward scan honest.
+  The alternative is a query that walks a million rows plus a scan budget that silently
+  truncates the answer — the same bug as no bound, but harder to see.
+* **The subscription is per connection, not per pane**, and off by default: a client wants
+  all of the history or none, and a hole where one pane was is worse than no history.
+* `internal/shellint` is a package of its own rather than an `integration.Target`. Those
+  wire an agent to a running server by editing that agent's config tree; this edits the
+  user's SHELL, in a file they wrote by hand, for three shells with three hook mechanisms.
+  They share a CLI verb and nothing else.
+* **Nothing in the installer edits a line it did not write.** One guarded block, replaced
+  *in place* on reinstall (a user who put ours before their prompt framework did it for a
+  reason), and an unterminated marker is treated as "not found" rather than swallowing the
+  rest of the file. The indirection through a sourced script means an update never touches
+  the rc file at all.
+
+Three things the **live** run found, none of which the unit tests could:
+
+* **`__cats_precmd` was the first row in the ledger.** bash's DEBUG trap fires before every
+  simple command *including each one inside `PROMPT_COMMAND`*, so the prompt hook traced
+  itself. Fixed by arming the trap only from `precmd` (never at source time), putting
+  `precmd` LAST in `PROMPT_COMMAND` so a prompt framework's own work is never traced, and
+  ignoring `__cats_*` by name.
+* **`cd /tmp; ls x` was recorded twice, at two different directories.** The first draft
+  disarmed the trap from inside its own handler, which does not hold: it is armed again by
+  the time the second command in a list runs. A flag cleared at the next prompt does hold.
+* **`$BASH_COMMAND` is the first SIMPLE command, not the line.** `make && ./run` was
+  recorded as `make`. The line is now read back out of `history 1` with parameter expansion
+  (no fork per prompt), falling back to `$BASH_COMMAND` when history is off.
+
+A fourth thing the live run *appeared* to find and did not: every record showed
+`cwd=/tmp`, which looked like the cwd being captured at the end. It was a persistent
+cathost — the same PTY, already `cd`'d, surviving the catway restart. Re-run cleanly, a
+`cd /var; echo` records `/tmp` and the next command records `/var`, which is exactly right.
+
+Tests added: `internal/orchestration/osc133_test.go` (the marks out of a mixed stream, split
+one byte at a time, both terminators, five things that must NOT parse, the exit-code table,
+VSCode's escaping, the buffer bound, and the four pairing rules), `internal/ledger`
+(newest-first, every filter, unknown-exit-is-not-a-failure, retention trimming the right
+end, no key collision between two hosts in the same nanosecond, reopen, the nil no-op, and
+the default/clamped limits), `internal/shellint` (install/uninstall round trip per shell
+leaving the rc file byte-identical, idempotent and in-place reinstall, two ways an
+uninstall must not guess, the two half-installed states told apart, `$ZDOTDIR`, and every
+asset emitting all four marks with an interactive guard),
+`internal/orchestration/ledger_test.go` (the capability, silence without a subscription, a
+real shell's full cycle reported through a real daemon, the switch turning off, and a
+command with no text skipped), `cmd/catway/ledger_test.go` (the record's two halves,
+origin from the agent, origin captured at the START, an unpaired end ignored, in-flight
+commands dropped with their host, the subscription following the ledger and the
+capability, and the two refusals).
+
+Verified live (catway, a persistent cathost, a bash with the real integration installed
+into a throwaway `$HOME`): `catctl integration install shell bash` writes the script and one
+block, `integration status` lists `shell/bash: current (v1)` beside the agents;
+`echo one && echo two` is recorded whole, `cd /tmp; ls /definitely/not/here` once with
+`exit=1`, `sleep 1` with `duration_ms=1026`, an empty Enter not at all, and `exec bash`
+with no exit status (the abandoned-command rule); `cd /var; echo at-var` records `/tmp` and
+the next command records `/var`; the `failed`, `contains` (case-insensitively) and `cwd`
+filters each narrow correctly and an unknown host is refused by name; and
+`integration uninstall shell bash` leaves the rc file byte-identical to before.
+
+Docs updated: `docs/protocols/control-api.md` (a Command history section and the field
+table), `docs/protocols/orchestration-seam.md` (the capability, both messages, the
+subscription's shape and why the daemon does the scanning),
+`docs/reference/cli.md` (`catctl history` and a "shell target" section under
+`catctl integration`), `docs/reference/configuration.md` (a Ledger section),
+`config.example.yaml`.
+catgen-dart goldens regenerated (`LedgerListParams`/`LedgerEntry`/`LedgerListResult`);
+**cats-mobile has not been regenerated** — still owed from slice 1.
 
 ### Phase 5 — semantic scrollback blocks
 

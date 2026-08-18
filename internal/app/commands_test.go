@@ -35,6 +35,8 @@ type fakeBackend struct {
 	lastRead       Responder
 	lastNotify     UINotifyParams
 	editor         EditorInfo
+	lastLedger     LedgerListParams
+	ledgerEntries  []LedgerEntry
 	lastOpen       OpenFileParams
 	lastOpenPane   uint32
 	lastCapture    Responder
@@ -128,6 +130,12 @@ func (b *fakeBackend) UIAction(r Responder, p UIActionParams) {
 }
 
 func (b *fakeBackend) EditorConfig() EditorInfo { return b.editor }
+
+func (b *fakeBackend) LedgerList(r Responder, p LedgerListParams) {
+	b.rec("ledgerList:" + p.Host + ":" + p.Contains)
+	b.lastLedger = p
+	r.OK(LedgerListResult{Entries: b.ledgerEntries})
+}
 
 func (b *fakeBackend) OpenFileIn(pane uint32, p OpenFileParams) {
 	b.rec("openFileIn:" + strconv.FormatUint(uint64(pane), 10) + ":" + p.Path)
