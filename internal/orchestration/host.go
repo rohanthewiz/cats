@@ -521,6 +521,17 @@ func (h *Host) dispatch(typ MessageType, payload []byte) error {
 		if err := h.requestText(c); err != nil {
 			h.emit(NewError(c.PaneID, err.Error()))
 		}
+	case MsgPing:
+		var c Ping
+		if err := json.Unmarshal(payload, &c); err != nil {
+			h.emit(NewError(0, "bad ping: "+err.Error()))
+			return nil
+		}
+		// Queued like any other event rather than written straight back. That
+		// is the measurement the client is asking for: a pong that overtook the
+		// pane frames ahead of it would report a healthy link on a daemon whose
+		// output the user is watching arrive in slow motion.
+		h.emit(NewPong(c.ID))
 	default:
 		h.emit(NewError(0, "unknown message type: "+string(typ)))
 	}

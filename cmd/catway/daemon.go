@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math"
 	"net"
 	"os"
 	"strings"
@@ -88,6 +89,20 @@ type daemon struct {
 	// waiting points so a detach that lands mid-dial or mid-session ends the
 	// goroutine at the next boundary instead of one backoff later.
 	stopped bool
+	// features is what the connected cathost said it can answer beyond the base
+	// protocol (orchestration.Welcome.Features), reset on every disconnect. A
+	// request that is not in here is never sent: an older daemon answers an
+	// unknown message type with an error event, which would reach the user as a
+	// toast about a message they did not send.
+	features map[string]bool
+	// latency is the last round trip measured by the ping probe, 0 when unknown
+	// (never measured, not connected, or a daemon that cannot answer a ping).
+	// pingID/pingAt are the outstanding probe: one at a time, because the point
+	// is a current reading rather than a distribution, and a single outstanding
+	// request is also what makes a missed answer detectable.
+	latency time.Duration
+	pingID  uint64
+	pingAt  time.Time
 }
 
 // unixDialer builds the dial func for a unix-socket cathost — the only
@@ -267,6 +282,12 @@ func (d *daemon) setConn(c net.Conn) {
 	d.conn = c
 	if c == nil {
 		d.peerVersion = 0
+		// A latency reading belongs to the connection that produced it. Keeping
+		// the last one across a drop would put a confident "2 ms" beside a host
+		// that has been unreachable for an hour.
+		d.features = nil
+		d.latency = 0
+		d.pingAt = time.Time{}
 	} else {
 		d.lastErr = "" // a completed handshake retires whatever kept us out before
 	}
@@ -315,6 +336,8 @@ func (d *daemon) stop() {
 	conn := d.conn
 	d.conn = nil
 	d.peerVersion = 0
+	d.features = nil
+	d.latency = 0
 	d.mu.Unlock()
 	if conn != nil {
 		_ = conn.Close() // unblocks the pump's read; run() then sees stopped
@@ -333,6 +356,153 @@ func (d *daemon) setPeerVersion(v int) {
 	d.mu.Lock()
 	d.peerVersion = v
 	d.mu.Unlock()
+}
+
+// setFeatures records what the connected cathost advertised it can answer.
+func (d *daemon) setFeatures(list []string) {
+	set := make(map[string]bool, len(list))
+	for _, f := range list {
+		set[f] = true
+	}
+	d.mu.Lock()
+	d.features = set
+	d.mu.Unlock()
+}
+
+// supports reports whether the connected cathost advertised a capability. False
+// while disconnected, which is what every caller wants: a request cannot be
+// sent down a link that is not there either.
+func (d *daemon) supports(feature string) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.conn != nil && d.features[feature]
+}
+
+// latencyMs is the roster's round-trip figure in milliseconds, 0 for "unknown"
+// — never measured, not connected, or a daemon too old to answer a ping.
+//
+// Rounded to two decimals rather than to whole milliseconds because the local
+// host is the common case and a unix socket round trip is a fraction of one:
+// whole milliseconds would report every healthy local session as "0 ms", which
+// reads as broken instead of as instant.
+func (d *daemon) latencyMs() float64 {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.conn == nil || d.latency <= 0 {
+		return 0
+	}
+	return math.Round(float64(d.latency.Microseconds())/10) / 100
+}
+
+const (
+	// hostPingInterval paces the latency probe. The number it draws is a
+	// sidebar readout, not a monitoring feed, so this is about keeping it
+	// roughly current; the traffic is two ~30-byte frames per host per tick,
+	// which is why it does not follow the reader the way the usage poll does.
+	hostPingInterval = 20 * time.Second
+	// hostPingTimeout is how long an unanswered ping is tolerated before the
+	// connection is treated as dead and closed (the dial loop then reconnects).
+	//
+	// This is the half of the probe that earns its keep. A TCP connection to a
+	// machine that slept, lost its route, or was firewalled off stays writable
+	// and readable-with-nothing-on-it indefinitely: catway goes on reporting the
+	// host as connected, queues keystrokes into it, and waits forever for reads
+	// that will never be answered. A ping is the only traffic that is guaranteed
+	// to produce a reply, so it is the only thing that can notice.
+	//
+	// Three intervals: long enough that a daemon busy with a burst of output is
+	// not disconnected for being slow, short enough that a dead link is found
+	// before a user has typed a paragraph into it.
+	hostPingTimeout = 3 * hostPingInterval
+)
+
+// pingProbe measures this connection's round trip until it ends. Runs on its
+// own goroutine per session (started by session, ended by its conn closing),
+// and reaches the loop only to refresh the roster.
+//
+// It answers two questions with one message. The first is the roster's latency
+// figure. The second is whether the link is alive at all — see hostPingTimeout.
+func (d *daemon) pingProbe(conn net.Conn) {
+	t := time.NewTicker(hostPingInterval)
+	defer t.Stop()
+	// The first sample is taken immediately: a host that shows no latency until
+	// twenty seconds after it connected looks like a host that cannot be
+	// measured, and the roster is pushed on connect precisely then.
+	for {
+		if !d.sendPing(conn) {
+			return
+		}
+		select {
+		case <-t.C:
+		case <-d.quit:
+			return
+		}
+	}
+}
+
+// sendPing writes one probe, first failing the connection if the previous one
+// was never answered. Reports false when the probe loop should end — the
+// connection has moved on, or this one has just been declared dead.
+func (d *daemon) sendPing(conn net.Conn) bool {
+	d.mu.Lock()
+	if d.conn != conn { // reconnected (or stopped) underneath us: not our session
+		d.mu.Unlock()
+		return false
+	}
+	if !d.pingAt.IsZero() && time.Since(d.pingAt) > hostPingTimeout {
+		d.mu.Unlock()
+		log.Printf("catway: cathost %s answered no ping in %s — closing the connection", d.label, hostPingTimeout)
+		// Close rather than mark: the pump is blocked on a read of this socket,
+		// and closing is what unblocks it into the ordinary disconnect path —
+		// the pending flush, the toast and the redial all happen exactly as they
+		// do for a link that dropped, because as far as anything upstream is
+		// concerned that is what happened.
+		_ = conn.Close()
+		return false
+	}
+	d.pingID++
+	id := d.pingID
+	d.pingAt = time.Now()
+	d.mu.Unlock()
+	if err := orchestration.WriteMessage(conn, orchestration.NewPing(id)); err != nil {
+		return false // the pump's read is about to fail too; it owns the reconnect
+	}
+	return true
+}
+
+// notePong records the round trip for a pong, ignoring one that does not match
+// the outstanding probe (a late answer to a ping already given up on). Returns
+// true when the roster's displayed figure should be re-pushed.
+func (d *daemon) notePong(id uint64) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if id != d.pingID || d.pingAt.IsZero() {
+		return false
+	}
+	prev := d.latency
+	d.latency = time.Since(d.pingAt)
+	d.pingAt = time.Time{}
+	return latencyWorthPushing(prev, d.latency)
+}
+
+// latencyWorthPushing decides whether a new sample changes the roster enough to
+// re-broadcast it. Every host pushes the whole roster to every browser, so
+// pushing on every tick would redraw the sidebar three times a minute per host
+// to move a number by a tenth of a millisecond.
+//
+// The first reading always counts. After that a change has to be both
+// noticeable in absolute terms and a real proportion of what was there, which
+// is what keeps a jittery 40 ms link from pushing on every sample while still
+// reporting the moment it becomes a 400 ms one.
+func latencyWorthPushing(prev, next time.Duration) bool {
+	if prev <= 0 {
+		return next > 0
+	}
+	delta := next - prev
+	if delta < 0 {
+		delta = -delta
+	}
+	return delta > 2*time.Millisecond && delta*5 > prev
 }
 
 // resolvesBranch reports whether this host resolves its own panes' git branches
@@ -462,8 +632,15 @@ func (d *daemon) session(conn net.Conn) error {
 
 	d.setConn(conn)
 	d.setPeerVersion(w.ProtocolVersion)
+	d.setFeatures(w.Features)
 	d.o.post(func() { d.o.broadcastHosts() }) // the roster's dot goes green
 	d.reconcile(w.Panes)
+	// The probe is per-session and dies with the connection: it holds the conn
+	// it was started for and stops the moment d.conn is something else, so a
+	// reconnect never ends up with two.
+	if d.supports(orchestration.FeaturePing) {
+		go d.pingProbe(conn)
+	}
 
 	for {
 		mt, payload, err := orchestration.ReadMessage(conn)
@@ -540,6 +717,17 @@ func (d *daemon) reconcile(alivePanes []uint32) {
 func (d *daemon) dispatch(mt orchestration.MessageType, payload []byte) {
 	o := d.o
 	switch mt {
+	case orchestration.MsgPong:
+		// Timed off the pump goroutine, where the frames are read, so the figure
+		// includes whatever queue the events are actually coming through. The
+		// loop is reached only when the number moved enough to redraw.
+		var ev orchestration.Pong
+		if err := json.Unmarshal(payload, &ev); err != nil {
+			return
+		}
+		if d.notePong(ev.ID) {
+			o.post(func() { o.broadcastHosts() })
+		}
 	case orchestration.MsgPaneFrame:
 		var ev orchestration.PaneFrame
 		if err := json.Unmarshal(payload, &ev); err != nil || ev.Frame == nil {

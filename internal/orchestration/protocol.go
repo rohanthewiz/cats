@@ -78,6 +78,7 @@ const (
 	MsgRequestResync    MessageType = "request_resync"
 	MsgSetOutputStream  MessageType = "set_output_stream"
 	MsgShutdown         MessageType = "shutdown"
+	MsgPing             MessageType = "ping"
 
 	// Go → Rust (events).
 	MsgWelcome       MessageType = "welcome"
@@ -92,7 +93,32 @@ const (
 	MsgPaneModes     MessageType = "pane_modes"
 	MsgPaneBranch    MessageType = "pane_branch"
 	MsgPaneExited    MessageType = "pane_exited"
+	MsgPong          MessageType = "pong"
 	MsgError         MessageType = "error"
+)
+
+// --- Capabilities ------------------------------------------------------------
+//
+// Feature strings are how a client learns what a daemon can do beyond the
+// version it negotiated, and they exist because the version ladder cannot carry
+// an additive message safely in this direction.
+//
+// The problem is concrete: NegotiateVersion refuses a peer NEWER than this
+// build, so a catway that bumped ProtocolVersion to announce one new request
+// would be rejected outright by every already-deployed daemon one version
+// behind — the exact fleet the range was widened for. And a request a daemon
+// does not know is not silently ignored either: dispatch answers it with an
+// "unknown message type" error event, which surfaces as a toast in somebody's
+// browser.
+//
+// So a daemon lists what it can answer in its welcome, and a client sends a
+// request only when it appears there. An empty list (every daemon built before
+// this) means "the base protocol only", which is exactly right.
+const (
+	// FeaturePing: the daemon answers MsgPing with MsgPong. Carries the roster's
+	// per-host latency, and doubles as liveness — a TCP connection to a machine
+	// that slept stays "connected" until something is written to it.
+	FeaturePing = "ping"
 )
 
 // --- Commands (Rust → Go) ---------------------------------------------------
@@ -265,6 +291,21 @@ func NewSetOutputStream(id uint32, enabled bool) SetOutputStream {
 // orchestrator sends this on a *clean* quit so the daemon doesn't linger; a
 // crash or binary handoff instead just drops the connection (the daemon keeps
 // its panes alive for the next cats to reconnect and resync).
+// Ping asks the daemon for a pong carrying the same ID. The ID is the client's
+// to choose and means nothing to the daemon — it exists so a reply can be
+// matched to the request that caused it, which is what makes the round trip a
+// measurement rather than a guess.
+//
+// Answered on the daemon's ordinary event queue, deliberately: a pong that
+// jumped the queue would measure the network and not the thing the user feels,
+// which is how long a keystroke takes to come back as a frame.
+type Ping struct {
+	Type MessageType `json:"type"`
+	ID   uint64      `json:"id"`
+}
+
+func NewPing(id uint64) Ping { return Ping{Type: MsgPing, ID: id} }
+
 type Shutdown struct {
 	Type MessageType `json:"type"`
 }
@@ -284,6 +325,11 @@ type Welcome struct {
 	// re-creating them. The daemon replays each pane's current state (full frame +
 	// modes + cwd + title + agent) right after this welcome.
 	Panes []uint32 `json:"panes,omitempty"`
+	// Features names the optional requests this daemon can answer beyond the
+	// negotiated version's base set (see the Feature* constants). Absent from
+	// every daemon built before capabilities existed, which is why the client's
+	// rule is "send it only if it is listed" rather than "unless it is refused".
+	Features []string `json:"features,omitempty"`
 }
 
 func NewWelcome(errMsg string, panes []uint32) Welcome {
@@ -294,8 +340,22 @@ func NewWelcome(errMsg string, panes []uint32) Welcome {
 // the daemon answers a hello with, so an older orchestrator sees the version it
 // asked for rather than one it would refuse. A rejection carries this build's
 // own version instead, since there is no agreed one to report.
+//
+// The feature list is this build's own either way: it describes what this
+// process can answer, which does not shrink because the peer asked for an older
+// version. A client that does not understand the field ignores it.
 func NewWelcomeAt(version int, errMsg string, panes []uint32) Welcome {
-	return Welcome{Type: MsgWelcome, ProtocolVersion: version, Error: errMsg, Panes: panes}
+	w := Welcome{Type: MsgWelcome, ProtocolVersion: version, Error: errMsg, Panes: panes}
+	if errMsg == "" {
+		w.Features = Features()
+	}
+	return w
+}
+
+// Features is what this build can answer. Returned as a fresh slice so a caller
+// cannot alter the daemon's advertisement by holding onto it.
+func Features() []string {
+	return []string{FeaturePing}
 }
 
 type PaneFrame struct {
@@ -482,6 +542,15 @@ type PaneExited struct {
 func NewPaneExited(id uint32, code int) PaneExited {
 	return PaneExited{Type: MsgPaneExited, PaneID: id, ExitCode: code}
 }
+
+// Pong answers a Ping with the ID it carried. It is the only event the daemon
+// sends that has nothing to do with a pane.
+type Pong struct {
+	Type MessageType `json:"type"`
+	ID   uint64      `json:"id"`
+}
+
+func NewPong(id uint64) Pong { return Pong{Type: MsgPong, ID: id} }
 
 type Error struct {
 	Type    MessageType `json:"type"`

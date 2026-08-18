@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -279,4 +280,62 @@ func waitFor(t *testing.T, c net.Conn, want MessageType) []byte {
 	}
 	t.Fatalf("timed out waiting for %q", want)
 	return nil
+}
+
+// Capabilities: the welcome advertises what this daemon can answer beyond the
+// negotiated version's base set, and the one capability that exists today
+// actually works. Both halves matter — a feature list a client believes and a
+// daemon that then errors on the request is worse than no list at all.
+func TestWelcomeAdvertisesFeaturesAndAnswersPing(t *testing.T) {
+	c := dialHost(t, nil)
+	w := handshake(t, c, NewHello())
+	if w.Error != "" {
+		t.Fatalf("welcome carried an error: %q", w.Error)
+	}
+	if !slices.Contains(w.Features, FeaturePing) {
+		t.Fatalf("welcome features = %v, want %q among them", w.Features, FeaturePing)
+	}
+
+	if err := WriteMessage(c, NewPing(77)); err != nil {
+		t.Fatalf("send ping: %v", err)
+	}
+	typ, payload := readEvent(t, c)
+	if typ != MsgPong {
+		t.Fatalf("answer to a ping = %q, want pong", typ)
+	}
+	var p Pong
+	if err := json.Unmarshal(payload, &p); err != nil {
+		t.Fatalf("decode pong: %v", err)
+	}
+	// The id is echoed so a client can tell this answer from a late one to a
+	// probe it already gave up on — the difference between a measurement and a
+	// number.
+	if p.ID != 77 {
+		t.Fatalf("pong id = %d, want the ping's 77", p.ID)
+	}
+}
+
+// An older peer is still served the daemon's own capabilities: the feature list
+// says what this process can do, which does not shrink because the client asked
+// for an older version. A client that predates the field ignores it.
+func TestFeaturesAreAdvertisedToAnOlderPeerToo(t *testing.T) {
+	c := dialHost(t, nil)
+	w := handshake(t, c, Hello{Type: MsgHello, ProtocolVersion: MinProtocolVersion})
+	if !slices.Contains(w.Features, FeaturePing) {
+		t.Fatalf("welcome features = %v, want %q among them", w.Features, FeaturePing)
+	}
+}
+
+// A refused handshake advertises nothing. There is no session to use a
+// capability in, and listing one would invite a client to keep talking to a
+// connection that is already ending.
+func TestRejectedHandshakeAdvertisesNoFeatures(t *testing.T) {
+	c := dialHost(t, func(h *Host) { h.RequireToken = "secret" })
+	w := handshake(t, c, NewHello())
+	if w.Error == "" {
+		t.Fatal("a tokenless hello should have been refused")
+	}
+	if len(w.Features) != 0 {
+		t.Fatalf("rejection features = %v, want none", w.Features)
+	}
 }

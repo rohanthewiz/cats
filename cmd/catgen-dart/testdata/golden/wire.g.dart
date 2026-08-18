@@ -976,6 +976,7 @@ class HostItem {
     this.local = false,
     required this.panes,
     this.error = '',
+    this.latencyMs = 0,
   });
 
   final String id;
@@ -1005,6 +1006,13 @@ class HostItem {
   /// one is known ("dial: connection refused"). Empty while connected.
   final String error;
 
+  /// LatencyMs is the last round trip measured to this cathost, in fractional
+  /// milliseconds; omitted when unknown. It is the one number that tells a
+  /// slow session from a slow machine — the same keystroke feels the same
+  /// whether the box is loaded or three thousand miles away, and only this
+  /// separates them.
+  final double latencyMs;
+
   factory HostItem.fromJson(Map<String, Object?> j) => HostItem(
         id: asString(j['id']),
         label: asString(j['label']),
@@ -1014,6 +1022,7 @@ class HostItem {
         local: asBool(j['local']),
         panes: asInt(j['panes']),
         error: asString(j['error']),
+        latencyMs: asDouble(j['latency_ms']),
       );
 
   Map<String, Object?> toJson() => {
@@ -1025,6 +1034,7 @@ class HostItem {
         if (local) 'local': local,
         'panes': panes,
         if (error.isNotEmpty) 'error': error,
+        if (latencyMs != 0) 'latency_ms': latencyMs,
       };
 }
 

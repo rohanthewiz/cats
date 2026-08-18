@@ -380,10 +380,17 @@ session rather than only the ones on screen. Every field is omitted when empty.
 
 `host.list` is the exception that proves the rule: the cathost roster is a set of
 live connections, not domain state, so it is the backend that answers. Each entry
-carries `id`, `label`, `connected`, `addr_kind`, `is_default`, `panes`, and an
-`error` explaining a host that is down. A session with no `hosts:` block answers
-with the single synthesized `local` host — which is how a client distinguishes
-"one machine here" from "the remote one is unreachable".
+carries `id`, `label`, `connected`, `addr_kind`, `is_default`, `panes`, an
+`error` explaining a host that is down, and `latency_ms`. A session with no
+`hosts:` block answers with the single synthesized `local` host — which is how a
+client distinguishes "one machine here" from "the remote one is unreachable".
+
+`latency_ms` is the last round trip measured to that cathost (see the
+[orchestration seam](orchestration-seam.md#liveness)), omitted when unknown —
+never measured, not connected, or a daemon too old to answer a ping. It is
+fractional because a local unix socket lands well under a millisecond, and it is
+the one number that separates a slow *session* from a slow *machine*: the same
+keystroke feels the same whether the box is loaded or three thousand miles away.
 
 `host.attach` and `host.detach` are the writers, and they edit the RUNNING
 session: attach builds the daemon and starts dialing, detach stops it. Both also

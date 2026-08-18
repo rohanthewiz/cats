@@ -48,7 +48,7 @@ server assumes a default 120×32 area.
 | `welcome` | protocol version, plus an `error` string if the connection is being refused |
 | `layout` | **full replacement** of the viewport structure: workspaces (sidebar), the active workspace's tabs, the active tab's pane rects, and border handles. Computed rects only — the BSP tree never crosses the wire |
 | `agents` | the cross-session agent roster for the sidebar |
-| `hosts` | the cathost roster: one item per configured host with `id`, `label`, `connected`, `addr_kind`, `is_default`, `panes`, and an `error` explaining a host that is down. Sent on connect and re-sent whenever a host connects or drops. A single-item roster is the normal single-machine session, which is how a client knows to draw no host UI at all |
+| `hosts` | the cathost roster: one item per configured host with `id`, `label`, `connected`, `addr_kind`, `is_default`, `panes`, an `error` explaining a host that is down, and `latency_ms` (the last measured round trip, fractional, omitted when unknown). Sent on connect, whenever a host connects or drops, and when a host's latency moves enough to change what is drawn — not on every sample, since every host pushes the whole roster to every client. A single-item roster is the normal single-machine session, which is how a client knows to draw no host UI at all |
 | `pane_title` | OSC 0/2 title for a pane |
 | `pane_cwd` | working directory for a pane |
 | `pane_branch` | the git branch checked out in that working directory (`""` when the pane is not in a repository); sent separately from `pane_cwd` because a checkout moves the branch without moving the pane |

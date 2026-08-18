@@ -730,6 +730,7 @@ func (o *orch) Hosts() []app.HostInfo {
 			Local:     id == localHostID,
 			Panes:     counts[id],
 			Error:     lastErr,
+			LatencyMs: d.latencyMs(),
 		})
 	}
 	return out
@@ -746,7 +747,7 @@ func (o *orch) hostsMsg() browserproto.Hosts {
 		items = append(items, browserproto.HostItem{
 			ID: h.ID, Label: h.Label, Connected: h.Connected,
 			AddrKind: h.AddrKind, Default: h.Default, Local: h.Local,
-			Panes: h.Panes, Error: h.Error,
+			Panes: h.Panes, Error: h.Error, LatencyMs: h.LatencyMs,
 		})
 	}
 	return browserproto.NewHosts(items)

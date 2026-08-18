@@ -40,7 +40,7 @@ sequenceDiagram
   end
   GW->>TH: hello {protocol_version: 3, token?}
   alt version in range and token accepted
-    TH-->>GW: welcome {protocol_version: negotiated, panes: [ids]}
+    TH-->>GW: welcome {protocol_version: negotiated, panes: [ids], features: [...]}
   else refused
     TH-->>GW: welcome {error: reason}, then close
   end
@@ -79,13 +79,14 @@ without racing the daemon's own post-hello replay. Unknown pane ids are ignored.
 | `request_text` | `pane_id`, `scope`, `lines`, `ansi`, `unwrap` | the orchestrator holds an *unfed* local emulator, so it cannot read text itself; answered with `pane_text` |
 | `request_resync` | `pane_id` | replay one pane's full state |
 | `set_output_stream` | `pane_id`, `enabled` | arms the raw-byte stream for `pane.wait_for_output` |
+| `ping` | `id` | round-trip probe; answered with `pong` carrying the same `id`. Sent only to a daemon advertising the `ping` capability |
 | `shutdown` | — | ask a persistent daemon to exit and tear down all panes |
 
 ### Events — `cathost` → `catway`
 
 | Type | Payload | Notes |
 |------|---------|-------|
-| `welcome` | `protocol_version`, `panes` | the surviving pane ids — the input to reconciliation |
+| `welcome` | `protocol_version`, `panes`, `features` | the surviving pane ids — the input to reconciliation — and the optional requests this daemon can answer |
 | `pane_frame` | `Frame` (see below) | full or skip-flagged diff |
 | `pane_output` | `pane_id`, `data` (base64) | raw PTY bytes, only while streaming is enabled. **Not** browser-facing |
 | `pane_cwd` | `pane_id`, `cwd` | from OSC 7, or the process probe |
@@ -97,6 +98,7 @@ without racing the daemon's own post-hello replay. Unknown pane ids are ignored.
 | `pane_text` | `pane_id`, `text` | reply to `request_text`, one per request |
 | `pane_modes` | `pane_id`, DEC mode flags | mouse tracking, bracketed paste, focus reporting, application cursor, alt-scroll, sync output, kitty keyboard, `modifyOtherKeys` |
 | `pane_exited` | `pane_id`, exit status | |
+| `pong` | `id` | reply to `ping`, echoing its `id`. The only event with no pane |
 | `error` | code, message | |
 
 ## Versioning
@@ -116,6 +118,48 @@ moment a cathost could live on a machine that is upgraded on its own schedule.
   written *before* the connection closes. A bare disconnect is indistinguishable
   from a daemon that never started, which is not a diagnosis anyone should have
   to guess at.
+
+### Capabilities
+
+New *requests* are advertised rather than versioned. `welcome.features` lists
+what this daemon can answer beyond the negotiated version's base set, and the
+client sends such a request only when it appears there.
+
+This is not belt-and-braces on top of the version ladder — it is there because
+the ladder cannot carry a new request in this direction. `NegotiateVersion`
+refuses a peer *newer* than the build it runs in, so a `catway` that bumped
+`ProtocolVersion` to announce a new message would be rejected outright by every
+already-deployed daemon one version behind: exactly the fleet the version range
+was widened for. And an unknown request is not ignored the way an unknown field
+is — `dispatch` answers it with an `error` event, which surfaces as a toast in
+somebody's browser.
+
+A daemon built before capabilities existed sends no `features` at all, which
+reads correctly as "the base protocol only".
+
+| Feature | Adds | Used for |
+|---------|------|----------|
+| `ping` | `ping` / `pong` | the roster's per-host round-trip figure, and liveness — see below |
+
+### Liveness
+
+`catway` pings each capable cathost every 20 seconds and closes the connection
+when three intervals pass with no answer. The measurement is the visible half;
+the timeout is the load-bearing one.
+
+Nothing else in the seam can notice a link that has gone quiet. A TCP connection
+to a machine that slept, lost its route, or was firewalled off stays writable
+indefinitely — `catway` goes on painting the host green, queues keystrokes into
+it, and waits forever for reads that will never be answered. A `ping` is the only
+traffic guaranteed to produce a reply, so it is the only thing that can tell.
+When it times out the connection is simply **closed**, which drops it into the
+ordinary disconnect path: the pending requests fail, the toast goes out, the dial
+loop reconnects.
+
+The daemon answers a `ping` on its normal event queue rather than writing
+straight back. That is deliberate — a pong that overtook the pane frames ahead of
+it would report a healthy link on a daemon whose output the user is watching
+arrive in slow motion.
 
 ## Why the daemon resolves cwd and branch
 

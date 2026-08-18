@@ -577,6 +577,7 @@ class HostInfo {
     this.local = false,
     required this.panes,
     this.error = '',
+    this.latencyMs = 0,
   });
 
   final String id;
@@ -602,6 +603,16 @@ class HostInfo {
   final int panes;
   final String error;
 
+  /// LatencyMs is the last measured round trip to this cathost, in
+  /// milliseconds; omitted when unknown — never measured, not connected, or a
+  /// daemon too old to answer a ping (see orchestration.FeaturePing).
+  ///
+  /// Fractional on purpose. The local host is the common case and a unix-socket
+  /// round trip is a fraction of a millisecond, so whole milliseconds would
+  /// report every healthy session as "0" — a number that reads as broken rather
+  /// than as instant.
+  final double latencyMs;
+
   factory HostInfo.fromJson(Map<String, Object?> j) => HostInfo(
         id: asString(j['id']),
         label: asString(j['label']),
@@ -611,6 +622,7 @@ class HostInfo {
         local: asBool(j['local']),
         panes: asInt(j['panes']),
         error: asString(j['error']),
+        latencyMs: asDouble(j['latency_ms']),
       );
 
   Map<String, Object?> toJson() => {
@@ -622,6 +634,7 @@ class HostInfo {
         if (local) 'local': local,
         'panes': panes,
         if (error.isNotEmpty) 'error': error,
+        if (latencyMs != 0) 'latency_ms': latencyMs,
       };
 }
 

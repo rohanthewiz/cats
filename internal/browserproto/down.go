@@ -220,6 +220,12 @@ type HostItem struct {
 	// Error is the last transport-level reason this host is unreachable, when
 	// one is known ("dial: connection refused"). Empty while connected.
 	Error string `json:"error,omitempty"`
+	// LatencyMs is the last round trip measured to this cathost, in fractional
+	// milliseconds; omitted when unknown. It is the one number that tells a
+	// slow session from a slow machine — the same keystroke feels the same
+	// whether the box is loaded or three thousand miles away, and only this
+	// separates them.
+	LatencyMs float64 `json:"latency_ms,omitempty"`
 }
 
 func NewHosts(items []HostItem) Hosts { return Hosts{T: MsgHosts, Items: items} }

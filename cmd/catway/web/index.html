@@ -523,6 +523,14 @@
   #host-list .hmeta { margin-left:auto; flex:none; color:var(--muted);
     font-size:calc(10px * var(--sb-scale)); font-variant-numeric:tabular-nums; }
   #host-list li.down .hmeta { color:var(--err); }
+  /* Round-trip time to that cathost. It sits BEFORE the pane count (which keeps
+     margin-left:auto and so stays pinned to the right edge) because the pane
+     count is the stable number and latency is the moving one: a figure that
+     changes should not shift a figure that does not. Dimmer than .hmeta — it is
+     a diagnostic, read when something feels slow, not on every glance. */
+  #host-list .hlat { flex:none; margin-left:auto; color:var(--muted); opacity:.7;
+    font-size:calc(9px * var(--sb-scale)); font-variant-numeric:tabular-nums; }
+  #host-list .hlat + .hmeta { margin-left:0; }
   /* The same badge as the pane header's, on the workspace rows: a workspace's
      host is where its NEW panes land, which is worth seeing beside its name once
      the two can differ. Pinned before the agent rollup at the right edge. */
@@ -3701,6 +3709,18 @@
     }];
   }
 
+  // fmtLatency renders a round trip at the precision the number deserves. A
+  // local unix socket lands well under a millisecond, where the exact figure is
+  // noise and the fact that it is sub-millisecond is the whole answer; a link
+  // over 10 ms has nothing useful after the decimal point. The middle band keeps
+  // one digit, which is where a busy local daemon and a container on the same
+  // box actually differ.
+  function fmtLatency(ms) {
+    if (ms < 1) return "<1 ms";
+    if (ms < 10) return ms.toFixed(1) + " ms";
+    return Math.round(ms) + " ms";
+  }
+
   function renderHosts(items) {
     hostItems = items || [];
     hostSecEl.hidden = !multiHost();
@@ -3718,6 +3738,14 @@
         const d = document.createElement("span"); d.className = "hdef"; d.textContent = "default";
         li.appendChild(d);
       }
+      // Round trip to that cathost, when it could be measured. Only shown while
+      // connected: a stale number beside a red dot would claim a link that is
+      // not there.
+      if (h.connected && h.latency_ms) {
+        const lat = document.createElement("span"); lat.className = "hlat";
+        lat.textContent = fmtLatency(h.latency_ms);
+        li.appendChild(lat);
+      }
       // Connected: what it is carrying. Disconnected: that it isn't — its panes
       // are still real and still counted in the tooltip, they just aren't moving.
       const meta = document.createElement("span"); meta.className = "hmeta";
@@ -3725,6 +3753,7 @@
       li.appendChild(meta);
       li.title = h.id + " · " + (h.addr_kind || "?") +
         " · " + h.panes + (h.panes === 1 ? " pane" : " panes") +
+        (h.connected && h.latency_ms ? " · " + h.latency_ms + " ms round trip" : "") +
         (h.connected ? "" : (h.error ? " · " + h.error : " · not connected")) +
         (h.local ? "" : " · right-click to detach");
       li.addEventListener("contextmenu", (e) => {

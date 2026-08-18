@@ -964,6 +964,15 @@ type HostInfo struct {
 	Local bool   `json:"local,omitempty"`
 	Panes int    `json:"panes"`
 	Error string `json:"error,omitempty"`
+	// LatencyMs is the last measured round trip to this cathost, in
+	// milliseconds; omitted when unknown — never measured, not connected, or a
+	// daemon too old to answer a ping (see orchestration.FeaturePing).
+	//
+	// Fractional on purpose. The local host is the common case and a unix-socket
+	// round trip is a fraction of a millisecond, so whole milliseconds would
+	// report every healthy session as "0" — a number that reads as broken rather
+	// than as instant.
+	LatencyMs float64 `json:"latency_ms,omitempty"`
 }
 
 // HostListResult is CmdResult.Data for host.list.
