@@ -1,0 +1,282 @@
+//go:build ghostty
+
+package orchestration
+
+import (
+	"context"
+	"encoding/json"
+	"net"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+)
+
+// The v3 handshake is the first one that judges its client: before a cathost
+// could be reached over a port, the socket's file permissions were the whole
+// access-control story and the hello payload was ignored outright. These tests
+// hold the three answers a client can get — accepted, accepted at an older
+// version, refused with a reason — and the one property a refusal must have:
+// the client is told *why* before the connection goes, because a silent close
+// is indistinguishable from a daemon that never started.
+
+// dialHost starts a Host over a pipe and returns the client end. Unlike
+// startTestHost it performs no handshake, since the handshake is the subject.
+func dialHost(t *testing.T, configure func(*Host)) net.Conn {
+	t.Helper()
+	serverEnd, clientEnd := net.Pipe()
+
+	h := NewHost()
+	h.FlushInterval = 5 * time.Millisecond
+	if configure != nil {
+		configure(h)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	go h.Serve(ctx, serverEnd)
+	t.Cleanup(func() {
+		cancel()
+		clientEnd.Close()
+	})
+	_ = clientEnd.SetDeadline(time.Now().Add(15 * time.Second))
+	return clientEnd
+}
+
+// handshake sends one hello and returns the welcome it is answered with.
+func handshake(t *testing.T, c net.Conn, hello Hello) Welcome {
+	t.Helper()
+	if err := WriteMessage(c, hello); err != nil {
+		t.Fatalf("send hello: %v", err)
+	}
+	typ, payload := readEvent(t, c)
+	if typ != MsgWelcome {
+		t.Fatalf("first event = %q, want welcome", typ)
+	}
+	var w Welcome
+	if err := json.Unmarshal(payload, &w); err != nil {
+		t.Fatalf("decode welcome: %v", err)
+	}
+	return w
+}
+
+func TestHandshakeAcceptsCurrentVersion(t *testing.T) {
+	c := dialHost(t, nil)
+	w := handshake(t, c, NewHello())
+	if w.Error != "" {
+		t.Fatalf("welcome carried an error: %q", w.Error)
+	}
+	if w.ProtocolVersion != ProtocolVersion {
+		t.Fatalf("welcome version = %d, want %d", w.ProtocolVersion, ProtocolVersion)
+	}
+}
+
+// A v2 orchestrator — a catway that has not been upgraded, which over a network
+// is the normal state of affairs for a while — is served, and is answered with
+// the version it asked for so its own equality check passes.
+func TestHandshakeAcceptsOlderPeerAndEchoesItsVersion(t *testing.T) {
+	c := dialHost(t, nil)
+	w := handshake(t, c, Hello{Type: MsgHello, ProtocolVersion: MinProtocolVersion})
+	if w.Error != "" {
+		t.Fatalf("a v%d client should be served: %q", MinProtocolVersion, w.Error)
+	}
+	if w.ProtocolVersion != MinProtocolVersion {
+		t.Fatalf("welcome version = %d, want the negotiated %d", w.ProtocolVersion, MinProtocolVersion)
+	}
+	// Still a working session, not a courtesy welcome.
+	cp := NewCreatePane(1, 20, 4)
+	cp.Command = "/bin/sh"
+	cp.Args = []string{"-c", "printf OLDPEER"}
+	if err := WriteMessage(c, cp); err != nil {
+		t.Fatalf("create_pane: %v", err)
+	}
+	waitFor(t, c, MsgPaneExited)
+}
+
+// A version this build cannot serve, and a missing or wrong token, both end the
+// session — after a welcome that names the reason.
+func TestHandshakeRejections(t *testing.T) {
+	for name, tc := range map[string]struct {
+		configure func(*Host)
+		hello     Hello
+		want      string
+	}{
+		"version below the floor": {
+			hello: Hello{Type: MsgHello, ProtocolVersion: 1},
+			want:  "protocol version 1 unsupported",
+		},
+		"version from the future": {
+			hello: Hello{Type: MsgHello, ProtocolVersion: ProtocolVersion + 1},
+			want:  "unsupported",
+		},
+		"missing token": {
+			configure: func(h *Host) { h.RequireToken = "s3cret" },
+			hello:     NewHello(),
+			want:      "authentication failed",
+		},
+		"wrong token": {
+			configure: func(h *Host) { h.RequireToken = "s3cret" },
+			hello:     NewHelloWithToken("s3cret-but-not-quite"),
+			want:      "authentication failed",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			c := dialHost(t, tc.configure)
+			w := handshake(t, c, tc.hello)
+			if !strings.Contains(w.Error, tc.want) {
+				t.Fatalf("welcome error = %q, want it to mention %q", w.Error, tc.want)
+			}
+			if len(w.Panes) != 0 {
+				t.Fatalf("a refused client learned about panes: %v", w.Panes)
+			}
+			// The reason arrives *before* the hang-up: that ordering is the
+			// entire point of queueing the welcome ahead of the sentinel.
+			if _, _, err := ReadMessage(c); err == nil {
+				t.Fatal("connection stayed open after a refused handshake")
+			}
+		})
+	}
+}
+
+func TestHandshakeAcceptsCorrectToken(t *testing.T) {
+	c := dialHost(t, func(h *Host) { h.RequireToken = "s3cret" })
+	w := handshake(t, c, NewHelloWithToken("s3cret"))
+	if w.Error != "" {
+		t.Fatalf("welcome carried an error: %q", w.Error)
+	}
+}
+
+// A cwd chosen on the orchestrator's machine may simply not exist on this one —
+// the routine outcome of splitting a pane or restoring a session across hosts.
+// Before v3 that was a dead pane; now it is a live pane in $HOME plus an error
+// event saying where it actually landed.
+func TestCreatePaneFallsBackWhenCwdIsMissing(t *testing.T) {
+	c := startTestHost(t)
+
+	cp := NewCreatePane(11, 40, 5)
+	cp.Cwd = filepath.Join(t.TempDir(), "only-on-the-other-machine")
+	cp.Command = "/bin/sh"
+	cp.Args = []string{"-c", "pwd"}
+	if err := WriteMessage(c, cp); err != nil {
+		t.Fatalf("create_pane: %v", err)
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("no home directory to fall back to")
+	}
+	var sawCwd, sawNote bool
+	deadline := time.Now().Add(10 * time.Second)
+	for !(sawCwd && sawNote) && time.Now().Before(deadline) {
+		typ, payload := readEvent(t, c)
+		switch typ {
+		case MsgPaneCwd:
+			var ev PaneCwd
+			if err := json.Unmarshal(payload, &ev); err != nil {
+				t.Fatal(err)
+			}
+			if ev.Cwd != home {
+				t.Fatalf("pane spawned in %q, want the home fallback %q", ev.Cwd, home)
+			}
+			sawCwd = true
+		case MsgError:
+			var ev Error
+			if err := json.Unmarshal(payload, &ev); err != nil {
+				t.Fatal(err)
+			}
+			// Attributed to the pane, and it names both directories: a pane
+			// that silently started somewhere else is how the next command
+			// runs in the wrong tree.
+			if ev.PaneID != 11 || !strings.Contains(ev.Message, "not a directory on this host") {
+				t.Fatalf("error event = %+v", ev)
+			}
+			sawNote = true
+		case MsgPaneExited:
+			if !sawCwd || !sawNote {
+				t.Fatalf("pane exited before both the cwd and the note arrived (cwd=%v note=%v)", sawCwd, sawNote)
+			}
+		}
+	}
+	if !sawCwd || !sawNote {
+		t.Fatalf("missing events: cwd=%v note=%v", sawCwd, sawNote)
+	}
+}
+
+// A cwd that does exist is used verbatim and produces no note — the fallback
+// must not become a thing that fires on the ordinary path.
+func TestCreatePaneKeepsAnExistingCwd(t *testing.T) {
+	c := startTestHost(t)
+
+	dir := t.TempDir()
+	cp := NewCreatePane(12, 40, 5)
+	cp.Cwd = dir
+	cp.Command = "/bin/sh"
+	cp.Args = []string{"-c", "sleep 0.2"}
+	if err := WriteMessage(c, cp); err != nil {
+		t.Fatalf("create_pane: %v", err)
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		typ, payload := readEvent(t, c)
+		switch typ {
+		case MsgPaneCwd:
+			var ev PaneCwd
+			if err := json.Unmarshal(payload, &ev); err != nil {
+				t.Fatal(err)
+			}
+			if ev.Cwd != dir {
+				t.Fatalf("pane cwd = %q, want the requested %q", ev.Cwd, dir)
+			}
+		case MsgError:
+			t.Fatalf("an existing cwd produced an error event: %s", payload)
+		case MsgPaneExited:
+			return
+		}
+	}
+	t.Fatal("pane never exited")
+}
+
+// The branch is resolved by the daemon from v3 on, because the pane's cwd is a
+// path on the daemon's filesystem — for a pane on another machine that is the
+// only place the answer exists.
+func TestHostReportsPaneBranch(t *testing.T) {
+	c := startTestHost(t)
+
+	repo := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(repo, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, ".git", "HEAD"), []byte("ref: refs/heads/remote-dream\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cp := NewCreatePane(13, 40, 5)
+	cp.Cwd = repo
+	cp.Command = "/bin/sh"
+	cp.Args = []string{"-c", "sleep 2"}
+	if err := WriteMessage(c, cp); err != nil {
+		t.Fatalf("create_pane: %v", err)
+	}
+
+	payload := waitFor(t, c, MsgPaneBranch)
+	var ev PaneBranch
+	if err := json.Unmarshal(payload, &ev); err != nil {
+		t.Fatal(err)
+	}
+	if ev.PaneID != 13 || ev.Branch != "remote-dream" {
+		t.Fatalf("pane_branch = %+v, want pane 13 on remote-dream", ev)
+	}
+}
+
+// waitFor reads until an event of type want arrives and returns its payload.
+func waitFor(t *testing.T, c net.Conn, want MessageType) []byte {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		typ, payload := readEvent(t, c)
+		if typ == want {
+			return payload
+		}
+	}
+	t.Fatalf("timed out waiting for %q", want)
+	return nil
+}

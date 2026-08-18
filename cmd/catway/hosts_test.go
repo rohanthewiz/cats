@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -134,16 +135,43 @@ func TestNewOrchHostsBuildsRoster(t *testing.T) {
 	}
 }
 
-// A transport catway cannot dial yet fails at startup with the reason, rather
-// than becoming a host that retries forever and spawns nothing.
-func TestNewOrchHostsRejectsUnsupportedTransport(t *testing.T) {
+// The native transports build a real dialer now. A tls:// host is the shape
+// Phase 4 exists for — a remote cathost reached with no ssh forward — and it
+// has to be constructible from nothing but a config entry.
+func TestNewOrchHostsAcceptsNativeTransports(t *testing.T) {
 	dir := t.TempDir()
+	fp := strings.Repeat("ab", 32) // a hex SHA-256, as cathost prints it
 	hosts := config.EffectiveHosts(filepath.Join(dir, "local.sock"), []config.Host{
-		{ID: "devbox", Addr: "tls://devbox:8422"},
+		{ID: "devbox", Addr: "tls://devbox:8422", Fingerprint: fp},
+		{ID: "sandbox", Addr: "tcp://127.0.0.1:8422"},
 	})
-	_, err := newOrchHosts(hosts, dir)
-	if err == nil {
-		t.Fatal("a tls:// host should fail to build until the transport exists")
+	o, err := newOrchHosts(hosts, dir)
+	if err != nil {
+		t.Fatalf("newOrchHosts: %v", err)
+	}
+	if got := o.hosts["devbox"].kind; got != "tls" {
+		t.Fatalf("devbox transport = %q, want tls", got)
+	}
+	if got := o.hosts["sandbox"].kind; got != "tcp" {
+		t.Fatalf("sandbox transport = %q, want tcp", got)
+	}
+}
+
+// A host catway cannot safely dial fails at startup with the reason, rather
+// than becoming a row that retries forever and spawns nothing. Both refusals
+// are about a credential, not a syntax error: a cleartext link off this machine
+// carries every keystroke in the clear, and a fingerprint that cannot be a
+// SHA-256 would silently pin nothing.
+func TestNewOrchHostsRejectsUnsafeTransports(t *testing.T) {
+	dir := t.TempDir()
+	for name, h := range map[string]config.Host{
+		"cleartext off the loopback": {ID: "devbox", Addr: "tcp://devbox:8422"},
+		"unusable fingerprint":       {ID: "devbox", Addr: "tls://devbox:8422", Fingerprint: "not-a-hash"},
+	} {
+		hosts := config.EffectiveHosts(filepath.Join(dir, "local.sock"), []config.Host{h})
+		if _, err := newOrchHosts(hosts, dir); err == nil {
+			t.Errorf("%s: should have failed to build", name)
+		}
 	}
 }
 

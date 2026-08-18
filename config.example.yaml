@@ -44,17 +44,20 @@ server:
 #   unix://path       a socket on this machine — including one forwarded from a
 #                     remote box: `ssh -L /tmp/devbox.sock:/tmp/cats-cathost.sock
 #                     devbox` makes a real remote host with no extra setup
-#   tcp://host:port   cleartext (loopback binds only)      — not yet implemented
-#   tls://host:port   cathost's own remote transport       — not yet implemented
+#   tcp://host:port   cleartext — refused unless the target is loopback
+#   tls://host:port   cathost's own remote transport: the daemon runs with
+#                     `-listen tls://… -token-file …` and prints its certificate
+#                     fingerprint; pinning it is what makes self-signed safe
 #
 # hosts:
 #   - id: devbox                          # letters/digits/._- ; how panes name it
 #     label: "devbox (ssh)"               # display name; defaults to the id
 #     addr: "unix:///tmp/devbox-cathost.sock"
 #     # default: true                     # new panes land here instead of local
-#     # token_file: "~/.config/cats/devbox.token"   # for a cathost that requires
-#     # fingerprint: "AB:CD:…"            # a token / pins its TLS certificate
-#                                         # (both inert until tls:// lands)
+#   - id: box                             # the same machine, without the ssh
+#     addr: "tls://box.lan:8422"
+#     token_file: "~/.config/cats/box.token"   # matches the daemon's -token-file
+#     fingerprint: "dd7d9b31…"            # from cathost's startup log
 
 # Session persistence & restore: the workspace/tab/pane model survives a
 # catway restart, and scrollback seeds survive a cathost daemon loss.

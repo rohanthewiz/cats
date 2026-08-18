@@ -1,11 +1,16 @@
 //go:build ghostty
 
-// Command cathost is the Go terminal backend daemon: it listens on a Unix
-// socket and serves the orchestration protocol (internal/orchestration),
+// Command cathost is the Go terminal backend daemon: it listens for an
+// orchestrator and serves the orchestration protocol (internal/orchestration),
 // owning PTYs + VT emulation per pane. The catway (cmd/catway) connects to
 // it as the orchestrator (workspace/pane tree, layout, detection, session)
 // and drives panes through the seam. Run with -persistent so panes survive a
 // catway restart or upgrade.
+//
+// -listen chooses the transport: a unix socket (the default, and what -socket
+// still selects), or tcp://loopback / tls://host:port for a daemon a catway on
+// another machine attaches to directly. Both network transports require
+// -token-file; see listen.go for why.
 //
 // Build requires libghostty-vt on PKG_CONFIG_PATH and -tags ghostty;
 // see `make vt` / scripts/build-libghostty-vt.sh.
@@ -29,7 +34,16 @@ import (
 )
 
 func main() {
-	socket := flag.String("socket", "/tmp/cats-cathost.sock", "unix socket path to listen on")
+	socket := flag.String("socket", "/tmp/cats-cathost.sock",
+		"unix socket path to listen on (shorthand for -listen unix://<path>)")
+	listen := flag.String("listen", "",
+		"address to listen on: unix://path, tcp://host:port (loopback only) or tls://host:port; overrides -socket")
+	tokenFile := flag.String("token-file", "",
+		"file holding the bearer token a client's hello must present; required for tcp:// and tls://")
+	tlsDir := flag.String("tls-dir", "",
+		"directory holding (or receiving) the self-signed tls:// certificate; default is the user config dir")
+	tlsSAN := flag.String("tls-san", "",
+		"comma-separated extra names the generated certificate must cover (a DNS name or IP this host is reached by)")
 	exitOnDisconnect := flag.Bool("exit-on-disconnect", false,
 		"exit after the first client disconnects (managed mode: the orchestrator owns our lifecycle)")
 	persistent := flag.Bool("persistent", false,
@@ -52,30 +66,44 @@ func main() {
 		}
 	}
 
-	var err error
+	// -socket is the historical spelling and stays the default, so every script
+	// and launchd plist that predates remote hosts keeps working untouched;
+	// -listen is the same setting with a scheme in front of it.
+	addr := *listen
+	if addr == "" {
+		addr = "unix://" + *socket
+	}
+
+	var token string
+	if *tokenFile != "" {
+		var err error
+		if token, err = readToken(*tokenFile); err != nil {
+			fmt.Fprintln(os.Stderr, "cathost:", err)
+			os.Exit(1)
+		}
+	}
+
+	ln, desc, cleanup, err := openListener(addr, *tlsDir, *tlsSAN, token != "")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "cathost:", err)
+		os.Exit(1)
+	}
+	defer cleanup()
+
 	if *persistent {
-		err = runPersistent(*socket, *idleTimeout)
+		err = runPersistent(ln, desc, token, *idleTimeout)
 	} else {
-		err = run(*socket, *exitOnDisconnect)
+		err = run(ln, desc, token, *exitOnDisconnect)
 	}
 	if err != nil {
+		cleanup() // os.Exit skips the defer
 		fmt.Fprintln(os.Stderr, "cathost:", err)
 		os.Exit(1)
 	}
 }
 
-func run(socket string, exitOnDisconnect bool) error {
-	// Remove a stale socket from a previous run.
-	if err := os.Remove(socket); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("remove stale socket: %w", err)
-	}
-
-	ln, err := net.Listen("unix", socket)
-	if err != nil {
-		return fmt.Errorf("listen: %w", err)
-	}
+func run(ln net.Listener, desc, token string, exitOnDisconnect bool) error {
 	defer ln.Close()
-	defer os.Remove(socket)
 
 	// SIGHUP too: in managed mode the orchestrator is our parent, so its exit (or a
 	// closed controlling terminal) hangs us up — treat that as a graceful shutdown
@@ -88,7 +116,8 @@ func run(socket string, exitOnDisconnect bool) error {
 		ln.Close() // unblock Accept
 	}()
 
-	log.Printf("cathost listening on %s (protocol v%d)", socket, orchestration.ProtocolVersion)
+	log.Printf("cathost listening on %s (protocol v%d-v%d%s)", desc,
+		orchestration.MinProtocolVersion, orchestration.ProtocolVersion, authNote(token))
 
 	for {
 		conn, err := ln.Accept()
@@ -102,6 +131,7 @@ func run(socket string, exitOnDisconnect bool) error {
 		serve := func() {
 			defer conn.Close()
 			h := orchestration.NewHost()
+			h.RequireToken = token
 			if err := h.Serve(ctx, conn); err != nil {
 				log.Printf("session ended: %v", err)
 			} else {
@@ -132,18 +162,8 @@ func run(socket string, exitOnDisconnect bool) error {
 // client. A cats that restarts or hands off reconnects to this same daemon and
 // resyncs its surviving panes (the create_pane-less path). The daemon exits on a
 // clean-quit shutdown command, on the idle timeout, or on a signal.
-func runPersistent(socket string, idleTimeout time.Duration) error {
-	// Remove a stale socket from a previous run.
-	if err := os.Remove(socket); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("remove stale socket: %w", err)
-	}
-
-	ln, err := net.Listen("unix", socket)
-	if err != nil {
-		return fmt.Errorf("listen: %w", err)
-	}
+func runPersistent(ln net.Listener, desc, token string, idleTimeout time.Duration) error {
 	defer ln.Close()
-	defer os.Remove(socket)
 
 	// Persistent mode must outlive the orchestrator. When cats dies its controlling
 	// terminal closes, which SIGHUPs every process still in that session — including
@@ -158,6 +178,7 @@ func runPersistent(socket string, idleTimeout time.Duration) error {
 	h := orchestration.NewHost()
 	h.Persistent = true
 	h.IdleTimeout = idleTimeout
+	h.RequireToken = token
 	h.Start(ctx)
 	defer h.Stop()
 
@@ -172,7 +193,8 @@ func runPersistent(socket string, idleTimeout time.Duration) error {
 		ln.Close()
 	}()
 
-	log.Printf("cathost listening on %s (persistent, protocol v%d)", socket, orchestration.ProtocolVersion)
+	log.Printf("cathost listening on %s (persistent, protocol v%d-v%d%s)", desc,
+		orchestration.MinProtocolVersion, orchestration.ProtocolVersion, authNote(token))
 
 	for {
 		conn, err := ln.Accept()
@@ -198,4 +220,14 @@ func runPersistent(socket string, idleTimeout time.Duration) error {
 		}
 		conn.Close()
 	}
+}
+
+// authNote is the startup log's one word about access control. Saying it out
+// loud on every start is cheap insurance against the failure that matters: a
+// daemon that was meant to require a token, silently not requiring one.
+func authNote(token string) string {
+	if token == "" {
+		return ", no token"
+	}
+	return ", token required"
 }

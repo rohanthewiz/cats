@@ -102,8 +102,11 @@ hosts:
     label: "devbox (ssh)"                        # display name; defaults to the id
     addr: "unix:///tmp/devbox-cathost.sock"
     # default: true                              # new panes land here instead of local
-    # token_file: "~/.config/cats/devbox.token"  # inert until tls:// lands
-    # fingerprint: "AB:CD:…"
+
+  - id: box                                      # the native transport: no ssh
+    addr: "tls://box.lan:8422"
+    token_file: "~/.config/cats/box.token"       # must match the daemon's -token-file
+    fingerprint: "dd7d9b31…"                     # printed by cathost at startup
 ```
 
 | Key | Notes |
@@ -119,7 +122,9 @@ The `local` entry is **always synthesized** from `server.cathost_socket`, so thi
 list only ever names the extra machines. Listing an entry with `id: local`
 overrides the synthesized one (its address must stay `unix://`).
 
-Only `unix://` is dialable today, which is less of a limit than it sounds:
+### Reaching another machine
+
+Two ways, and the ssh one needs nothing from the daemon at all:
 
 ```sh
 ssh -N -L /tmp/devbox-cathost.sock:/tmp/cats-cathost.sock devbox
@@ -127,8 +132,23 @@ ssh -N -L /tmp/devbox-cathost.sock:/tmp/cats-cathost.sock devbox
 
 makes a remote machine's cathost a local socket, and a `unix://` host pointed at
 it is a genuine remote host — panes on it appear beside local ones in the same
-workspace. `tcp://` and `tls://` are accepted by the parser but refused at
-startup until the native transport ships.
+workspace.
+
+`tls://` is the native alternative, for a host nobody wants to keep an ssh
+session open for. The daemon runs with `-listen tls://… -token-file …` (see
+[cathost](cli.md#cathost)) and prints its certificate fingerprint; the catway
+presents the token in its handshake and pins that fingerprint. **Pinning
+replaces chain verification, it does not waive it** — a `tls://` host with no
+`fingerprint` falls back to ordinary CA + hostname validation, which is right
+only if you actually issued a real certificate for that name.
+
+`tcp://` is cleartext and is refused at both ends unless the target is a
+loopback address — it exists for a sandbox or a container sharing this machine's
+network namespace, not for a network.
+
+An address catway cannot safely dial (cleartext off the loopback, a fingerprint
+that is not a SHA-256) fails at **startup**, with the reason, rather than
+becoming a roster row that retries forever.
 
 Like `server.*`, this section is read once at startup: adding or removing a host
 needs a restart. Every pane records the host it ran on, so a restart re-adopts

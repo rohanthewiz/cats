@@ -25,7 +25,38 @@ import (
 // v2 orchestrator's waits — the handshake rejects the mismatch rather than
 // silently degrading (an old daemon would ignore set_output_stream and never
 // stream, so waits would miss all post-registration output).
-const ProtocolVersion = 2
+//
+// v3 is the remote-host version: an authenticating hello (Hello.Token), a cwd
+// fallback so a directory that exists only on the orchestrator's machine no
+// longer yields a dead pane, and host-side branch resolution (pane_branch) —
+// which is the only way a pane on another machine can carry a branch at all,
+// since its cwd names a directory on *that* filesystem.
+const ProtocolVersion = 3
+
+// MinProtocolVersion is the oldest peer version this build still talks to.
+//
+// Exact-equality handshakes were affordable while both ends shipped in the same
+// binary drop; they stop being affordable the moment a cathost lives on another
+// machine, where "upgrade both at once" means an ssh session per host. Every v3
+// addition is additive — a v2 peer ignores an unknown hello field and an unknown
+// event type — so the two versions genuinely interoperate, with the v3-only
+// behaviour (host-side branches) simply not happening.
+const MinProtocolVersion = 2
+
+// NegotiateVersion picks the version a session runs at: the newest both ends
+// speak, or 0 when the peer's version is outside the supported range (the
+// caller rejects the handshake).
+//
+// The daemon answers a hello with the *negotiated* version rather than its own,
+// so an older orchestrator — which demands exact equality, because that is what
+// every build before v3 did — still recognises a newer daemon's welcome. Without
+// that, shipping v3 would break every not-yet-upgraded catway on contact.
+func NegotiateVersion(peer int) int {
+	if peer < MinProtocolVersion || peer > ProtocolVersion {
+		return 0
+	}
+	return peer
+}
 
 // MaxFrameSize caps a single length-prefixed frame. A host frame is one pane
 // (smaller than a full composited UI); 8 MiB leaves headroom for large grids.
@@ -59,6 +90,7 @@ const (
 	MsgPaneSelection MessageType = "pane_selection"
 	MsgPaneText      MessageType = "pane_text"
 	MsgPaneModes     MessageType = "pane_modes"
+	MsgPaneBranch    MessageType = "pane_branch"
 	MsgPaneExited    MessageType = "pane_exited"
 	MsgError         MessageType = "error"
 )
@@ -68,9 +100,22 @@ const (
 type Hello struct {
 	Type            MessageType `json:"type"`
 	ProtocolVersion int         `json:"protocol_version"`
+	// Token authenticates the orchestrator to a cathost started with
+	// -token-file. Empty when the daemon requires none, which is every unix
+	// socket session: filesystem permissions on the socket are the auth there,
+	// and a token would add a secret to manage for no gain. A v2 daemon ignores
+	// this field, so sending it costs nothing.
+	Token string `json:"token,omitempty"`
 }
 
 func NewHello() Hello { return Hello{Type: MsgHello, ProtocolVersion: ProtocolVersion} }
+
+// NewHelloWithToken is NewHello for a daemon that requires a bearer token.
+func NewHelloWithToken(token string) Hello {
+	h := NewHello()
+	h.Token = token
+	return h
+}
 
 type CreatePane struct {
 	Type         MessageType       `json:"type"`
@@ -242,7 +287,15 @@ type Welcome struct {
 }
 
 func NewWelcome(errMsg string, panes []uint32) Welcome {
-	return Welcome{Type: MsgWelcome, ProtocolVersion: ProtocolVersion, Error: errMsg, Panes: panes}
+	return NewWelcomeAt(ProtocolVersion, errMsg, panes)
+}
+
+// NewWelcomeAt is NewWelcome reporting a specific (negotiated) version — what
+// the daemon answers a hello with, so an older orchestrator sees the version it
+// asked for rather than one it would refuse. A rejection carries this build's
+// own version instead, since there is no agreed one to report.
+func NewWelcomeAt(version int, errMsg string, panes []uint32) Welcome {
+	return Welcome{Type: MsgWelcome, ProtocolVersion: version, Error: errMsg, Panes: panes}
 }
 
 type PaneFrame struct {
@@ -336,6 +389,23 @@ type PaneTitle struct {
 
 func NewPaneTitle(id uint32, title string) PaneTitle {
 	return PaneTitle{Type: MsgPaneTitle, PaneID: id, Title: title}
+}
+
+// PaneBranch reports the git branch checked out in a pane's working directory
+// ("" when it is not in a repository, "@<sha>" while detached). The daemon owns
+// this because the pane's cwd is a path on the *daemon's* filesystem: resolving
+// it on the orchestrator's machine answers a question about a different
+// directory that merely shares a name — or, more often, about nothing at all.
+// A v2 daemon never sends it and the orchestrator keeps resolving locally,
+// which is correct there because a v2 daemon is always the local one.
+type PaneBranch struct {
+	Type   MessageType `json:"type"`
+	PaneID uint32      `json:"pane_id"`
+	Branch string      `json:"branch"`
+}
+
+func NewPaneBranch(id uint32, branch string) PaneBranch {
+	return PaneBranch{Type: MsgPaneBranch, PaneID: id, Branch: branch}
 }
 
 // PaneSelection is the reply to a RequestSelection: the plain text of the

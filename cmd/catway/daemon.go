@@ -3,11 +3,17 @@
 package main
 
 import (
+	"crypto/sha256"
+	"crypto/tls"
+	"crypto/x509"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
 	"net"
+	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -34,22 +40,29 @@ type daemon struct {
 	// id is the stable host id used across the model, the runtimes, and (later)
 	// the wire ("local" for the always-present default host). label is the
 	// human-facing name that appears in log lines and error toasts; kind names
-	// the transport ("unix" today, "tcp"/"tls" from Phase 4).
+	// the transport ("unix", "tcp" or "tls").
 	id    string
 	label string
 	kind  string
-	// socket is the unix path this host dials, kept for logging and for tests
-	// that build a daemon directly; dial is the transport-agnostic way to open
-	// a fresh connection, so adding tcp/tls means adding a dialer, not a branch
-	// in run().
+	// socket is the dial target (a unix path, or host:port for tcp/tls), kept
+	// for logging and for tests that build a daemon directly; dial is the
+	// transport-agnostic way to open a fresh connection, which is why adding
+	// tcp and tls meant adding two dialers and no branch in run().
 	socket string
 	dial   func() (net.Conn, error)
+	// token/tokenFile authenticate us to a cathost started with -token-file.
+	// The file is read at each handshake rather than at startup, so rotating a
+	// token takes effect on the next reconnect instead of on a catway restart —
+	// which matters because the reconnect is exactly what a rotation causes.
+	token     string
+	tokenFile string
 
 	mu sync.Mutex // serializes writes; guards conn, peerVersion and lastErr
-	// peerVersion is the protocol version the connected cathost reported in its
-	// welcome, 0 while disconnected. Nothing branches on it yet (the handshake
-	// still demands exact equality); it exists so the version-range negotiation
-	// of Phase 4 has somewhere to record the answer.
+	// peerVersion is the negotiated protocol version this cathost's welcome
+	// agreed to, 0 while disconnected. It is what decides who resolves a pane's
+	// git branch: a v3 daemon does it itself (the cwd is on its filesystem), a
+	// v2 one cannot, and a v2 daemon is by definition the local one, so catway
+	// keeps reading HEAD for it. See resolvesBranch.
 	peerVersion int
 	// lastErr is why this host is currently unreachable — the dial or session
 	// error the retry loop last saw, cleared on a successful handshake. It is
@@ -65,15 +78,110 @@ type daemon struct {
 // genuinely remote host with no protocol work at all.
 func unixDialer(path string) func() (net.Conn, error) {
 	return func() (net.Conn, error) {
-		return net.DialTimeout("unix", path, 3*time.Second)
+		return net.DialTimeout("unix", path, dialTimeout)
 	}
 }
 
-// dialerFor resolves one configured host's transport into a dialer. Only unix
-// sockets are dialable today — which is not the limitation it sounds like, since
-// `ssh -L local.sock:remote.sock` turns one into a genuinely remote cathost —
-// and tcp/tls are named here so a config that reaches for them fails at startup
-// with the reason, rather than retrying a dial that can never work.
+// dialTimeout bounds one connection attempt. Short, because failing fast is
+// what puts the reason on the host's roster row; the retry loop is what keeps
+// trying.
+const dialTimeout = 3 * time.Second
+
+// tcpDialer builds the dial func for a cleartext cathost. Cleartext is only
+// ever defensible on the loopback (an agent sandbox, a container sharing the
+// network namespace), so a non-loopback target is refused here as well as at
+// the daemon's bind: catway is the half that would be sending the keystrokes.
+func tcpDialer(target string) (func() (net.Conn, error), error) {
+	if err := requireLoopbackTarget(target); err != nil {
+		return nil, err
+	}
+	return func() (net.Conn, error) {
+		return net.DialTimeout("tcp", target, dialTimeout)
+	}, nil
+}
+
+// tlsDialer builds the dial func for cathost's native remote transport.
+//
+// With a fingerprint configured the certificate is pinned: chain verification
+// is turned off and the peer's leaf must hash to exactly the value the operator
+// copied from the daemon's startup log. That is *stronger* than the default for
+// this shape of deployment — a personal fleet of boxes has no CA, so the
+// alternative to pinning is not a verified chain, it is a skipped check — and
+// it is the only reason self-signed certificates are safe here.
+//
+// With no fingerprint the standard chain+hostname verification applies, which
+// is the right behaviour for an operator who fronted their cathost with a real
+// certificate. There is no third option: an unpinned, unverified TLS session
+// authenticates nobody, and would hand a shell to whatever answered the port.
+func tlsDialer(target, fingerprint string) (func() (net.Conn, error), error) {
+	host, _, err := net.SplitHostPort(target)
+	if err != nil {
+		return nil, err
+	}
+	cfg := &tls.Config{ServerName: host, MinVersion: tls.VersionTLS12}
+	want := normalizeFingerprint(fingerprint)
+	if want != "" {
+		if len(want) != sha256.Size*2 {
+			return nil, fmt.Errorf("fingerprint %q: want a hex SHA-256 (%d characters, as cathost prints it)", fingerprint, sha256.Size*2)
+		}
+		cfg.InsecureSkipVerify = true // replaced, not waived, by the pin below
+		cfg.VerifyPeerCertificate = pinnedVerifier(want)
+	}
+	return func() (net.Conn, error) {
+		d := &net.Dialer{Timeout: dialTimeout}
+		return tls.DialWithDialer(d, "tcp", target, cfg)
+	}, nil
+}
+
+// pinnedVerifier checks the peer's leaf certificate against a pinned SHA-256 of
+// its DER bytes — the same value gwtls.Fingerprint computes and cathost logs.
+// rawCerts[0] is the leaf; nothing else in the chain is consulted, because a
+// self-signed certificate *is* the chain.
+func pinnedVerifier(want string) func([][]byte, [][]*x509.Certificate) error {
+	return func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
+		if len(rawCerts) == 0 {
+			return errors.New("cathost presented no certificate")
+		}
+		sum := sha256.Sum256(rawCerts[0])
+		got := hex.EncodeToString(sum[:])
+		if got != want {
+			return fmt.Errorf("cathost certificate fingerprint %s does not match the pinned %s", got, want)
+		}
+		return nil
+	}
+}
+
+// normalizeFingerprint accepts the value in the shapes it gets pasted in:
+// lower/upper hex, and the colon-separated form openssl and certificate viewers
+// print. Anything else fails the length check in tlsDialer.
+func normalizeFingerprint(fp string) string {
+	return strings.ToLower(strings.NewReplacer(":", "", " ", "", "\n", "").Replace(strings.TrimSpace(fp)))
+}
+
+// requireLoopbackTarget mirrors cathost's own bind-time refusal, so a cleartext
+// address that would leave this machine is rejected when the roster is built —
+// at startup, with the reason — rather than on the first keystroke.
+func requireLoopbackTarget(target string) error {
+	host, _, err := net.SplitHostPort(target)
+	if err != nil {
+		return err
+	}
+	if host == "localhost" {
+		return nil
+	}
+	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
+		return nil
+	}
+	return fmt.Errorf("addr tcp://%s: tcp is cleartext, so it may only reach a loopback address — use tls:// for another machine", target)
+}
+
+// dialerFor resolves one configured host's transport into a dialer.
+//
+// unix:// remains the workhorse — it is the local daemon, and, through an
+// `ssh -L local.sock:remote.sock` forward, a genuinely remote one with no
+// protocol work at all. tcp:// and tls:// are the native transports: the first
+// for a loopback-only peer, the second for a cathost on another machine that
+// nobody wants to keep an ssh session open for.
 func dialerFor(h config.Host) (kind string, dial func() (net.Conn, error), err error) {
 	scheme, target, err := h.Transport()
 	if err != nil {
@@ -82,8 +190,12 @@ func dialerFor(h config.Host) (kind string, dial func() (net.Conn, error), err e
 	switch scheme {
 	case config.HostUnix:
 		return scheme, unixDialer(target), nil
-	case config.HostTCP, config.HostTLS:
-		return "", nil, fmt.Errorf("addr %q: the %s transport is not implemented yet — use unix:// (an `ssh -L` forward reaches a remote cathost today)", h.Addr, scheme)
+	case config.HostTCP:
+		dial, err = tcpDialer(target)
+		return scheme, dial, err
+	case config.HostTLS:
+		dial, err = tlsDialer(target, h.Fingerprint)
+		return scheme, dial, err
 	}
 	return "", nil, fmt.Errorf("addr %q: unknown scheme %q", h.Addr, scheme)
 }
@@ -99,12 +211,14 @@ func newDaemon(o *orch, h config.Host) (*daemon, error) {
 	}
 	_, target, _ := h.Transport() // already parsed by dialerFor
 	return &daemon{
-		o:      o,
-		id:     h.ID,
-		label:  h.DisplayLabel(),
-		kind:   kind,
-		socket: target,
-		dial:   dial,
+		o:         o,
+		id:        h.ID,
+		label:     h.DisplayLabel(),
+		kind:      kind,
+		socket:    target,
+		dial:      dial,
+		token:     h.Token,
+		tokenFile: h.TokenFile,
 	}, nil
 }
 
@@ -168,6 +282,35 @@ func (d *daemon) setPeerVersion(v int) {
 	d.mu.Unlock()
 }
 
+// resolvesBranch reports whether this host resolves its own panes' git branches
+// and reports them as pane_branch events. Only a connected v3+ daemon does; for
+// anything else catway falls back to reading HEAD itself, which is correct
+// precisely because anything else is the local machine's daemon.
+func (d *daemon) resolvesBranch() bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.conn != nil && d.peerVersion >= 3
+}
+
+// authToken is the bearer token to present in the hello: the literal from the
+// config, or the current contents of token_file. Read per handshake so a
+// rotated file is picked up by the reconnect the rotation itself causes; a
+// host with neither returns "", which is what every unix-socket daemon expects.
+func (d *daemon) authToken() (string, error) {
+	if d.tokenFile == "" {
+		return d.token, nil
+	}
+	b, err := os.ReadFile(d.tokenFile)
+	if err != nil {
+		return "", fmt.Errorf("read token_file: %w", err)
+	}
+	tok := strings.TrimSpace(string(b))
+	if tok == "" {
+		return "", fmt.Errorf("token_file %s is empty", d.tokenFile)
+	}
+	return tok, nil
+}
+
 // run dials this host forever, with backoff.
 func (d *daemon) run() {
 	backoff := time.Second
@@ -216,7 +359,11 @@ func (d *daemon) lostMessage() string {
 
 // session runs one daemon connection: handshake, reconcile, event pump.
 func (d *daemon) session(conn net.Conn) error {
-	if err := orchestration.WriteMessage(conn, orchestration.NewHello()); err != nil {
+	tok, err := d.authToken()
+	if err != nil {
+		return err
+	}
+	if err := orchestration.WriteMessage(conn, orchestration.NewHelloWithToken(tok)); err != nil {
 		return err
 	}
 	mt, payload, err := orchestration.ReadMessage(conn)
@@ -233,8 +380,13 @@ func (d *daemon) session(conn net.Conn) error {
 	if w.Error != "" {
 		return errors.New("daemon rejected hello: " + w.Error)
 	}
-	if w.ProtocolVersion != orchestration.ProtocolVersion {
-		return fmt.Errorf("daemon speaks protocol %d, want %d", w.ProtocolVersion, orchestration.ProtocolVersion)
+	// A range, not equality: a cathost on another machine is upgraded on its own
+	// schedule, and refusing a peer one version behind would mean an ssh session
+	// per box on every release. Everything newer than MinProtocolVersion is
+	// additive, so an older daemon simply doesn't do the newer things.
+	if orchestration.NegotiateVersion(w.ProtocolVersion) == 0 {
+		return fmt.Errorf("daemon speaks protocol %d, this build speaks %d-%d",
+			w.ProtocolVersion, orchestration.MinProtocolVersion, orchestration.ProtocolVersion)
 	}
 
 	d.setConn(conn)
@@ -396,6 +548,15 @@ func (d *daemon) dispatch(mt orchestration.MessageType, payload []byte) {
 			o.emitEvent(app.EventPaneCwd, ev.PaneID, app.PaneCwdEvent{Pane: ev.PaneID, Cwd: ev.Cwd})
 			o.saveSoon() // pane cwds ride the session file (restore re-spawns there)
 		})
+
+	case orchestration.MsgPaneBranch:
+		var ev orchestration.PaneBranch
+		if err := json.Unmarshal(payload, &ev); err != nil {
+			return
+		}
+		// The host resolved this against its own filesystem, which for a remote
+		// pane is the only machine where the answer exists at all.
+		o.post(func() { o.applyPaneBranch(ev.PaneID, ev.Branch) })
 
 	case orchestration.MsgPaneAgent:
 		var ev orchestration.PaneAgent

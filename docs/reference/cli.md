@@ -61,19 +61,43 @@ signal force-quits.
 The terminal backend daemon: PTYs plus VT emulation per pane.
 
 ```
-cathost [-socket /tmp/cats-cathost.sock] [-persistent] [-idle-timeout 10m]
+cathost [-socket /tmp/cats-cathost.sock] [-listen unix://…|tcp://…|tls://…]
+        [-token-file PATH] [-tls-dir DIR] [-tls-san a,b]
+        [-persistent] [-idle-timeout 10m]
         [-exit-on-disconnect] [-manifest-update=false]
 ```
 
 | Flag | Default | Notes |
 |------|---------|-------|
-| `-socket` | `/tmp/cats-cathost.sock` | unix socket to listen on |
+| `-socket` | `/tmp/cats-cathost.sock` | unix socket to listen on; shorthand for `-listen unix://<path>` |
+| `-listen` | — | `unix://path`, `tcp://host:port` (loopback only) or `tls://host:port`. Overrides `-socket` |
+| `-token-file` | — | file holding the bearer token a client's `hello` must present. **Required** for `tcp://` and `tls://` |
+| `-tls-dir` | user config dir `/cats/cathost-tls` | where the self-signed `tls://` certificate is cached (minted on first use) |
+| `-tls-san` | — | comma-separated extra names the generated certificate must cover |
 | `-persistent` | off | keep panes alive across client disconnects. **Use this.** Overrides `-exit-on-disconnect` |
 | `-idle-timeout` | `10m` | in persistent mode, exit if no client attaches for this long. `0` disables |
 | `-exit-on-disconnect` | off | managed mode: exit after the first client disconnects |
 | `-manifest-update` | `true` | fetch agent-detection manifest updates at startup |
 
 Build requires `-tags ghostty` and `PKG_CONFIG_PATH`.
+
+### Serving a remote catway
+
+A unix socket is reachable only by someone who can already open the file; a port
+is reachable by anyone who can route to it, and what it hands out is a shell.
+So both network transports demand a token, and `tcp://` additionally refuses any
+bind that is not loopback.
+
+```sh
+head -c 32 /dev/urandom | base64 > ~/.config/cats/cathost.token
+cathost -listen tls://0.0.0.0:8422 -token-file ~/.config/cats/cathost.token \
+        -tls-san devbox.lan -persistent -idle-timeout 0
+```
+
+Startup logs the certificate's SHA-256. Copy it, plus the token file, into the
+catway's [`hosts`](configuration.md#hosts) entry — the fingerprint is what makes
+a self-signed certificate safe, since it replaces chain verification rather than
+waiving it.
 
 For a long-running service, `-persistent -idle-timeout 0` is what you want. See
 [the seam's lifecycle diagram](../protocols/orchestration-seam.md#persistent-vs-managed-mode).

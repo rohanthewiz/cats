@@ -3,6 +3,7 @@ package orchestration
 import (
 	"bytes"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/rohanthewiz/cats/internal/terminal"
@@ -144,6 +145,7 @@ func TestCodecRoundTrip(t *testing.T) {
 	hl := uint32(7)
 	msgs := []any{
 		NewHello(),
+		NewHelloWithToken("s3cret"),
 		NewCreatePane(42, 80, 24),
 		NewInput(42, []byte{0x1b, 'h', 'i', 0x00}),
 		NewResize(42, 100, 30),
@@ -157,6 +159,7 @@ func TestCodecRoundTrip(t *testing.T) {
 		NewError(42, "boom"),
 		NewPaneSelection(42, "hello world"),
 		NewPaneText(42, "scrollback"),
+		NewPaneBranch(42, "feature/remote"),
 		NewPaneModes(42, terminal.InputModes{
 			BracketedPaste: true, MouseMode: terminal.MouseAnyMotion,
 			MouseEncoding: terminal.MouseEncodingSGR, KittyKeyboardFlags: 5,
@@ -176,8 +179,8 @@ func TestCodecRoundTrip(t *testing.T) {
 	}
 
 	wantTypes := []MessageType{
-		MsgHello, MsgCreatePane, MsgInput, MsgResize, MsgClosePane, MsgRequestSelection, MsgRequestText,
-		MsgRequestResync, MsgShutdown, MsgWelcome, MsgPaneExited, MsgError, MsgPaneSelection, MsgPaneText, MsgPaneModes, MsgPaneFrame,
+		MsgHello, MsgHello, MsgCreatePane, MsgInput, MsgResize, MsgClosePane, MsgRequestSelection, MsgRequestText,
+		MsgRequestResync, MsgShutdown, MsgWelcome, MsgPaneExited, MsgError, MsgPaneSelection, MsgPaneText, MsgPaneBranch, MsgPaneModes, MsgPaneFrame,
 	}
 	for i, want := range wantTypes {
 		typ, payload, err := ReadMessage(&buf)
@@ -318,5 +321,55 @@ func TestOutputStreamMessagesRoundTrip(t *testing.T) {
 	}
 	if buf.Len() != 0 {
 		t.Errorf("%d trailing bytes after reading both messages", buf.Len())
+	}
+}
+
+// The version range is the whole reason a cathost can live on a machine that is
+// upgraded on its own schedule. These are the four answers that matter: the
+// floor, the ceiling, and the two sides nobody speaks.
+func TestNegotiateVersion(t *testing.T) {
+	for peer, want := range map[int]int{
+		0:                   0, // absent field: a pre-v1 client, or a truncated hello
+		1:                   0, // below the floor — v1 cannot serve wait_for_output
+		MinProtocolVersion:  MinProtocolVersion,
+		ProtocolVersion:     ProtocolVersion,
+		ProtocolVersion + 1: 0, // a peer from the future; it must not be guessed at
+	} {
+		if got := NegotiateVersion(peer); got != want {
+			t.Errorf("NegotiateVersion(%d) = %d, want %d", peer, got, want)
+		}
+	}
+}
+
+// A welcome answers with the version the client asked for, not with ours. An
+// orchestrator built before v3 demands equality with what it sent, so a daemon
+// that always announced its own version would break every catway that had not
+// been upgraded in the same breath — the exact failure the range exists to
+// prevent.
+func TestWelcomeReportsNegotiatedVersion(t *testing.T) {
+	if got := NewWelcomeAt(MinProtocolVersion, "", nil).ProtocolVersion; got != MinProtocolVersion {
+		t.Errorf("negotiated welcome reports %d, want %d", got, MinProtocolVersion)
+	}
+	if got := NewWelcome("", nil).ProtocolVersion; got != ProtocolVersion {
+		t.Errorf("plain welcome reports %d, want this build's %d", got, ProtocolVersion)
+	}
+}
+
+// The token rides an omitempty field, so a session that needs no authentication
+// puts nothing extra on the wire and a v2 daemon sees the hello it always saw.
+func TestHelloTokenOmittedWhenEmpty(t *testing.T) {
+	b, err := json.Marshal(NewHello())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b), "token") {
+		t.Errorf("hello without a token = %s, want no token field", b)
+	}
+	b, err = json.Marshal(NewHelloWithToken("s3cret"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), `"token":"s3cret"`) {
+		t.Errorf("hello with a token = %s", b)
 	}
 }

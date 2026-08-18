@@ -172,7 +172,68 @@ remote workspaces and panes), `resume_test.go` (no resume argv for a remote pane
 - Tests: `commands_test.go` param routing; `persist_test.go` snapshot with `host` restores `rt.host` and `CreatePane` reaches that pipe host.
 - Ship gate: cross-host panes side by side; catway restart re-adopts survivors per host; real remote via `ssh -L` unix forward.
 
-### Phase 4 — native remote transport + host-side moves
+### Phase 4 — native remote transport + host-side moves — **DONE**
+
+As built (deltas from the plan below): version negotiation is **two-sided** —
+`NegotiateVersion(peer)` gates the range at both ends, and the daemon answers with
+the *negotiated* version rather than its own (`NewWelcomeAt`), because every build
+before v3 demands equality with what it sent; announcing v3 to them would have
+broken every not-yet-upgraded catway on contact. A refused hello is a `welcome`
+carrying `error` followed by an `endSession{}` **writer sentinel**, so the reason
+reaches the wire before the connection goes (a bare close is indistinguishable from
+a daemon that never started); `Host.dispatch` therefore returns an error, and
+`Attach` keeps reading after a fatal one — leaving the loop early would close
+`sessDone` and drop the queued explanation. Branch resolution needed more than "on
+cwd change": the *local* cathost is v3 too, so catway skips its own resolver for
+every pane, and a `git checkout` in a pane that never moves emits nothing at all —
+hence a daemon-side `branchPump` (10s sweep + a non-blocking `wakeBranch()` nudge
+from each cwd change) with the throttle keyed on the *directory*, so a pane that
+moved is never throttled. `resyncPane` replays `pane_branch` even when empty; on
+catway's side `applyPaneBranch` is the entry point and `refreshPaneBranch` returns
+early for any pane whose host `resolvesBranch()` (connected ∧ peer ≥3) — a remote
+pane whose host goes away still drops its label, since it describes a checkout
+nobody can reach. `-listen` is one address string parsed by `config.Host.Transport`
+(the same parser the catway config uses, so the two can never disagree), with
+`-socket` kept as the default and shorthand; both network transports **refuse to
+start without `-token-file`**, and `tcp://` is refused off the loopback at both the
+bind and the dial. TLS pinning replaces chain verification rather than waiving it
+(`InsecureSkipVerify` + `VerifyPeerCertificate`); a `tls://` host with no
+fingerprint gets ordinary CA+hostname validation, and a fingerprint that is not a
+hex SHA-256 fails at roster build. The token is read from its file *per handshake*,
+so a rotation takes effect on the reconnect it causes. The cwd fallback reports
+`$HOME` through a normal `error` event attributed to the pane, after the pane
+exists, so the toast is actionable rather than a mystery about where the shell
+landed. `gitBranch/findGitDir/headBranch` moved wholesale into `internal/gitbranch`
+(catway keeps a one-line shim); their tests moved with them.
+Tests added: `internal/gitbranch` (the moved resolver suite),
+`internal/orchestration/protocol_test.go` (negotiation table, negotiated welcome,
+omitempty token), `internal/orchestration/handshake_test.go` (v3 and v2 peers
+served — the v2 one to completion — bad/missing token and out-of-range versions
+refused *with the reason delivered before the close*, cwd fallback vs. an existing
+cwd, `pane_branch` from a real daemon), `cmd/catway/transport_test.go` (fingerprint
+pinned against a live TLS listener, fingerprint normalization, token read from
+file, peer-version → `resolvesBranch`, a v1 daemon refused), `cmd/catway/gitbranch_test.go`
+(catway defers to a v3 host, host answers applied, remote branch dropped when its
+host is unreachable), `cmd/cathost/listen_test.go` (unix open/stale-socket/cleanup,
+every unsafe-bind refusal, tls mints and serves a certificate, token file trimmed).
+Verified live (two cathosts, one unix and one `tls://127.0.0.1:18422` with a token,
+no ssh anywhere): `catctl hosts` shows both connected with `addr_kind: tls`; a
+workspace created on the TLS host spawns there and its pane carries a real branch
+(the client-init push is gated on a non-empty branch, so its arrival *is* the value
+check); a workspace on a path that exists on neither machine lands in `$HOME` with
+`daemon error (pane 3): /only/on/the/other/machine is not a directory on this host
+— started in /Users/RAllison3 instead` instead of a dead pane; a wrong token puts
+`daemon rejected hello: authentication failed` on the roster row and a wrong
+fingerprint puts the two hashes side by side; a local pane in a repo still shows its
+branch, now resolved by the local cathost rather than by catway.
+Docs updated: `docs/protocols/orchestration-seam.md` (v3, transport table,
+versioning, why the daemon owns cwd and branch), `docs/reference/cli.md` (the new
+cathost flags + a serve-a-remote-catway recipe), `docs/reference/configuration.md`
+and `config.example.yaml` (tls:// is real; pinning explained).
+No catgen-dart golden churn: `Hello`/`PaneBranch` are seam types, not browser ones.
+Known gap for Phase 5: hot attach/detach still needs a restart, and an unqualified
+`pane.split` still takes the workspace's default host rather than the split pane's.
+
 - `internal/orchestration/protocol.go`: `ProtocolVersion=3`, `MinProtocolVersion=2`, `Hello.Token`, `MsgPaneBranch{PaneID,Branch}`; `host.go`: `RequireToken`, `handleHello(payload)` (version range + token → `Welcome{Error}` + close), cwd fallback (`os.Stat` fail → `$HOME`, plus `Error` note), branch resolver on cwd change (extract `gitBranch/findGitDir/headBranch` into `internal/gitbranch`).
 - `cmd/cathost/main.go`: `-listen unix://|tcp://|tls://`, `-token-file`, `-tls-dir` (`gwtls.EnsureSelfSigned`, prints fingerprint); `-socket` kept as alias. `cmd/catway/daemon.go`: `tcpDialer`, `tlsDialer(fingerprint)`, `peerVersion`, range check; `gitbranch.go` skips panes on peer ≥3 hosts.
 - Tests: `protocol_test.go`, `host_test.go` (bad token/old version rejected; v2 hello on unix accepted), `daemon_test.go` (fingerprint mismatch fails).

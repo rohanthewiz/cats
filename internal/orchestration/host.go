@@ -4,6 +4,7 @@ package orchestration
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,12 +18,27 @@ import (
 
 	"github.com/creack/pty"
 	"github.com/rohanthewiz/cats/internal/detect"
+	"github.com/rohanthewiz/cats/internal/gitbranch"
 	"github.com/rohanthewiz/cats/internal/terminal"
 )
 
 // DefaultFlushInterval coalesces dirty panes into frames at ~60 Hz, mirroring
 // the Phase A requestAnimationFrame coalescing.
 const DefaultFlushInterval = 16 * time.Millisecond
+
+// Branch resolution pacing (pane_branch). The daemon resolves branches because
+// the pane's cwd is a path on *this* filesystem — see gitbranch.
+const (
+	// branchSweepInterval paces the background refresh, which is what catches a
+	// `git checkout` in a pane whose directory never changes: there is no OSC
+	// event for a branch change, so nothing else would notice it.
+	branchSweepInterval = 10 * time.Second
+	// branchRefreshInterval floors the gap between two reads for the *same*
+	// directory, so a burst of sweeps costs one read. A pane that has moved is
+	// exempt: a cd is precisely when the label is knowably wrong, and the user
+	// expects the pair to land together.
+	branchRefreshInterval = 3 * time.Second
+)
 
 // pane is one terminal: a PTY + go-libghostty emulator + child process.
 type pane struct {
@@ -79,6 +95,14 @@ type pane struct {
 	lastVisBlocker bool
 	lastVisWorking bool
 	hasAgent       bool // a pane_agent has been emitted at least once
+	// Branch state, written by the branch pump and read by resync. branchCwd is
+	// the directory lastBranch was resolved for, which is what separates "we
+	// already answered this" from "the pane moved" — the throttle only applies
+	// to the former.
+	lastBranch string
+	branchCwd  string
+	branchAt   time.Time
+	hasBranch  bool // a pane_branch has been emitted at least once
 
 	// lastModes is the input-mode state last reported via pane_modes; the flusher
 	// re-queries after a dirty frame and emits only on change. hasModes guards the
@@ -145,6 +169,37 @@ func (p *pane) setAgentMeta(agent, state string, visBlocker, visWorking bool) {
 	p.metaMu.Unlock()
 }
 
+// branchDue reports the directory whose branch is worth resolving now, if any:
+// nothing when the pane has no known cwd, and nothing when the same directory
+// was resolved within branchRefreshInterval. A pane that has moved since its
+// last resolution is always due.
+func (p *pane) branchDue(now time.Time) (cwd string, ok bool) {
+	p.metaMu.Lock()
+	defer p.metaMu.Unlock()
+	if p.lastPwd == "" {
+		return "", false
+	}
+	if p.hasBranch && p.branchCwd == p.lastPwd && now.Sub(p.branchAt) < branchRefreshInterval {
+		return "", false
+	}
+	return p.lastPwd, true
+}
+
+// setBranchMeta records a resolution and reports whether it changed what the
+// client has been told. The first resolution always counts as a change — even
+// to "" — because that empty answer is how the orchestrator learns this daemon
+// owns the pane's branch and should stop resolving it itself.
+func (p *pane) setBranchMeta(cwd, branch string, now time.Time) (changed bool) {
+	p.metaMu.Lock()
+	defer p.metaMu.Unlock()
+	p.branchCwd, p.branchAt = cwd, now
+	if p.hasBranch && p.lastBranch == branch {
+		return false
+	}
+	p.lastBranch, p.hasBranch = branch, true
+	return true
+}
+
 // Host is the Go terminal backend: it owns panes and serves the orchestration
 // protocol. In managed mode (Serve) panes are torn down when the single
 // connection ends. In persistent mode the panes — PTYs, emulators, detection —
@@ -161,6 +216,18 @@ type Host struct {
 	// (a crashed cats that never reconnects). Zero disables it. Only consulted in
 	// persistent mode.
 	IdleTimeout time.Duration
+
+	// RequireToken, when set, is the bearer token a client's hello must carry.
+	// Empty means no authentication, which is right for a unix socket (the
+	// socket's file permissions are the gate) and wrong for anything reachable
+	// over the network — cathost refuses to open a tcp/tls listener without one.
+	RequireToken string
+
+	// branchWake nudges the branch pump out of its sweep interval when a pane's
+	// cwd changes. Buffered depth 1 and sent non-blocking: the pump re-reads
+	// every pane anyway, so a nudge that arrives while one is already pending is
+	// already accounted for.
+	branchWake chan struct{}
 
 	mu    sync.Mutex
 	panes map[uint32]*pane
@@ -190,6 +257,7 @@ func NewHost() *Host {
 		panes:         make(map[uint32]*pane),
 		closed:        make(chan struct{}),
 		exit:          make(chan struct{}),
+		branchWake:    make(chan struct{}, 1),
 	}
 }
 
@@ -199,6 +267,7 @@ func NewHost() *Host {
 func (h *Host) Start(ctx context.Context) {
 	h.startOnce.Do(func() {
 		h.armIdle() // exit if a persistent daemon is spawned but no client ever attaches
+		go h.branchPump(ctx)
 		go func() {
 			ticker := time.NewTicker(h.FlushInterval)
 			defer ticker.Stop()
@@ -253,6 +322,13 @@ func (h *Host) Attach(ctx context.Context, conn io.ReadWriteCloser) error {
 			case <-sessDone:
 				return
 			case ev := <-out:
+				if _, end := ev.(endSession); end {
+					// Everything queued ahead of the sentinel is on the wire by
+					// now, so the rejection welcome has been delivered; cancel
+					// closes the connection, which unblocks the reader.
+					cancel()
+					return
+				}
 				if err := WriteMessage(conn, ev); err != nil {
 					cancel()
 					return
@@ -261,7 +337,7 @@ func (h *Host) Attach(ctx context.Context, conn io.ReadWriteCloser) error {
 		}
 	}()
 
-	var readErr error
+	var readErr, fatalErr error
 	for {
 		typ, payload, err := ReadMessage(conn)
 		if err != nil {
@@ -270,7 +346,15 @@ func (h *Host) Attach(ctx context.Context, conn io.ReadWriteCloser) error {
 			}
 			break
 		}
-		h.dispatch(typ, payload)
+		// A rejected handshake is the only fatal dispatch. We do not break here:
+		// the rejection welcome is still queued behind the writer, and leaving
+		// the loop would close sessDone and drop it — leaving the client with a
+		// bare disconnect, unable to tell a bad token from a dead daemon. The
+		// writer ends the session once it reaches the sentinel, and the read
+		// below fails on the closed connection.
+		if err := h.dispatch(typ, payload); err != nil {
+			fatalErr = err
+		}
 	}
 
 	// Detach: stop routing events to this connection (new emits drop), then unblock
@@ -283,8 +367,17 @@ func (h *Host) Attach(ctx context.Context, conn io.ReadWriteCloser) error {
 	cancel()
 	wg.Wait()
 	h.armIdle()
+	if fatalErr != nil {
+		return fatalErr // why we hung up beats "connection closed" as the log line
+	}
 	return readErr
 }
+
+// endSession is a writer sentinel: everything queued before it reaches the wire,
+// then the session ends. It exists so a rejected handshake can *explain itself*
+// before the connection goes — the welcome carrying the reason is queued like
+// any other event, and a plain close would race it.
+type endSession struct{}
 
 // Stop tears down all panes and signals the flusher/pumps to exit. Idempotent.
 func (h *Host) Stop() {
@@ -333,17 +426,21 @@ func (h *Host) Serve(ctx context.Context, conn io.ReadWriteCloser) error {
 	return err
 }
 
-func (h *Host) dispatch(typ MessageType, payload []byte) {
+// dispatch handles one client message. It returns a non-nil error only when the
+// session must end — today, a hello this daemon refuses (unsupported protocol
+// version, bad token). Everything else reports failures to the client as error
+// events and keeps the connection.
+func (h *Host) dispatch(typ MessageType, payload []byte) error {
 	switch typ {
 	case MsgHello:
-		h.handleHello()
+		return h.handleHello(payload)
 	case MsgShutdown:
 		h.requestExit()
 	case MsgRequestResync:
 		var c RequestResync
 		if err := json.Unmarshal(payload, &c); err != nil {
 			h.emit(NewError(0, "bad request_resync: "+err.Error()))
-			return
+			return nil
 		}
 		if p := h.getPane(c.PaneID); p != nil {
 			h.resyncPane(p)
@@ -352,7 +449,7 @@ func (h *Host) dispatch(typ MessageType, payload []byte) {
 		var c SetOutputStream
 		if err := json.Unmarshal(payload, &c); err != nil {
 			h.emit(NewError(0, "bad set_output_stream: "+err.Error()))
-			return
+			return nil
 		}
 		if p := h.getPane(c.PaneID); p != nil {
 			p.streamOutput.Store(c.Enabled) // readPump picks it up on its next read
@@ -361,7 +458,7 @@ func (h *Host) dispatch(typ MessageType, payload []byte) {
 		var c CreatePane
 		if err := json.Unmarshal(payload, &c); err != nil {
 			h.emit(NewError(0, "bad create_pane: "+err.Error()))
-			return
+			return nil
 		}
 		if err := h.createPane(c); err != nil {
 			h.emit(NewError(c.PaneID, err.Error()))
@@ -370,7 +467,7 @@ func (h *Host) dispatch(typ MessageType, payload []byte) {
 		var c Input
 		if err := json.Unmarshal(payload, &c); err != nil {
 			h.emit(NewError(0, "bad input: "+err.Error()))
-			return
+			return nil
 		}
 		if p := h.getPane(c.PaneID); p != nil {
 			if err := p.writePTY(c.Data); err != nil {
@@ -383,7 +480,7 @@ func (h *Host) dispatch(typ MessageType, payload []byte) {
 		var c Resize
 		if err := json.Unmarshal(payload, &c); err != nil {
 			h.emit(NewError(0, "bad resize: "+err.Error()))
-			return
+			return nil
 		}
 		if err := h.resizePane(c); err != nil {
 			h.emit(NewError(c.PaneID, err.Error()))
@@ -392,7 +489,7 @@ func (h *Host) dispatch(typ MessageType, payload []byte) {
 		var c ClosePane
 		if err := json.Unmarshal(payload, &c); err != nil {
 			h.emit(NewError(0, "bad close_pane: "+err.Error()))
-			return
+			return nil
 		}
 		if p := h.removePane(c.PaneID); p != nil {
 			h.closePane(p) // read pump observes EOF and emits pane_exited
@@ -401,7 +498,7 @@ func (h *Host) dispatch(typ MessageType, payload []byte) {
 		var c ScrollViewport
 		if err := json.Unmarshal(payload, &c); err != nil {
 			h.emit(NewError(0, "bad scroll_viewport: "+err.Error()))
-			return
+			return nil
 		}
 		if err := h.scrollPane(c); err != nil {
 			h.emit(NewError(c.PaneID, err.Error()))
@@ -410,7 +507,7 @@ func (h *Host) dispatch(typ MessageType, payload []byte) {
 		var c RequestSelection
 		if err := json.Unmarshal(payload, &c); err != nil {
 			h.emit(NewError(0, "bad request_selection: "+err.Error()))
-			return
+			return nil
 		}
 		if err := h.requestSelection(c); err != nil {
 			h.emit(NewError(c.PaneID, err.Error()))
@@ -419,7 +516,7 @@ func (h *Host) dispatch(typ MessageType, payload []byte) {
 		var c RequestText
 		if err := json.Unmarshal(payload, &c); err != nil {
 			h.emit(NewError(0, "bad request_text: "+err.Error()))
-			return
+			return nil
 		}
 		if err := h.requestText(c); err != nil {
 			h.emit(NewError(c.PaneID, err.Error()))
@@ -427,14 +524,40 @@ func (h *Host) dispatch(typ MessageType, payload []byte) {
 	default:
 		h.emit(NewError(0, "unknown message type: "+string(typ)))
 	}
+	return nil
 }
 
-// handleHello answers a client's hello with a welcome listing the live pane IDs,
-// then replays each pane's current state (full frame + modes + cwd + title +
-// agent). On a fresh daemon the list is empty and nothing is replayed; on a
-// reconnect the client reconciles its restored session against these surviving
-// panes and adopts them instead of re-creating them.
-func (h *Host) handleHello() {
+// handleHello authenticates the client, then answers with a welcome listing the
+// live pane IDs and replays each pane's current state (full frame + modes + cwd
+// + title + agent + branch). On a fresh daemon the list is empty and nothing is
+// replayed; on a reconnect the client reconciles its restored session against
+// these surviving panes and adopts them instead of re-creating them.
+//
+// The payload was ignored entirely before v3 — which was defensible while both
+// ends only ever met across a unix socket on one machine, and is not once a
+// daemon listens on a port. Two things are checked now: that the peer's protocol
+// version is one this build can serve, and that it presents the token when one
+// is required. A refusal returns an error so the caller ends the session, after
+// the welcome carrying the reason has been queued.
+func (h *Host) handleHello(payload []byte) error {
+	var c Hello
+	if err := json.Unmarshal(payload, &c); err != nil {
+		return h.rejectHello("bad hello: " + err.Error())
+	}
+	version := NegotiateVersion(c.ProtocolVersion)
+	if version == 0 {
+		return h.rejectHello(fmt.Sprintf("protocol version %d unsupported: this daemon speaks %d..%d",
+			c.ProtocolVersion, MinProtocolVersion, ProtocolVersion))
+	}
+	if h.RequireToken != "" {
+		// Constant time, because the comparison is against a secret and the
+		// client controls one side of it. Unequal lengths compare false here
+		// without an early return.
+		if subtle.ConstantTimeCompare([]byte(c.Token), []byte(h.RequireToken)) != 1 {
+			return h.rejectHello("authentication failed: bad or missing token")
+		}
+	}
+
 	h.mu.Lock()
 	ids := make([]uint32, 0, len(h.panes))
 	ps := make([]*pane, 0, len(h.panes))
@@ -444,10 +567,25 @@ func (h *Host) handleHello() {
 	}
 	h.mu.Unlock()
 
-	h.emit(NewWelcome("", ids))
+	// The welcome reports the *negotiated* version, not ours: an older client
+	// demands equality with what it sent, so answering with a newer number is
+	// how a rolled-out daemon would break every catway not yet upgraded.
+	h.emit(NewWelcomeAt(version, "", ids))
 	for _, p := range ps {
 		h.resyncPane(p)
 	}
+	return nil
+}
+
+// rejectHello queues the refusal welcome, then the sentinel that ends the
+// session once it has been written, and returns the reason for the daemon's own
+// log. The client is told why in the same breath: a silent close would look
+// identical to a dead socket, and "check the token" is not a guess an operator
+// should have to make.
+func (h *Host) rejectHello(reason string) error {
+	h.emit(NewWelcomeAt(ProtocolVersion, reason, nil))
+	h.emit(endSession{})
+	return errors.New("rejected client: " + reason)
 }
 
 // resyncPane replays a pane's current state to the freshly-attached client: a
@@ -484,6 +622,7 @@ func (h *Host) resyncPane(p *pane) {
 	cwd, title := p.lastPwd, p.lastTitle
 	agent, state := p.lastAgent, p.lastAgentState
 	vb, vw, hasAgent := p.lastVisBlocker, p.lastVisWorking, p.hasAgent
+	branch, hasBranch := p.lastBranch, p.hasBranch
 	p.metaMu.Unlock()
 	if cwd != "" {
 		h.emit(NewPaneCwd(p.id, cwd))
@@ -494,17 +633,32 @@ func (h *Host) resyncPane(p *pane) {
 	if hasAgent {
 		h.emit(NewPaneAgent(p.id, agent, state, vb, vw))
 	}
+	// Replayed even when empty: a reconnecting client has to learn that this
+	// pane's branch is the daemon's to report, and "" is a real answer (the
+	// pane is not in a repository), not a missing one.
+	if hasBranch {
+		h.emit(NewPaneBranch(p.id, branch))
+	}
 }
 
 func (h *Host) createPane(c CreatePane) error {
+	// The requested cwd was chosen on the orchestrator's machine — inherited
+	// from a neighbouring pane, restored from a session file, or typed into a
+	// dialog — and this daemon may be on a different one, where that path
+	// simply does not exist. exec would fail with chdir ENOENT and the pane
+	// would be born dead, which is the worst possible answer for a directory
+	// that was only ever a suggestion. Fall back to the home directory and say
+	// so instead.
+	cwd, cwdNote := h.resolveSpawnCwd(c.Cwd)
+
 	name := c.Command
 	if name == "" {
 		name = defaultShell()
 	}
 	cmd := exec.Command(name, c.Args...)
 	cmd.Env = buildEnv(c.Env)
-	if c.Cwd != "" {
-		cmd.Dir = c.Cwd
+	if cwd != "" {
+		cmd.Dir = cwd
 	}
 
 	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Cols: c.Cols, Rows: c.Rows})
@@ -516,8 +670,8 @@ func (h *Host) createPane(c CreatePane) error {
 		h.emit(NewError(c.PaneID, fmt.Sprintf("command %q: %v — falling back to shell", name, err)))
 		cmd = exec.Command(defaultShell())
 		cmd.Env = buildEnv(c.Env)
-		if c.Cwd != "" {
-			cmd.Dir = c.Cwd
+		if cwd != "" {
+			cmd.Dir = cwd
 		}
 		ptmx, err = pty.StartWithSize(cmd, &pty.Winsize{Cols: c.Cols, Rows: c.Rows})
 	}
@@ -530,7 +684,7 @@ func (h *Host) createPane(c CreatePane) error {
 	// browser tooltip, worktree anchoring, session persistence) have a pwd even
 	// when the shell never reports OSC 7. A real OSC 7 later overwrites this via
 	// setCwdMeta's change detection, so shells that do report stay authoritative.
-	spawnDir := c.Cwd
+	spawnDir := cwd
 	if spawnDir == "" {
 		// No explicit dir means the PTY inherited the daemon's process cwd.
 		spawnDir, _ = os.Getwd()
@@ -561,6 +715,12 @@ func (h *Host) createPane(c CreatePane) error {
 	// shell never emits OSC 7 would show no directory at all downstream.
 	if spawnDir != "" {
 		h.emit(NewPaneCwd(p.id, spawnDir))
+		h.wakeBranch()
+	}
+	// Reported after the pane exists so the toast is attributable to it: the
+	// pane is usable, it just isn't where the caller asked for.
+	if cwdNote != "" {
+		h.emit(NewError(p.id, cwdNote))
 	}
 
 	go h.readPump(p)
@@ -595,6 +755,7 @@ func (h *Host) readPump(p *pane) {
 				p.oscCwd.Store(true)
 				if p.setCwdMeta(cwd) {
 					h.emit(NewPaneCwd(p.id, cwd))
+					h.wakeBranch() // the branch is resolved against this cwd
 				}
 			}
 			for _, clip := range p.osc52.scan(buf[:n]) {
@@ -691,6 +852,7 @@ func (h *Host) detectPump(p *pane) {
 				lastCwdSeq = seq
 				if cwd := detect.ProcessCwd(p.childPid()); cwd != "" && p.setCwdMeta(cwd) {
 					h.emit(NewPaneCwd(p.id, cwd))
+					h.wakeBranch()
 				}
 			}
 		}
@@ -1073,6 +1235,96 @@ func (h *Host) emit(ev any) {
 	case out <- ev:
 	case <-sessDone:
 	case <-h.closed:
+	}
+}
+
+// --- working directory + branch -------------------------------------------
+
+// resolveSpawnCwd decides where a new pane actually starts, and what to say
+// when that is not what was asked for.
+//
+// An empty request means "wherever the daemon lives" and is left alone. A
+// request that names a directory this machine does not have (or that is not a
+// directory at all) degrades to $HOME rather than killing the pane: the caller
+// is frequently on another machine, and a path that exists only there is a
+// routine outcome of splitting a pane or restoring a session across hosts, not
+// an error worth a dead terminal over. The note is the whole reason the
+// fallback is safe — a pane that silently started somewhere else would leave
+// the next command running in the wrong tree.
+func (h *Host) resolveSpawnCwd(want string) (cwd, note string) {
+	if want == "" {
+		return "", ""
+	}
+	if fi, err := os.Stat(want); err == nil && fi.IsDir() {
+		return want, ""
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		// No home either: fall back to the daemon's own directory (cmd.Dir
+		// unset), which is always somewhere real.
+		return "", fmt.Sprintf("%s is not a directory on this host — started in the daemon's working directory instead", want)
+	}
+	return home, fmt.Sprintf("%s is not a directory on this host — started in %s instead", want, home)
+}
+
+// wakeBranch nudges the branch pump to resolve now rather than at its next
+// sweep. Non-blocking by design: the pump re-reads every pane when it runs, so
+// a nudge arriving while one is already queued is redundant, and dropping it
+// must never stall the read pump that sent it.
+func (h *Host) wakeBranch() {
+	select {
+	case h.branchWake <- struct{}{}:
+	default:
+	}
+}
+
+// branchPump keeps every pane's branch label current: on a nudge (a pane just
+// moved) and on a timer (someone ran `git checkout` in a pane that never moved,
+// which emits nothing at all).
+//
+// It runs daemon-side because the pane's cwd is a path on *this* filesystem.
+// For a pane on another machine the orchestrator cannot resolve it — at best it
+// finds nothing, at worst a same-named checkout of its own sitting on a
+// different branch — so the answer has to be computed where the directory is
+// and shipped as an event.
+func (h *Host) branchPump(ctx context.Context) {
+	t := time.NewTicker(branchSweepInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-h.closed:
+			return
+		case <-h.branchWake:
+		case <-t.C:
+		}
+		h.sweepBranches()
+	}
+}
+
+// sweepBranches resolves and emits the branch of every pane that is due. The
+// reads (two syscalls per pane, no process) happen on this goroutine rather
+// than a pane's read pump, so a slow filesystem — a network mount is the case
+// that matters — delays a label instead of the terminal output behind it.
+func (h *Host) sweepBranches() {
+	h.mu.Lock()
+	ps := make([]*pane, 0, len(h.panes))
+	for _, p := range h.panes {
+		ps = append(ps, p)
+	}
+	h.mu.Unlock()
+
+	for _, p := range ps {
+		now := time.Now()
+		cwd, ok := p.branchDue(now)
+		if !ok {
+			continue
+		}
+		branch := gitbranch.Resolve(cwd)
+		if p.setBranchMeta(cwd, branch, now) {
+			h.emit(NewPaneBranch(p.id, branch))
+		}
 	}
 }
 
