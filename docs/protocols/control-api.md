@@ -302,6 +302,14 @@ new pane inherits the split pane's live working directory. A `command` is refuse
 in a locked workspace, exactly as `tab.create`'s is; a bare split is the user
 asking for a shell and goes through.
 
+`host` behaves differently here than on `tab.create`, and deliberately: a split
+with no `host` lands on the machine of **the pane being split**, not on the
+workspace's default host. A split means "another terminal beside this one", so a
+split of a guest pane stays on the guest's machine — which is also what makes the
+inherited `cwd` meaningful, since it is a path on that filesystem. `tab.create`
+and `workspace.create` have no neighbouring pane to ask, so they keep taking the
+workspace's host.
+
 ```bash
 catctl pane.split --params '{"direction":"v","command":["ced","main.go"]}'
 # {"pane": 7}

@@ -93,6 +93,34 @@ func (w *Workspace) defaultHost(spec SpawnSpec) SpawnSpec {
 	return spec
 }
 
+// splitHost is defaultHost for a split: the new pane lands on the machine of
+// the pane it was split from, not on the workspace's default.
+//
+// A split is the one pane-creating verb with an unambiguous neighbour, and the
+// answer to "beside this" is the same machine — otherwise splitting a guest
+// pane produces a pane on the workspace's box, sitting next to a terminal it
+// cannot see the filesystem of, which is also how the split would inherit no
+// cwd (the cwd rule only inherits same-host). The workspace default still
+// applies when the source pane is unknown to the tab, which a live split never
+// is; it is there so the fallback is the old rule rather than "the default
+// host".
+//
+// Note that a source pane's stored "" is inherited as "" rather than resolved:
+// an empty PaneState.HostID means the DEFAULT host (that is how the runtime
+// resolves it), so copying it verbatim puts the new pane exactly where its
+// neighbour is. Resolving it to w.HostID here would move a re-homed pane's
+// split back onto a workspace host its neighbour no longer runs on.
+func (w *Workspace) splitHost(t *Tab, paneID layout.PaneID, spec SpawnSpec) SpawnSpec {
+	if spec.HostID != "" {
+		return spec // an explicit host param always wins
+	}
+	if st := t.Panes[paneID]; st != nil {
+		spec.HostID = st.HostID
+		return spec
+	}
+	return w.defaultHost(spec)
+}
+
 // publicPaneIDForNumber renders the stable public pane handle, e.g. "w1:p3".
 func publicPaneIDForNumber(workspaceID string, paneNumber int) string {
 	return workspaceID + ":p" + EncodePublicNumber(paneNumber)
@@ -228,11 +256,14 @@ func (w *Workspace) SplitFocusedWithRatio(direction layout.Direction, ratio floa
 func (w *Workspace) splitActive(direction layout.Direction, ratio *float32, spec SpawnSpec) (NewPane, error) {
 	paneNumber := w.nextPublicPaneNumber
 	spec.PublicPaneID = publicPaneIDForNumber(w.ID, paneNumber)
-	spec = w.defaultHost(spec)
 	tab := w.ActiveTab()
 	if tab == nil {
 		return NewPane{}, errors.New("workspace: no active tab")
 	}
+	// Same rule as SplitPane: a split lands beside the pane it came from. The
+	// two entry points differ only in how the source pane is named (focused vs
+	// explicit), so they must not differ in where the result goes.
+	spec = w.splitHost(tab, tab.Layout.Focused(), spec)
 	newPane, err := tab.splitFocusedWithSpawner(w.spawner, direction, ratio, spec)
 	if err != nil {
 		return NewPane{}, err
@@ -259,8 +290,8 @@ func (w *Workspace) splitPaneWithSpawner(paneID layout.PaneID, direction layout.
 	}
 	paneNumber := w.nextPublicPaneNumber
 	spec.PublicPaneID = publicPaneIDForNumber(w.ID, paneNumber)
-	spec = w.defaultHost(spec)
 	tab := w.Tabs[tabIdx]
+	spec = w.splitHost(tab, paneID, spec)
 	previousFocus := tab.Layout.Focused()
 	tab.Layout.FocusPane(paneID)
 	newPane, err := tab.splitFocusedWithSpawner(w.spawner, direction, ratio, spec)

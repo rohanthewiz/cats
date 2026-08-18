@@ -373,10 +373,11 @@ func (s *Session) SplitPane(target *layout.PaneID, dir layout.Direction) (layout
 }
 
 // SplitPaneOn is SplitPane placing the new pane on a named cathost ("" = the
-// workspace's own default host). It exists so the §7 dispatcher can route
-// pane.split's host param without building a workspace.SpawnSpec of its own —
-// the host is the only spec field a command may set, the rest being the
-// backend's business via StageSpawn.
+// machine the split pane itself is on — see Workspace.splitHost, which is what
+// fills it in). It exists so the §7 dispatcher can route pane.split's host
+// param without building a workspace.SpawnSpec of its own — the host is the
+// only spec field a command may set, the rest being the backend's business via
+// StageSpawn.
 func (s *Session) SplitPaneOn(target *layout.PaneID, dir layout.Direction, hostID string) (layout.PaneID, error) {
 	return s.SplitPaneWith(target, dir, workspace.SpawnSpec{HostID: hostID})
 }

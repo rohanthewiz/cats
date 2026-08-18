@@ -368,12 +368,16 @@ func BorderPath(id string) ([]bool, bool) {
 //   - Env adds environment variables to the spawned process.
 //
 // Cwd/Env without Command still apply to the default shell spawn.
-// Host puts the new pane on a named cathost instead of the workspace's own
-// default (host.list names them). It is the one field that decides which
-// *machine* the spawn lands on, so everything else here — Cwd especially — is
-// interpreted on that machine: a cwd from the pane being split means nothing on
-// another host, which is why the inherited cwd is dropped when the split
-// crosses hosts (Dispatcher.inheritedSplitCwd).
+// Host puts the new pane on a named cathost (host.list names them) instead of
+// where it would otherwise go, which for a split is the machine of the pane
+// being split — not the workspace's default. "Beside this pane" is what a split
+// means, and a guest pane's split belongs next to it; the workspace's host is a
+// policy for new *tabs* and workspaces, which have no neighbouring pane to
+// answer the question. Host is the one field that decides which *machine* the
+// spawn lands on, so everything else here — Cwd especially — is interpreted on
+// that machine: a cwd from the pane being split means nothing on another host,
+// which is why the inherited cwd is dropped when the split crosses hosts
+// (Dispatcher.inheritedSplitCwd).
 type SplitParams struct {
 	Pane      *uint32           `json:"pane,omitempty"`
 	Direction string            `json:"direction"` // SplitH | SplitV

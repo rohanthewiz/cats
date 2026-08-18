@@ -80,6 +80,76 @@ func TestExplicitPaneHostBeatsWorkspaceDefault(t *testing.T) {
 	}
 }
 
+// A split lands beside the pane it split, not on the workspace's default. This
+// is the difference between "another terminal here" and "another terminal
+// somewhere else that happens to share a layout": a guest pane's split must be
+// able to see the same filesystem, or the inherited cwd is meaningless and the
+// two panes only look adjacent.
+func TestSplitInheritsTheSplitPanesHost(t *testing.T) {
+	sp := newHostSpawner()
+	ws, err := New(sp, "/tmp/wsroot", SpawnSpec{}) // unpinned: default-host workspace
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	root := ws.Tabs[0].RootPane
+
+	if _, _, err := ws.SplitPane(root, layout.Horizontal, true, SpawnSpec{HostID: "devbox"}); err != nil {
+		t.Fatalf("split onto devbox: %v", err)
+	}
+
+	// Splitting the guest with no host named: devbox, not the workspace's "".
+	beside, err := ws.SplitFocused(layout.Vertical, SpawnSpec{})
+	if err != nil {
+		t.Fatalf("split of the guest: %v", err)
+	}
+	if got := sp.hosts[beside.PaneID]; got != "devbox" {
+		t.Errorf("split of a guest pane spawned on %q, want devbox", got)
+	}
+	if st, _ := ws.PaneStateFor(beside.PaneID); st.HostID != "devbox" {
+		t.Errorf("split of a guest pane state host = %q, want devbox", st.HostID)
+	}
+
+	// Splitting the root the other way still gives the default host, so the
+	// rule tracks the source pane rather than the last host used.
+	_, local, err := ws.SplitPane(root, layout.Vertical, false, SpawnSpec{})
+	if err != nil {
+		t.Fatalf("split of the root: %v", err)
+	}
+	if got := sp.hosts[local.PaneID]; got != "" {
+		t.Errorf("split of a default-host pane spawned on %q, want the default", got)
+	}
+
+	// A workspace pinned elsewhere does not override the neighbour either: the
+	// workspace default is for tabs and new workspaces, which have no
+	// neighbouring pane to ask.
+	pinned, err := New(sp, "/tmp/pinned", SpawnSpec{HostID: "buildbox"})
+	if err != nil {
+		t.Fatalf("New pinned: %v", err)
+	}
+	pinnedRoot := pinned.Tabs[0].RootPane
+	_, guest2, err := pinned.SplitPane(pinnedRoot, layout.Horizontal, true, SpawnSpec{HostID: "devbox"})
+	if err != nil {
+		t.Fatalf("split onto devbox: %v", err)
+	}
+	_, beside2, err := pinned.SplitPane(guest2.PaneID, layout.Vertical, true, SpawnSpec{})
+	if err != nil {
+		t.Fatalf("split of the guest: %v", err)
+	}
+	if got := sp.hosts[beside2.PaneID]; got != "devbox" {
+		t.Errorf("split of a guest in a pinned workspace spawned on %q, want devbox", got)
+	}
+
+	// And a new TAB in that workspace still takes the workspace's host — the
+	// two rules are meant to differ.
+	tabIdx, err := pinned.CreateTab("/tmp/pinned", SpawnSpec{})
+	if err != nil {
+		t.Fatalf("CreateTab: %v", err)
+	}
+	if got := sp.hosts[pinned.Tabs[tabIdx].RootPane]; got != "buildbox" {
+		t.Errorf("new tab spawned on %q, want the workspace's buildbox", got)
+	}
+}
+
 // Restore respawns each pane on the host it was recorded on — per pane, not per
 // workspace, so the odd-one-out pane comes back where its process lived rather
 // than being quietly migrated to the workspace's default.

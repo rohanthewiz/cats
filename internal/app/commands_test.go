@@ -1849,11 +1849,24 @@ func TestDispatchSplitHost(t *testing.T) {
 		t.Fatal("the pane being split must stay where it was")
 	}
 
-	// A split naming no host keeps the workspace's own default.
+	// A split naming no host lands beside the pane it split, not on the
+	// workspace's default: the previous split focused the devbox pane, so this
+	// one is a split OF a guest pane and must stay on devbox. The workspace is
+	// still the unpinned default one, which is exactly what used to make this
+	// come back "" and put the pane on the wrong machine.
 	r = h.resp()
 	h.d.Dispatch(CmdPaneSplit, params(t, SplitParams{Direction: SplitV}), r)
+	if got := okData[SplitResult](t, r); h.s.PaneHost(layout.PaneID(got.Pane)) != "devbox" {
+		t.Fatalf("unqualified split of a guest pane = %q, want devbox", h.s.PaneHost(layout.PaneID(got.Pane)))
+	}
+
+	// And splitting a pane that is on the default host still yields one there —
+	// the rule is "beside this pane", not "always the last host named".
+	r = h.resp()
+	srcID := uint32(src)
+	h.d.Dispatch(CmdPaneSplit, params(t, SplitParams{Direction: SplitV, Pane: &srcID}), r)
 	if got := okData[SplitResult](t, r); h.s.PaneHost(layout.PaneID(got.Pane)) != "" {
-		t.Fatalf("unqualified split host = %q, want the workspace default", h.s.PaneHost(layout.PaneID(got.Pane)))
+		t.Fatalf("unqualified split of a local pane = %q, want the default host", h.s.PaneHost(layout.PaneID(got.Pane)))
 	}
 
 	before := len(h.s.VisiblePaneIDs())

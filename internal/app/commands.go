@@ -386,7 +386,7 @@ func (d *Dispatcher) Dispatch(name string, dec ParamDecoder, r Responder) {
 		// Resolve the source pane's cwd before the split, for the same reason a new
 		// tab takes its neighbor's: the new pane is another shell in the work the
 		// user is already doing. Scoped to the host the new pane will run on —
-		// with no host param that is the workspace's own default, which is what
+		// with no host param that is the split pane's own machine, which is what
 		// SplitPane fills in below.
 		inherited := d.inheritedSplitCwd(optPaneID(sp.Pane), sp.Host)
 		np, err := d.session.SplitPaneOn(optPaneID(sp.Pane), dir, sp.Host)
@@ -1076,21 +1076,23 @@ func (d *Dispatcher) inheritedTabCwd(wsID, host string) string {
 // pane being split, which is the tab-level rule (inheritedTabCwd) applied to the
 // one pane a split unambiguously comes from. "" — an unresolvable target, or a
 // pane the backend does not know — leaves the workspace's spawn cwd in place.
-// host is pane.split's host param — "" meaning the workspace's own default,
-// which is what the model fills in for a split that named no host. The cwd is
-// inherited only when the pane being split is on that same machine, for the
-// reason inheritedTabCwd gives.
+// host is pane.split's host param. The cwd is inherited only when the pane being
+// split is on that same machine, for the reason inheritedTabCwd gives.
+//
+// An empty host is the common case and always inherits: a split that names no
+// host lands on the split pane's own machine (Workspace.splitHost), so the
+// directory and the new terminal are on the same filesystem by construction.
+// Resolving "" through the roster instead would compare the source pane against
+// the *default* host and drop the cwd for every split of a guest pane.
 func (d *Dispatcher) inheritedSplitCwd(target *layout.PaneID, host string) string {
 	src, err := d.session.ResolvePaneTarget(target)
 	if err != nil {
 		return ""
 	}
-	if host == "" {
-		if ws := d.session.PaneWorkspace(src); ws != nil {
-			host = ws.HostID
-		}
-	}
 	meta := d.backend.PaneMeta(uint32(src))
+	if host == "" {
+		return meta.Cwd
+	}
 	if !d.sameHost(meta.Host, host) {
 		return ""
 	}
