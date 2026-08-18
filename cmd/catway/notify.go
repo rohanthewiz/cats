@@ -129,7 +129,8 @@ type pushSink interface{ Send(push.Event) }
 func (o *orch) notifyAll(n browserproto.Notify, agent, msg string) {
 	o.broadcast(n)
 	o.emitEvent(app.EventPaneNotify, n.Pane,
-		app.PaneNotifyEvent{Pane: n.Pane, Agent: agent, Kind: n.Kind, Message: msg})
+		app.PaneNotifyEvent{Pane: n.Pane, Agent: agent, Kind: n.Kind, Message: msg,
+			ID: n.ID, Actions: n.Actions})
 	o.push.Send(o.pushEvent(n, agent))
 }
 

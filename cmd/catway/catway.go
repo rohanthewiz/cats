@@ -178,6 +178,12 @@ type orch struct {
 	// subs holds control-API event subscribers (events.subscribe); emitEvent fans
 	// a pane event out to the matching ones and drops any that can't keep up.
 	subs map[*ctlSubscriber]struct{}
+	// notifs / notifOrder are the answerable-notification registry (uinotify.go):
+	// a ui.notify that declared buttons lives here until one of them is taken or
+	// it expires. notifOrder is insertion-ordered so the bound is enforced by a
+	// slice index rather than a scan over timestamps.
+	notifs     map[string]*liveNotify
+	notifOrder []string
 	// structPanes (pane id → public handle) and structFocus snapshot the model's
 	// pane set and globally-focused pane at the last emit; emitStructuralEvents
 	// diffs against them after each mutation to derive pane_added / pane_removed /

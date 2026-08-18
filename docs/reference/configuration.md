@@ -274,7 +274,7 @@ a real system push — not a toast on a screen nobody is looking at.
 push:
   enabled: false
   url: "https://ntfy.sh/cats-CHANGE-ME-TO-SOMETHING-UNGUESSABLE"
-  kinds: ["attention"]      # "attention" and/or "finished"
+  kinds: ["attention"]      # any of "attention", "finished", "info"
   priority:                 # ntfy priority per kind
     attention: "high"
     finished: "low"
@@ -297,9 +297,13 @@ connected at all. Unknown kinds and non-ntfy priorities are rejected at startup
 rather than silently downgrading every notification. The bridge is built once at
 startup, so like `server.*` it needs a restart, not `catctl reload`.
 
-Two defaults are deliberate. `kinds` is attention-only — `finished` fires on
-every completion of every agent, and a bridge that pushes those is how its owner
-learns to ignore it. `priority` tops out at `high`, never `urgent`: ntfy's
+Two defaults are deliberate. `kinds` is attention-only, and it excludes two
+things for two reasons: `finished` fires on every completion of every agent, and
+a bridge that pushes those is how its owner learns to ignore it; `info` is
+whatever a plugin, a hook or a script raised through
+[`ui.notify`](../protocols/control-api.md#notifications), and something that can
+be raised by anything holding the control socket must not be able to reach a
+phone until you say so. `priority` tops out at `high`, never `urgent`: ntfy's
 urgent bypasses Do Not Disturb on Android, and a blocked agent is not a 3am
 emergency.
 

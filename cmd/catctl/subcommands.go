@@ -113,6 +113,12 @@ var subcommands = []subcommand{
 	{"attach-host", app.CmdHostAttach, "attach-host <id> <addr> [label...]", nil, "attach a cathost (addr: unix://path, tcp://host:port, tls://host:port)", buildAttachHost},
 	{"detach-host", app.CmdHostDetach, "detach-host <id> [force]", []argKind{argDetachHost}, "detach a cathost (force also re-homes its panes)", buildDetachHost},
 
+	// Notifications. The ergonomic verb is the plain one-liner a script wants
+	// at the end of a long build; anything with buttons goes through
+	// `catctl ui.notify --params …`, which is the shape a caller declaring
+	// actions would rather write anyway.
+	{"notify", app.CmdUINotify, "notify <title...>", nil, "raise a notification on every client (and the phone bridge)", buildNotify},
+
 	// Misc.
 	{"agent", app.CmdAgentFocus, "agent <pane>", []argKind{argPane}, "reveal an agent's pane", buildPane},
 	{"themes", app.CmdThemeList, "themes", nil, "list available UI themes", noParams},
@@ -235,6 +241,17 @@ func buildRenamePane(args []string) (json.RawMessage, error) {
 		return nil, err
 	}
 	return marshal(app.RenamePaneParams{Pane: n, Name: strings.Join(args[1:], " ")})
+}
+
+// buildNotify: notify <title...>. Kind is left empty so the server applies its
+// own default ("info") — spelling it here would freeze the default into every
+// installed catctl.
+func buildNotify(args []string) (json.RawMessage, error) {
+	title := strings.TrimSpace(strings.Join(args, " "))
+	if title == "" {
+		return nil, usageErr{"notify <title...>"}
+	}
+	return marshal(app.UINotifyParams{Title: title})
 }
 
 // buildResize: resize <border> <ratio>.

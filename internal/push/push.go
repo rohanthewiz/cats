@@ -63,13 +63,17 @@ const (
 const (
 	KindAttention = "attention"
 	KindFinished  = "finished"
+	// KindInfo is ui.notify's default. It is never in the default Kinds set —
+	// see config.PushKindInfo — so reaching a phone with one is an explicit
+	// operator choice.
+	KindInfo = "info"
 )
 
 // Event is one notification to deliver, already resolved against the pane's
 // runtime context. The caller owns that lookup so this package stays free of
 // the session model.
 type Event struct {
-	Kind  string // KindAttention | KindFinished
+	Kind  string // KindAttention | KindFinished | KindInfo
 	Title string // e.g. "claude needs attention"
 	Body  string // the workspace/tab context line
 	Pane  uint32
@@ -250,6 +254,8 @@ func renderTags(ev Event) string {
 		tags = append(tags, "warning")
 	case KindFinished:
 		tags = append(tags, "white_check_mark")
+	case KindInfo:
+		tags = append(tags, "bell")
 	}
 	// ntfy treats an unknown tag as a literal label, which is exactly what we
 	// want for the agent name — but a tag containing a comma would split into

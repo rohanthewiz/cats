@@ -102,9 +102,11 @@ push:
   # bearer credential, set CATS_PUSH_TOKEN; like CATS_PASSWORD it is deliberately
   # NOT read from this file (the settings modal rewrites this file, and would
   # otherwise copy your token into it).
-  kinds: ["attention"]                 # "attention" and/or "finished". Default is
-                                       # attention only: every agent completion is
-                                       # how you learn to ignore the channel.
+  kinds: ["attention"]                 # any of "attention", "finished", "info".
+                                       # Default is attention only: every agent
+                                       # completion is how you learn to ignore the
+                                       # channel, and "info" is whatever a plugin
+                                       # or a script raised with `catctl notify`.
   priority:                            # ntfy priority per kind. Deliberately not
     attention: "high"                  # "urgent" — that bypasses Do Not Disturb,
     finished: "low"                    # and a blocked agent is not an emergency.

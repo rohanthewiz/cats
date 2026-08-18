@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
+	"strings"
 
 	"github.com/rohanthewiz/cats/internal/layout"
 	"github.com/rohanthewiz/cats/internal/startdir"
@@ -130,6 +132,20 @@ type Backend interface {
 	// on the Backend seam because only the backend knows the anchor a relative
 	// path resolves against (the addressed pane's live cwd).
 	StartPathList(r Responder, p PathListParams)
+
+	// UINotify raises a notification from an arbitrary caller (ui.notify) and
+	// UIAction takes one of its buttons (ui.action). Both resolve r
+	// synchronously: the notification fan-out is a broadcast plus a
+	// non-blocking push, and an action is one encoded write into a PTY —
+	// neither has anything to wait for.
+	//
+	// They are on the Backend seam rather than answered here because the
+	// dispatcher holds no notification registry and no PTYs, and because the
+	// registry is the thing that makes an action single-use: putting it
+	// anywhere else would let a second entry point answer a prompt the first
+	// one already answered.
+	UINotify(r Responder, p UINotifyParams)
+	UIAction(r Responder, p UIActionParams)
 
 	// RefreshUsage asks the backend's rate-limit poller to take a reading now
 	// (usage.refresh). It returns immediately: the read is one network round
@@ -895,6 +911,49 @@ func (d *Dispatcher) Dispatch(name string, dec ParamDecoder, r Responder) {
 			return
 		}
 		d.backend.ThemeDelete(r, p)
+
+	case CmdUINotify:
+		var p UINotifyParams
+		if err := dec.Decode(&p); err != nil {
+			bad(err)
+			return
+		}
+		if strings.TrimSpace(p.Title) == "" {
+			r.Fail("title is required")
+			return
+		}
+		if p.Kind == "" {
+			p.Kind = NotifyKindInfo
+		}
+		if !NotifyKindOK(p.Kind) {
+			r.Fail("kind must be one of attention, finished, info")
+			return
+		}
+		// Shape-only checks here; whether a pane exists and whether an action's
+		// text can be encoded for it are the backend's, which holds the panes.
+		for i, a := range p.Actions {
+			if strings.TrimSpace(a.Label) == "" {
+				r.Fail("actions[" + strconv.Itoa(i) + "]: label is required")
+				return
+			}
+		}
+		if err := uniqueActionIDs(p.Actions); err != nil {
+			r.Fail(err.Error())
+			return
+		}
+		d.backend.UINotify(r, p)
+
+	case CmdUIAction:
+		var p UIActionParams
+		if err := dec.Decode(&p); err != nil {
+			bad(err)
+			return
+		}
+		if p.ID == "" {
+			r.Fail("id is required")
+			return
+		}
+		d.backend.UIAction(r, p)
 
 	case CmdUsageRefresh:
 		// Ack the ask, not the answer: the reading lands later, on every client

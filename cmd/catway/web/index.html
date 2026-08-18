@@ -849,6 +849,14 @@
     padding:6px 10px; border-radius:5px; font-size:12px; max-width:340px; box-shadow:0 2px 8px rgba(0,0,0,.4);
     opacity:0; transform:translateX(8px); transition:opacity .2s, transform .2s; }
   .toast.show { opacity:1; transform:none; }
+  /* An actionable toast is taller and stays put, so it gets a little more room
+     than a four-second status line needs. */
+  .toast-actions { display:flex; flex-wrap:wrap; gap:6px; margin-top:7px; }
+  .toast-btn { background:var(--panel); color:var(--fg-strong); border:1px solid var(--line);
+    border-radius:4px; padding:3px 9px; font-size:11px; font-family:inherit; cursor:pointer; }
+  .toast-btn:hover:not(:disabled) { border-color:var(--accent); color:var(--accent); }
+  .toast-btn:disabled { opacity:.45; cursor:default; }
+  .toast-btn.toast-dismiss { margin-left:auto; border-style:dashed; }
 
   /* ---- Split resize handles (WS8) ---- */
   .split { position:absolute; z-index:4; }
@@ -6383,12 +6391,56 @@
       bannerEl.classList.remove("show", "linkerr"); // link recovered → drop the alarm
     }
   }
-  function toast(text) {
+  // toast(text) is the four-second status line. toast(text, {id, actions}) is
+  // the answerable one: it carries a notification's buttons (ui.notify) and
+  // does NOT auto-dismiss, because a button that disappears after four seconds
+  // is a button nobody can press. It leaves when it is answered or dismissed.
+  function toast(text, opts) {
+    opts = opts || {};
+    const actions = opts.actions || [];
     const el = document.createElement("div");
-    el.className = "toast"; el.textContent = text;
+    el.className = "toast";
+    const line = document.createElement("div");
+    line.textContent = text;
+    el.appendChild(line);
+
+    let timer = null;
+    const dismiss = () => {
+      if (timer) { clearTimeout(timer); timer = null; }
+      el.classList.remove("show");
+      setTimeout(() => el.remove(), 250);
+    };
+
+    if (actions.length) {
+      const row = document.createElement("div");
+      row.className = "toast-actions";
+      for (const a of actions) {
+        const b = document.createElement("button");
+        b.className = "toast-btn";
+        b.textContent = a.label || a.id;
+        b.onclick = () => {
+          // The whole row goes dead on the first click. A notification is
+          // answered once server-side, so a second click could only earn a
+          // refusal — and the click that earns it would look, to the user,
+          // exactly like the one that worked.
+          for (const other of row.querySelectorAll("button")) other.disabled = true;
+          sendCmd("ui.action", { id: opts.id, action: a.id });
+          dismiss();
+        };
+        row.appendChild(b);
+      }
+      const x = document.createElement("button");
+      x.className = "toast-btn toast-dismiss";
+      x.textContent = "Dismiss";
+      x.onclick = dismiss;
+      row.appendChild(x);
+      el.appendChild(row);
+    }
+
     toastsEl.appendChild(el);
     requestAnimationFrame(() => el.classList.add("show"));
-    setTimeout(() => { el.classList.remove("show"); setTimeout(() => el.remove(), 250); }, 4000);
+    if (!actions.length) timer = setTimeout(dismiss, 4000);
+    return el;
   }
 
   // ---- Notifications (WS6): agent needs-attention / finished ----
@@ -6398,16 +6450,22 @@
   // user granted permission) whose click reveals the pane — agent.focus crosses
   // workspaces and tabs.
   function handleNotify(msg) {
-    // Non-agent kinds (e.g. an update notice) always toast — there is no pane
-    // whose visibility could make them redundant.
+    const opts = msg.id && msg.actions && msg.actions.length
+      ? { id: msg.id, actions: msg.actions } : null;
+    // Non-agent kinds (e.g. an update notice, or anything raised through
+    // ui.notify) always toast — there is no pane whose visibility could make
+    // them redundant.
     if (msg.kind !== "attention" && msg.kind !== "finished") {
-      toast(msg.message + (msg.body ? " — " + msg.body : ""));
+      toast(msg.message + (msg.body ? " — " + msg.body : ""), opts);
       return;
     }
     const visible = msg.pane ? panes.has(msg.pane) : false;
     const focused = document.hasFocus();
-    if (focused && visible) return;
-    toast(msg.message + (msg.body ? " — " + msg.body : ""));
+    // Suppression exists because a toast is redundant with a pane the user is
+    // already looking at. A BUTTON is not redundant with anything, so an
+    // answerable notification is never suppressed.
+    if (focused && visible && !opts) return;
+    toast(msg.message + (msg.body ? " — " + msg.body : ""), opts);
     if (focused || !("Notification" in window) || Notification.permission !== "granted") return;
     const n = new Notification(msg.message, { body: msg.body || "", tag: "cats-pane-" + (msg.pane || 0) });
     n.onclick = () => {

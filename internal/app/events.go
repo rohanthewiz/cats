@@ -26,6 +26,7 @@ const (
 	EventPaneTitle  = "pane_title"  // the program set the pane's title (OSC 0/2)
 	EventPaneCwd    = "pane_cwd"    // the pane's working directory changed (OSC 7)
 	EventPaneNotify = "pane_notify" // an agent state change warrants attention (blocked / background finish)
+	EventUIAction   = "ui_action"   // somebody took an action on a notification (ui.action, or a push action button)
 
 	EventPaneAdded    = "pane_added"    // a pane entered the session (split / new tab / new workspace)
 	EventPaneRemoved  = "pane_removed"  // a pane left the session (close pane / tab / workspace)
@@ -45,6 +46,7 @@ const (
 func EventNames() []string {
 	return []string{
 		EventPaneExited, EventPaneAgent, EventPaneTitle, EventPaneCwd, EventPaneNotify,
+		EventUIAction,
 		EventPaneAdded, EventPaneRemoved, EventFocusChanged,
 		EventThemeChanged,
 	}
@@ -83,8 +85,31 @@ type PaneCwdEvent struct {
 type PaneNotifyEvent struct {
 	Pane    uint32 `json:"pane"`
 	Agent   string `json:"agent"`
-	Kind    string `json:"kind"` // attention | finished
+	Kind    string `json:"kind"` // attention | finished | info
 	Message string `json:"message"`
+	// ID and Actions are set for a notification raised through ui.notify that
+	// declared buttons. A subscriber that wants to answer one — a phone bridge,
+	// a chat relay, a status bar — needs the id to send ui.action and the
+	// labels to draw, and learning them from the event costs it no extra call.
+	ID      string         `json:"id,omitempty"`
+	Actions []NotifyAction `json:"actions,omitempty"`
+}
+
+// UIActionEvent is the payload for EventUIAction: somebody took action Action
+// on notification ID. It is emitted AFTER the action's own Send has been
+// injected, so a subscriber reading it knows the effect has already happened
+// rather than that it is about to.
+//
+// Source says where the tap came from — "control" for a ui.action command,
+// "push" for the notification-action endpoint a phone reaches. A runbook that
+// treats "the human answered from their desk" and "the human answered from a
+// lock screen" identically is free to ignore it; one that logs who did what is
+// not.
+type UIActionEvent struct {
+	Pane   uint32 `json:"pane"` // the notification's pane, 0 for a session-level one
+	ID     string `json:"id"`
+	Action string `json:"action"`
+	Source string `json:"source"`
 }
 
 // PaneRefEvent is the payload for the three model-structure events

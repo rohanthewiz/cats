@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"testing"
 	"time"
 )
@@ -190,6 +191,16 @@ func TestParsePush(t *testing.T) {
 	}
 	if !reflect.DeepEqual(def.Kinds, []string{PushKindAttention}) {
 		t.Fatalf("default push.kinds = %v, want just attention", def.Kinds)
+	}
+	// "info" is ui.notify's kind, so anything holding the control socket can
+	// raise one. It must be configurable and must NOT be on by default: a
+	// plugin narrating its own progress cannot be allowed to reach a phone
+	// until the operator says so.
+	if err := (Push{Enabled: true, URL: "https://ntfy.sh/x", Kinds: []string{PushKindInfo}}).Validate(); err != nil {
+		t.Fatalf("push.kinds must accept %q: %v", PushKindInfo, err)
+	}
+	if slices.Contains(def.Kinds, PushKindInfo) {
+		t.Fatalf("default push.kinds forwards %q: %v", PushKindInfo, def.Kinds)
 	}
 	if d, err := def.Interval(); err != nil || d != time.Minute {
 		t.Fatalf("default push.min_interval = %v (err %v), want 1m", d, err)

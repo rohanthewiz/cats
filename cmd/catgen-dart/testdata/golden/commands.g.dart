@@ -141,6 +141,10 @@ abstract final class CmdName {
 
   static const String pathList = 'path.list';
 
+  static const String uiNotify = 'ui.notify';
+
+  static const String uiAction = 'ui.action';
+
   static const String hostAttach = 'host.attach';
 
   static const String hostDetach = 'host.detach';
@@ -1877,6 +1881,97 @@ class ThemeSaveParams {
       };
 }
 
+/// UIActionParams: ui.action — take action Action on notification ID.
+///
+/// A notification is answered ONCE. The registry drops it on the first
+/// successful action, so a prompt cannot be answered twice by a browser toast
+/// and a phone that both showed the same buttons, and a second tap is refused
+/// by name rather than silently re-sending "yes" into a shell that has since
+/// moved on.
+class UIActionParams {
+  const UIActionParams({
+    required this.id,
+    required this.action,
+  });
+
+  final String id;
+  final String action;
+
+  factory UIActionParams.fromJson(Map<String, Object?> j) => UIActionParams(
+        id: asString(j['id']),
+        action: asString(j['action']),
+      );
+
+  Map<String, Object?> toJson() => {
+        'id': id,
+        'action': action,
+      };
+}
+
+/// UINotifyParams: ui.notify.
+///
+/// Kind decides who hears about it, and the three values are the browser's
+/// existing notify kinds plus "info". "info" is new here and is deliberately
+/// NOT in the default push.kinds: a plugin that narrates its own progress must
+/// not be able to start vibrating a phone merely by existing, and an operator
+/// who wants that adds one word to the config.
+///
+/// Pane attributes the notification to a pane — the deep link a tap follows,
+/// the client-side "is it already on screen" suppression, and the default
+/// target of an action's Send. Omitting it yields a session-level notification,
+/// which is right for "the nightly build finished" and wrong for anything a
+/// button could answer.
+class UINotifyParams {
+  const UINotifyParams({
+    required this.title,
+    this.body = '',
+    this.kind = '',
+    this.pane,
+    this.actions = const <NotifyAction>[],
+  });
+
+  final String title;
+  final String body;
+
+  /// attention | finished | info (default info)
+  final String kind;
+  final int? pane;
+  final List<NotifyAction> actions;
+
+  factory UINotifyParams.fromJson(Map<String, Object?> j) => UINotifyParams(
+        title: asString(j['title']),
+        body: asString(j['body']),
+        kind: asString(j['kind']),
+        pane: asIntOrNull(j['pane']),
+        actions: asList(j['actions'], (e) => NotifyAction.fromJson(asObj(e))),
+      );
+
+  Map<String, Object?> toJson() => {
+        'title': title,
+        if (body.isNotEmpty) 'body': body,
+        if (kind.isNotEmpty) 'kind': kind,
+        if (pane != null) 'pane': pane,
+        if (actions.isNotEmpty) 'actions': [for (final e in actions) e.toJson()],
+      };
+}
+
+/// UINotifyResult is CmdResult.Data for ui.notify: the id ui.action answers by.
+class UINotifyResult {
+  const UINotifyResult({
+    required this.id,
+  });
+
+  final String id;
+
+  factory UINotifyResult.fromJson(Map<String, Object?> j) => UINotifyResult(
+        id: asString(j['id']),
+      );
+
+  Map<String, Object?> toJson() => {
+        'id': id,
+      };
+}
+
 /// WaitForOutputParams: pane.wait_for_output — block until the pane's output
 /// matches Pattern (a substring, or a regexp when Regex is set), or until TimeoutMs
 /// elapses. Unlike read/capture (one round-trip), this rides the unary envelope but
@@ -2394,6 +2489,8 @@ const List<CommandSpec> kCommandSpecs = <CommandSpec>[
   CommandSpec('plugin.list', replyRequired: true),
   CommandSpec('plugin.uninstall', paramsRequired: true),
   CommandSpec('path.list', replyRequired: true),
+  CommandSpec('ui.notify', paramsRequired: true),
+  CommandSpec('ui.action', paramsRequired: true),
   CommandSpec('host.attach', paramsRequired: true),
   CommandSpec('host.detach', paramsRequired: true),
   CommandSpec('session.get'),
@@ -2686,6 +2783,15 @@ mixin CatsCommands implements CatsCommandTransport {
   /// This method always correlates, so it always runs.
   Future<PathListResult> pathList([PathListParams? params]) async =>
       PathListResult.fromJson(asObj(await invoke(CmdName.pathList, params?.toJson())));
+
+  /// `ui.notify`
+  Future<UINotifyResult> uiNotify(UINotifyParams params) async =>
+      UINotifyResult.fromJson(asObj(await invoke(CmdName.uiNotify, params.toJson())));
+
+  /// `ui.action`
+  Future<void> uiAction(UIActionParams params) async {
+    await invoke(CmdName.uiAction, params.toJson());
+  }
 
   /// `host.attach`
   Future<HostListResult> hostAttach(HostAttachParams params) async =>

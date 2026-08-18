@@ -32,6 +32,7 @@ type fakeBackend struct {
 	scrollErr      error
 	reloadErr      error
 	lastRead       Responder
+	lastNotify     UINotifyParams
 	lastCapture    Responder
 	lastWait       Responder
 	lastWaitP      WaitForOutputParams
@@ -109,6 +110,17 @@ func (b *fakeBackend) HostDetach(r Responder, p HostDetachParams) {
 	b.rec("hostDetach")
 	b.lastHostDetach = p
 	r.OK(HostListResult{Hosts: b.Hosts()})
+}
+
+func (b *fakeBackend) UINotify(r Responder, p UINotifyParams) {
+	b.rec("uiNotify:" + p.Kind + ":" + p.Title)
+	b.lastNotify = p
+	r.OK(UINotifyResult{ID: "n1"})
+}
+
+func (b *fakeBackend) UIAction(r Responder, p UIActionParams) {
+	b.rec("uiAction:" + p.ID + ":" + p.Action)
+	r.OK(nil)
 }
 
 func (b *fakeBackend) RefreshUsage()       { b.rec("refreshUsage") }
@@ -2027,5 +2039,95 @@ func TestDispatchWorkspaceHostFlowsToNewPanes(t *testing.T) {
 	}
 	if ov := h.b.staged[got.Pane]; ov.Cwd != "/srv/app" {
 		t.Fatalf("same-host inherit = %q, want the neighbor's /srv/app", ov.Cwd)
+	}
+}
+
+// --- ui.notify / ui.action ----------------------------------------------------
+
+// The dispatcher owns the shape checks — title, kind, labels, unique ids — and
+// nothing reaches the backend until they pass. The kind default is applied here
+// too, so a caller that omits it does not have to know what "info" is.
+func TestDispatchUINotifyValidates(t *testing.T) {
+	cases := []struct {
+		name string
+		p    UINotifyParams
+		want string // substring of the refusal; "" means it must reach the backend
+	}{
+		{"no title", UINotifyParams{Body: "b"}, "title is required"},
+		{"blank title", UINotifyParams{Title: "   "}, "title is required"},
+		{"unknown kind", UINotifyParams{Title: "t", Kind: "urgent"}, "attention, finished, info"},
+		{"unlabelled action", UINotifyParams{Title: "t", Actions: []NotifyAction{{ID: "a"}}}, "label is required"},
+		{"duplicate ids", UINotifyParams{Title: "t", Actions: []NotifyAction{
+			{ID: "a", Label: "A"}, {ID: "a", Label: "B"}}}, "duplicate id"},
+		{"minimal", UINotifyParams{Title: "t"}, ""},
+		{"with actions", UINotifyParams{Title: "t", Actions: []NotifyAction{{Label: "Yes"}}}, ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			h := newCmdHarness(t)
+			r := h.resp()
+			h.d.Dispatch(CmdUINotify, params(t, c.p), r)
+			if c.want != "" {
+				if !r.failCall || !strings.Contains(r.errMsg, c.want) {
+					t.Fatalf("want a refusal containing %q; got ok=%v %q", c.want, r.okCall, r.errMsg)
+				}
+				for _, e := range *h.log {
+					if strings.HasPrefix(e, "uiNotify") {
+						t.Fatalf("a refused notification still reached the backend: %v", *h.log)
+					}
+				}
+				return
+			}
+			if !r.okCall {
+				t.Fatalf("unexpected refusal: %q", r.errMsg)
+			}
+			if h.b.lastNotify.Kind != NotifyKindInfo {
+				t.Errorf("kind = %q; want the %q default applied by the dispatcher",
+					h.b.lastNotify.Kind, NotifyKindInfo)
+			}
+		})
+	}
+}
+
+// An action id left empty is filled in from its position before the backend
+// sees it, so a caller that only wants buttons never has to invent names — and
+// the ids it gets back are the ones ui.action answers by.
+func TestDispatchUINotifyFillsActionIDs(t *testing.T) {
+	h := newCmdHarness(t)
+	r := h.resp()
+	h.d.Dispatch(CmdUINotify, params(t, UINotifyParams{Title: "t", Actions: []NotifyAction{
+		{Label: "Yes"}, {ID: "no", Label: "No"}, {Label: "Later"},
+	}}), r)
+	if !r.okCall {
+		t.Fatalf("refused: %q", r.errMsg)
+	}
+	got := h.b.lastNotify.Actions
+	want := []string{"1", "no", "3"}
+	for i, id := range want {
+		if got[i].ID != id {
+			t.Errorf("actions[%d].ID = %q; want %q", i, got[i].ID, id)
+		}
+	}
+}
+
+// ui.action needs an id and nothing else the dispatcher can check: whether the
+// notification is still answerable is the registry's question, and asking it
+// here would be a second answer to it.
+func TestDispatchUIAction(t *testing.T) {
+	h := newCmdHarness(t)
+	r := h.resp()
+	h.d.Dispatch(CmdUIAction, params(t, UIActionParams{Action: "yes"}), r)
+	if !r.failCall || !strings.Contains(r.errMsg, "id is required") {
+		t.Fatalf("missing id: ok=%v %q", r.okCall, r.errMsg)
+	}
+
+	h2 := newCmdHarness(t)
+	r2 := h2.resp()
+	h2.d.Dispatch(CmdUIAction, params(t, UIActionParams{ID: "n1", Action: "yes"}), r2)
+	if !r2.okCall {
+		t.Fatalf("refused: %q", r2.errMsg)
+	}
+	if !slices.Contains(*h2.log, "uiAction:n1:yes") {
+		t.Fatalf("action did not reach the backend: %v", *h2.log)
 	}
 }

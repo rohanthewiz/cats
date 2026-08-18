@@ -1320,10 +1320,17 @@ class Mouse {
 }
 
 /// Notify renders a toast + (permission-gated) system notification. Kind is
-/// "attention" (an agent hit a blocker) or "finished" (a background agent run
-/// completed). Pane/Pub name the pane so a notification click can reveal it;
-/// the front-end suppresses the whole thing when that pane is visible and the
-/// page is focused (the user is already looking at it).
+/// "attention" (an agent hit a blocker), "finished" (a background agent run
+/// completed) or "info" (anything raised through ui.notify). Pane/Pub name the
+/// pane so a notification click can reveal it; the front-end suppresses the
+/// whole thing when that pane is visible and the page is focused (the user is
+/// already looking at it).
+///
+/// ID and Actions arrive together or not at all: a notification that declared
+/// buttons carries the id they are answered by (ui.action) alongside them. The
+/// toast holding the buttons is therefore self-contained — it does not have to
+/// look the notification up to answer it, which matters because a toast can
+/// outlive the reconnect that would have invalidated any client-side handle.
 ///
 /// Wire type: `notify`.
 class Notify {
@@ -1333,6 +1340,8 @@ class Notify {
     this.body = '',
     this.pane = 0,
     this.pub = '',
+    this.id = '',
+    this.actions = const <NotifyAction>[],
   });
 
   /// The `t` discriminator this class always carries. It is a property of
@@ -1344,6 +1353,8 @@ class Notify {
   final String body;
   final int pane;
   final String pub;
+  final String id;
+  final List<NotifyAction> actions;
 
   factory Notify.fromJson(Map<String, Object?> j) => Notify(
         kind: asString(j['kind']),
@@ -1351,6 +1362,8 @@ class Notify {
         body: asString(j['body']),
         pane: asInt(j['pane']),
         pub: asString(j['pub']),
+        id: asString(j['id']),
+        actions: asList(j['actions'], (e) => NotifyAction.fromJson(asObj(e))),
       );
 
   Map<String, Object?> toJson() => {
@@ -1360,6 +1373,71 @@ class Notify {
         if (body.isNotEmpty) 'body': body,
         if (pane != 0) 'pane': pane,
         if (pub.isNotEmpty) 'pub': pub,
+        if (id.isNotEmpty) 'id': id,
+        if (actions.isNotEmpty) 'actions': [for (final e in actions) e.toJson()],
+      };
+}
+
+/// NotifyAction is one button on a notification, and it is deliberately a
+/// DECLARED EFFECT rather than a callback.
+///
+/// The caller this exists for is a hook script: it reports that its agent is
+/// blocked and exits, milliseconds before anybody sees the notification it
+/// caused. An action meaning "call me back" would therefore be dead on arrival
+/// in the case the feature is for — a phone, minutes later, with nothing left
+/// running to call. So an action says what to do and catway does it: Send is
+/// injected into Pane (falling back to the notification's own pane) exactly as
+/// pane.send_input would inject it.
+///
+/// Send may be empty, and then the action is announcement-only: a live
+/// subscriber sees the ui_action event and acts on it itself. Both halves
+/// always happen in that order — perform, then announce — so a subscriber
+/// watching a prompt being answered from a phone sees the answer after the fact
+/// rather than racing it.
+class NotifyAction {
+  const NotifyAction({
+    this.id = '',
+    required this.label,
+    this.send = '',
+    this.submit = false,
+    this.pane,
+  });
+
+  /// ID is the caller's handle for this action, echoed in the ui_action event.
+  /// Generated from the index when empty, so a caller that only wants buttons
+  /// never has to invent names.
+  final String id;
+
+  /// the button text; required
+  final String label;
+
+  /// Send is the literal text injected into the pane when the action is taken.
+  final String send;
+
+  /// Submit appends the pane's Enter, exactly as pane.send_input's submit does.
+  /// Separate from Send because "1" and "1\n" are different answers to a
+  /// prompt that filters as you type.
+  final bool submit;
+
+  /// Pane overrides the notification's pane for this action's Send. Nil is the
+  /// common case; it exists so one notification can offer "answer it" and
+  /// "look at the log over there".
+  final int? pane;
+
+  factory NotifyAction.fromJson(Map<String, Object?> j) => NotifyAction(
+        id: asString(j['id']),
+        label: asString(j['label']),
+        send: asString(j['send']),
+        submit: asBool(j['submit']),
+        pane: asIntOrNull(j['pane']),
+      );
+
+  Map<String, Object?> toJson() => {
+        if (id.isNotEmpty) 'id': id,
+        'label': label,
+        if (send.isNotEmpty) 'send': send,
+        if (submit) 'submit': submit,
+        if (pane != null) 'pane': pane,
       };
 }
 

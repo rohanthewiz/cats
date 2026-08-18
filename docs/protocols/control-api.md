@@ -226,13 +226,23 @@ slow-connection drop.
 | `pane_agent` | detected agent identity or state changed |
 | `pane_title` | the program set the pane's title (OSC 0/2) |
 | `pane_cwd` | the pane's working directory changed (OSC 7) |
-| `pane_notify` | an agent state change warrants attention (blocked, or a background run finished) |
+| `pane_notify` | a notification was raised — an agent state change (blocked, or a background run finished), or anything sent through `ui.notify` |
+| `ui_action` | somebody took an action on a notification (`ui.action`, or a push action button) |
 | `pane_added` | a pane entered the session (split / new tab / new workspace) |
 | `pane_removed` | a pane left the session |
 | `focus_changed` | the globally-focused pane changed |
 | `theme_changed` | the effective appearance changed (`config.set` / `theme.save` / `theme.delete`) |
 
-Every event but the last names a pane. `theme_changed` is **session-scoped**: it
+`pane_notify` carries `id` and `actions` when the notification declared buttons
+(see `ui.notify` below): a subscriber that wants to answer one — a chat relay, a
+status bar, a phone bridge of your own — has the id to send `ui.action` with and
+the labels to draw, without a second call. `ui_action` then reports the tap,
+**after** the action's own input has already been injected, along with `source`
+(`control` for a `ui.action` command).
+
+Every event but `theme_changed` names a pane — `ui_action` names the
+notification's pane, which is 0 for a session-level one. `theme_changed` is
+**session-scoped**: it
 is emitted with pane 0, so a subscription that filters on a pane will not see it.
 That follows from the filter's contract — a client that asked about one pane
 asked about one pane — so a client wanting both takes two streams, or one
@@ -434,6 +444,7 @@ new panes rather than a location.
 | `theme.list` / `theme.save` / `theme.delete` | — |
 | `plugin.list` / `plugin.uninstall` | — |
 | `path.list` | — |
+| `ui.notify` / `ui.action` | `notify <title...>` / — |
 | `agent.focus` | `agent <pane>` |
 | `usage.refresh` | — |
 | `server.reload_config` | `reload` |
@@ -460,6 +471,65 @@ catway can no longer reach.
 
 Git work runs **off** the orchestrator loop at both ends, so a slow
 `git worktree add` never stalls input on either machine.
+
+### Notifications
+
+`ui.notify` raises the same notification an agent state change raises — the
+browser toast, the `pane_notify` event, and the phone bridge, by one path — from
+anything holding this socket. A plugin, an agent hook, a runbook, `catctl` in a
+script, or an editor in a pane on another machine:
+
+```bash
+catctl notify deploy finished
+catctl ui.notify --params '{
+  "title": "claude needs attention",
+  "kind":  "attention",
+  "pane":  3,
+  "actions": [
+    {"id": "yes", "label": "Yes",  "send": "1", "submit": true},
+    {"id": "no",  "label": "No",   "send": "2", "submit": true}
+  ]
+}'
+```
+
+`kind` is `attention`, `finished` or `info` (the default). `info` is deliberately
+**not** in the default `push.kinds`, so a plugin narrating its own progress
+cannot start vibrating a phone merely by existing; an operator who wants that
+adds one word to the config.
+
+`pane` attributes the notification: it is the deep link a tap follows, the
+client-side "is it already on screen" suppression, and the default target of an
+action's `send`. Omit it for a session-level notification — right for "the
+nightly build finished", wrong for anything a button could answer.
+
+**An action is a declared effect, not a callback.** `send` is injected into the
+pane exactly as `pane.send_input` would inject it (`submit` appends Enter). That
+is not a convenience: the caller this exists for is a hook script that reported
+its agent blocked and exited milliseconds before anyone saw the notification, so
+an action meaning "call me back" would be dead on arrival in the case the
+feature is for. An action with no `send` is announcement-only and reaches live
+subscribers as `ui_action` to act on themselves.
+
+`ui.notify` returns the `id` its actions are answered by (empty when it declared
+none). `ui.action {id, action}` takes one:
+
+```bash
+catctl ui.action --params '{"id":"K2fD…","action":"yes"}'
+```
+
+**A notification is answered once.** The registry drops it on the first action
+taken, so a browser toast and a lock screen showing the same buttons cannot both
+land an answer, and a second attempt is refused by name. An action whose `send`
+fails — the pane exited between the notification and the tap — is still spent,
+so a phone retrying over a flaky link cannot land a "yes" twice because the first
+attempt reported an error. Buttons expire after 30 minutes: by then the agent has
+usually timed out and the shell has scrolled, and an answer would land somewhere
+it was never meant for.
+
+This confers no privilege a caller does not already have: anything holding this
+socket can `pane.send_input` directly, and gating the honest route would only
+make it look more privileged than the dishonest one — the same argument written
+down for `clipboard.read`.
 
 `path.list` is what a front-end completes a directory against — the start-path
 picker in the new-workspace dialog is its only caller today:

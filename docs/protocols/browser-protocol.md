@@ -79,7 +79,7 @@ for when the server picks which.
 | `t` | Purpose |
 |-----|---------|
 | `clipboard` | an OSC 52 write from any pane (base64); empty data is a clear |
-| `notify` | a toast plus a permission-gated system notification. Kind is `attention` (an agent hit a blocker) or `finished` (a background run completed). Carries the pane id and public number so a click can reveal it; the front end suppresses it entirely when that pane is already visible |
+| `notify` | a toast plus a permission-gated system notification. Kind is `attention` (an agent hit a blocker), `finished` (a background run completed) or `info` (anything raised through `ui.notify`). Carries the pane id and public number so a click can reveal it; the front end suppresses it entirely when that pane is already visible — **unless** it carries `actions`, since a button is not redundant with a pane you are looking at. `id` + `actions` arrive together: the toast draws a button per action and answers with a `ui.action` command, which is why it needs no server round trip to know how |
 | `title` | the browser tab title |
 | `error` | a server-side error to surface |
 | `shutdown` | the server is going away |

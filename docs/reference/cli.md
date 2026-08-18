@@ -196,6 +196,25 @@ and an agent row inside it will not reveal its pane — revealing a pane *is* a
 switch, so the two refusals are the same one. Every deliberate route in still
 works: the row's context menu, the command palette, and the keyboard.
 
+Notifications — the same toast an agent transition raises, from a script:
+
+```bash
+catctl notify deploy finished on devbox
+```
+
+That is the one-liner form. A notification with buttons goes through the raw
+form, because a caller declaring actions would rather write JSON anyway:
+
+```bash
+catctl ui.notify --params '{"title":"deploy?","pane":3,
+  "actions":[{"id":"go","label":"Ship it","send":"y","submit":true}]}'
+catctl ui.action --params '{"id":"<the id ui.notify returned>","action":"go"}'
+```
+
+An action's `send` is typed into the pane exactly as `catctl run` would type it,
+and a notification is answerable **once** — see
+[the control API](../protocols/control-api.md#notifications).
+
 Hosts — these edit the **running** roster and the config's `hosts:` block
 together, so neither needs a restart:
 

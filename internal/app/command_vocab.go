@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -99,6 +100,21 @@ const (
 	// directories, so a front-end can complete a start path against the
 	// server's filesystem instead of asking the user to type it blind.
 	CmdPathList = "path.list"
+
+	// UI notifications. ui.notify lets anything holding the control socket —
+	// a plugin, an agent hook, a runbook, an editor in a pane on another
+	// machine — raise the same notification an agent state change raises, so
+	// "the build finished" reaches the browser toast, the pane_notify event
+	// stream and the phone by the one path that already carries all three.
+	// It confers no new privilege: a caller that can pane.send_input can
+	// already do everything a notification action does, by a longer route.
+	//
+	// ui.action is the answer half. It is a command rather than a browser-only
+	// message because the button may be tapped somewhere the WebSocket does not
+	// reach — a lock screen — and both routes must land on one implementation
+	// that performs the effect exactly once.
+	CmdUINotify = "ui.notify"
+	CmdUIAction = "ui.action"
 
 	// Host commands (the HOSTS section's buttons + catctl): attach a cathost to
 	// the running session, or detach one. They are §7 commands rather than a
@@ -249,6 +265,13 @@ var commandSpecs = []CommandSpec{
 
 	// Path listing.
 	{Name: CmdPathList, Params: PathListParams{}, Result: PathListResult{}, ReplyRequired: true},
+
+	// Notifications. ui.notify returns the id its actions are answered by, but
+	// is not reply-gated: a hook script that fires and forgets still wants the
+	// toast, and the id is only interesting to a caller that declared actions
+	// and is still around to watch for them.
+	{Name: CmdUINotify, Params: UINotifyParams{}, Result: UINotifyResult{}, ParamsRequired: true},
+	{Name: CmdUIAction, Params: UIActionParams{}, ParamsRequired: true},
 
 	// Hosts. Both writers echo the new roster, so a client repaints from the
 	// reply instead of waiting for the hosts push that also follows.
@@ -1306,6 +1329,99 @@ type PathListResult struct {
 	Recents   []string `json:"recents,omitempty"` // absolute directories, best-first
 }
 
+// --- Notification params & results (§7, ui.notify / ui.action) ---------------
+
+// NotifyAction is one button on a notification, and it is deliberately a
+// DECLARED EFFECT rather than a callback.
+//
+// The caller this exists for is a hook script: it reports that its agent is
+// blocked and exits, milliseconds before anybody sees the notification it
+// caused. An action meaning "call me back" would therefore be dead on arrival
+// in the case the feature is for — a phone, minutes later, with nothing left
+// running to call. So an action says what to do and catway does it: Send is
+// injected into Pane (falling back to the notification's own pane) exactly as
+// pane.send_input would inject it.
+//
+// Send may be empty, and then the action is announcement-only: a live
+// subscriber sees the ui_action event and acts on it itself. Both halves
+// always happen in that order — perform, then announce — so a subscriber
+// watching a prompt being answered from a phone sees the answer after the fact
+// rather than racing it.
+type NotifyAction struct {
+	// ID is the caller's handle for this action, echoed in the ui_action event.
+	// Generated from the index when empty, so a caller that only wants buttons
+	// never has to invent names.
+	ID    string `json:"id,omitempty"`
+	Label string `json:"label"` // the button text; required
+	// Send is the literal text injected into the pane when the action is taken.
+	Send string `json:"send,omitempty"`
+	// Submit appends the pane's Enter, exactly as pane.send_input's submit does.
+	// Separate from Send because "1" and "1\n" are different answers to a
+	// prompt that filters as you type.
+	Submit bool `json:"submit,omitempty"`
+	// Pane overrides the notification's pane for this action's Send. Nil is the
+	// common case; it exists so one notification can offer "answer it" and
+	// "look at the log over there".
+	Pane *uint32 `json:"pane,omitempty"`
+}
+
+// UINotifyParams: ui.notify.
+//
+// Kind decides who hears about it, and the three values are the browser's
+// existing notify kinds plus "info". "info" is new here and is deliberately
+// NOT in the default push.kinds: a plugin that narrates its own progress must
+// not be able to start vibrating a phone merely by existing, and an operator
+// who wants that adds one word to the config.
+//
+// Pane attributes the notification to a pane — the deep link a tap follows,
+// the client-side "is it already on screen" suppression, and the default
+// target of an action's Send. Omitting it yields a session-level notification,
+// which is right for "the nightly build finished" and wrong for anything a
+// button could answer.
+type UINotifyParams struct {
+	Title   string         `json:"title"`
+	Body    string         `json:"body,omitempty"`
+	Kind    string         `json:"kind,omitempty"` // attention | finished | info (default info)
+	Pane    *uint32        `json:"pane,omitempty"`
+	Actions []NotifyAction `json:"actions,omitempty"`
+}
+
+// UINotifyResult is CmdResult.Data for ui.notify: the id ui.action answers by.
+type UINotifyResult struct {
+	ID string `json:"id"`
+}
+
+// UIActionParams: ui.action — take action Action on notification ID.
+//
+// A notification is answered ONCE. The registry drops it on the first
+// successful action, so a prompt cannot be answered twice by a browser toast
+// and a phone that both showed the same buttons, and a second tap is refused
+// by name rather than silently re-sending "yes" into a shell that has since
+// moved on.
+type UIActionParams struct {
+	ID     string `json:"id"`
+	Action string `json:"action"`
+}
+
+// Notify kinds accepted by ui.notify. Duplicated as plain strings rather than
+// imported from browserproto or internal/push, matching how config.go carries
+// its own copies: the vocabulary package describes the wire, and taking a
+// dependency on either renderer to name three constants would invert that.
+const (
+	NotifyKindAttention = "attention"
+	NotifyKindFinished  = "finished"
+	NotifyKindInfo      = "info"
+)
+
+// NotifyKindOK reports whether kind is one ui.notify accepts.
+func NotifyKindOK(kind string) bool {
+	switch kind {
+	case NotifyKindAttention, NotifyKindFinished, NotifyKindInfo:
+		return true
+	}
+	return false
+}
+
 // optPaneID converts an optional wire pane id into an optional layout.PaneID
 // (nil = the focused pane).
 func optPaneID(p *uint32) *layout.PaneID {
@@ -1314,4 +1430,27 @@ func optPaneID(p *uint32) *layout.PaneID {
 	}
 	id := layout.PaneID(*p)
 	return &id
+}
+
+// uniqueActionIDs fills in an empty action id from its index and reports a
+// collision. Two buttons sharing an id is not a cosmetic problem: the id is the
+// whole address of an action, so the second one would be unreachable and the
+// first would answer for both — silently, and only for the caller unlucky
+// enough to have named two buttons the same. Fail the notification instead.
+//
+// The generated ids are "1", "2", … rather than the labels, because a label is
+// display text (it gets translated, it gets emoji, it collides) and an id is an
+// address.
+func uniqueActionIDs(actions []NotifyAction) error {
+	seen := make(map[string]bool, len(actions))
+	for i := range actions {
+		if actions[i].ID == "" {
+			actions[i].ID = strconv.Itoa(i + 1)
+		}
+		if seen[actions[i].ID] {
+			return fmt.Errorf("actions: duplicate id %q", actions[i].ID)
+		}
+		seen[actions[i].ID] = true
+	}
+	return nil
 }

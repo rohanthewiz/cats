@@ -592,6 +592,12 @@ func (c Config) Validate() error {
 const (
 	PushKindAttention = "attention"
 	PushKindFinished  = "finished"
+	// PushKindInfo is the kind ui.notify defaults to — anything a plugin, an
+	// agent hook or a runbook raises for itself. It is accepted here so an
+	// operator CAN forward it, and left out of the default Kinds so a plugin
+	// that narrates its own progress cannot start vibrating a phone merely by
+	// existing.
+	PushKindInfo = "info"
 )
 
 // pushPriorities are the values ntfy accepts. Checked eagerly so a typo fails at
@@ -613,12 +619,12 @@ func (p Push) Validate() error {
 		return err
 	}
 	for _, k := range p.Kinds {
-		if k != PushKindAttention && k != PushKindFinished {
+		if k != PushKindAttention && k != PushKindFinished && k != PushKindInfo {
 			return fmt.Errorf("kinds: unknown notify kind %q", k)
 		}
 	}
 	for k, v := range p.Priority {
-		if k != PushKindAttention && k != PushKindFinished {
+		if k != PushKindAttention && k != PushKindFinished && k != PushKindInfo {
 			return fmt.Errorf("priority: unknown notify kind %q", k)
 		}
 		if !pushPriorities[v] {
