@@ -892,17 +892,26 @@ func (o *orch) createPane(rt *paneRuntime) {
 	// from CATS_CONTROL_SOCKET, which must hold even when catway listens on a
 	// non-default path.
 	//
-	// Local panes only, for the reason above and with no relay to stand in for
-	// it: the control API is a duplex protocol rather than the hook API's
-	// one-shot line, so carrying it across the seam is its own piece of work. A
-	// remote pane is left with no override, which is honest — catctl there
-	// fails to dial rather than quietly reaching a different catway through an
-	// inherited path.
-	if o.controlSocket != "" && o.paneIsLocal(rt.id) {
+	// A remote pane gets the variable EXPLICITLY DISABLED rather than left
+	// alone. The control API is a duplex protocol rather than the hook API's
+	// one-shot line, so carrying it across the seam is its own piece of work,
+	// and until then there is nothing on that machine for catctl to dial.
+	//
+	// Silence would not be neutral. A pane inherits the cathost's environment,
+	// and a cathost launched from inside another cats session carries that
+	// session's CATS_CONTROL_SOCKET — so an in-pane catctl would quietly drive
+	// somebody else's terminals. (Observed, not theorised.) An unset variable
+	// falls back to the conventional /tmp path, which is the same hazard by a
+	// more predictable route. SocketNone makes catctl say why instead.
+	ctlVal := o.controlSocket
+	if !o.paneIsLocal(rt.id) {
+		ctlVal = ctlproto.SocketNone
+	}
+	if ctlVal != "" {
 		if cp.Env == nil {
 			cp.Env = make(map[string]string, 1)
 		}
-		cp.Env[ctlproto.SocketEnvVar] = o.controlSocket
+		cp.Env[ctlproto.SocketEnvVar] = ctlVal
 	}
 	if o.hostOf(rt).connected() {
 		if cwd, ok := o.restoredCwds[rt.id]; ok {

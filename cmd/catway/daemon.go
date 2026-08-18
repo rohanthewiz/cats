@@ -103,6 +103,19 @@ type daemon struct {
 	latency time.Duration
 	pingID  uint64
 	pingAt  time.Time
+	// stalled marks a connection this end closed because the peer stopped
+	// answering pings. It exists purely so the roster tells the truth: the read
+	// error that follows our own Close is "use of closed network connection",
+	// which reads to an operator as a bug in catway rather than as a machine
+	// that went quiet. Read-and-cleared by the dial loop (takeStalled).
+	stalled bool
+	// pingSince is when the current run of UNANSWERED probes began, zero when
+	// the last one came back. It is separate from pingAt, and the separation is
+	// the whole liveness check: pingAt moves with every probe, so measuring the
+	// silence from it can never exceed one interval and the timeout below could
+	// never fire. (It could not, until a frozen cathost proved it.) pingAt still
+	// times the latency of the probe being answered; pingSince times the gap.
+	pingSince time.Time
 	// statsInterval is what this host has been asked to report its own memory,
 	// CPU and disk on (0 = nothing). Held across disconnects so the reconnect
 	// can re-establish it without asking the orchestrator what it wanted.
@@ -301,7 +314,8 @@ func (d *daemon) setConn(c net.Conn) {
 		// that has been unreachable for an hour.
 		d.features = nil
 		d.latency = 0
-		d.pingAt = time.Time{}
+		d.pingAt, d.pingSince = time.Time{}, time.Time{}
+		d.stalled = false
 	} else {
 		d.lastErr = "" // a completed handshake retires whatever kept us out before
 	}
@@ -356,6 +370,16 @@ func (d *daemon) stop() {
 	if conn != nil {
 		_ = conn.Close() // unblocks the pump's read; run() then sees stopped
 	}
+}
+
+// takeStalled reports whether this connection was closed for going quiet, and
+// clears the flag. Read once per session end by the dial loop.
+func (d *daemon) takeStalled() bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	was := d.stalled
+	d.stalled = false
+	return was
 }
 
 // stopping reports whether stop has been called.
@@ -447,7 +471,9 @@ const (
 	//
 	// Three intervals: long enough that a daemon busy with a burst of output is
 	// not disconnected for being slow, short enough that a dead link is found
-	// before a user has typed a paragraph into it.
+	// before a user has typed a paragraph into it. Measured from the start of
+	// the unanswered run (daemon.pingSince), not from the last probe sent —
+	// see there for why that distinction is the whole check.
 	hostPingTimeout = 3 * hostPingInterval
 )
 
@@ -484,7 +510,8 @@ func (d *daemon) sendPing(conn net.Conn) bool {
 		d.mu.Unlock()
 		return false
 	}
-	if !d.pingAt.IsZero() && time.Since(d.pingAt) > hostPingTimeout {
+	if !d.pingSince.IsZero() && time.Since(d.pingSince) > hostPingTimeout {
+		d.stalled = true // so the roster names the silence, not our own Close
 		d.mu.Unlock()
 		log.Printf("catway: cathost %s answered no ping in %s — closing the connection", d.label, hostPingTimeout)
 		// Close rather than mark: the pump is blocked on a read of this socket,
@@ -498,6 +525,9 @@ func (d *daemon) sendPing(conn net.Conn) bool {
 	d.pingID++
 	id := d.pingID
 	d.pingAt = time.Now()
+	if d.pingSince.IsZero() {
+		d.pingSince = d.pingAt // the silence starts with the first unanswered probe
+	}
 	d.mu.Unlock()
 	if err := orchestration.WriteMessage(conn, orchestration.NewPing(id)); err != nil {
 		return false // the pump's read is about to fail too; it owns the reconnect
@@ -516,7 +546,10 @@ func (d *daemon) notePong(id uint64) bool {
 	}
 	prev := d.latency
 	d.latency = time.Since(d.pingAt)
-	d.pingAt = time.Time{}
+	// Any answer to the CURRENT probe ends the run, however many older ones
+	// went unanswered: the question the timeout asks is whether this link is
+	// still carrying traffic, not whether it dropped something earlier.
+	d.pingAt, d.pingSince = time.Time{}, time.Time{}
 	return latencyWorthPushing(prev, d.latency)
 }
 
@@ -609,6 +642,12 @@ func (d *daemon) run() {
 			// would toast the user about a machine they just removed.
 			return
 		}
+		if d.takeStalled() {
+			// The read error here is the consequence of our own Close, so it
+			// would put "use of closed network connection" on the roster row of
+			// a machine that simply stopped answering.
+			err = fmt.Errorf("stopped answering — no reply in %s", hostPingTimeout)
+		}
 		d.setLastErr(err) // nil (a clean end) clears it; a real error explains the gap
 		d.setConn(nil)
 		// Only this host's in-flight work is failed: a request or waiter on
@@ -636,12 +675,34 @@ func (d *daemon) lostMessage() string {
 	return d.label + ": cathost connection lost — reconnecting"
 }
 
+// handshakeTimeout bounds the hello/welcome exchange.
+//
+// It exists because a dial can succeed against a daemon that will never answer.
+// A unix or TCP connect is completed by the kernel, so a cathost that is
+// stopped, wedged, or on a machine that has gone to sleep accepts the
+// connection and says nothing — and without a deadline the read below blocks
+// forever, leaving that host permanently "not connected" with no error and the
+// dial loop parked on a socket it will never hear from. (Observed against a
+// SIGSTOPped cathost.) The ping probe cannot help here: it does not start until
+// the handshake completes.
+//
+// Generous next to dialTimeout, because the daemon has real work to do before
+// it answers — it enumerates its live panes — and a slow answer is still an
+// answer. The retry loop is what keeps trying.
+//
+// A var rather than a const only so a test can shrink it; nothing else writes it.
+var handshakeTimeout = 10 * time.Second
+
 // session runs one daemon connection: handshake, reconcile, event pump.
 func (d *daemon) session(conn net.Conn) error {
 	tok, err := d.authToken()
 	if err != nil {
 		return err
 	}
+	// Bounded for the handshake only, then cleared: once the session is up the
+	// pump blocks on a read that is *supposed* to be idle for minutes at a
+	// time, and the ping probe is what judges silence from there on.
+	_ = conn.SetDeadline(time.Now().Add(handshakeTimeout))
 	if err := orchestration.WriteMessage(conn, orchestration.NewHelloWithToken(tok)); err != nil {
 		return err
 	}
@@ -668,6 +729,7 @@ func (d *daemon) session(conn net.Conn) error {
 			w.ProtocolVersion, orchestration.MinProtocolVersion, orchestration.ProtocolVersion)
 	}
 
+	_ = conn.SetDeadline(time.Time{}) // the handshake is done; the pump may idle
 	d.setConn(conn)
 	d.setPeerVersion(w.ProtocolVersion)
 	d.setFeatures(w.Features)

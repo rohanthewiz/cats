@@ -52,7 +52,9 @@ func TestNotePongMatchesTheOutstandingProbe(t *testing.T) {
 	defer server.Close()
 	d := &daemon{id: "h", label: "h", quit: make(chan struct{})}
 	d.setConn(client)
-	d.pingID, d.pingAt = 4, time.Now().Add(-8*time.Millisecond)
+	d.pingID = 4
+	d.pingAt = time.Now().Add(-8 * time.Millisecond)
+	d.pingSince = d.pingAt
 
 	if d.notePong(3) {
 		t.Fatal("a pong for a different id must not be taken as a reading")
@@ -62,6 +64,9 @@ func TestNotePongMatchesTheOutstandingProbe(t *testing.T) {
 	}
 	if !d.notePong(4) {
 		t.Fatal("the first reading of a connection is always worth pushing")
+	}
+	if !d.pingSince.IsZero() {
+		t.Fatal("an answered probe must end the unanswered run, or the link is closed while healthy")
 	}
 	if d.latency < 8*time.Millisecond {
 		t.Fatalf("latency = %v, want at least the 8ms the probe was outstanding", d.latency)
@@ -181,10 +186,26 @@ func TestUnansweredPingClosesTheConnection(t *testing.T) {
 	if !d.sendPing(client) {
 		t.Fatal("the first probe should go out")
 	}
-	// Backdate the outstanding probe past the tolerance rather than waiting a
+	// Age the unanswered run to just inside the tolerance rather than waiting a
 	// minute for it: the clock is the input, not the subject.
 	d.mu.Lock()
-	d.pingAt = time.Now().Add(-hostPingTimeout - time.Second)
+	aged := time.Now().Add(-hostPingTimeout / 2)
+	d.pingSince = aged
+	d.mu.Unlock()
+
+	// Probes keep going out meanwhile, and each one moves pingAt. This is the
+	// regression: measuring the silence from the LAST probe instead of from the
+	// first unanswered one caps it at a single interval, so the timeout could
+	// never fire — which is exactly what a frozen cathost did in a live run
+	// while this test passed.
+	if !d.sendPing(client) {
+		t.Fatal("a probe inside the tolerance should still go out")
+	}
+	d.mu.Lock()
+	if !d.pingSince.Equal(aged) {
+		t.Fatal("a second probe reset the silence it was supposed to be measuring")
+	}
+	d.pingSince = time.Now().Add(-hostPingTimeout - time.Second)
 	d.mu.Unlock()
 
 	if d.sendPing(client) {
@@ -192,6 +213,15 @@ func TestUnansweredPingClosesTheConnection(t *testing.T) {
 	}
 	if _, err := client.Write([]byte("x")); err == nil {
 		t.Fatal("the connection should have been closed")
+	}
+	// The dial loop is told WHY, because the read error that follows our own
+	// Close is "use of closed network connection" — which on a roster row reads
+	// as a bug in catway rather than as a machine that went quiet.
+	if !d.takeStalled() {
+		t.Fatal("the stall was not recorded; the roster would blame our own close")
+	}
+	if d.takeStalled() {
+		t.Fatal("takeStalled must clear, or the next clean disconnect inherits this reason")
 	}
 	<-drain
 }
@@ -203,4 +233,38 @@ func mustJSON(t *testing.T, v any) []byte {
 		t.Fatalf("marshal: %v", err)
 	}
 	return b
+}
+
+// A dial can succeed against a daemon that will never answer: the kernel
+// completes a unix or TCP connect on its own, so a cathost that is stopped or
+// wedged accepts the connection and says nothing. Without a deadline on the
+// handshake the dial loop parks there forever and the host stays "not
+// connected" with no reason attached — and the ping probe cannot help, because
+// it does not start until the handshake completes.
+func TestHandshakeAgainstASilentDaemonTimesOut(t *testing.T) {
+	client, server := net.Pipe()
+	defer client.Close()
+	defer server.Close()
+	// A peer that reads the hello and never writes a welcome.
+	go func() { _, _, _ = orchestration.ReadMessage(server) }()
+
+	d := &daemon{id: "h", label: "h", quit: make(chan struct{})}
+	// Reach the deadline in test time rather than the real ten seconds: the
+	// subject is that a deadline is set at all, not its value.
+	defer func(v time.Duration) { handshakeTimeout = v }(handshakeTimeout)
+	handshakeTimeout = 150 * time.Millisecond
+
+	done := make(chan error, 1)
+	go func() { done <- d.session(client) }()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("a silent daemon should end the session with an error, not succeed")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("session never returned; the handshake read is unbounded")
+	}
+	if d.connected() {
+		t.Fatal("a daemon that never sent a welcome must not count as connected")
+	}
 }

@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rohanthewiz/cats/internal/ctlproto"
 	"github.com/rohanthewiz/cats/internal/layout"
 	"github.com/rohanthewiz/cats/internal/orchestration"
 )
@@ -457,5 +458,49 @@ func TestRelayedHookReportAnswersBadRequests(t *testing.T) {
 	}
 	if !strings.Contains(string(reply.Payload), "invalid_request") {
 		t.Fatalf("reply = %q, want an invalid_request error", reply.Payload)
+	}
+}
+
+// CATS_CONTROL_SOCKET is disabled on a remote pane rather than left alone.
+// Silence is not neutral: a pane inherits the cathost's environment, and a
+// cathost launched from inside another cats session carries THAT session's
+// control socket — so an in-pane catctl would quietly drive somebody else's
+// terminals. Observed live, not theorised.
+func TestRemotePaneGetsNoControlSocket(t *testing.T) {
+	o, localPane, remotePane, pdLocal, pdRemote := twoHostOrch(t)
+	o.controlSocket = "/tmp/p6-control.sock"
+	o.hookSocket = "/tmp/local-hooks.sock"
+	o.hosts[testRemoteHost].setHookSocket("/tmp/relay.sock")
+
+	// twoHostOrch already spawned both panes, so the create_pane each host has
+	// queued describes the environment BEFORE the sockets above were set.
+	pdLocal.collect(50 * time.Millisecond)
+	pdRemote.collect(50 * time.Millisecond)
+
+	env := func(pd *pipeDaemon, pane uint32) map[string]string {
+		t.Helper()
+		o.createPane(o.panes[pane])
+		var cp orchestration.CreatePane
+		if err := json.Unmarshal(pd.expect(t, orchestration.MsgCreatePane), &cp); err != nil {
+			t.Fatalf("decode create_pane: %v", err)
+		}
+		return cp.Env
+	}
+
+	local := env(pdLocal, localPane)
+	if local[ctlproto.SocketEnvVar] != "/tmp/p6-control.sock" {
+		t.Errorf("local pane control socket = %q, want this catway's", local[ctlproto.SocketEnvVar])
+	}
+	if local["CATS_SOCKET_PATH"] != "/tmp/local-hooks.sock" {
+		t.Errorf("local pane hook socket = %q", local["CATS_SOCKET_PATH"])
+	}
+
+	remote := env(pdRemote, remotePane)
+	if remote[ctlproto.SocketEnvVar] != ctlproto.SocketNone {
+		t.Errorf("remote pane control socket = %q, want it explicitly disabled (%q)",
+			remote[ctlproto.SocketEnvVar], ctlproto.SocketNone)
+	}
+	if remote["CATS_SOCKET_PATH"] != "/tmp/relay.sock" {
+		t.Errorf("remote pane hook socket = %q, want that host's relay", remote["CATS_SOCKET_PATH"])
 	}
 }

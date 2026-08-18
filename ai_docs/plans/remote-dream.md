@@ -313,8 +313,226 @@ Known gap, unchanged from Phase 3: an unqualified `pane.split` still takes the
 
 - §7 `host.attach`/`host.detach` (`HostAttachParams` = config `Host` shape); `orch.attachHost/detachHost` (detach refuses while it owns panes unless `force` → respawn on default); persist to `hosts:` like `config.set`; `ReloadConfig` diffs the roster; roster buttons in the aside; `catctl host attach/detach`.
 
-### Phase 6 — follow-ups
-Per-host meters (`host_stats` event → `UsageGroup{ID:"host:"+id}`), remote `path.list` via a cathost `list_dir` request, hook relay for remote agents, latency in `HostItem`, catapp `Cats Client.app` host presets.
+### Phase 6 — follow-ups — **DONE**
+
+As built. The plan's one line was five follow-ups; the shape they share is that
+each is a question only the *other machine* can answer, and the shared discovery
+is that catway had been answering them anyway with this machine's answer. Every
+one is a wrong answer being replaced, not a missing feature being added.
+
+**Capabilities, not a version bump.** All the new requests hang off
+`Welcome.Features`, and that is forced rather than chosen: `NegotiateVersion`
+refuses a peer *newer* than its own build, so bumping `ProtocolVersion` to
+announce a message would be rejected outright by every already-deployed cathost
+one version behind — the exact fleet the range was widened for in Phase 4. And an
+unknown request is not ignored the way an unknown field is: `dispatch` answers it
+with an error event, which reaches a browser as a toast. So a daemon lists what it
+can answer and catway sends a request only when it appears there; an empty list
+(every build before this) means "the base protocol only". `ProtocolVersion` stays
+at 3.
+
+**6a — a split lands beside the pane it split** (the gap left standing since
+Phase 3). `Workspace.splitHost` fills an empty spec host from the source pane,
+falling back to the workspace default only when that pane is unknown to the tab;
+both split entry points run through it. A stored `""` is inherited *verbatim*
+rather than resolved — an empty `PaneState.HostID` means the default host, so
+copying it puts the new pane exactly where its neighbour is, where resolving it
+to `w.HostID` would move a re-homed pane's split back onto a machine its
+neighbour no longer runs on. `tab.create`/`workspace.create` keep the workspace's
+host: they have no neighbouring pane to ask, which is what the workspace-level
+field is *for*. `inheritedSplitCwd` follows — an empty host param now always
+inherits, since the split is on the source pane's machine by construction.
+
+**6b — latency, and a link that can be told is dead.** `ping`/`pong`, with
+`HostInfo/HostItem.latency_ms` on each roster row — fractional, because a local
+unix socket lands under a millisecond and whole milliseconds would report every
+healthy session as "0". The load-bearing half is the timeout: nothing else in the
+seam can notice a link that has gone quiet, since a connection to a machine that
+slept stays writable forever while catway paints the host green and queues
+keystrokes into it. Three unanswered 20s intervals and the connection is
+**closed**, which drops it into the ordinary disconnect path — flush, toast,
+redial — because as far as anything upstream is concerned that is what happened.
+cathost answers a ping on its normal event queue, not straight back: a pong that
+overtook the frames ahead of it would report a healthy link on a daemon whose
+output the user is watching arrive in slow motion. One probe outstanding at a
+time, id-matched (a late answer to a ping already given up on is not a reading,
+and one outstanding request is what makes a miss detectable). The roster is
+re-pushed only when a sample moves the drawn figure (>2 ms **and** >20%), since
+every host pushes the whole roster to every client.
+
+Three things the *live* run found, none of which the unit tests could:
+
+* **The timeout could never fire.** The first draft measured the silence from
+  `pingAt`, which every probe resets — so the gap could never exceed one
+  interval. A SIGSTOPped cathost sat "connected" indefinitely while the test
+  passed, because the test backdated the field by hand. `pingSince` is now the
+  start of the *unanswered run* and `pingAt` only times the probe being
+  answered; the regression test sends a second probe and asserts the run's start
+  did not move.
+* **A dial can succeed against a daemon that will never answer.** The kernel
+  completes a unix or TCP connect on its own, so a stopped cathost accepts the
+  connection and says nothing — and the hello/welcome read had no deadline, so
+  the dial loop parked on it forever with the host showing "not connected" and
+  no reason. `handshakeTimeout` (10 s) bounds that exchange and is cleared once
+  the pump starts, since the pump is *supposed* to idle. The ping probe cannot
+  cover this: it does not start until the handshake completes.
+* **The roster blamed catway for it.** The read error that follows our own
+  `Close` is "use of closed network connection", which on a host row reads as a
+  bug here rather than as a machine that went quiet. `daemon.stalled` carries
+  the real reason to the dial loop, which reports "stopped answering — no reply
+  in 1m0s".
+
+**6c — per-host meters.** `internal/hostmeter` is the memory/CPU/disk readers
+lifted out of `cmd/catway` unchanged in substance, because two processes now need
+the same reading of two different machines and the *rows* are built by the same
+code on both sides — if only the numbers travelled and each end phrased them, the
+local and remote halves of one sidebar section would drift apart one fix at a
+time. Nothing in it imports browserproto. The wire is a **subscription**
+(`request_host_stats`/`host_stats`), which follows from what a CPU reading is: a
+rate does not exist as a value to be read, only as a difference between two
+readings an interval apart, so a daemon that started measuring when asked and
+answered immediately would have nothing to say. The corollary is what keeps a
+cathost from being a monitoring agent — nothing is sampled until somebody
+subscribes; the subscription dies with the connection or with `interval_ms: 0`,
+taking the sampler and (on darwin) its `iostat` with it (`hostmeter.Sampler` grew
+a `Stop` for exactly this); and catway paces it off the same attention tier as
+the account poll, whose **dark tier is now "stop"**. A box nobody has a sidebar
+open on measures nothing. catway never subscribes to its *local* host — it
+measures that machine directly, and in managed mode the local cathost is a child
+of this process on this box, so subscribing would put two CPU samplers (two
+`iostat`s on darwin) on one machine to draw one row. The section is composed on
+the way out (`usageMsg`) rather than stored composed, because the poll's half and
+each host's half arrive on unrelated clocks; a host that disconnects or is
+detached has its rows dropped, since a meter describing a machine that has
+stopped answering is exactly the one not to leave on screen as if it were
+current.
+
+**6d — the start-path picker works on the other machine.** `path.list` used to
+refuse a remote pane with "local-host only"; it now asks that pane's cathost.
+Everything that used to be expanded here travels **unexpanded** — `~` is the
+remote user's home, `$VAR` its environment, `.` a directory only its kernel
+resolves, and whether something is a directory at all is not a question this side
+can answer about a disk it cannot see. `internal/pathpick` grew the whole listing
+(`List`/`Merge`/`ListError`/`MaxRecents`) so both halves run the same code and
+differ only in which process runs it. The request carries the session's own live
+cwds **on that host** and the daemon merges and stats them — an unfiltered list
+would offer a picker on devbox this laptop's project directories, and any that
+happened to exist there too would be offered as if they were the ones on screen.
+`PathListParams` grew `host`, because the new-workspace dialog picks a host
+*before* anything exists there; when the anchor pane is on a different machine
+from the one being listed its cwd is deliberately **not** sent, since a relative
+path resolved against a directory from another filesystem is worse than no anchor
+(with none the answering machine starts at its own home). The round trip reuses
+the read/capture pending queue keyed on the anchor pane, which gets the timeout
+and the host-scoped flush for free. `HostInfo/HostItem.lists_dirs` is separate
+from `local` because the two used to be the same answer and are not any more; the
+browser gates the picker on it and points it at the chosen host, dropping its
+cache on the switch (a listing of `/home/me` here says nothing about `/home/me`
+there, and the two are indistinguishable once they are in one map).
+
+**6e — hook relay for remote agents.** Every pane is spawned with
+`CATS_SOCKET_PATH`; for a pane on another machine catway injected its own path
+anyway — a file in a filesystem it cannot see, and on a box that runs cats
+itself, a *different* server's socket. Each cathost now opens a hook socket of
+its own, advertises it as `welcome.hook_socket`, and catway injects that; what
+arrives is forwarded as `hook_report` and answered with `hook_reply` through the
+same `answerHook` a local report gets — same arbitration, same idempotency token,
+same error codes, because a relayed transition is not a different kind of event.
+The payload is **bytes, verbatim**: the pane is the orchestrator's, the hook API
+is the orchestrator's to define, and relaying bytes keeps the next field added to
+it from needing a cathost release. The read limits stay enforced daemon-side,
+since that end owns the socket. The path is in the welcome rather than behind a
+request because catway needs it *before* its first pane, and it is stable for the
+daemon's **lifetime**, not the connection's — panes outlive a reconnect and their
+environment cannot be rewritten — so catway keeps it across a disconnect and
+ignores an empty re-advertisement. A host with no relay gets no hook environment
+at all rather than a fallback: dormant hooks beat hooks dialing whatever answers
+on the other machine. cathost gained `-hook-socket` (`-` disables).
+
+The live run turned up the sharper half of the same problem, which the plan had
+not anticipated: a remote pane inherits **`CATS_CONTROL_SOCKET` from the
+cathost's own environment**, and a cathost launched from inside another cats
+session carries that session's socket — so an in-pane `catctl` would quietly
+drive somebody else's terminals (observed, not theorised). Silence is not
+neutral and neither is unsetting it (that falls back to the conventional `/tmp`
+path, the same hazard by a more predictable route), so `ctlproto.SocketNone`
+(`"-"`) now means "no control socket reachable from here" and remote panes are
+given it explicitly; `Call` refuses with a message naming the variable, because
+"connection refused" would send someone looking for a dead server. A control
+relay is the real fix and is its own piece of work — the control API is duplex
+where the hook API is a one-shot line.
+
+**6f — host presets for `Cats Client.app`.** The thin client remembered exactly
+one catway URL, so a laptop that follows its owner between a home server, a work
+VPN and a relay had to be moved by editing `app.json`. Each connection is now a
+preset, offered in a native **Connect** menu (⌘1–⌘9, a checkmark on the one in
+the window, "Connect to Another…" at ⌘K) and on the connect page, which is
+reachable at any time rather than only on a first run. Switching is a navigation
+in the same window, not a relaunch, so the session cookie WKWebView holds per
+host survives being away from it. The current URL is stored on its own rather
+than as an index — the app must open on the last-used catway even if `presets`
+was hand-edited into nonsense, and whatever it opens on is folded into the list
+so a client that connected once before presets existed finds it in the menu.
+Forgetting is not disconnecting: removing a row leaves the window where it is.
+`upsertPreset` keeps insertion order on update, because a menu whose items move
+when you use them is one you cannot build muscle memory for. The whole menu bar
+is rebuilt to move the checkmark (NSMenu has no cheaper way, and a handful of
+items costs nothing next to a marker that says you are somewhere you are not),
+and the self-contained `Cats.app` gets **no** Connect menu rather than an empty
+one.
+
+Tests added: `internal/workspace/host_test.go` (a split of a guest pane, of a
+default-host pane, and in a pinned workspace, plus the tab rule that must still
+differ), `internal/app/commands_test.go` (the same through the dispatcher),
+`cmd/catway/latency_test.go` (capability gating, pong matching, fractional
+reporting, the push threshold table, the probe through a real pipe, and an
+unanswered ping closing the connection), `cmd/catway/hoststats_test.go`
+(composition, drop-on-disconnect, skipping a host that left the roster, the
+attention tiers, remotes-only subscription, and no request to an unadvertised
+host), `cmd/catway/paths_test.go` (refusal, round trip, the host param overriding
+the anchor, and the anchor cwd withheld across machines),
+`cmd/catway/hooks_test.go` (which socket a pane is told about, the path surviving
+a disconnect, a relayed report moving the state, a malformed one still answered,
+and the control-socket rule), `internal/orchestration/handshake_test.go` +
+`hookrelay_test.go` (features advertised and answered, the stats subscription's
+lifecycle, listing from the daemon's filesystem, the relay's path/permissions/
+round trip/teardown), `internal/ctlproto/client_test.go` (SocketNone),
+`cmd/catapp/config_test.go` (preset identity, ordering, escaping, gating).
+
+Verified live — two persistent cathosts, one catway, a stdlib WebSocket
+stand-in for a browser (catway creates no PTYs without a viewport, and measures
+no remote host without a watcher):
+`catctl hosts` shows `latency_ms` ~0.2 ms and `lists_dirs` on both; cathost B
+restarted under a different `HOME` proves `path.list --params '{"host":"devbox",
+"dir":"~/"}'` resolves to **B's** home while catway's own `~` is unchanged;
+splitting the devbox pane with no host yields a devbox pane and splitting the
+local one yields a local pane; with a client attached the usage message carries a
+`host:devbox` group beside `host`, and nothing is measured before that; a freshly
+created remote pane's environment is `CATS_SOCKET_PATH=/tmp/cats-hookrelay-…`
+(B's, not catway's) and `CATS_CONTROL_SOCKET=-`; and a hook report `nc -U`'d to
+that socket from inside the pane comes back `{"id":"h1","result":{"type":"ok"}}`
+while `catctl pane 5` starts reporting `agent: codex, agent_state: working`.
+Freezing cathost B with SIGSTOP has catway close the link 60 s after the first
+missed ping ("cathost devbox answered no ping in 1m0s — closing the
+connection"), clear its latency, and reconnect within seconds of SIGCONT
+(7.7 ms again); restarting catway while B is still frozen ends the handshake
+after 10 s with "i/o timeout" instead of parking on it. The "stopped answering"
+row text is unit-tested rather than observed live: the redial's own handshake
+timeout supersedes it within a second, which is the right answer for the row
+(the current reason is that we cannot reconnect) but leaves too narrow a window
+to catch from outside.
+Docs updated: `docs/protocols/orchestration-seam.md` (capabilities, liveness,
+host meters, directory listing, hook relay, message catalogue), `hook-api.md`
+("Panes on another machine"), `control-api.md` (`path.list`'s host/`lists_dirs`,
+`latency_ms`, `pane.split`'s host rule), `browser-protocol.md`,
+`docs/reference/cli.md` (`cathost -hook-socket`),
+`docs/architecture/mac-client-linux-server.md` (host presets).
+catgen-dart goldens regenerated; **cats-mobile has not been regenerated** — that
+needs cats pushed first (see memory: cats-mobile regen flow).
+
+Left for later: a **control-socket relay** (the one thing 6e could not finish —
+`catctl`, cats-todo and plugins inside a remote pane have nothing to dial), and
+remote worktrees, which stay local-only for the same reason they always did.
 
 ## Verification
 - Every phase: `make test` and `make test-ghostty` (`-tags ghostty ./...`); regen catgen-dart goldens whenever `internal/app`, `browserproto`, or `orchestration` wire structs change and `go test ./cmd/catgen-dart`; `TestCommandSpecsRouted` for each new command; then cats-mobile regen per memory.

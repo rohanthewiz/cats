@@ -114,21 +114,26 @@ func TestHookRelayPathOutlivesASessionAndIsCleanedUp(t *testing.T) {
 		t.Fatal("no relay socket")
 	}
 
-	server, client := net.Pipe()
-	go func() { _ = h.Attach(t.Context(), server) }()
-	if w := handshakeOn(t, client); w.HookSocket != path {
-		t.Fatalf("welcome path = %q, want the daemon's %q", w.HookSocket, path)
+	// Serially, the way the daemon's own accept loop attaches clients: Attach
+	// clears the session's outbound sink on the way out, so overlapping the two
+	// would let the first one's teardown swallow the second one's welcome.
+	attach := func(step string) Welcome {
+		t.Helper()
+		server, client := net.Pipe()
+		done := make(chan struct{})
+		go func() { defer close(done); _ = h.Attach(t.Context(), server) }()
+		w := handshakeOn(t, client)
+		client.Close()
+		<-done
+		if w.HookSocket != path {
+			t.Fatalf("%s welcome path = %q, want the daemon's %q", step, w.HookSocket, path)
+		}
+		return w
 	}
-	client.Close()
-
+	attach("first")
 	// A second client is told the same path — the panes the first one created
 	// are still running with it in their environment.
-	server2, client2 := net.Pipe()
-	go func() { _ = h.Attach(t.Context(), server2) }()
-	if w := handshakeOn(t, client2); w.HookSocket != path {
-		t.Fatalf("second welcome path = %q, want the same %q", w.HookSocket, path)
-	}
-	client2.Close()
+	attach("second")
 
 	h.Stop()
 	if _, err := os.Stat(path); err == nil {
