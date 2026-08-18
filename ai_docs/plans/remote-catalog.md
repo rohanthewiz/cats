@@ -380,11 +380,36 @@ subscription's shape and why the daemon does the scanning),
 catgen-dart goldens regenerated (`LedgerListParams`/`LedgerEntry`/`LedgerListResult`);
 **cats-mobile has not been regenerated** — still owed from slice 1.
 
-### Phase 5 — semantic scrollback blocks
+### Phase 5 — semantic scrollback blocks — **NOT STARTED; scoped, and one item needs a
+decision**
 
-The ledger's marks give the browser block boundaries: collapse, jump to previous/next,
-copy just the output, send a block to chat/agent/note. "Explain this failed block" is
-`chat.send` with the block as context.
+The ledger's marks give the browser block boundaries. Scoping this against the code turned
+up two things worth writing down before anybody starts.
+
+**Row positions need the feed split at each mark.** `readPump` feeds the whole 32 KiB chunk
+to the emulator and *then* scans it, so the cursor position at scan time is the position
+after the whole chunk — fine for a mark at the end of a read (the common case: the shell
+prints its prompt and waits), wrong for `133;C` followed immediately by output in the same
+read, where a block would start below its own first lines. The fix is to have the scanner
+report each mark's byte offset and feed the chunk in pieces, taking the screen-space row
+between them. Rows are `ScrollMetrics.MaxOffsetFromBottom + cursor.Y` — the same
+screen-buffer space `request_selection` already uses, so a block's text is a `read` away.
+
+**Collapse does not fit the rendering model, and the plan should say so.** cats renders a
+grid of cells server-side and ships frames; the browser draws what it is given. "Collapse
+this block" therefore is not a client-side fold — it would mean the daemon rendering a
+viewport with rows elided, which is deep inside libghostty's screen model. The other three
+verbs need none of that:
+
+* **jump to previous/next command** — scroll the viewport to a block's start row
+  (`scroll_viewport`, which exists)
+* **copy just the output** — `read` over `[output_start_row, end_row]` (exists)
+* **send a block to chat/agent/note** — the same read, then `chat.send` (exists)
+
+Suggested split: **5a** = row positions on the seam and in the ledger, plus a
+`ledger.output` convenience that reads a recorded command's output, plus the browser's jump
+and copy affordances. **5b** = collapse, only if it is worth the rendering work, and with
+that cost understood rather than assumed away.
 
 ### Phase 6 — runbooks
 
