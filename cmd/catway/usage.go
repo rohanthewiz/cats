@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/rohanthewiz/cats/internal/browserproto"
+	"github.com/rohanthewiz/cats/internal/hostmeter"
 )
 
 // The account's standing against Claude's rate-limit windows, in the sidebar's
@@ -127,8 +128,8 @@ const (
 func (o *orch) runUsage() {
 	est := newUsageEstimator(o.claudeProjects)
 	cop := newCopilotEstimator(copilotStateDir())
-	cpu := newCPUSampler()
-	go cpu.run()
+	cpu := hostmeter.NewSampler()
+	go cpu.Run()
 	// Owned by this goroutine alone, like the estimators beside it: the poll is
 	// the only thing that attempts the account read, so the only thing that can
 	// have a run of failures to remember.
@@ -272,12 +273,16 @@ func (o *orch) RefreshUsage() {
 // a few hundred bytes, twice an hour per client.
 func (o *orch) setUsage(m browserproto.Usage) {
 	o.usage = &m
+	// Stored as the poll read it and composed on the way out: the remote hosts'
+	// groups belong to this section too but arrive on their own subscriptions,
+	// and folding them in here would make every poll responsible for state it
+	// did not read (see usageMsg).
 	// Stamped from the loop's own clock rather than parsed back out of the
 	// message: this is only ever compared against time.Now() to decide whether a
 	// refocus has earned a fresh read (noteUsageAttention), and the message's
 	// own ReadAt is a wire format that exists to be printed.
 	o.lastUsageRead = time.Now()
-	o.broadcast(m)
+	o.broadcastUsage()
 }
 
 // readUsage produces one reading: a subsection per provider that reports
@@ -293,7 +298,7 @@ func (o *orch) setUsage(m browserproto.Usage) {
 // The host group does not depend on any account: a machine with no claude login
 // still has a memory ceiling worth watching, and the row should not disappear
 // because a token expired.
-func readUsage(claude *usageEstimator, copilot *copilotEstimator, cpu *cpuSampler, back *usageBackoff) browserproto.Usage {
+func readUsage(claude *usageEstimator, copilot *copilotEstimator, cpu *hostmeter.Sampler, back *usageBackoff) browserproto.Usage {
 	now := time.Now()
 	groups := []browserproto.UsageGroup{claudeUsageGroup(claude, back, now)}
 	if g, ok := copilot.group(now); ok {
@@ -415,39 +420,38 @@ func claudeEstimateGroup(g browserproto.UsageGroup, est *usageEstimator, now tim
 // read on the same tick — a laptop runs out of RAM, or out of disk, long before
 // an account runs out of week.
 //
-// The rows are gathered independently. Each reader reports nothing rather than a
-// guess on a host it cannot ask (see hostMemory, cpuSampler.window, hostDisk),
-// and a reader that came up empty drops its row instead of taking the section
-// down with it: they have no host in common where exactly one is expected to
-// fail, but a permission, a synthetic mount or a killed iostat can silence any
-// of them on its own, and the surviving numbers are still worth showing. Only a
-// group with no rows at all is withheld — an empty heading reads as a broken
-// sidebar.
+// The reading itself is hostmeter's, because a cathost on another machine takes
+// exactly the same one about its own box (see hostStatsGroup); this function is
+// only the sidebar's half of it. Each reader there reports nothing rather than a
+// guess on a host it cannot ask, and a reader that came up empty drops its row
+// instead of taking the section down with it. Only a group with no rows at all
+// is withheld — an empty heading reads as a broken sidebar.
 //
 // Memory is the group's headline (UsageWindow.Headline): the row a folded HOST
 // stands in for the rest with. It is the resource that ends a session soonest
 // and least reversibly — a machine that starts swapping makes every pane treacle
 // and nothing but a process exiting takes it back, where a pegged CPU is usually
 // the work itself and a full disk has been full for a week.
-func hostUsageGroup(cpu *cpuSampler) (browserproto.UsageGroup, bool) {
-	g := browserproto.UsageGroup{ID: "host", Name: "Host"}
-	if mem := hostMemory(); mem.Pct >= 0 {
-		mem.Name, mem.Headline = "Memory", true
-		g.Windows = append(g.Windows, mem)
-	}
-	// Reading order is by how fast each one moves against how badly it ends:
-	// memory first (minutes, and it stops the session), CPU second (seconds, and
-	// it is usually the work rather than a problem), disk last (weeks). CPU sits
-	// in the middle rather than first for that reason — it is the row most often
-	// high for a good reason, and leading the group with it would train the eye
-	// to skip the group.
-	if c := cpu.window(); c.Pct >= 0 {
-		c.Name = "CPU"
-		g.Windows = append(g.Windows, c)
-	}
-	if disk := hostDisk(); disk.Pct >= 0 {
-		disk.Name = "Disk"
-		g.Windows = append(g.Windows, disk)
+func hostUsageGroup(cpu *hostmeter.Sampler) (browserproto.UsageGroup, bool) {
+	return meterGroup("host", "Host", hostmeter.Rows(cpu))
+}
+
+// meterGroup turns one machine's meter rows into a sidebar group. Shared by the
+// local HOST section and every remote host's, so the two cannot drift: the
+// headline rule, the name mapping and the withhold-when-empty rule are stated
+// once.
+func meterGroup(id, name string, rows []hostmeter.Row) (browserproto.UsageGroup, bool) {
+	g := browserproto.UsageGroup{ID: id, Name: name}
+	for _, r := range rows {
+		g.Windows = append(g.Windows, browserproto.UsageWindow{
+			Name:   r.Name,
+			Pct:    r.Pct,
+			Detail: r.Detail,
+			Spark:  r.Spark,
+			// Memory is the one row a folded group quotes. hostmeter orders the
+			// rows but says nothing about emphasis, which is a sidebar concern.
+			Headline: r.Name == "Memory",
+		})
 	}
 	if len(g.Windows) == 0 {
 		return browserproto.UsageGroup{}, false
@@ -593,7 +597,7 @@ func weeklyModelLimit(limits []usageAPILimit) (string, browserproto.UsageWindow)
 			continue
 		}
 		name = l.Scope.Model.DisplayName
-		window = browserproto.UsageWindow{Pct: clampPct(l.Percent), ResetsAt: l.ResetsAt}
+		window = browserproto.UsageWindow{Pct: hostmeter.ClampPct(l.Percent), ResetsAt: l.ResetsAt}
 	}
 	return name, window
 }
@@ -602,17 +606,7 @@ func apiWindow(w *usageAPIWindow) browserproto.UsageWindow {
 	if w == nil {
 		return browserproto.UsageWindow{Pct: browserproto.UsagePctUnknown}
 	}
-	return browserproto.UsageWindow{Pct: clampPct(w.Utilization), ResetsAt: w.ResetsAt}
-}
-
-func clampPct(v float64) float64 {
-	if v < 0 {
-		return 0
-	}
-	if v > 100 {
-		return 100
-	}
-	return v
+	return browserproto.UsageWindow{Pct: hostmeter.ClampPct(w.Utilization), ResetsAt: w.ResetsAt}
 }
 
 // --- The credential -----------------------------------------------------------

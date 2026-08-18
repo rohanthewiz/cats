@@ -80,6 +80,7 @@ without racing the daemon's own post-hello replay. Unknown pane ids are ignored.
 | `request_resync` | `pane_id` | replay one pane's full state |
 | `set_output_stream` | `pane_id`, `enabled` | arms the raw-byte stream for `pane.wait_for_output` |
 | `ping` | `id` | round-trip probe; answered with `pong` carrying the same `id`. Sent only to a daemon advertising the `ping` capability |
+| `request_host_stats` | `interval_ms` | subscribe to the daemon's readings of its own machine, one `host_stats` per interval; `0` cancels. Capability: `host_stats` |
 | `shutdown` | — | ask a persistent daemon to exit and tear down all panes |
 
 ### Events — `cathost` → `catway`
@@ -99,6 +100,7 @@ without racing the daemon's own post-hello replay. Unknown pane ids are ignored.
 | `pane_modes` | `pane_id`, DEC mode flags | mouse tracking, bracketed paste, focus reporting, application cursor, alt-scroll, sync output, kitty keyboard, `modifyOtherKeys` |
 | `pane_exited` | `pane_id`, exit status | |
 | `pong` | `id` | reply to `ping`, echoing its `id`. The only event with no pane |
+| `host_stats` | `rows` | one reading of the daemon's machine — memory, CPU, disk — display-ready. Only while a subscription is live |
 | `error` | code, message | |
 
 ## Versioning
@@ -140,6 +142,7 @@ reads correctly as "the base protocol only".
 | Feature | Adds | Used for |
 |---------|------|----------|
 | `ping` | `ping` / `pong` | the roster's per-host round-trip figure, and liveness — see below |
+| `host_stats` | `request_host_stats` / `host_stats` | the sidebar's per-host meters — see below |
 
 ### Liveness
 
@@ -160,6 +163,40 @@ The daemon answers a `ping` on its normal event queue rather than writing
 straight back. That is deliberate — a pong that overtook the pane frames ahead of
 it would report a healthy link on a daemon whose output the user is watching
 arrive in slow motion.
+
+### Host meters
+
+`host_stats` is how a pane on another machine can say anything about the machine
+it is on: the daemon measures its own memory, CPU and disk and pushes the rows,
+and `catway` renders them as a `host:<id>` group in the sidebar's USAGE section
+beside its own.
+
+It is a **subscription**, not a request/reply pair, and that follows from what a
+CPU reading is. Utilization is a rate — it does not exist as a value to be read,
+only as a difference between two readings an interval apart — so a daemon that
+started measuring when asked and answered immediately would have nothing to say.
+The client subscribes, the daemon starts sampling, readings arrive on the
+interval the client chose.
+
+The corollary is the rule that keeps a cathost from being a monitoring agent:
+
+* nothing is sampled until somebody subscribes;
+* the subscription dies with the connection, or when the client sends
+  `interval_ms: 0`, taking the sampler — and on macOS its `iostat` — with it;
+* `catway` subscribes only while a browser is connected, and cancels when the
+  last one goes. A box in the roster nobody has a sidebar open on measures
+  nothing at all.
+
+`catway` never subscribes to its **local** host: it measures that machine
+directly, and in managed mode the local cathost is a child of this process on
+this box, so subscribing would put two CPU samplers on one machine to draw one
+row.
+
+The rows travel display-ready (name, percentage, caption, optional history)
+rather than as raw byte counts. Both halves of the section are built by the same
+`internal/hostmeter` code that way; sending numbers and re-deriving the captions
+on the far side is how the local and remote halves of one section start
+disagreeing about what "used" means.
 
 ## Why the daemon resolves cwd and branch
 

@@ -1,12 +1,8 @@
-//go:build ghostty
-
-package main
+package hostmeter
 
 import (
 	"fmt"
 	"os"
-
-	"github.com/rohanthewiz/cats/internal/browserproto"
 )
 
 // How much of the machine's disk is spoken for, as the second row of the
@@ -28,24 +24,25 @@ import (
 // Hosts that cannot be asked report nothing rather than a guess, and the sidebar
 // draws no row — see hostDisk.
 
-// hostDisk reads the volume behind the user's home directory as a usage window.
-// A failed read is UsagePctUnknown, which the sidebar renders as no row at all,
-// on the same reasoning as hostMemory: an empty disk row invites the reader to
-// conclude something about a volume nobody measured.
-func hostDisk() browserproto.UsageWindow {
-	total, used, err := diskBytes(hostDiskPath())
+// DiskRow reads the volume behind the user's home directory as one row. A
+// failed read is PctUnknown, which the sidebar renders as no row at all, on the
+// same reasoning as MemoryRow: an empty disk row invites the reader to conclude
+// something about a volume nobody measured.
+func DiskRow() Row {
+	total, used, err := diskBytes(DiskPath())
 	if err != nil || total == 0 {
-		return browserproto.UsageWindow{Pct: browserproto.UsagePctUnknown}
+		return Row{Name: "Disk", Pct: PctUnknown}
 	}
-	return browserproto.UsageWindow{
-		Pct: clampPct(100 * float64(used) / float64(total)),
+	return Row{
+		Name: "Disk",
+		Pct:  ClampPct(100 * float64(used) / float64(total)),
 		// The absolute pair, for the same reason memory carries one: 90% of a
 		// 2 TB volume still has room for today's work, 90% of 128 GB does not.
-		Detail: fmt.Sprintf("%s/%s", formatBytes(used), formatBytes(total)),
+		Detail: fmt.Sprintf("%s/%s", FormatBytes(used), FormatBytes(total)),
 	}
 }
 
-// hostDiskPath picks the volume to measure: the one holding the user's home
+// DiskPath picks the volume to measure: the one holding the user's home
 // directory, falling back to the root.
 //
 // Home rather than "/" because home is where this program's own growth happens
@@ -53,7 +50,7 @@ func hostDisk() browserproto.UsageWindow {
 // with a separate /home partition the root volume's figure would answer a
 // question nobody asked. On macOS the two are the same APFS container, so the
 // choice costs nothing there and pays on the host where it matters.
-func hostDiskPath() string {
+func DiskPath() string {
 	if home, err := os.UserHomeDir(); err == nil && home != "" {
 		return home
 	}

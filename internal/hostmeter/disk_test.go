@@ -1,14 +1,10 @@
-//go:build ghostty
-
-package main
+package hostmeter
 
 import (
 	"os"
 	"runtime"
 	"strings"
 	"testing"
-
-	"github.com/rohanthewiz/cats/internal/browserproto"
 )
 
 // There is no captured-output parser here the way there is for memory — statfs
@@ -18,7 +14,7 @@ import (
 // inside the process to check the answer against.
 
 func TestHostDiskLive(t *testing.T) {
-	w := hostDisk()
+	w := DiskRow()
 	switch runtime.GOOS {
 	case "darwin", "linux":
 		if w.Pct < 0 {
@@ -34,7 +30,7 @@ func TestHostDiskLive(t *testing.T) {
 			t.Fatalf("detail = %q, want used/total", w.Detail)
 		}
 	default:
-		if w.Pct != browserproto.UsagePctUnknown {
+		if w.Pct != PctUnknown {
 			t.Fatalf("pct = %v on %s, want unknown", w.Pct, runtime.GOOS)
 		}
 	}
@@ -55,14 +51,14 @@ func TestDiskBytesMissingPath(t *testing.T) {
 func TestHostDiskPath(t *testing.T) {
 	home, err := os.UserHomeDir()
 	if err == nil && home != "" {
-		if got := hostDiskPath(); got != home {
+		if got := DiskPath(); got != home {
 			t.Fatalf("path = %q, want the home directory %q", got, home)
 		}
 	}
 	// UserHomeDir reads $HOME on both supported systems, so emptying it forces
 	// the fallback branch without touching the real environment beyond this test.
 	t.Setenv("HOME", "")
-	if got := hostDiskPath(); got != "/" {
+	if got := DiskPath(); got != "/" {
 		t.Fatalf("path without a home = %q, want /", got)
 	}
 	switch runtime.GOOS {

@@ -339,3 +339,99 @@ func TestRejectedHandshakeAdvertisesNoFeatures(t *testing.T) {
 		t.Fatalf("rejection features = %v, want none", w.Features)
 	}
 }
+
+// Host stats: a subscription, not a request/reply, because a CPU figure is a
+// rate and does not exist until something has been measuring. These hold the
+// three things that makes true — nothing is sampled until asked, the first
+// reading arrives immediately with the rows that CAN be read now, and asking
+// for nothing stops it.
+func TestHostStatsSubscription(t *testing.T) {
+	c := dialHost(t, nil)
+	w := handshake(t, c, NewHello())
+	if !slices.Contains(w.Features, FeatureHostStats) {
+		t.Fatalf("welcome features = %v, want %q among them", w.Features, FeatureHostStats)
+	}
+
+	if err := WriteMessage(c, NewRequestHostStats(time.Second)); err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	typ, payload := readEvent(t, c)
+	if typ != MsgHostStats {
+		t.Fatalf("first event after subscribing = %q, want host_stats", typ)
+	}
+	var st HostStats
+	if err := json.Unmarshal(payload, &st); err != nil {
+		t.Fatalf("decode host_stats: %v", err)
+	}
+	// The first reading is deliberately sent before the CPU sampler has
+	// anything: memory and disk are readable now, and a section that stays blank
+	// until the first tick reads as a machine that cannot be measured. On a host
+	// where neither is readable an empty set is the honest answer, so only the
+	// shape is asserted.
+	for _, r := range st.Rows {
+		if !r.Known() {
+			t.Errorf("row %q was reported with no reading", r.Name)
+		}
+		if r.Name == "" {
+			t.Error("a row arrived with no name; the sidebar keys its scales on it")
+		}
+	}
+}
+
+// Cancelling stops the sampler, which on darwin is the whole cost of the
+// feature: a cathost nobody is watching must not keep an iostat alive.
+func TestHostStatsUnsubscribeStopsTheSampler(t *testing.T) {
+	h := NewHost()
+	h.FlushInterval = 5 * time.Millisecond
+	h.requestHostStats(NewRequestHostStats(time.Second))
+	h.statsMu.Lock()
+	sub := h.stats
+	h.statsMu.Unlock()
+	if sub == nil {
+		t.Fatal("subscribing installed nothing")
+	}
+
+	h.requestHostStats(NewRequestHostStats(0))
+	h.statsMu.Lock()
+	still := h.stats
+	h.statsMu.Unlock()
+	if still != nil {
+		t.Fatal("an interval of 0 must cancel the subscription")
+	}
+	select {
+	case <-sub.stop:
+	default:
+		t.Fatal("the pump was not told to stop")
+	}
+	// The sampler goes with it: it is the thing that costs a subprocess.
+	if !sub.sampler.Stopped() {
+		t.Fatal("the sampler is still running after the subscription ended")
+	}
+}
+
+// A second request re-paces the first rather than adding to it. One daemon
+// serves one client, so two live pumps would be two readings per interval of
+// the same machine.
+func TestHostStatsResubscribeReplaces(t *testing.T) {
+	h := NewHost()
+	h.FlushInterval = 5 * time.Millisecond
+	h.requestHostStats(NewRequestHostStats(time.Second))
+	h.statsMu.Lock()
+	first := h.stats
+	h.statsMu.Unlock()
+
+	h.requestHostStats(NewRequestHostStats(2 * time.Second))
+	h.statsMu.Lock()
+	second := h.stats
+	h.statsMu.Unlock()
+	defer h.stopHostStats()
+
+	if first == second {
+		t.Fatal("re-pacing kept the old subscription")
+	}
+	select {
+	case <-first.stop:
+	default:
+		t.Fatal("the superseded pump was left running")
+	}
+}

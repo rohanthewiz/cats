@@ -248,6 +248,10 @@ type Host struct {
 
 	idleMu    sync.Mutex
 	idleTimer *time.Timer
+
+	// The host-stats subscription (hoststats.go): nil until a client asks, and
+	// dropped again when it stops asking or the session ends.
+	statsFields
 }
 
 // NewHost creates an empty Host.
@@ -363,6 +367,10 @@ func (h *Host) Attach(ctx context.Context, conn io.ReadWriteCloser) error {
 	h.out = nil
 	h.sessDone = nil
 	h.connMu.Unlock()
+	// The subscription belongs to the connection that asked for it. Left
+	// running, a persistent daemon would go on sampling (and, on darwin, keep an
+	// iostat alive) for a client that has gone.
+	h.stopHostStats()
 	close(sessDone)
 	cancel()
 	wg.Wait()
@@ -382,6 +390,7 @@ type endSession struct{}
 // Stop tears down all panes and signals the flusher/pumps to exit. Idempotent.
 func (h *Host) Stop() {
 	h.closedOnce.Do(func() { close(h.closed) })
+	h.stopHostStats()
 	h.shutdownAll()
 }
 
@@ -521,6 +530,13 @@ func (h *Host) dispatch(typ MessageType, payload []byte) error {
 		if err := h.requestText(c); err != nil {
 			h.emit(NewError(c.PaneID, err.Error()))
 		}
+	case MsgRequestHostStats:
+		var c RequestHostStats
+		if err := json.Unmarshal(payload, &c); err != nil {
+			h.emit(NewError(0, "bad request_host_stats: "+err.Error()))
+			return nil
+		}
+		h.requestHostStats(c)
 	case MsgPing:
 		var c Ping
 		if err := json.Unmarshal(payload, &c); err != nil {

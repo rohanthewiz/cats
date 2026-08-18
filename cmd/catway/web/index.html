@@ -3177,15 +3177,19 @@
         // broken section rather than as a provider with nothing to report.
         if (!wins.length && !g.note) continue;
 
-        // "host" is the one group the server synthesises rather than reads from
-        // a provider, and the one whose percentages mean something else: a
+        // The host groups are the ones the server measures rather than reads
+        // from a provider, and the ones whose percentages mean something else: a
         // machine 70% into its RAM is a couple of test runs from swapping, while
-        // a week 70% spent is on track. Its rows do not even share a scale with
-        // each other, so they are looked up by name — the only group whose row
-        // names this file is entitled to know, because this file's own server
-        // chose them. Every other id is opaque here, and its rows take the
-        // rate-limit scale.
-        const host = g.id === "host";
+        // a week 70% spent is on track. Their rows do not even share a scale
+        // with each other, so they are looked up by name — the only group whose
+        // row names this file is entitled to know, because this file's own
+        // server chose them. Every other id is opaque here, and its rows take
+        // the rate-limit scale.
+        //
+        // "host" is this machine; "host:<id>" is a cathost reporting its own
+        // box. Same rows, same names, same scales — the prefix is what says the
+        // numbers describe somewhere else.
+        const host = g.id === "host" || (g.id || "").startsWith("host:");
         const levelsFor = (w) => host ? (HOST_LEVELS[w.name] || MEMORY_LEVELS) : USAGE_LEVELS;
 
         const gid = usageGroupID(g);

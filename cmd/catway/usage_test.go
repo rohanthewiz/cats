@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -642,5 +643,50 @@ func TestUsageRemoteErrorClassification(t *testing.T) {
 	}
 	if !errors.Is(wrapped, local) {
 		t.Error("the wrapped cause is not reachable")
+	}
+}
+
+// The sidebar's half of the host meters: hostmeter decides which rows there are
+// and in what order, this decides what the group is called, what its id is, and
+// which row a folded heading quotes.
+//
+// The id is checked because the sidebar branches on it to pick the memory and
+// disk warning scales — a machine 70% into its RAM is in more trouble than a
+// week 70% spent — and the row names for the same reason: within a host group
+// the scale is chosen per row by name, so a renamed row silently takes the wrong
+// thresholds.
+func TestHostUsageGroupShape(t *testing.T) {
+	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" {
+		t.Skipf("no host readings on %s", runtime.GOOS)
+	}
+	g, ok := hostUsageGroup(nil) // nil sampler = the first ten seconds of every run
+	if !ok {
+		t.Fatalf("no host group on %s", runtime.GOOS)
+	}
+	if g.ID != "host" || g.Name != "Host" {
+		t.Errorf("group = %q/%q, want host/Host — the sidebar's host scales key on the id", g.ID, g.Name)
+	}
+	var names, heads []string
+	for _, w := range g.Windows {
+		names = append(names, w.Name)
+		if w.Headline {
+			heads = append(heads, w.Name)
+		}
+	}
+	if len(names) != 2 || names[0] != "Memory" || names[1] != "Disk" {
+		t.Fatalf("rows = %v, want [Memory Disk] with no sampler", names)
+	}
+	// Memory is what a folded HOST shows in place of its rows, so the flag is on
+	// exactly one window and on that one.
+	if len(heads) != 1 || heads[0] != "Memory" {
+		t.Fatalf("headline rows = %v, want [Memory] — the folded heading quotes it", heads)
+	}
+}
+
+// An unreadable machine yields no group rather than a heading with nothing under
+// it.
+func TestMeterGroupWithdrawnWhenEmpty(t *testing.T) {
+	if _, ok := meterGroup("host:devbox", "devbox", nil); ok {
+		t.Fatal("a machine with no readable meter should contribute no group")
 	}
 }

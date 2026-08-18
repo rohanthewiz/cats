@@ -1,13 +1,9 @@
-//go:build ghostty
-
-package main
+package hostmeter
 
 import (
 	"runtime"
 	"strings"
 	"testing"
-
-	"github.com/rohanthewiz/cats/internal/browserproto"
 )
 
 // The parsers are tested against captured output rather than the live host, so
@@ -125,8 +121,8 @@ func TestFormatBytes(t *testing.T) {
 		{0, "0K"},
 	}
 	for _, tc := range tests {
-		if got := formatBytes(tc.in); got != tc.want {
-			t.Errorf("formatBytes(%d) = %q, want %q", tc.in, got, tc.want)
+		if got := FormatBytes(tc.in); got != tc.want {
+			t.Errorf("FormatBytes(%d) = %q, want %q", tc.in, got, tc.want)
 		}
 	}
 }
@@ -136,7 +132,7 @@ func TestFormatBytes(t *testing.T) {
 // from subprocess to window works, and there is no independent number to check
 // it against from inside the process.
 func TestHostMemoryLive(t *testing.T) {
-	w := hostMemory()
+	w := MemoryRow()
 	switch runtime.GOOS {
 	case "darwin", "linux":
 		if w.Pct < 0 {
@@ -149,96 +145,76 @@ func TestHostMemoryLive(t *testing.T) {
 			t.Fatalf("detail = %q, want used/total", w.Detail)
 		}
 	default:
-		if w.Pct != browserproto.UsagePctUnknown {
+		if w.Pct != PctUnknown {
 			t.Fatalf("pct = %v on %s, want unknown", w.Pct, runtime.GOOS)
 		}
 	}
 }
 
-// The window's other half: an unreadable host yields no HOST subsection at all,
-// rather than a heading with nothing under it. The ID is checked because the
-// sidebar branches on it to pick the memory and disk warning scales — a machine
-// 70% into its RAM is in more trouble than a week 70% spent. The row names are
-// checked for the same reason: within the HOST group the sidebar picks a scale
-// per row by name, so a renamed row would silently take the wrong thresholds.
+// The row set's other half: an unreadable host yields no rows at all, rather
+// than a set of empty meters. The names are load-bearing — the sidebar picks a
+// warning scale per row by name, so a renamed row silently takes the wrong
+// thresholds — and so is the order.
 //
 // A nil sampler stands in for "CPU has nothing yet", which is the state for the
-// first ten seconds of every run — the group must be the memory/disk pair then,
-// not a group waiting on a third row.
-func TestHostUsageGroup(t *testing.T) {
-	g, ok := hostUsageGroup(nil)
+// first ten seconds of every run: the set must be the memory/disk pair then, not
+// a set waiting on a third row.
+func TestRowsWithoutCPU(t *testing.T) {
+	rows := Rows(nil)
+	var names []string
+	for _, r := range rows {
+		names = append(names, r.Name)
+	}
 	switch runtime.GOOS {
 	case "darwin", "linux":
-		if !ok {
-			t.Fatalf("no group on %s", runtime.GOOS)
-		}
-		if g.ID != "host" {
-			t.Errorf("id = %q, want host — the sidebar's host scales key on it", g.ID)
-		}
-		var names []string
-		for _, w := range g.Windows {
-			names = append(names, w.Name)
-		}
 		if len(names) != 2 || names[0] != "Memory" || names[1] != "Disk" {
 			t.Fatalf("rows = %v, want [Memory Disk] — the sidebar keys its scales on these names", names)
 		}
-		// Memory is what a folded HOST shows in place of its rows, so the flag is
-		// on exactly one window and on that one.
-		var heads []string
-		for _, w := range g.Windows {
-			if w.Headline {
-				heads = append(heads, w.Name)
+		for _, r := range rows {
+			if !r.Known() {
+				t.Errorf("row %q is in the set with no reading", r.Name)
 			}
 		}
-		if len(heads) != 1 || heads[0] != "Memory" {
-			t.Fatalf("headline rows = %v, want [Memory] — the folded HOST heading quotes it", heads)
-		}
 	default:
-		if ok {
-			t.Fatalf("a group was returned on %s, where neither resource is readable", runtime.GOOS)
+		if len(rows) != 0 {
+			t.Fatalf("rows = %v on %s, where neither resource is readable", names, runtime.GOOS)
 		}
 	}
 }
 
 // The CPU row takes its place between memory and disk once the sampler has
 // something, and carries its history with it. The sampler is fed by hand rather
-// than started: this is about the group's shape, and a real sample is one
-// interval away.
-func TestHostUsageGroupWithCPU(t *testing.T) {
+// than started: this is about the set's shape, and a real sample is one interval
+// away.
+func TestRowsWithCPU(t *testing.T) {
 	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" {
 		t.Skipf("no host readings on %s", runtime.GOOS)
 	}
-	cpu := newCPUSampler()
+	cpu := NewSampler()
 	cpu.add(12, 2.5)
 	cpu.add(34, 3.0)
 
-	g, ok := hostUsageGroup(cpu)
-	if !ok {
-		t.Fatalf("no group on %s", runtime.GOOS)
-	}
+	rows := Rows(cpu)
 	var names []string
-	var cpuWin browserproto.UsageWindow
-	for _, w := range g.Windows {
-		names = append(names, w.Name)
-		if w.Name == "CPU" {
-			cpuWin = w
+	var cpuRow Row
+	for _, r := range rows {
+		names = append(names, r.Name)
+		if r.Name == "CPU" {
+			cpuRow = r
 		}
 	}
 	// Between the two, so the row most often high for a good reason is not the
-	// first thing the group says.
+	// first thing the set says.
 	if len(names) != 3 || names[0] != "Memory" || names[1] != "CPU" || names[2] != "Disk" {
 		t.Fatalf("rows = %v, want [Memory CPU Disk]", names)
 	}
-	if cpuWin.Pct != 34 {
-		t.Errorf("cpu pct = %v, want the newest sample (34)", cpuWin.Pct)
+	if cpuRow.Pct != 34 {
+		t.Errorf("cpu pct = %v, want the newest sample (34)", cpuRow.Pct)
 	}
-	if len(cpuWin.Spark) != 2 {
-		t.Errorf("spark = %v, want both samples — the sidebar draws the history, not the point", cpuWin.Spark)
+	if len(cpuRow.Spark) != 2 {
+		t.Errorf("spark = %v, want both samples — the sidebar draws the history, not the point", cpuRow.Spark)
 	}
-	if cpuWin.Detail != "load 3.00" {
-		t.Errorf("detail = %q, want the newest load average beside the percentage", cpuWin.Detail)
-	}
-	if cpuWin.Headline {
-		t.Error("cpu is flagged as the headline; memory is the row a folded HOST quotes")
+	if cpuRow.Detail != "load 3.00" {
+		t.Errorf("detail = %q, want the newest load average beside the percentage", cpuRow.Detail)
 	}
 }

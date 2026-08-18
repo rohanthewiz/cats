@@ -15,7 +15,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"time"
 
+	"github.com/rohanthewiz/cats/internal/hostmeter"
 	"github.com/rohanthewiz/cats/internal/terminal"
 )
 
@@ -79,6 +81,7 @@ const (
 	MsgSetOutputStream  MessageType = "set_output_stream"
 	MsgShutdown         MessageType = "shutdown"
 	MsgPing             MessageType = "ping"
+	MsgRequestHostStats MessageType = "request_host_stats"
 
 	// Go → Rust (events).
 	MsgWelcome       MessageType = "welcome"
@@ -94,6 +97,7 @@ const (
 	MsgPaneBranch    MessageType = "pane_branch"
 	MsgPaneExited    MessageType = "pane_exited"
 	MsgPong          MessageType = "pong"
+	MsgHostStats     MessageType = "host_stats"
 	MsgError         MessageType = "error"
 )
 
@@ -119,6 +123,11 @@ const (
 	// per-host latency, and doubles as liveness — a TCP connection to a machine
 	// that slept stays "connected" until something is written to it.
 	FeaturePing = "ping"
+	// FeatureHostStats: the daemon can measure the machine it runs on and push
+	// MsgHostStats on a subscription (MsgRequestHostStats). It is the only way a
+	// pane's memory and disk pressure can be shown for a machine that is not
+	// this one.
+	FeatureHostStats = "host_stats"
 )
 
 // --- Commands (Rust → Go) ---------------------------------------------------
@@ -306,6 +315,31 @@ type Ping struct {
 
 func NewPing(id uint64) Ping { return Ping{Type: MsgPing, ID: id} }
 
+// RequestHostStats subscribes to the daemon's readings of the machine it runs
+// on, one MsgHostStats every IntervalMs. IntervalMs of 0 cancels: the daemon
+// stops sampling and sends nothing more.
+//
+// A subscription rather than a request/reply pair because the expensive part of
+// a CPU reading is not the answer, it is *having been measuring* — utilization
+// is a rate, so it only exists as a difference between two readings taken an
+// interval apart. A daemon nobody has subscribed to therefore samples nothing
+// at all, which is the point: a cathost is not a monitoring agent, and starting
+// an iostat on every box in the roster for a sidebar section nobody has opened
+// would be a poor trade.
+//
+// The interval is the client's to choose because the client knows who is
+// looking. Re-sending it re-paces an existing subscription rather than adding a
+// second one — there is one per connection, and the connection is the
+// subscription's lifetime.
+type RequestHostStats struct {
+	Type       MessageType `json:"type"`
+	IntervalMs int         `json:"interval_ms"`
+}
+
+func NewRequestHostStats(interval time.Duration) RequestHostStats {
+	return RequestHostStats{Type: MsgRequestHostStats, IntervalMs: int(interval.Milliseconds())}
+}
+
 type Shutdown struct {
 	Type MessageType `json:"type"`
 }
@@ -355,7 +389,7 @@ func NewWelcomeAt(version int, errMsg string, panes []uint32) Welcome {
 // Features is what this build can answer. Returned as a fresh slice so a caller
 // cannot alter the daemon's advertisement by holding onto it.
 func Features() []string {
-	return []string{FeaturePing}
+	return []string{FeaturePing, FeatureHostStats}
 }
 
 type PaneFrame struct {
@@ -551,6 +585,26 @@ type Pong struct {
 }
 
 func NewPong(id uint64) Pong { return Pong{Type: MsgPong, ID: id} }
+
+// HostStats is one reading of the machine the daemon runs on: the memory, CPU
+// and disk rows hostmeter produces, already named and formatted.
+//
+// The rows travel display-ready rather than as raw byte counts because both
+// ends would otherwise have to agree on how to phrase them, and the local host's
+// section is built from the same hostmeter.Rows call. Sending the numbers and
+// re-deriving the captions on the far side is how the local and remote halves of
+// one sidebar section start disagreeing about what "used" means.
+//
+// An empty Rows is a real answer: a machine whose meters cannot be read says so
+// by reporting nothing, and the client draws no section for it.
+type HostStats struct {
+	Type MessageType     `json:"type"`
+	Rows []hostmeter.Row `json:"rows,omitempty"`
+}
+
+func NewHostStats(rows []hostmeter.Row) HostStats {
+	return HostStats{Type: MsgHostStats, Rows: rows}
+}
 
 type Error struct {
 	Type    MessageType `json:"type"`

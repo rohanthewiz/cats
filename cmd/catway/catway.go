@@ -17,6 +17,7 @@ import (
 	"github.com/rohanthewiz/cats/internal/browserproto"
 	"github.com/rohanthewiz/cats/internal/config"
 	"github.com/rohanthewiz/cats/internal/ctlproto"
+	"github.com/rohanthewiz/cats/internal/hostmeter"
 	"github.com/rohanthewiz/cats/internal/inputenc"
 	"github.com/rohanthewiz/cats/internal/layout"
 	"github.com/rohanthewiz/cats/internal/orchestration"
@@ -196,6 +197,12 @@ type orch struct {
 	// sent the current numbers rather than an empty section for up to two
 	// minutes.
 	usage *browserproto.Usage
+	// hostStats is each remote cathost's last reported reading of the machine
+	// it runs on, keyed by host id (hoststats.go). Kept beside the poll's
+	// reading rather than inside it because the two arrive on completely
+	// different clocks — the poll is ours, these are pushed by other machines —
+	// and usageMsg is where they are put back together.
+	hostStats map[string][]hostmeter.Row
 	// usageNudge asks the poller for an off-schedule reading (usage.refresh —
 	// the sidebar's refresh control). Buffered by one and written to without
 	// blocking: several clicks while a read is in flight collapse into the one
@@ -1449,6 +1456,10 @@ func (o *orch) noteUsageAttention() {
 		}
 	}
 	prev := o.usageAttention.Swap(int32(want))
+	// Remote hosts measure themselves only while somebody is looking, so the
+	// tier that paces our own poll is also what re-paces theirs — including
+	// down to "not at all" when the last browser goes.
+	o.syncHostStats()
 	if want != usageAttentionWatched || prev == int32(usageAttentionWatched) {
 		return // no rising edge into view; the tier alone is the whole update
 	}
@@ -2094,8 +2105,8 @@ func (o *orch) registerConn(c *client, init *browserproto.Init) {
 	// already carries are only drawn once the client knows how many hosts there
 	// are, so sending it later would flash them in.
 	o.send(c, o.hostsMsg())
-	if o.usage != nil {
-		o.send(c, *o.usage)
+	if m, ok := o.usageMsg(); ok {
+		o.send(c, m)
 	}
 	if o.chat != nil {
 		// The whole chat model in one message — a client joining

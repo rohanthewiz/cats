@@ -111,6 +111,10 @@ func (o *orch) applyHostRoster(configured []config.Host) error {
 			mine := o.panesOnHost(id)
 			o.closePanesOn(d, mine)
 			orphaned = append(orphaned, mine...)
+			// Its meters described a machine that is no longer part of this
+			// session; leaving them in the sidebar would keep a subsection for a
+			// host with no row in the roster above it.
+			o.dropHostStats(id)
 		}
 		d.stop()
 	}

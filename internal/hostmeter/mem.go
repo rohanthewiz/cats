@@ -1,6 +1,4 @@
-//go:build ghostty
-
-package main
+package hostmeter
 
 import (
 	"fmt"
@@ -9,8 +7,6 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
-
-	"github.com/rohanthewiz/cats/internal/browserproto"
 )
 
 // How much of the machine's RAM is spoken for, as one more row in the sidebar's
@@ -36,25 +32,27 @@ import (
 // RAM, subtracted from the total. Everywhere else reports nothing rather than a
 // guess, and the sidebar draws no row.
 
-// hostMemory reads the host's memory as a usage window: a percentage in use and
-// the absolute figures behind it. A failed read is UsagePctUnknown, which the
-// sidebar renders as no row at all — an empty memory row would be a worse
-// answer than the absence of one, because it invites the reader to conclude
-// something about a machine nobody measured.
-func hostMemory() browserproto.UsageWindow {
-	total, used, err := hostMemoryBytes()
+// MemoryRow reads the host's memory as one row: a percentage in use and the
+// absolute figures behind it. A failed read is PctUnknown, which the sidebar
+// renders as no row at all — an empty memory row would be a worse answer than
+// the absence of one, because it invites the reader to conclude something about
+// a machine nobody measured.
+func MemoryRow() Row {
+	total, used, err := MemoryBytes()
 	if err != nil || total == 0 {
-		return browserproto.UsageWindow{Pct: browserproto.UsagePctUnknown}
+		return Row{Name: "Memory", Pct: PctUnknown}
 	}
-	return browserproto.UsageWindow{
-		Pct: clampPct(100 * float64(used) / float64(total)),
+	return Row{
+		Name: "Memory",
+		Pct:  ClampPct(100 * float64(used) / float64(total)),
 		// The absolute pair, because a percentage alone cannot be acted on:
 		// 70% of 8 GB and 70% of 128 GB call for different decisions.
-		Detail: fmt.Sprintf("%s/%s", formatBytes(used), formatBytes(total)),
+		Detail: fmt.Sprintf("%s/%s", FormatBytes(used), FormatBytes(total)),
 	}
 }
 
-func hostMemoryBytes() (total, used uint64, err error) {
+// MemoryBytes is the raw reading behind MemoryRow.
+func MemoryBytes() (total, used uint64, err error) {
 	switch runtime.GOOS {
 	case "darwin":
 		return darwinMemory()
@@ -239,7 +237,7 @@ func parseMeminfo(raw []byte) (total, used uint64, err error) {
 	return total, total - avail, nil
 }
 
-// formatBytes renders a byte count for the sidebar's small print. Powers of two,
+// FormatBytes renders a byte count for the sidebar's small print. Powers of two,
 // because RAM is sold, specified and reported that way: 25769803776 bytes is the
 // "24 GB" printed on the machine, and rendering it as 25.8 GB beside a
 // percentage of itself would read as an error in the percentage.
@@ -248,7 +246,7 @@ func parseMeminfo(raw []byte) (total, used uint64, err error) {
 // live: "347.7G/460.4G" is two characters of noise wider than the slot wants,
 // and at that scale a tenth of a gigabyte is below the resolution of any
 // decision the row informs.
-func formatBytes(n uint64) string {
+func FormatBytes(n uint64) string {
 	switch {
 	case n >= 100<<30:
 		return fmt.Sprintf("%.0fG", float64(n)/(1<<30))

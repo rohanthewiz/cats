@@ -1,6 +1,4 @@
-//go:build ghostty
-
-package main
+package hostmeter
 
 import (
 	"bufio"
@@ -13,8 +11,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/rohanthewiz/cats/internal/browserproto"
 )
 
 // How hard the machine is working, as the third row of the sidebar's HOST
@@ -86,26 +82,60 @@ const (
 	cpuMaxRestarts  = 3
 )
 
-// cpuSampler holds the recent history and hands it to the poll.
+// Sampler holds the recent history and hands it to the poll.
 //
 // It is the one piece of usage state touched by two goroutines — its own
 // sampling loop writes, runUsage's poll reads — so it carries a mutex where the
 // rest of this file's readers are plain functions. The critical sections are a
 // slice append and a slice copy; nothing that can block is done under the lock.
-type cpuSampler struct {
+type Sampler struct {
 	mu      sync.Mutex
 	samples []float64 // busy percent, oldest first, at most cpuHistoryLen
 	load    float64   // 1-minute load average as of the newest sample; -1 unknown
 	at      time.Time // when the newest sample landed
+
+	// quit ends the sampling loop. It exists because a cathost samples only
+	// while somebody is subscribed: the whole cost of this row on darwin is a
+	// long-lived iostat, and a daemon that kept one running for a section
+	// nobody is looking at would be a monitoring agent nobody asked for. A
+	// catway's own sampler is never stopped — it runs for the life of the
+	// process, as it always did.
+	quit     chan struct{}
+	quitOnce sync.Once
 }
 
-func newCPUSampler() *cpuSampler { return &cpuSampler{load: -1} }
+func NewSampler() *Sampler { return &Sampler{load: -1, quit: make(chan struct{})} }
+
+// Stop ends the sampling loop and, on darwin, kills the iostat behind it. The
+// history is left intact — a caller may still read the last rows — but it goes
+// stale on the ordinary cpuStaleAfter schedule and Row then reports nothing.
+// Idempotent, and safe to call on a sampler that was never started.
+func (c *Sampler) Stop() {
+	if c == nil {
+		return
+	}
+	c.quitOnce.Do(func() { close(c.quit) })
+}
+
+// Stopped reports whether Stop has been called — the observable half of the
+// contract for a caller that needs to know its subprocess is gone.
+func (c *Sampler) Stopped() bool { return c != nil && c.stopping() }
+
+// stopping reports whether Stop has been called.
+func (c *Sampler) stopping() bool {
+	select {
+	case <-c.quit:
+		return true
+	default:
+		return false
+	}
+}
 
 // add records one interval's reading, dropping the oldest when the ring is full.
-func (c *cpuSampler) add(busy, load float64) {
+func (c *Sampler) add(busy, load float64) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.samples = append(c.samples, clampPct(busy))
+	c.samples = append(c.samples, ClampPct(busy))
 	if len(c.samples) > cpuHistoryLen {
 		// Copy down rather than reslice: a bare c.samples[1:] keeps the whole
 		// backing array alive and walks its head off the front forever, so the
@@ -116,13 +146,13 @@ func (c *cpuSampler) add(busy, load float64) {
 	c.load, c.at = load, time.Now()
 }
 
-// window is the CPU row as of now, or UsagePctUnknown when there is nothing
-// trustworthy to report — no samples yet (the first arrives one interval after
-// launch), an unsupported host, or a source that has gone quiet. A nil sampler
-// answers the same way, which is what lets the tests build a HOST group without
-// starting a goroutine.
-func (c *cpuSampler) window() browserproto.UsageWindow {
-	unknown := browserproto.UsageWindow{Pct: browserproto.UsagePctUnknown}
+// Row is the CPU row as of now, or PctUnknown when there is nothing trustworthy
+// to report — no samples yet (the first arrives one interval after launch), an
+// unsupported host, or a source that has gone quiet. A nil sampler answers the
+// same way, which is what lets a caller build a HOST group without starting a
+// goroutine.
+func (c *Sampler) Row() Row {
+	unknown := Row{Name: "CPU", Pct: PctUnknown}
 	if c == nil {
 		return unknown
 	}
@@ -131,25 +161,25 @@ func (c *cpuSampler) window() browserproto.UsageWindow {
 	if len(c.samples) == 0 || time.Since(c.at) > cpuStaleAfter {
 		return unknown
 	}
-	w := browserproto.UsageWindow{Pct: c.samples[len(c.samples)-1]}
+	r := Row{Name: "CPU", Pct: c.samples[len(c.samples)-1]}
 	if c.load >= 0 {
 		// Load average rather than a used/total pair, because CPU has no pair to
 		// give: the percentage already IS the whole machine. Load answers the
 		// question the percentage cannot — 100% with a load of 2 on ten cores is
 		// one busy process, 100% with a load of 40 is a queue.
-		w.Detail = fmt.Sprintf("load %.2f", c.load)
+		r.Detail = fmt.Sprintf("load %.2f", c.load)
 	}
 	if len(c.samples) > 1 {
 		// A copy: the caller marshals this on another goroutine while the
 		// sampling loop keeps appending to the original.
-		w.Spark = append([]float64(nil), c.samples...)
+		r.Spark = append([]float64(nil), c.samples...)
 	}
-	return w
+	return r
 }
 
 // run is the sampling loop (own goroutine, started by runUsage). It returns on
 // a host that cannot be sampled, and only then.
-func (c *cpuSampler) run() {
+func (c *Sampler) Run() {
 	switch runtime.GOOS {
 	case "darwin":
 		c.runDarwin()
@@ -164,10 +194,16 @@ func (c *cpuSampler) run() {
 // process can be killed out from under us for reasons that have nothing to do
 // with this server; a stream that ends having produced nothing is counted as a
 // failure, and enough of those in a row means the host cannot answer at all.
-func (c *cpuSampler) runDarwin() {
+func (c *Sampler) runDarwin() {
 	fails := 0
 	for {
+		if c.stopping() {
+			return
+		}
 		n, err := c.streamIostat()
+		if c.stopping() {
+			return // the stream ended because we killed it, not because it failed
+		}
 		if n > 0 {
 			fails = 0 // it worked at least once; whatever ended it was not fatal
 		} else {
@@ -177,18 +213,22 @@ func (c *cpuSampler) runDarwin() {
 				if err != nil {
 					reason = "iostat: " + err.Error()
 				}
-				log.Printf("catway: host CPU unavailable (%s) — the sidebar drops the row", reason)
+				log.Printf("hostmeter: host CPU unavailable (%s) — the sidebar drops the row", reason)
 				return
 			}
 		}
-		time.Sleep(cpuRestartDelay)
+		select {
+		case <-time.After(cpuRestartDelay):
+		case <-c.quit:
+			return
+		}
 	}
 }
 
 // streamIostat runs one iostat to exhaustion, folding in every line it prints.
 // It returns how many CPU lines it saw, so the supervisor can tell "the process
 // died" from "the process is not there".
-func (c *cpuSampler) streamIostat() (int, error) {
+func (c *Sampler) streamIostat() (int, error) {
 	cmd := exec.Command("iostat", "-w", strconv.Itoa(int(cpuSampleInterval/time.Second)))
 	out, err := cmd.StdoutPipe()
 	if err != nil {
@@ -197,12 +237,24 @@ func (c *cpuSampler) streamIostat() (int, error) {
 	if err := cmd.Start(); err != nil {
 		return 0, err
 	}
-	// Kill on the way out. Nothing here ends the loop early today, but a reader
-	// that returns on a scan error without this would leave iostat running for
-	// the life of the server, printing into a pipe nobody drains.
+	// Kill on the way out. A reader that returns on a scan error without this
+	// would leave iostat running for the life of the server, printing into a
+	// pipe nobody drains.
 	defer func() {
 		_ = cmd.Process.Kill()
 		_ = cmd.Wait()
+	}()
+	// And kill it on Stop, which is the only thing that can interrupt the scan
+	// below: it blocks on a pipe that only produces a line every ten seconds, so
+	// waiting for it to notice would make an unsubscribe take that long.
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		select {
+		case <-c.quit:
+			_ = cmd.Process.Kill()
+		case <-done:
+		}
 	}()
 
 	sc := bufio.NewScanner(out)
@@ -265,7 +317,7 @@ func parseIostatCPU(line string) (busy, load float64, ok bool) {
 // runLinux differences /proc/stat across each interval. The first pass only
 // establishes the baseline — a rate needs two readings — so the first sample
 // lands one interval in, exactly as darwin's does.
-func (c *cpuSampler) runLinux() {
+func (c *Sampler) runLinux() {
 	var prevBusy, prevTotal float64
 	have, fails := false, 0
 	t := time.NewTicker(cpuSampleInterval)
@@ -291,10 +343,14 @@ func (c *cpuSampler) runLinux() {
 			prevBusy, prevTotal, have = busy, total, true
 		}
 		if fails >= cpuMaxRestarts {
-			log.Printf("catway: host CPU unavailable (/proc/stat unreadable) — the sidebar drops the row")
+			log.Printf("hostmeter: host CPU unavailable (/proc/stat unreadable) — the sidebar drops the row")
 			return
 		}
-		<-t.C
+		select {
+		case <-t.C:
+		case <-c.quit:
+			return
+		}
 	}
 }
 

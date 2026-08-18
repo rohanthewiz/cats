@@ -1,6 +1,4 @@
-//go:build ghostty
-
-package main
+package hostmeter
 
 import (
 	"os"
@@ -9,8 +7,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/rohanthewiz/cats/internal/browserproto"
 )
 
 // Both parsers are tested against captured output rather than the live host, on
@@ -96,11 +92,11 @@ func TestParseProcStatCPUWithoutAggregateLine(t *testing.T) {
 // The ring is bounded, keeps the newest samples, and keeps them in order — the
 // chart is drawn straight from it, so a wrong order is a wrong shape.
 func TestCPUSamplerRingKeepsTheNewest(t *testing.T) {
-	c := newCPUSampler()
+	c := NewSampler()
 	for i := 0; i < cpuHistoryLen+10; i++ {
 		c.add(float64(i%101), 1)
 	}
-	w := c.window()
+	w := c.Row()
 	if len(w.Spark) != cpuHistoryLen {
 		t.Fatalf("spark = %d samples, want the ring's cap (%d)", len(w.Spark), cpuHistoryLen)
 	}
@@ -118,18 +114,18 @@ func TestCPUSamplerRingKeepsTheNewest(t *testing.T) {
 // reading rather than a stale one: hostUsageGroup drops the row, which is the
 // same contract hostMemory and hostDisk keep on a host they cannot ask.
 func TestCPUSamplerSilentWhenEmptyOrStale(t *testing.T) {
-	var nilSampler *cpuSampler
-	if w := nilSampler.window(); w.Pct != browserproto.UsagePctUnknown {
+	var nilSampler *Sampler
+	if w := nilSampler.Row(); w.Pct != PctUnknown {
 		t.Errorf("nil sampler pct = %v, want unknown", w.Pct)
 	}
-	if w := newCPUSampler().window(); w.Pct != browserproto.UsagePctUnknown {
+	if w := NewSampler().Row(); w.Pct != PctUnknown {
 		t.Errorf("empty sampler pct = %v, want unknown", w.Pct)
 	}
 
-	c := newCPUSampler()
+	c := NewSampler()
 	c.add(42, 1)
 	c.at = time.Now().Add(-cpuStaleAfter - time.Second)
-	if w := c.window(); w.Pct != browserproto.UsagePctUnknown {
+	if w := c.Row(); w.Pct != PctUnknown {
 		t.Errorf("stale sampler pct = %v, want unknown — a pinned old reading invites action", w.Pct)
 	}
 }
@@ -138,9 +134,9 @@ func TestCPUSamplerSilentWhenEmptyOrStale(t *testing.T) {
 // line can be drawn through, and the front-end skips the strip below that. The
 // row itself still reports its percentage.
 func TestCPUSamplerSingleSampleHasNoSpark(t *testing.T) {
-	c := newCPUSampler()
+	c := NewSampler()
 	c.add(42, -1)
-	w := c.window()
+	w := c.Row()
 	if w.Pct != 42 {
 		t.Errorf("pct = %v, want 42", w.Pct)
 	}

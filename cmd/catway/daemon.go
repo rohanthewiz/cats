@@ -103,6 +103,10 @@ type daemon struct {
 	latency time.Duration
 	pingID  uint64
 	pingAt  time.Time
+	// statsInterval is what this host has been asked to report its own memory,
+	// CPU and disk on (0 = nothing). Held across disconnects so the reconnect
+	// can re-establish it without asking the orchestrator what it wanted.
+	statsInterval time.Duration
 }
 
 // unixDialer builds the dial func for a unix-socket cathost — the only
@@ -582,6 +586,9 @@ func (d *daemon) run() {
 		d.o.post(func() {
 			d.o.flushPendingFor(d.id, "cathost connection lost")
 			d.o.flushWaitersFor(d.id, "cathost connection lost")
+			// Its meters described a machine that has stopped answering; that is
+			// exactly the reading not to leave on screen as if it were current.
+			d.o.dropHostStats(d.id)
 			d.o.broadcast(browserproto.NewError(0, d.lostMessage()))
 			d.o.broadcastHosts()
 		})
@@ -641,6 +648,11 @@ func (d *daemon) session(conn net.Conn) error {
 	if d.supports(orchestration.FeaturePing) {
 		go d.pingProbe(conn)
 	}
+	// A new connection knows nothing about the subscription the last one had, so
+	// it is re-sent rather than assumed. Sent unconditionally — including a 0,
+	// which is how a host that reconnects while no browser is open is told to
+	// stay quiet.
+	d.sendStatsRequest()
 
 	for {
 		mt, payload, err := orchestration.ReadMessage(conn)
@@ -728,6 +740,12 @@ func (d *daemon) dispatch(mt orchestration.MessageType, payload []byte) {
 		if d.notePong(ev.ID) {
 			o.post(func() { o.broadcastHosts() })
 		}
+	case orchestration.MsgHostStats:
+		var ev orchestration.HostStats
+		if err := json.Unmarshal(payload, &ev); err != nil {
+			return
+		}
+		o.post(func() { o.noteHostStats(d.id, ev.Rows) })
 	case orchestration.MsgPaneFrame:
 		var ev orchestration.PaneFrame
 		if err := json.Unmarshal(payload, &ev); err != nil || ev.Frame == nil {

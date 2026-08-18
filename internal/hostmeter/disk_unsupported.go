@@ -1,6 +1,6 @@
-//go:build ghostty && !darwin && !linux
+//go:build !darwin && !linux
 
-package main
+package hostmeter
 
 import (
 	"fmt"
