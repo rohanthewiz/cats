@@ -173,15 +173,16 @@ func TestArgKindsMatchSynopsis(t *testing.T) {
 	// spelling; a workspace is written out in full where the abbreviation would
 	// be ambiguous (`tabs [workspace]` beside `ws <id>`).
 	placeholder := map[argKind][]string{
-		argPane:       {"pane"},
-		argTab:        {"num"},
-		argWorkspace:  {"id", "workspace"},
-		argDirection:  {"left|right|up|down"},
-		argSplitDir:   {"h|v"},
-		argCycleDir:   {"prev"},
-		argTheme:      {"name"},
-		argDetachHost: {"id"},
-		argRunbook:    {"name"},
+		argPane:         {"pane"},
+		argTab:          {"num"},
+		argWorkspace:    {"id", "workspace"},
+		argDirection:    {"left|right|up|down"},
+		argSplitDir:     {"h|v"},
+		argCycleDir:     {"prev"},
+		argTheme:        {"name"},
+		argDetachHost:   {"id"},
+		argRunbook:      {"name"},
+		argRecordAction: {"start|stop|cancel|status"},
 	}
 	for _, sc := range subcommands {
 		// Operands in the synopsis, in order: <x> and [x] alike.

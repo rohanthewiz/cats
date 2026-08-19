@@ -200,6 +200,16 @@ type Backend interface {
 	// that waits for the reply knows the whole sequence is done.
 	RunbookList(r Responder)
 	RunbookRun(r Responder, p RunbookRunParams)
+	// RunbookRecord arms, disarms or reports the macro recorder
+	// (runbook.record). It is the backend's for the same two reasons the pair
+	// above are: the recording is live daemon state, and stopping one writes a
+	// file. Synchronous — arming is a flag, and emitting a runbook is a YAML
+	// marshal and a write of a few kilobytes.
+	//
+	// A backend that implements it also implements the unexported recorder
+	// seam (see record.go), which is what puts commands into the recording;
+	// one without a recorder can answer every action with "not recording".
+	RunbookRecord(r Responder, p RunbookRecordParams)
 
 	// RefreshUsage asks the backend's rate-limit poller to take a reading now
 	// (usage.refresh). It returns immediately: the read is one network round
@@ -263,23 +273,57 @@ func (d JSONParamDecoder) Decode(v any) error {
 	return json.Unmarshal(d.Raw, v)
 }
 
+// RawParams hands back the bytes Decode read, for the macro recorder — which
+// wants the shape the CALLER sent rather than the decoded struct, since a zero
+// value that was sent explicitly is invisible once it has been through an
+// omitempty field. See recordDecoder.
+func (d JSONParamDecoder) RawParams() []byte { return d.Raw }
+
 // Dispatcher runs the §7 command table against a Session and a Backend. It
 // borrows the same *Session the backend holds (single-goroutine, no locking).
 type Dispatcher struct {
 	session *Session
 	backend Backend
+	// rec is the backend's macro recorder, nil unless the backend has one. It
+	// is read from the backend at construction rather than set on the
+	// dispatcher, because dispatchers are built per call in places (the runbook
+	// executor builds one per step) and a recorder that had to be installed on
+	// each of them would miss whichever site forgot.
+	rec Recorder
 }
 
 // NewDispatcher builds a dispatcher over a session and its runtime backend.
 func NewDispatcher(s *Session, b Backend) *Dispatcher {
-	return &Dispatcher{session: s, backend: b}
+	d := &Dispatcher{session: s, backend: b}
+	if rb, ok := b.(recorderBackend); ok {
+		d.rec = rb.Recorder()
+	}
+	return d
 }
 
 // Dispatch runs one §7 command. Loop-goroutine only (it shares the session with
 // the backend). Model-mutating commands call a Session method then reconcile via
 // ApplyModel; pure focus/rename rebroadcast the layout; scroll passes through;
 // read/capture start an async daemon round-trip; server.* are lifecycle.
+//
+// When a recorder is armed and the command is one it captures, the decoder and
+// the responder are wrapped before the switch sees them — see record.go. The
+// wrapping is the whole of the recorder's reach into this file: no case knows
+// it is being recorded, which is what keeps "what a macro replays" the same
+// question as "what the command does".
 func (d *Dispatcher) Dispatch(name string, dec ParamDecoder, r Responder) {
+	if d.rec != nil && RecordedCommand(name) {
+		if seq := d.rec.Begin(name); seq != 0 {
+			rd := &recordDecoder{inner: dec}
+			dec = rd
+			r = &recordResponder{inner: r, rec: d.rec, dec: rd, seq: seq}
+		}
+	}
+	d.dispatch(name, dec, r)
+}
+
+// dispatch is the command table itself.
+func (d *Dispatcher) dispatch(name string, dec ParamDecoder, r Responder) {
 	// bad reports a malformed-params failure in the historical wording.
 	bad := func(err error) { r.Fail("bad params: " + err.Error()) }
 
@@ -1109,6 +1153,34 @@ func (d *Dispatcher) Dispatch(name string, dec ParamDecoder, r Responder) {
 			return
 		}
 		d.backend.RunbookRun(r, p)
+
+	case CmdRunbookRecord:
+		var p RunbookRecordParams
+		if err := dec.Decode(&p); err != nil {
+			bad(err)
+			return
+		}
+		// Shape-only, like runbook.run above: the action has to be one of four
+		// words and stop has to name the file it is writing. Whether anything is
+		// being recorded, and whether what was recorded can be emitted at all,
+		// are the backend's — it holds the recorder and the directory.
+		p.Action = strings.TrimSpace(p.Action)
+		switch p.Action {
+		case RecordStart, RecordStop, RecordCancel, RecordStatus:
+		case "":
+			r.Fail("action is required: " + strings.Join([]string{RecordStart, RecordStop, RecordCancel, RecordStatus}, " | "))
+			return
+		default:
+			r.Fail(fmt.Sprintf("unknown action %q: %s", p.Action,
+				strings.Join([]string{RecordStart, RecordStop, RecordCancel, RecordStatus}, " | ")))
+			return
+		}
+		p.Name = strings.TrimSpace(p.Name)
+		if p.Action == RecordStop && p.Name == "" {
+			r.Fail("name is required to stop a recording: it is the name the runbook is saved and run under")
+			return
+		}
+		d.backend.RunbookRecord(r, p)
 
 	case CmdLedgerOutput:
 		// The reply gate comes FIRST, before any validation: a reply-required

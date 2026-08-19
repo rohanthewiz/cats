@@ -164,6 +164,8 @@ abstract final class CmdName {
 
   static const String runbookRun = 'runbook.run';
 
+  static const String runbookRecord = 'runbook.record';
+
   static const String hostAttach = 'host.attach';
 
   static const String hostDetach = 'host.detach';
@@ -1935,6 +1937,97 @@ class RunbookListResult {
       };
 }
 
+/// RunbookRecordParams: runbook.record.
+///
+/// Action is the verb — start, stop, cancel, status — rather than four commands,
+/// because they are one piece of state seen from four sides and a client that
+/// knows one knows them all. Name is required by stop and is the runbook's
+/// identity: the recording exists only in memory until it is given one, which is
+/// the whole of the privacy story (see CmdRunbookRecord).
+class RunbookRecordParams {
+  const RunbookRecordParams({
+    required this.action,
+    this.name = '',
+    this.description = '',
+    this.overwrite = false,
+  });
+
+  final String action;
+  final String name;
+  final String description;
+
+  /// Overwrite permits stop to replace an existing runbook file. Off by
+  /// default: a name collision is far more often a second recording of
+  /// something already working than a deliberate replacement, and the file it
+  /// would overwrite may have been edited by hand since.
+  final bool overwrite;
+
+  factory RunbookRecordParams.fromJson(Map<String, Object?> j) => RunbookRecordParams(
+        action: asString(j['action']),
+        name: asString(j['name']),
+        description: asString(j['description']),
+        overwrite: asBool(j['overwrite']),
+      );
+
+  Map<String, Object?> toJson() => {
+        'action': action,
+        if (name.isNotEmpty) 'name': name,
+        if (description.isNotEmpty) 'description': description,
+        if (overwrite) 'overwrite': overwrite,
+      };
+}
+
+/// RunbookRecordResult is CmdResult.Data for runbook.record.
+///
+/// Commands lists what has been captured so far, in order, so "what will I get
+/// if I stop now?" is answerable without stopping — which matters because a
+/// recorder that silently captured nothing (every command a query, the flag
+/// never set) is otherwise indistinguishable from one that is working.
+class RunbookRecordResult {
+  const RunbookRecordResult({
+    required this.action,
+    required this.recording,
+    required this.steps,
+    this.name = '',
+    this.path = '',
+    this.commands = const <String>[],
+    this.note = '',
+  });
+
+  final String action;
+  final bool recording;
+  final int steps;
+  final String name;
+  final String path;
+  final List<String> commands;
+
+  /// Note carries a condition the recorder is in that is not an error — it hit
+  /// its in-memory ceiling and stopped capturing. It is reported rather than
+  /// raised, because the command that overflowed the recording was a command
+  /// the user ran for its own sake and must not be failed for it.
+  final String note;
+
+  factory RunbookRecordResult.fromJson(Map<String, Object?> j) => RunbookRecordResult(
+        action: asString(j['action']),
+        recording: asBool(j['recording']),
+        steps: asInt(j['steps']),
+        name: asString(j['name']),
+        path: asString(j['path']),
+        commands: asList(j['commands'], asString),
+        note: asString(j['note']),
+      );
+
+  Map<String, Object?> toJson() => {
+        'action': action,
+        'recording': recording,
+        'steps': steps,
+        if (name.isNotEmpty) 'name': name,
+        if (path.isNotEmpty) 'path': path,
+        if (commands.isNotEmpty) 'commands': commands,
+        if (note.isNotEmpty) 'note': note,
+      };
+}
+
 /// RunbookRunParams: runbook.run.
 ///
 /// Vars override the runbook's declared defaults. They are strings on the wire
@@ -3170,6 +3263,7 @@ const List<CommandSpec> kCommandSpecs = <CommandSpec>[
   CommandSpec('file.put', paramsRequired: true),
   CommandSpec('runbook.list', replyRequired: true),
   CommandSpec('runbook.run', paramsRequired: true),
+  CommandSpec('runbook.record', paramsRequired: true),
   CommandSpec('host.attach', paramsRequired: true),
   CommandSpec('host.detach', paramsRequired: true),
   CommandSpec('session.get'),
@@ -3525,6 +3619,10 @@ mixin CatsCommands implements CatsCommandTransport {
   /// `runbook.run`
   Future<RunbookRunResult> runbookRun(RunbookRunParams params) async =>
       RunbookRunResult.fromJson(asObj(await invoke(CmdName.runbookRun, params.toJson())));
+
+  /// `runbook.record`
+  Future<RunbookRecordResult> runbookRecord(RunbookRecordParams params) async =>
+      RunbookRecordResult.fromJson(asObj(await invoke(CmdName.runbookRecord, params.toJson())));
 
   /// `host.attach`
   Future<HostListResult> hostAttach(HostAttachParams params) async =>

@@ -185,6 +185,22 @@ const (
 	CmdRunbookList = "runbook.list"
 	CmdRunbookRun  = "runbook.run"
 
+	// runbook.record turns a stretch of live use into one of those files: do the
+	// thing once by hand, then ask for it back as YAML.
+	//
+	// It is ARMED rather than always on — start, stop, cancel, status — and the
+	// recording is held in memory until a name is given. That is a privacy
+	// decision before it is a storage one: an always-on journal would be a
+	// durable record of every parameter of every command, including every chat
+	// message, kept by default, on a machine somebody else may administer.
+	// Armed, nothing exists unless somebody asked for it, and the question
+	// "what may be written down" shrinks to "what goes in the file the user
+	// just asked for".
+	//
+	// What it captures is CommandSpec.Recorded — see there for why that is
+	// declared per command rather than inferred.
+	CmdRunbookRecord = "runbook.record"
+
 	// Host commands (the HOSTS section's buttons + catctl): attach a cathost to
 	// the running session, or detach one. They are §7 commands rather than a
 	// config-file-only setting for the same reason config.set is one — a browser
@@ -247,6 +263,32 @@ type CommandSpec struct {
 	// is required by workspace.focus, which cannot guess an id, and optional for
 	// workspace.close, where an empty id means the active workspace.
 	ParamsRequired bool
+
+	// Recorded marks the commands an armed macro recorder captures
+	// (runbook.record): the ones whose replay would do again what was done.
+	//
+	// It is DECLARED rather than derived, for the reason the other two are: the
+	// next command added to this table has to answer the question, and a
+	// default that guessed would mean it never got asked. Nothing in the shape
+	// of a spec answers it either — pane.split returns a result and is very
+	// much an effect, while ledger.output has no effect and returns a
+	// screenful.
+	//
+	// The rule is "would replaying this do again what was done", which is
+	// narrower than "has an effect" in three places worth naming:
+	//
+	//   - Queries are out (pane.list, capture, file.get). A macro containing
+	//     them is noise: the caller that ran one was looking at something, not
+	//     doing something. pane.wait_for_output is the exception that proves
+	//     the rule — it has no effect at all, and it is recorded, because a
+	//     replay without it races the shell it was waiting for.
+	//   - Answers to a live prompt are out (ui.action, chat.permission,
+	//     ledger.jump). Each names something that existed for one moment — a
+	//     notification id, a permission request, a block in a scrollback — so
+	//     there is nothing for a later run to answer.
+	//   - runbook.run is out because its STEPS are recorded as they re-enter
+	//     Dispatch. Recording the call as well would replay every effect twice.
+	Recorded bool
 }
 
 // commandSpecs is the §7 command table: the single list both CommandSpecs and
@@ -264,73 +306,73 @@ var commandSpecs = []CommandSpec{
 	// reply. pane.split is not reply-gated: like tab.create the split is worth
 	// performing for a caller that never listens (the browser's own split button
 	// sends no id), and its result is a handle, not the point of the call.
-	{Name: CmdPaneSplit, Params: SplitParams{}, Result: SplitResult{}, ParamsRequired: true},
-	{Name: CmdPaneClose, Params: OptPaneParams{}},
-	{Name: CmdPaneFocus, Params: PaneParams{}, ParamsRequired: true},
-	{Name: CmdPaneFocusDirection, Params: DirParams{}, ParamsRequired: true},
-	{Name: CmdPaneCycle, Params: CycleParams{}, ParamsRequired: true},
-	{Name: CmdPaneLast},
-	{Name: CmdPaneSwap, Params: DirParams{}, ParamsRequired: true},
-	{Name: CmdPaneSwapWith, Params: SwapWithParams{}, ParamsRequired: true},
-	{Name: CmdPaneZoom, Params: OptPaneParams{}},
-	{Name: CmdPaneRename, Params: RenamePaneParams{}, ParamsRequired: true},
-	{Name: CmdPaneResizeBorder, Params: ResizeBorderParams{}, ParamsRequired: true},
-	{Name: CmdScroll, Params: ScrollParams{}, ParamsRequired: true},
+	{Name: CmdPaneSplit, Params: SplitParams{}, Result: SplitResult{}, ParamsRequired: true, Recorded: true},
+	{Name: CmdPaneClose, Params: OptPaneParams{}, Recorded: true},
+	{Name: CmdPaneFocus, Params: PaneParams{}, ParamsRequired: true, Recorded: true},
+	{Name: CmdPaneFocusDirection, Params: DirParams{}, ParamsRequired: true, Recorded: true},
+	{Name: CmdPaneCycle, Params: CycleParams{}, ParamsRequired: true, Recorded: true},
+	{Name: CmdPaneLast, Recorded: true},
+	{Name: CmdPaneSwap, Params: DirParams{}, ParamsRequired: true, Recorded: true},
+	{Name: CmdPaneSwapWith, Params: SwapWithParams{}, ParamsRequired: true, Recorded: true},
+	{Name: CmdPaneZoom, Params: OptPaneParams{}, Recorded: true},
+	{Name: CmdPaneRename, Params: RenamePaneParams{}, ParamsRequired: true, Recorded: true},
+	{Name: CmdPaneResizeBorder, Params: ResizeBorderParams{}, ParamsRequired: true, Recorded: true},
+	{Name: CmdScroll, Params: ScrollParams{}, ParamsRequired: true, Recorded: true},
 	{Name: CmdRead, Params: ReadParams{}, Result: ReadResult{}, ReplyRequired: true, ParamsRequired: true},
 	{Name: CmdCapture, Params: CaptureParams{}, Result: CaptureResult{}, ReplyRequired: true, ParamsRequired: true},
-	{Name: CmdWaitForOutput, Params: WaitForOutputParams{}, Result: WaitForOutputResult{}, ReplyRequired: true, ParamsRequired: true},
-	{Name: CmdPaneSendInput, Params: SendInputParams{}, ParamsRequired: true},
+	{Name: CmdWaitForOutput, Params: WaitForOutputParams{}, Result: WaitForOutputResult{}, ReplyRequired: true, ParamsRequired: true, Recorded: true},
+	{Name: CmdPaneSendInput, Params: SendInputParams{}, ParamsRequired: true, Recorded: true},
 
 	// Tabs. tab.create returns its new tab/pane so an automation client can
 	// drive the fresh pane without diffing pane.list.
-	{Name: CmdTabCreate, Params: TabCreateParams{}, Result: TabCreateResult{}},
-	{Name: CmdTabClose, Params: OptTabParams{}},
-	{Name: CmdTabFocus, Params: TabParams{}, ParamsRequired: true},
-	{Name: CmdTabRename, Params: RenameTabParams{}, ParamsRequired: true},
-	{Name: CmdTabMove, Params: MoveTabParams{}, ParamsRequired: true},
+	{Name: CmdTabCreate, Params: TabCreateParams{}, Result: TabCreateResult{}, Recorded: true},
+	{Name: CmdTabClose, Params: OptTabParams{}, Recorded: true},
+	{Name: CmdTabFocus, Params: TabParams{}, ParamsRequired: true, Recorded: true},
+	{Name: CmdTabRename, Params: RenameTabParams{}, ParamsRequired: true, Recorded: true},
+	{Name: CmdTabMove, Params: MoveTabParams{}, ParamsRequired: true, Recorded: true},
 
 	// Workspaces.
-	{Name: CmdWorkspaceCreate, Params: WorkspaceCreateParams{}, Result: WorkspaceCreateResult{}},
-	{Name: CmdWorkspaceClose, Params: WorkspaceParams{}},
-	{Name: CmdWorkspaceFocus, Params: WorkspaceParams{}, ParamsRequired: true},
-	{Name: CmdWorkspaceRename, Params: RenameWorkspaceParams{}, ParamsRequired: true},
-	{Name: CmdWorkspaceMove, Params: MoveWorkspaceParams{}, ParamsRequired: true},
-	{Name: CmdWorkspaceLock, Params: LockWorkspaceParams{}, ParamsRequired: true},
+	{Name: CmdWorkspaceCreate, Params: WorkspaceCreateParams{}, Result: WorkspaceCreateResult{}, Recorded: true},
+	{Name: CmdWorkspaceClose, Params: WorkspaceParams{}, Recorded: true},
+	{Name: CmdWorkspaceFocus, Params: WorkspaceParams{}, ParamsRequired: true, Recorded: true},
+	{Name: CmdWorkspaceRename, Params: RenameWorkspaceParams{}, ParamsRequired: true, Recorded: true},
+	{Name: CmdWorkspaceMove, Params: MoveWorkspaceParams{}, ParamsRequired: true, Recorded: true},
+	{Name: CmdWorkspaceLock, Params: LockWorkspaceParams{}, ParamsRequired: true, Recorded: true},
 
 	// Global focus + server lifecycle.
-	{Name: CmdAgentFocus, Params: PaneParams{}, ParamsRequired: true},
-	{Name: CmdServerReloadConfig},
+	{Name: CmdAgentFocus, Params: PaneParams{}, ParamsRequired: true, Recorded: true},
+	{Name: CmdServerReloadConfig, Recorded: true},
 	{Name: CmdServerStop},
 
 	// Usage. Not reply-gated: the refresh is worth performing for a caller that
 	// never listens, because its product is the broadcast, not the reply.
-	{Name: CmdUsageRefresh},
+	{Name: CmdUsageRefresh, Recorded: true},
 
 	// Chat. None reply-gated for the same reason as usage.refresh: the effects
 	// land as chat_* broadcasts on every client.
-	{Name: CmdChatSend, Params: ChatSendParams{}, ParamsRequired: true},
-	{Name: CmdChatCancel},
+	{Name: CmdChatSend, Params: ChatSendParams{}, ParamsRequired: true, Recorded: true},
+	{Name: CmdChatCancel, Recorded: true},
 	{Name: CmdChatPermission, Params: ChatPermissionParams{}, ParamsRequired: true},
-	{Name: CmdChatClear},
+	{Name: CmdChatClear, Recorded: true},
 
 	// Git worktrees. Only the listing is reply-gated: the other three have
 	// effects worth performing even when the caller stops listening.
 	{Name: CmdWorktreeList, Params: WorktreeListParams{}, Result: WorktreeListResult{}, ReplyRequired: true},
-	{Name: CmdWorktreeCreate, Params: WorktreeCreateParams{}, Result: WorktreeCreateResult{}},
-	{Name: CmdWorktreeOpen, Params: WorktreeOpenParams{}, Result: WorktreeOpenResult{}},
-	{Name: CmdWorktreeRemove, Params: WorktreeRemoveParams{}},
+	{Name: CmdWorktreeCreate, Params: WorktreeCreateParams{}, Result: WorktreeCreateResult{}, Recorded: true},
+	{Name: CmdWorktreeOpen, Params: WorktreeOpenParams{}, Result: WorktreeOpenResult{}, Recorded: true},
+	{Name: CmdWorktreeRemove, Params: WorktreeRemoveParams{}, Recorded: true},
 
 	// Config + themes. Every writer echoes the same ConfigGetResult snapshot a
 	// read would return, so a client refreshes from the reply it already has.
 	{Name: CmdConfigGet, Result: ConfigGetResult{}, ReplyRequired: true},
-	{Name: CmdConfigSet, Params: ConfigSetParams{}, Result: ConfigGetResult{}},
+	{Name: CmdConfigSet, Params: ConfigSetParams{}, Result: ConfigGetResult{}, Recorded: true},
 	{Name: CmdThemeList, Result: ThemeListResult{}, ReplyRequired: true},
-	{Name: CmdThemeSave, Params: ThemeSaveParams{}, Result: ConfigGetResult{}, ParamsRequired: true},
-	{Name: CmdThemeDelete, Params: ThemeDeleteParams{}, Result: ConfigGetResult{}, ParamsRequired: true},
+	{Name: CmdThemeSave, Params: ThemeSaveParams{}, Result: ConfigGetResult{}, ParamsRequired: true, Recorded: true},
+	{Name: CmdThemeDelete, Params: ThemeDeleteParams{}, Result: ConfigGetResult{}, ParamsRequired: true, Recorded: true},
 
 	// Plugins.
 	{Name: CmdPluginList, Result: PluginListResult{}, ReplyRequired: true},
-	{Name: CmdPluginUninstall, Params: PluginUninstallParams{}, Result: PluginUninstallResult{}, ParamsRequired: true},
+	{Name: CmdPluginUninstall, Params: PluginUninstallParams{}, Result: PluginUninstallResult{}, ParamsRequired: true, Recorded: true},
 
 	// Path listing.
 	{Name: CmdPathList, Params: PathListParams{}, Result: PathListResult{}, ReplyRequired: true},
@@ -339,13 +381,13 @@ var commandSpecs = []CommandSpec{
 	// is not reply-gated: a hook script that fires and forgets still wants the
 	// toast, and the id is only interesting to a caller that declared actions
 	// and is still around to watch for them.
-	{Name: CmdUINotify, Params: UINotifyParams{}, Result: UINotifyResult{}, ParamsRequired: true},
+	{Name: CmdUINotify, Params: UINotifyParams{}, Result: UINotifyResult{}, ParamsRequired: true, Recorded: true},
 	{Name: CmdUIAction, Params: UIActionParams{}, ParamsRequired: true},
 
 	// pane.open_file returns which editor it reached (and whether it had to
 	// start one), but is not reply-gated: "open this file" is worth doing for a
 	// caller that never listens, exactly like a split.
-	{Name: CmdPaneOpenFile, Params: OpenFileParams{}, Result: OpenFileResult{}, ParamsRequired: true},
+	{Name: CmdPaneOpenFile, Params: OpenFileParams{}, Result: OpenFileResult{}, ParamsRequired: true, Recorded: true},
 
 	// The command history is a query: no effects, and reply-gated because a
 	// listing with nowhere to go is not worth producing.
@@ -358,18 +400,22 @@ var commandSpecs = []CommandSpec{
 	// is not — a caller that stops listening still wanted the file written.
 	{Name: CmdFileStat, Params: FileStatParams{}, Result: FileStatResult{}, ReplyRequired: true, ParamsRequired: true},
 	{Name: CmdFileGet, Params: FileGetParams{}, Result: FileGetResult{}, ReplyRequired: true, ParamsRequired: true},
-	{Name: CmdFilePut, Params: FilePutParams{}, Result: FilePutResult{}, ParamsRequired: true},
+	{Name: CmdFilePut, Params: FilePutParams{}, Result: FilePutResult{}, ParamsRequired: true, Recorded: true},
 
 	// Runbooks. The listing is reply-gated like every other query; the run is
 	// not, because its product is the effects its steps had — a caller that
 	// stops listening still wanted the panes opened.
 	{Name: CmdRunbookList, Result: RunbookListResult{}, ReplyRequired: true},
 	{Name: CmdRunbookRun, Params: RunbookRunParams{}, Result: RunbookRunResult{}, ParamsRequired: true},
+	// runbook.record is not itself recorded, and not only for the obvious
+	// reason: the recorder is armed by a command, so recording the arming would
+	// put "start recording" in every macro it produced.
+	{Name: CmdRunbookRecord, Params: RunbookRecordParams{}, Result: RunbookRecordResult{}, ParamsRequired: true},
 
 	// Hosts. Both writers echo the new roster, so a client repaints from the
 	// reply instead of waiting for the hosts push that also follows.
-	{Name: CmdHostAttach, Params: HostAttachParams{}, Result: HostListResult{}, ParamsRequired: true},
-	{Name: CmdHostDetach, Params: HostDetachParams{}, Result: HostListResult{}, ParamsRequired: true},
+	{Name: CmdHostAttach, Params: HostAttachParams{}, Result: HostListResult{}, ParamsRequired: true, Recorded: true},
+	{Name: CmdHostDetach, Params: HostDetachParams{}, Result: HostListResult{}, ParamsRequired: true, Recorded: true},
 
 	// Read-only queries. They answer straight from the Session, so they are not
 	// reply-gated — a query with no reply channel is a cheap no-op rather than a
@@ -495,7 +541,7 @@ func BorderPath(id string) ([]bool, bool) {
 // which is why the inherited cwd is dropped when the split crosses hosts
 // (Dispatcher.inheritedSplitCwd).
 type SplitParams struct {
-	Pane      *uint32           `json:"pane,omitempty"`
+	Pane      *uint32           `json:"pane,omitempty" cats:"handle=pane"`
 	Direction string            `json:"direction"` // SplitH | SplitV
 	Cwd       string            `json:"cwd,omitempty"`
 	Command   []string          `json:"command,omitempty"`
@@ -526,17 +572,17 @@ func (p SplitParams) spawnOverride() (SpawnOverride, bool) {
 // the caller is already in, so naming it would report something the caller told
 // us.
 type SplitResult struct {
-	Pane uint32 `json:"pane"`
+	Pane uint32 `json:"pane" cats:"handle=pane"`
 }
 
 // PaneParams: pane.focus, agent.focus — commands addressing a specific pane.
 type PaneParams struct {
-	Pane uint32 `json:"pane"`
+	Pane uint32 `json:"pane" cats:"handle=pane"`
 }
 
 // OptPaneParams: pane.close, pane.zoom. Pane nil = the focused pane.
 type OptPaneParams struct {
-	Pane *uint32 `json:"pane,omitempty"`
+	Pane *uint32 `json:"pane,omitempty" cats:"handle=pane"`
 }
 
 // DirParams: pane.focus_direction, pane.swap.
@@ -547,8 +593,8 @@ type DirParams struct {
 // SwapWithParams: pane.swap_with — exchange two panes' layout slots (the
 // drag-reorder drop; pane.swap is the directional keyboard variant).
 type SwapWithParams struct {
-	Pane   uint32 `json:"pane"`
-	Target uint32 `json:"target"`
+	Pane   uint32 `json:"pane" cats:"handle=pane"`
+	Target uint32 `json:"target" cats:"handle=pane"`
 }
 
 // CycleParams: pane.cycle.
@@ -558,7 +604,7 @@ type CycleParams struct {
 
 // RenamePaneParams: pane.rename ("" clears the custom name).
 type RenamePaneParams struct {
-	Pane uint32 `json:"pane"`
+	Pane uint32 `json:"pane" cats:"handle=pane"`
 	Name string `json:"name"`
 }
 
@@ -572,7 +618,7 @@ type ResizeBorderParams struct {
 // ScrollParams: scroll. Delta lines: negative scrolls up into history,
 // positive back toward the live bottom (β ScrollViewport semantics).
 type ScrollParams struct {
-	Pane  uint32 `json:"pane"`
+	Pane  uint32 `json:"pane" cats:"handle=pane"`
 	Delta int    `json:"delta"`
 }
 
@@ -581,7 +627,7 @@ type ScrollParams struct {
 // β SelectionPoint; derive from the frame's Scroll). Rect selects a block
 // region instead of a reading-order range.
 type ReadParams struct {
-	Pane   uint32    `json:"pane"`
+	Pane   uint32    `json:"pane" cats:"handle=pane"`
 	Anchor [2]uint32 `json:"anchor"`
 	Cursor [2]uint32 `json:"cursor"`
 	Rect   bool      `json:"rect,omitempty"`
@@ -598,7 +644,7 @@ type ReadResult struct {
 // soft-wrapped lines. Unlike read, this needs no coordinates — it captures whole
 // rows, e.g. for "copy scrollback" or feeding an agent the terminal contents.
 type CaptureParams struct {
-	Pane   uint32 `json:"pane"`
+	Pane   uint32 `json:"pane" cats:"handle=pane"`
 	Scope  uint8  `json:"scope,omitempty"`
 	Lines  uint32 `json:"lines,omitempty"`
 	Ansi   bool   `json:"ansi,omitempty"`
@@ -621,7 +667,7 @@ type CaptureResult struct {
 // 0 = the whole buffer); the live stream is matched in full. TimeoutMs 0 uses the
 // server default.
 type WaitForOutputParams struct {
-	Pane      uint32 `json:"pane"`
+	Pane      uint32 `json:"pane" cats:"handle=pane"`
 	Pattern   string `json:"pattern"`
 	Regex     bool   `json:"regex,omitempty"`
 	TimeoutMs uint32 `json:"timeout_ms,omitempty"`
@@ -724,7 +770,7 @@ func WaitTimeout(ms uint32) time.Duration {
 // an empty-Text Submit sends just the Enter. Encoding stays server-side, same
 // as browser input: clients never pre-encode VT bytes.
 type SendInputParams struct {
-	Pane   uint32 `json:"pane"`
+	Pane   uint32 `json:"pane" cats:"handle=pane"`
 	Text   string `json:"text,omitempty"`
 	Submit bool   `json:"submit,omitempty"`
 }
@@ -765,13 +811,13 @@ type MoveTabParams struct {
 // MoveWorkspaceParams: workspace.move — reorder the workspace list. Index is an
 // insertion point (a gap position 0..=len).
 type MoveWorkspaceParams struct {
-	ID    string `json:"id"`
+	ID    string `json:"id" cats:"handle=workspace"`
 	Index int    `json:"index"`
 }
 
 // WorkspaceParams: workspace.focus, workspace.close.
 type WorkspaceParams struct {
-	ID string `json:"id"` // public workspace id, e.g. "w1"
+	ID string `json:"id" cats:"handle=workspace"` // public workspace id, e.g. "w1"
 }
 
 // WorkspaceCreateParams: workspace.create. Every field is optional — the whole
@@ -815,12 +861,12 @@ type WorkspaceCreateParams struct {
 // diffing workspace.list. The browser UI ignores it (the layout broadcast that
 // follows already carries the new workspace).
 type WorkspaceCreateResult struct {
-	ID string `json:"id"`
+	ID string `json:"id" cats:"handle=workspace"`
 }
 
 // RenameWorkspaceParams: workspace.rename ("" reverts to auto-naming).
 type RenameWorkspaceParams struct {
-	ID   string `json:"id"`
+	ID   string `json:"id" cats:"handle=workspace"`
 	Name string `json:"name"`
 }
 
@@ -835,7 +881,7 @@ type RenameWorkspaceParams struct {
 // control API can lift it — what it stops is a plugin action or an agent launch
 // landing somewhere by accident.
 type LockWorkspaceParams struct {
-	ID     string `json:"id,omitempty"`
+	ID     string `json:"id,omitempty" cats:"handle=workspace"`
 	Locked bool   `json:"locked"`
 }
 
@@ -843,7 +889,7 @@ type LockWorkspaceParams struct {
 
 // TabListParams: tab.list. Workspace "" = the active workspace.
 type TabListParams struct {
-	Workspace string `json:"workspace,omitempty"`
+	Workspace string `json:"workspace,omitempty" cats:"handle=workspace"`
 }
 
 // SessionInfoResult is CmdResult.Data for session.get: a one-shot snapshot of the
@@ -968,7 +1014,7 @@ type TabCreateParams struct {
 	Cwd       string            `json:"cwd,omitempty"`
 	Command   []string          `json:"command,omitempty"`
 	Env       map[string]string `json:"env,omitempty"`
-	Workspace string            `json:"workspace,omitempty"`
+	Workspace string            `json:"workspace,omitempty" cats:"handle=workspace"`
 	Host      string            `json:"host,omitempty"`
 }
 
@@ -1055,7 +1101,7 @@ func (p TabCreateParams) spawnOverride() (SpawnOverride, bool) {
 // all (the browser UI ignores it).
 type TabCreateResult struct {
 	Num  int    `json:"num"`
-	Pane uint32 `json:"pane"`
+	Pane uint32 `json:"pane" cats:"handle=pane"`
 }
 
 // PaneListResult is CmdResult.Data for pane.list.
@@ -1134,7 +1180,7 @@ type HostAttachParams struct {
 	ID          string `json:"id"`
 	Label       string `json:"label,omitempty"`
 	Addr        string `json:"addr"`
-	Token       string `json:"token,omitempty"`
+	Token       string `json:"token,omitempty" cats:"secret"`
 	TokenFile   string `json:"token_file,omitempty"`
 	Fingerprint string `json:"fingerprint,omitempty"`
 	// Default makes the new host the one unqualified panes land on. It is
@@ -1161,7 +1207,7 @@ type HostDetachParams struct {
 // WorktreeListParams: worktree.list. Pane nil = the focused pane; the repo is
 // resolved from that pane's live cwd (Backend supplies pane cwds).
 type WorktreeListParams struct {
-	Pane *uint32 `json:"pane,omitempty"`
+	Pane *uint32 `json:"pane,omitempty" cats:"handle=pane"`
 }
 
 // WorktreeInfo describes one existing checkout for worktree.list. Current marks
@@ -1196,7 +1242,7 @@ type WorktreeListResult struct {
 // WorktreeCreateParams: worktree.create. Branch "" generates a slug; Path ""
 // derives the default checkout path under the configured worktree root.
 type WorktreeCreateParams struct {
-	Pane   *uint32 `json:"pane,omitempty"`
+	Pane   *uint32 `json:"pane,omitempty" cats:"handle=pane"`
 	Branch string  `json:"branch,omitempty"`
 	Path   string  `json:"path,omitempty"`
 }
@@ -1204,7 +1250,7 @@ type WorktreeCreateParams struct {
 // WorktreeCreateResult is CmdResult.Data for worktree.create: the new
 // workspace's public id and the resolved branch/checkout.
 type WorktreeCreateResult struct {
-	Workspace string `json:"workspace"`
+	Workspace string `json:"workspace" cats:"handle=workspace"`
 	Branch    string `json:"branch"`
 	Path      string `json:"path"`
 }
@@ -1212,13 +1258,13 @@ type WorktreeCreateResult struct {
 // WorktreeOpenParams: worktree.open — focus the workspace already open on Path,
 // or create a new one there.
 type WorktreeOpenParams struct {
-	Pane *uint32 `json:"pane,omitempty"`
+	Pane *uint32 `json:"pane,omitempty" cats:"handle=pane"`
 	Path string  `json:"path"`
 }
 
 // WorktreeOpenResult is CmdResult.Data for worktree.open.
 type WorktreeOpenResult struct {
-	Workspace   string `json:"workspace"`
+	Workspace   string `json:"workspace" cats:"handle=workspace"`
 	AlreadyOpen bool   `json:"already_open,omitempty"`
 }
 
@@ -1228,7 +1274,7 @@ type WorktreeOpenResult struct {
 // front-end can escalate to the delete-anyway confirm. The branch is never
 // deleted.
 type WorktreeRemoveParams struct {
-	Workspace string `json:"workspace"`
+	Workspace string `json:"workspace" cats:"handle=workspace"`
 	Force     bool   `json:"force,omitempty"`
 }
 
@@ -1409,7 +1455,7 @@ type PluginUninstallResult struct {
 // to list answers with an Error rather than with this machine's directories.
 type PathListParams struct {
 	Dir     string  `json:"dir,omitempty"`
-	Pane    *uint32 `json:"pane,omitempty"`
+	Pane    *uint32 `json:"pane,omitempty" cats:"handle=pane"`
 	Recents bool    `json:"recents,omitempty"`
 	Host    string  `json:"host,omitempty"`
 }
@@ -1489,7 +1535,7 @@ type UINotifyParams struct {
 	Title   string         `json:"title"`
 	Body    string         `json:"body,omitempty"`
 	Kind    string         `json:"kind,omitempty"` // attention | finished | info (default info)
-	Pane    *uint32        `json:"pane,omitempty"`
+	Pane    *uint32        `json:"pane,omitempty" cats:"handle=pane"`
 	Actions []NotifyAction `json:"actions,omitempty"`
 }
 
@@ -1541,7 +1587,7 @@ func NotifyKindOK(kind string) bool {
 // front end that disagreed with it.
 type LedgerListParams struct {
 	Host     string `json:"host,omitempty"`
-	Pane     uint32 `json:"pane,omitempty"`
+	Pane     uint32 `json:"pane,omitempty" cats:"handle=pane"`
 	Cwd      string `json:"cwd,omitempty"`
 	Contains string `json:"contains,omitempty"`
 	// Failed narrows to commands that are KNOWN to have failed. A command whose
@@ -1582,7 +1628,7 @@ type LedgerListResult struct {
 // ledger.jump. Both fields are required — a block id is allocated by the pane's
 // own cathost, so it means nothing without the pane.
 type LedgerBlockParams struct {
-	Pane  uint32 `json:"pane"`
+	Pane  uint32 `json:"pane" cats:"handle=pane"`
 	Block uint64 `json:"block"`
 }
 
@@ -1684,6 +1730,52 @@ type RunbookRunResult struct {
 	Failed bool                `json:"failed,omitempty"`
 }
 
+// RunbookRecordParams: runbook.record.
+//
+// Action is the verb — start, stop, cancel, status — rather than four commands,
+// because they are one piece of state seen from four sides and a client that
+// knows one knows them all. Name is required by stop and is the runbook's
+// identity: the recording exists only in memory until it is given one, which is
+// the whole of the privacy story (see CmdRunbookRecord).
+type RunbookRecordParams struct {
+	Action      string `json:"action"`
+	Name        string `json:"name,omitempty"`
+	Description string `json:"description,omitempty"`
+	// Overwrite permits stop to replace an existing runbook file. Off by
+	// default: a name collision is far more often a second recording of
+	// something already working than a deliberate replacement, and the file it
+	// would overwrite may have been edited by hand since.
+	Overwrite bool `json:"overwrite,omitempty"`
+}
+
+// The four spellings of RunbookRecordParams.Action.
+const (
+	RecordStart  = "start"
+	RecordStop   = "stop"
+	RecordCancel = "cancel"
+	RecordStatus = "status"
+)
+
+// RunbookRecordResult is CmdResult.Data for runbook.record.
+//
+// Commands lists what has been captured so far, in order, so "what will I get
+// if I stop now?" is answerable without stopping — which matters because a
+// recorder that silently captured nothing (every command a query, the flag
+// never set) is otherwise indistinguishable from one that is working.
+type RunbookRecordResult struct {
+	Action    string   `json:"action"`
+	Recording bool     `json:"recording"`
+	Steps     int      `json:"steps"`
+	Name      string   `json:"name,omitempty"`
+	Path      string   `json:"path,omitempty"`
+	Commands  []string `json:"commands,omitempty"`
+	// Note carries a condition the recorder is in that is not an error — it hit
+	// its in-memory ceiling and stopped capturing. It is reported rather than
+	// raised, because the command that overflowed the recording was a command
+	// the user ran for its own sake and must not be failed for it.
+	Note string `json:"note,omitempty"`
+}
+
 // --- Editor params & results (§7, pane.open_file) ----------------------------
 
 // OpenFileParams: pane.open_file.
@@ -1712,8 +1804,8 @@ type OpenFileParams struct {
 	Path   string  `json:"path"`
 	Line   int     `json:"line,omitempty"`
 	Column int     `json:"column,omitempty"`
-	Pane   *uint32 `json:"pane,omitempty"`
-	Editor *uint32 `json:"editor,omitempty"`
+	Pane   *uint32 `json:"pane,omitempty" cats:"handle=pane"`
+	Editor *uint32 `json:"editor,omitempty" cats:"handle=pane"`
 	Host   string  `json:"host,omitempty"`
 	// Spawn allows starting an editor when none is running. Nil means the
 	// configured default (editor.spawn, on). Set it false for a caller that
@@ -1727,7 +1819,7 @@ type OpenFileParams struct {
 // inferring, because a spawned editor opens the file from its ARGV and has not
 // seen the line number — see the CmdPaneOpenFile comment.
 type OpenFileResult struct {
-	Pane    uint32 `json:"pane"`
+	Pane    uint32 `json:"pane" cats:"handle=pane"`
 	Host    string `json:"host"`
 	Spawned bool   `json:"spawned,omitempty"`
 }
@@ -1758,7 +1850,7 @@ type OpenFileResult struct {
 // FileStatParams: file.stat — what is at this path.
 type FileStatParams struct {
 	Path string  `json:"path"`
-	Pane *uint32 `json:"pane,omitempty"`
+	Pane *uint32 `json:"pane,omitempty" cats:"handle=pane"`
 	Host string  `json:"host,omitempty"`
 }
 
@@ -1782,7 +1874,7 @@ type FileStatResult struct {
 // deliberate and is explained at CmdFileGet.
 type FileGetParams struct {
 	Path   string  `json:"path"`
-	Pane   *uint32 `json:"pane,omitempty"`
+	Pane   *uint32 `json:"pane,omitempty" cats:"handle=pane"`
 	Host   string  `json:"host,omitempty"`
 	Offset int64   `json:"offset,omitempty"`
 	Length int64   `json:"length,omitempty"`
@@ -1819,7 +1911,7 @@ type FileGetResult struct {
 // the fix named in the message.
 type FilePutParams struct {
 	Path      string  `json:"path"`
-	Pane      *uint32 `json:"pane,omitempty"`
+	Pane      *uint32 `json:"pane,omitempty" cats:"handle=pane"`
 	Host      string  `json:"host,omitempty"`
 	Data      []byte  `json:"data,omitempty"`
 	Offset    int64   `json:"offset,omitempty"`

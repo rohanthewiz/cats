@@ -439,6 +439,13 @@ func argCandidates(kind argKind, words []string) []candidate {
 		return []candidate{{"h", "split horizontally (side by side)"}, {"v", "split vertically (stacked)"}}
 	case argCycleDir:
 		return []candidate{{"next", "the next pane"}, {"prev", "the previous pane"}}
+	case argRecordAction:
+		return []candidate{
+			{app.RecordStart, "start recording what you do"},
+			{app.RecordStop, "save the recording as a runbook"},
+			{app.RecordCancel, "throw the recording away"},
+			{app.RecordStatus, "what has been captured so far"},
+		}
 	}
 	return nil
 }

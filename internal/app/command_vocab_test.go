@@ -124,7 +124,9 @@ func parseDispatchCases(t *testing.T, file string, consts map[string]string) map
 	var sw *ast.SwitchStmt
 	for _, decl := range f.Decls {
 		fn, ok := decl.(*ast.FuncDecl)
-		if !ok || fn.Name.Name != "Dispatch" || fn.Recv == nil {
+		// The table is in `dispatch`, the unexported half of Dispatch — the
+		// exported one is the recorder wrapper (record.go) and holds no cases.
+		if !ok || fn.Name.Name != "dispatch" || fn.Recv == nil {
 			continue
 		}
 		ast.Inspect(fn.Body, func(n ast.Node) bool {
@@ -139,7 +141,7 @@ func parseDispatchCases(t *testing.T, file string, consts map[string]string) map
 		})
 	}
 	if sw == nil {
-		t.Fatalf("no switch statement found in Dispatch (%s)", file)
+		t.Fatalf("no switch statement found in dispatch (%s)", file)
 	}
 
 	out := map[string]bool{}

@@ -202,6 +202,12 @@ type orch struct {
 	// runbooks at all and the whole subsystem should then cost one map lookup
 	// per emitted event.
 	runbooks runbookTriggers
+	// macro is the armed macro recorder (record.go), created on first use and
+	// idle until somebody runs `runbook.record start`. It is on the orch rather
+	// than the dispatcher because a dispatcher is built per command — the
+	// runbook executor builds one per step — and a recorder that lived there
+	// would record whichever caller happened to hold the instance it was set on.
+	macro *macroRecorder
 	// ledger is the command history (ledger.go), nil when disabled or when its
 	// store could not be opened. openCmds holds the commands that have started
 	// and not yet ended, keyed by pane — a pane runs one foreground command at a

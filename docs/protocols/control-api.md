@@ -478,6 +478,7 @@ new panes rather than a location.
 | `pane.open_file` | `open <path> [line]` |
 | `file.stat` / `file.get` / `file.put` | `cp [-f] <src> <dst>` (a loop over all three) |
 | `runbook.list` / `runbook.run` | `runbooks` / `runbook <name> [key=value ...]` |
+| `runbook.record` | `record <start\|stop\|cancel\|status> [name] [overwrite]` |
 | `agent.focus` | `agent <pane>` |
 | `usage.refresh` | — |
 | `server.reload_config` | `reload` |
@@ -1064,6 +1065,76 @@ stream should not have to know which runs it will be told about — with `source
 `"control"` and no `trigger`. It carries a summary rather than the per-step list,
 because it answers "did the thing I set up actually work", not "what happened";
 whoever asked for the run already has the second answer.
+
+#### Recording one
+
+`runbook.record` writes the file the other two read: do the thing once by hand,
+then ask for it back as YAML.
+
+```bash
+catctl record start
+# … split a pane, type the command, wait for it, notify …
+catctl record status                 # what has been captured so far
+catctl record stop deploy            # writes ~/.config/cats/runbooks/deploy.yaml
+catctl record stop deploy overwrite  # …replacing one that is already there
+catctl record cancel                 # throw it away
+```
+
+**Armed, not always on.** Nothing is captured until somebody asks, and the
+recording lives in memory until it is given a name. The alternative — a durable
+journal every command lands in, sliced by time afterwards — is strictly more
+powerful and strictly worse to own: a permanent record of every parameter of
+every command, including every chat message and every keystroke, kept by
+default, on a machine somebody else may administer. `status` exists so an empty
+recording is visible before it is stopped.
+
+**What is captured** is declared per command (`CommandSpec.Recorded`), not
+inferred, and the rule is "would replaying this do again what was done":
+
+* Queries are out — a macro containing `pane.list` is noise, because the caller
+  that ran it was looking at something rather than doing something.
+  `pane.wait_for_output` is the exception that proves the rule: no effect at all,
+  and recorded, because a replay without it races the shell it waited for.
+* Answers to a live prompt are out — `ui.action`, `chat.permission`,
+  `ledger.jump` each name something that existed for one moment.
+* `runbook.run` is out because its **steps** are recorded as they run. Recording
+  a runbook produces a runbook that does the same thing, rather than one that
+  does everything twice.
+
+The hook is in the dispatcher and nowhere else, so what is recorded is the
+vocabulary rather than one client's use of it: a browser click, a `catctl` call,
+a plugin, a relayed command from another host and a runbook's own step are all
+the same event to it. A command that **failed** is dropped — it did not happen.
+
+**Pane and workspace ids do not survive.** A recorded `pane.send_input
+{pane: 7}` replayed tomorrow types into whatever pane 7 is then, so every handle
+is rewritten:
+
+* a pane or workspace made **inside** the recording becomes a reference to the
+  step that made it (`{{ s1.pane }}`), exactly as a hand-written runbook would
+  spell it;
+* the pane and workspace the recording **started in** become the pane and
+  workspace the runbook is *run* from, through a `pane.get` / `session.get` step
+  the emitter prepends. This is what makes the common recording — do the thing in
+  the pane I am already in — work at all;
+* anything else is **refused**, naming the step and the fix. A runbook that loads
+  and then acts on a stranger's pane is the failure mode the load checks exist to
+  prevent, and no comment in a file prevents it.
+
+Consecutive `pane.send_input` calls to one pane are merged into one step, up to
+and including the keypress that submitted — a browser sends one command per key,
+and a step per character is faithful and unreadable.
+
+**Redaction is per field, not per command.** A field marked secret in the
+vocabulary (today: `host.attach`'s `token`) never reaches the file; the emitted
+runbook declares a var for it and asks for the value when it runs. Deliberately
+narrow: `pane.send_input`'s text is the most private field in the vocabulary and
+is recorded, because it is also the one a macro exists to replay — the
+protection for it is that recording is armed at all.
+
+A `stop` that is refused — a name already taken, a handle that cannot be
+rewritten, nothing captured — leaves the recording **running**, so a typo does
+not cost the whole session's work.
 
 ## Raw vs ergonomic
 

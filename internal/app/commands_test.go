@@ -38,6 +38,8 @@ type fakeBackend struct {
 	lastLedger     LedgerListParams
 	ledgerEntries  []LedgerEntry
 	lastRunbook    RunbookRunParams
+	lastRecord     RunbookRecordParams
+	recorder       Recorder
 	lastOpen       OpenFileParams
 	lastOpenPane   uint32
 	lastCapture    Responder
@@ -81,6 +83,11 @@ type fakeBackend struct {
 	// override reached the backend (and, via the log, before applyModel).
 	staged map[uint32]SpawnOverride
 }
+
+// Recorder makes the fake a recording backend (record.go). It is nil in every
+// harness but the recorder's own, which is the point: the optional interface
+// means a backend that does not record is a backend that returns nil here.
+func (b *fakeBackend) Recorder() Recorder { return b.recorder }
 
 func (b *fakeBackend) rec(s string)                { *b.log = append(*b.log, s) }
 func (b *fakeBackend) Area() layout.Rect           { return b.area }
@@ -161,6 +168,12 @@ func (b *fakeBackend) RunbookRun(r Responder, p RunbookRunParams) {
 	b.rec("runbookRun:" + p.Name)
 	b.lastRunbook = p
 	r.OK(RunbookRunResult{Name: p.Name})
+}
+
+func (b *fakeBackend) RunbookRecord(r Responder, p RunbookRecordParams) {
+	b.rec("runbookRecord:" + p.Action + ":" + p.Name)
+	b.lastRecord = p
+	r.OK(RunbookRecordResult{Action: p.Action, Name: p.Name})
 }
 
 func (b *fakeBackend) OpenFileIn(pane uint32, p OpenFileParams) {

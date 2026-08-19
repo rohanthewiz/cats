@@ -328,15 +328,10 @@ func (c *loadCtx) checkRef(rf ref) error {
 	return nil
 }
 
-// specFor looks one command up in the §7 table.
-func specFor(name string) (app.CommandSpec, bool) {
-	for _, s := range app.CommandSpecs() {
-		if s.Name == name {
-			return s, true
-		}
-	}
-	return app.CommandSpec{}, false
-}
+// specFor looks one command up in the §7 table. The index is the vocabulary's
+// own — a load walks every step and every step asks this question, and a linear
+// scan of seventy specs per step is a scan nobody needs.
+func specFor(name string) (app.CommandSpec, bool) { return app.Spec(name) }
 
 // nameOK accepts the identifier shape used for both a runbook's name and a
 // step's id: they are addressed from a CLI argument and from inside a `{{ }}`

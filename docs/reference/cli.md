@@ -342,6 +342,28 @@ would not fire right now. Cron is not one of these: point launchd or systemd at
 `catctl runbook <name>`. Guardrails, the config switch, and the rest are in
 [the control API](../protocols/control-api.md#runbooks).
 
+You do not have to write one by hand. Do the thing once, and ask for it back:
+
+```bash
+catctl record start
+catctl split v                       # …or do it all in the browser; same recorder
+catctl run 4 make test               # type it and press Enter
+catctl wait 4 PASS
+catctl record status                 # what has been captured so far
+catctl record stop run-tests         # writes ~/.config/cats/runbooks/run-tests.yaml
+```
+
+`record cancel` throws it away; `record stop <name> overwrite` replaces an
+existing file. Only commands with effects are captured — a `pane.list` you ran to
+look at something is not part of what you did — and pane ids are rewritten into
+references, either to the step that created the pane or to the pane the runbook
+is *run* from. A pane the recording neither created nor started in is refused by
+name, because replaying a literal pane id types into whoever holds it that day.
+Nothing is captured until `record start`, and nothing is written until `stop`
+names a file. See
+[the control API](../protocols/control-api.md#recording-one) for what is
+captured, what is redacted, and why.
+
 Files:
 
 ```bash

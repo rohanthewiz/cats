@@ -453,13 +453,11 @@ push), `docs/reference/cli.md` (`catctl output` / `catctl jump`).
 catgen-dart goldens regenerated; **cats-mobile has not been regenerated** — still owed from
 slice 1.
 
-### Phase 5b — collapse — **NOT STARTED, and deliberately deferred**
+### Phase 5b — collapse — **MOVED** to `ai_docs/plans/remote-extras.md`
 
-cats renders the grid server-side and ships frames, so "collapse this block" is not a
-client-side fold: it would mean the daemon rendering a viewport with rows elided, inside
-libghostty's screen model. Worth doing only with that cost understood rather than assumed
-away — and the three verbs people actually reach for (jump, copy, send to chat) are shipped
-without it.
+Deferred on a cost that has to be paid deliberately: server-side rendering makes a fold a
+change to libghostty's screen model, not a client-side hide. The reasoning and what would
+have to be settled first now live in the extras plan.
 
 ### Phase 6a — runbooks: the format, the engine, manual run — **DONE**
 
@@ -557,105 +555,154 @@ naming rationale, and a Triggers section), `cli.md`, `configuration.md`
 (a Runbooks section), `config.example.yaml`. catgen-dart goldens regenerated
 (`RunbookInfo` gained `triggers` / `trigger_status`); **cats-mobile regen owed**.
 
-### Phase 6c — record-a-macro — **NOT STARTED, scoped**
+### Phase 6c — record-a-macro — **DONE**
 
-Turn a stretch of live use into a runbook file: do the thing once by hand, then
-ask for it back as YAML. 6a and 6b already built everything downstream of that
-sentence — the document format, `params:`, step refs, `on:` — so the whole of
-6c is upstream of it: there is nothing to record from.
+As built. The one-sentence feature — do the thing once by hand, then ask for it
+back as YAML — needed one thing built upstream of it (a journal of §7 commands,
+which existed nowhere) and one thing decided that the plan below named as the
+hard part (what to do about handles). Both landed where the plan said; the
+deltas are in what "handle" turned out to mean and in how the common recording
+is made emittable at all.
 
-The ledger records *shell* commands via OSC 133 (`internal/ledger`); no journal
-of §7 commands exists anywhere. That journal is the work.
+**The journal is a wrapper, not a case.** `Dispatch` became two functions: the
+exported one wraps the decoder and the responder when the command is recorded
+and a recording is armed, and the unexported `dispatch` is the table, unchanged
+and unaware. No case knows it is being recorded, which is what keeps "what a
+macro replays" the same question as "what the command does" — and
+`TestCommandSpecsRouted` now reads `dispatch`, since that is where the switch
+lives.
 
-#### Where the journal hooks
+**The slot is taken on the way in and filled on the way out.** Recording on
+completion alone would have silently reordered every macro containing a command
+that resolves late (a worktree create, a file put to another machine) against
+the sequence the user actually performed. `Begin` reserves the position,
+`Commit` fills it, `Abort` releases it — a command that failed did not happen,
+and a command that never resolves its responder is simply never emitted.
 
-`app.Dispatcher.Dispatch` and nowhere else. It is the one choke point every
-caller already funnels through — browser `cmd`, catctl, the control relay,
-plugin binaries, a runbook's own steps, a trigger's run — so a recorder placed
-there records the vocabulary rather than one client's use of it. Anywhere else
-is a second vocabulary that starts drifting the day it is written.
+**The params kept are the caller's bytes, not the decoded struct.** This is the
+6b `omitempty` bug wearing its third hat: `submit: false` sent explicitly is
+invisible once it has been through a struct field that drops zero values, so a
+recording built from the decoded params would turn "type this line" into "press
+Enter on it". `JSONParamDecoder` grew `RawParams`, and the decoder wrapper
+prefers it.
 
-That it also catches runbook steps is a feature, not an accident: recording
-while a runbook runs should produce a runbook that does the same thing.
+**Effects, and two exceptions in each direction.** `CommandSpec.Recorded` is the
+third dispatch property, declared per command. The rule is not "has an effect"
+but "would replaying this do again what was done", which puts
+`pane.wait_for_output` **in** (no effect at all, and a replay without it races
+the shell it waited for) and puts three effects **out**: `ui.action`,
+`chat.permission` and `ledger.jump` each name something that existed for one
+moment — a notification id, a permission request, a block in a scrollback — so
+there is nothing for a later run to answer. `runbook.run` is out because its
+*steps* are recorded as they re-enter `Dispatch`; recording the call as well
+would replay every effect twice (tested).
 
-#### What is recorded, and the flag that decides
+**Handles, and the anchor that makes the feature usable.** The plan predicted the
+refusal and recommended it, and it was right that emitting a literal pane id is
+never acceptable — but a refusal alone would have failed the *common* recording,
+which starts in a pane that already existed. So there are three outcomes, not
+two:
 
-Effects, not queries. A macro containing `pane.list` is noise, and the caller
-that ran it was looking at something, not doing something.
+* a pane or workspace produced **inside** the recording becomes a reference to
+  the step that produced it (`{{ s1.pane }}`), with the id given only to the
+  steps something actually names;
+* the pane and workspace the recording **started in** become the pane and
+  workspace the runbook is *run from*, through a `pane.get` / `session.get` step
+  the emitter prepends. Both are ordinary §7 queries, so "the pane this was
+  started from" needed no runbook-only concept — and neither step is added
+  unless something referred to it;
+* anything else is refused, naming the step, the id, the field and the fix.
 
-"Has an effect" is not derivable from the table as it stands — `pane.split`
-returns a result and is very much an effect — so it is a **third dispatch
-property beside `ReplyRequired` and `ParamsRequired`**, declared per command in
-`commandSpecs`. Declared, not inferred, for the reason the other two are: the
-next command added must have to answer the question, and a default that guesses
-means it never gets asked.
+Workspaces are handled alongside panes because the argument is identical (`w3`
+in a fresh session is somebody else's workspace) and the mechanism is one `kind`
+string. Tab numbers are deliberately **not** handles: a tab number is a
+position, and "the second tab" means the same thing twice.
 
-#### The privacy dimension, and why it needs a build-breaking test
+**Redaction is per field and deliberately narrow.** `cats:"secret"` withholds the
+value and the emitter declares a var for it, so the runbook keeps its shape and
+asks for the credential when it runs — today that is `host.attach`'s `token` and
+nothing else. `pane.send_input`'s text is the most private field in the
+vocabulary and is recorded, because it is also the one a macro exists to replay;
+the protection for it is that recording is armed at all. The build-breaking
+check the plan asked for is `TestRecordedParamsAreClassified`, an exhaustive
+table of every field of every recorded command cross-checked against the tags in
+both directions, plus a second test refusing a `cats` tag on a nested field —
+classification is top-level only, and a tag nothing reads is exactly the drift
+these tests exist to catch.
 
-`chat.send` carries whatever was typed to an agent, `config.set` carries
-whatever value was set, and `pane.send_input` carries keystrokes — which is
-simultaneously the most private field in the vocabulary and the one a macro
-exists to replay. So redaction is per FIELD, not per command, and it cannot
-live in the recorder: it is a property of the params struct, declared beside the
-field as a struct tag (`cats:"secret"`), walked by the same reflection
-`runbook.EventMap` already uses on event payloads.
+Four things the writing and the live run found that the plan did not anticipate:
 
-The default for an untagged field has to be "recorded" — a recorder that
-dropped fields it did not recognise would silently emit runbooks that do not
-reproduce what was done, which is 6b's `omitempty` bug wearing a different hat.
-Which means the safety has to come from somewhere else: **a table test that
-fails the build when a params struct carries a field no classification covers**,
-in the manner of `TestCommandSpecsRouted`. The omission fails a test rather
-than leaking a secret into a file on disk.
+* **The emitter has to load what it wrote.** `Emit` finishes by `Parse`ing its
+  own output, so a recording that would not load is an error at record time
+  rather than a broken file discovered next week. It costs one call and it is
+  the only check that covers the whole document at once.
+* **A refused stop must not throw the recording away.** The two ways stop fails
+  are a name already taken and a handle that cannot be rewritten; discarding on
+  either punishes a typo with the loss of everything recorded. The recording
+  stays armed and the message says so.
+* **Numbers cross two decoders here too.** Params arrive as a JSON tree, where
+  every number is a float64, and a YAML encoder writes `60000.0`. Harmless for
+  small values, wrong for a file offset past 2^53, and ugly in every case in a
+  file whose readability is the reason it is YAML — so integral floats are
+  written as integers, and map keys are sorted, which is also what makes
+  emission byte-stable across two recordings of the same thing.
+* **An empty recording is an answer, not a file.** Stopping with nothing
+  captured is refused rather than writing a document with no steps, and `status`
+  exists so that state is visible before stop is typed — a recorder that
+  captured nothing (every command a query) is otherwise indistinguishable from
+  one that is working.
 
-#### Always-on journal, or armed recording
+Coalescing landed as planned with one rule the plan left open: a run of
+`pane.send_input` merges up to **and including** the call that submitted,
+because submit is an Enter encoded against the pane's live mode state rather
+than a newline in the text, so merging across one would change what replays.
 
-The decision the phase turns on, and the recommendation is the smaller one.
+The armed recorder lives on the orch (`macroRecorder`), one recording at a time,
+with an in-memory ceiling that stops capture without failing the command that
+hit it and reports itself through `status`. catctl got `record
+<start|stop|cancel|status> [name] [overwrite]` — `overwrite` is a word, not a
+flag, for the reason `force` is one on `detach-host`. The browser got nothing:
+the recorder is reachable from any client through §7, and a button for it is a
+separate piece of work.
 
-* **Armed** — `runbook.record start` / `stop` / `cancel`, held in memory, never
-  written until a name is given. Nothing exists unless somebody asked for it, so
-  the privacy question above shrinks to "what goes in the file the user just
-  asked for", and the ledger's whole retention/eviction apparatus is not needed.
-* **Always-on** — a durable journal with retention, from which a time range is
-  sliced ("make a runbook out of the last ten minutes"). Strictly more powerful,
-  and strictly worse to own: a durable store of every parameter of every command
-  including every chat message, kept by default, on a machine somebody else may
-  administer.
+Tests added: `internal/app/record_test.go` (the classification table both ways,
+the nested-tag refusal, every consumed handle kind having a producer, effects
+captured and queries not, a disarmed recorder capturing nothing while the
+command still runs, a failed command released, call order preserved across a
+late responder, an explicit zero surviving, and the result reaching the
+recorder); `internal/runbook/emit_test.go` (the produced-handle rewrite, ids only
+where referenced, both anchors and their absence, both refusals, an absent
+optional pane left alone, coalescing up to the submit and not across panes or
+across a submit, secret redaction with the non-secret field untouched, the
+explicit zero, empty/bad-name/over-long refusals, byte-stability, and a resolved
+reference coming back as the *new* pane with its type intact);
+`cmd/catway/record_test.go` (the whole loop writing a listable runbook, a
+recorded runbook replaying its effect, the literal id never written, the anchor
+step, a failed command skipped, cancel leaving nothing, nothing captured while
+disarmed, the five refusals, an existing name refused and then overwritten with
+the recording intact across it, the emitter's refusal leaving it armed, the
+ceiling, and a runbook's steps recorded rather than its run).
 
-Take armed. It is the feature as named — "I did this once, do it again" — and
-the always-on journal can be built later on top of the same recorder, at which
-point its retention and its redaction have a working implementation to inherit
-rather than a design to invent.
-
-#### The hard part: pane ids do not survive the recording
-
-This is why 6c is not an afternoon. A recorded `pane.send_input {pane: 7}`
-replays into whatever pane 7 happens to be tomorrow, which is somebody else's
-terminal. So the emitter has to **rewrite pane references into step refs**:
-a pane produced by an earlier recorded `pane.split` becomes
-`{{ steps.<id>.pane }}`, exactly as a hand-written runbook would spell it.
-
-A pane reference the recording did not create has no honest rewrite. The
-options are to refuse the recording (naming the step), or to emit the literal id
-with a comment saying it will not survive. Refusing is more in keeping with
-everything else here — a runbook that loads and then does the wrong thing is the
-failure mode the load checks exist to prevent — but the common case is a
-recording that starts in an existing pane, so a refusal has to come with the fix
-in the same sentence: split first, or record from a fresh tab.
-
-Consecutive `pane.send_input` calls to one pane coalesce into one step. A
-keystroke-per-step recording is technically faithful and unreadable, and
-readability is the point of emitting YAML rather than a blob.
-
-#### Shape of the work
-
-* `internal/app` — the record flag on `CommandSpec`, the `cats:"secret"` tag on
-  the params structs, the classification test, and the recorder hook in
-  `Dispatch`
-* `internal/runbook` — an emitter (steps → the document the loader accepts) plus
-  the pane-ref rewrite, tested by round-tripping through `runbook.Load`
-* `cmd/catway` — the armed recorder's state, `runbook.record`, and the write
-* Docs: `control-api.md`, `cli.md`, a `runbook.record` verb in catctl
+Verified live (one cathost, one catway, `catctl`, an isolated
+`XDG_CONFIG_HOME`): `record start`, a split, `run 2 echo …`, a `wait`, a
+`notify`, then `record stop hello-flow` writes a four-step runbook whose input
+and wait both read `{{ s1.pane }}` and whose `timeout_ms` is `5000`, not
+`5000.0`; `catctl runbook hello-flow` then creates pane 3 and `catctl capture 3`
+shows `HELLO-FROM-RECORDING` in it. A recording made in an existing pane emits
+the `pane.get` anchor and `{{ start_pane.pane }}`. A `host.attach` carrying a
+token emits `token: "{{ vars.token }}"` with the var declared and the
+description saying a value was withheld — `grep -r hunter2` over the runbook
+directory finds nothing — while the address and fingerprint beside it are
+recorded verbatim. A `host.attach` that FAILED its fingerprint check left the
+recording at one step, which is the abort path seen from outside. And a
+`send_input` to a pane that was neither created by the recording nor the one it
+started in is refused by name, with the recording still running afterwards.
+Docs: `control-api.md` (a "Recording one" section under Runbooks, and the verb
+in the catctl map), `cli.md` (record it instead of writing it).
+catgen-dart goldens regenerated (`runbook.record` and its two structs);
+**cats-mobile regen owed** — the Dart `CommandSpec` mirror deliberately did NOT
+gain `recorded`, since a client has no recorder and the flag is a fact about
+this server's dispatcher.
 
 ### Phase 7 — file transfer through cathost — **DONE**
 
@@ -755,10 +802,11 @@ section), `cli.md` (a Files block under the verbs). catgen-dart goldens
 regenerated — `[]byte` lands as `Uint8List`, so the mobile client gets typed
 `file.get` / `file.put` — **cats-mobile regen owed**.
 
-### Phase 8 — adjacent stars
+### Phase 8 — adjacent stars — **MOVED** to `ai_docs/plans/remote-extras.md`
 
 Record & replay, port preview, agent migration between hosts, presence, the global palette.
-Scoped when the phases above have landed and the shape of the ledger is known.
+The phases above have landed and the ledger's shape is known, so these are scoped on demand
+in the extras plan rather than as one phase here.
 
 ## Verification
 

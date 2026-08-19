@@ -40,16 +40,17 @@ type subcommand struct {
 type argKind int
 
 const (
-	argNone       argKind = iota // no candidates (free text, numbers)
-	argPane                      // live pane ids, from pane.list
-	argTab                       // live tab numbers, from tab.list
-	argWorkspace                 // live workspace ids, from workspace.list
-	argDirection                 // left|right|up|down
-	argSplitDir                  // h|v
-	argCycleDir                  // next|prev
-	argTheme                     // installed theme names, from theme.list
-	argDetachHost                // detachable cathost ids, from host.list
-	argRunbook                   // runbook names, from runbook.list
+	argNone         argKind = iota // no candidates (free text, numbers)
+	argPane                        // live pane ids, from pane.list
+	argTab                         // live tab numbers, from tab.list
+	argWorkspace                   // live workspace ids, from workspace.list
+	argDirection                   // left|right|up|down
+	argSplitDir                    // h|v
+	argCycleDir                    // next|prev
+	argTheme                       // installed theme names, from theme.list
+	argDetachHost                  // detachable cathost ids, from host.list
+	argRunbook                     // runbook names, from runbook.list
+	argRecordAction                // the four verbs runbook.record takes
 )
 
 // usageErr reports malformed subcommand arguments; its message is the verb's
@@ -141,6 +142,10 @@ var subcommands = []subcommand{
 	// branch=main`.
 	{"runbooks", app.CmdRunbookList, "runbooks", nil, "list the runbooks in the config directory", noParams},
 	{"runbook", app.CmdRunbookRun, "runbook <name> [key=value ...]", []argKind{argRunbook}, "run a runbook's steps in order", buildRunbook},
+	// `record` writes the runbook the other two read. Its stop takes the name
+	// rather than a separate `save` verb, because a recording that has been
+	// stopped and not yet named would be a third state to explain and to hold.
+	{"record", app.CmdRunbookRecord, "record <start|stop|cancel|status> [name] [overwrite]", []argKind{argRecordAction}, "record what you do into a runbook", buildRecord},
 
 	// Misc.
 	{"agent", app.CmdAgentFocus, "agent <pane>", []argKind{argPane}, "reveal an agent's pane", buildPane},
@@ -580,6 +585,39 @@ func buildDetachHost(args []string) (json.RawMessage, error) {
 			return nil, usageErr{"detach-host <id> [force]"}
 		}
 		p.Force = true
+	}
+	return marshal(p)
+}
+
+// buildRecord: record <start|stop|cancel|status> [name] [overwrite].
+//
+// `overwrite` is a word rather than a flag for the reason `force` is one on
+// detach-host: it is the argument that throws something away, and a word has to
+// be typed on purpose.
+func buildRecord(args []string) (json.RawMessage, error) {
+	const use = "record <start|stop|cancel|status> [name] [overwrite]"
+	if len(args) == 0 {
+		return nil, usageErr{use}
+	}
+	p := app.RunbookRecordParams{Action: args[0]}
+	switch args[0] {
+	case app.RecordStart, app.RecordCancel, app.RecordStatus:
+		if len(args) != 1 {
+			return nil, usageErr{use}
+		}
+	case app.RecordStop:
+		if len(args) < 2 || len(args) > 3 {
+			return nil, usageErr{use}
+		}
+		p.Name = args[1]
+		if len(args) == 3 {
+			if args[2] != "overwrite" {
+				return nil, usageErr{use}
+			}
+			p.Overwrite = true
+		}
+	default:
+		return nil, usageErr{use}
 	}
 	return marshal(p)
 }
