@@ -579,7 +579,7 @@ class FileGetResult {
         'host': host,
         'size': size,
         'offset': offset,
-        if (data != null) 'data': data == null ? null : base64Encode(data),
+        if (data != null) 'data': data == null ? null : base64Encode(data!),
         'eof': eof,
       };
 }
@@ -630,7 +630,7 @@ class FilePutParams {
         'path': path,
         if (pane != null) 'pane': pane,
         if (host.isNotEmpty) 'host': host,
-        if (data != null) 'data': data == null ? null : base64Encode(data),
+        if (data != null) 'data': data == null ? null : base64Encode(data!),
         if (offset != 0) 'offset': offset,
         if (more) 'more': more,
         if (mode != 0) 'mode': mode,

@@ -229,7 +229,14 @@ func (e *emitter) encode(t reflect.Type, ptr bool, src string) string {
 	}
 	if isByteSlice(t) {
 		if ptr {
-			return fmt.Sprintf("%s == null ? null : base64Encode(%s)", src, src)
+			// The `!` is not redundant with the null check beside it: Dart will
+			// not promote a PUBLIC FIELD, so base64Encode(data) inside the
+			// ternary is still passing a Uint8List? where List<int> is wanted,
+			// and the generated file does not compile. The null check stays
+			// because a nullable field without `omitempty` is emitted with no
+			// `if (… != null)` guard around it, and must write null rather than
+			// throw.
+			return fmt.Sprintf("%s == null ? null : base64Encode(%s!)", src, src)
 		}
 		return fmt.Sprintf("base64Encode(%s)", src)
 	}
