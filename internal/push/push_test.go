@@ -365,13 +365,13 @@ func TestSendCarriesActionsHeader(t *testing.T) {
 	b.Send(Event{Kind: KindAttention, Pane: 1, Title: "claude needs attention", Pub: "w1:p1",
 		Actions: []Action{{Label: "Yes", URL: "https://cats.example/api/notify-action/tok"}}})
 	rec.wait(t, 1)
-	if got := rec.at(rec.count()-1).header.Get("Actions"); !strings.Contains(got, "notify-action/tok") {
+	if got := rec.at(rec.count() - 1).header.Get("Actions"); !strings.Contains(got, "notify-action/tok") {
 		t.Errorf("Actions header = %q", got)
 	}
 
 	b.Send(Event{Kind: KindAttention, Pane: 2, Title: "codex needs attention", Pub: "w1:p2"})
 	rec.wait(t, 1)
-	if got := rec.at(rec.count()-1).header.Get("Actions"); got != "" {
+	if got := rec.at(rec.count() - 1).header.Get("Actions"); got != "" {
 		t.Errorf("a notification with no actions set Actions = %q", got)
 	}
 }
