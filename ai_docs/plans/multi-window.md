@@ -25,6 +25,11 @@ Mac app the windows to use it.
 
 ## Verified facts that shape the design
 
+> Line numbers below were read against the working tree on 2026-08-19 (which had
+> unrelated edits in flight in `cmd/catway/catway.go` and `internal/app`), so they
+> will have drifted by the time a phase starts. Treat them as a hint, not an
+> address — grep for the named symbol.
+
 - **One viewport, three globals.** `Session.active` (`internal/app/session.go:50`) names
   the active workspace; each `workspace.Workspace` has its own active tab; each tab's
   `layout.TileLayout` has its own focused pane. The *session's* focused pane is the
