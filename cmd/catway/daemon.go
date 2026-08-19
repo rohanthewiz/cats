@@ -42,6 +42,12 @@ type daemon struct {
 	// the wire ("local" for the always-present default host). label is the
 	// human-facing name that appears in log lines and error toasts; kind names
 	// the transport ("unix", "tcp" or "tls").
+	//
+	// label is the one of the three that MOVES on a live daemon: a rename in a
+	// re-read config lands without a redial (applyHostRoster), from the orch
+	// loop, while this daemon's own dial goroutine is logging with it. It is
+	// therefore behind mu — write with setLabel, read with name(). id and kind
+	// identify the daemon and never change once it is built.
 	id    string
 	label string
 	kind  string
@@ -71,7 +77,7 @@ type daemon struct {
 	token     string
 	tokenFile string
 
-	mu sync.Mutex // serializes writes; guards conn, peerVersion, lastErr and stopped
+	mu sync.Mutex // serializes writes; guards conn, peerVersion, lastErr, stopped and label
 	// peerVersion is the negotiated protocol version this cathost's welcome
 	// agreed to, 0 while disconnected. It is what decides who resolves a pane's
 	// git branch: a v3 daemon does it itself (the cwd is on its filesystem), a
@@ -401,6 +407,27 @@ func (d *daemon) stopping() bool {
 }
 
 // setPeerVersion records the version the connected cathost reported.
+// setLabel renames a daemon in place. applyHostRoster keeps a daemon whose dial
+// target is unchanged and refreshes what a re-read config moved, so a rename
+// costs no reconnect — but it runs on the orch loop, and the dial loop this
+// daemon is running names itself in every log line it writes. That is the race:
+// two goroutines, one string, no lock. Both ends now go through mu.
+func (d *daemon) setLabel(label string) {
+	d.mu.Lock()
+	d.label = label
+	d.mu.Unlock()
+}
+
+// name is the daemon's human-facing label. Every read goes through it — including
+// the ones already on the orch loop, where the direct field access happened to be
+// safe. "Which goroutine am I on?" is not a question a caller should have to
+// answer correctly to log a host's name.
+func (d *daemon) name() string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.label
+}
+
 func (d *daemon) setPeerVersion(v int) {
 	d.mu.Lock()
 	d.peerVersion = v
@@ -542,7 +569,7 @@ func (d *daemon) sendPing(conn net.Conn) bool {
 	if !d.pingSince.IsZero() && time.Since(d.pingSince) > hostPingTimeout {
 		d.stalled = true // so the roster names the silence, not our own Close
 		d.mu.Unlock()
-		log.Printf("catway: cathost %s answered no ping in %s — closing the connection", d.label, hostPingTimeout)
+		log.Printf("catway: cathost %s answered no ping in %s — closing the connection", d.name(), hostPingTimeout)
 		// Close rather than mark: the pump is blocked on a read of this socket,
 		// and closing is what unblocks it into the ordinary disconnect path —
 		// the pending flush, the toast and the redial all happen exactly as they
@@ -640,7 +667,7 @@ func (d *daemon) run() {
 		}
 		conn, err := d.dial()
 		if err != nil {
-			log.Printf("catway: cathost dial (%s): %v (retrying in %s)", d.label, err, backoff)
+			log.Printf("catway: cathost dial (%s): %v (retrying in %s)", d.name(), err, backoff)
 			d.setLastErr(err)
 			// The roster carries connectivity, so a host that never came up must
 			// still refresh it: the failure is the only news there is about a
@@ -661,7 +688,7 @@ func (d *daemon) run() {
 		backoff = time.Second
 		err = d.session(conn)
 		if err != nil {
-			log.Printf("catway: cathost session (%s): %v", d.label, err)
+			log.Printf("catway: cathost session (%s): %v", d.name(), err)
 		}
 		_ = conn.Close()
 		if d.stopping() {
@@ -707,7 +734,7 @@ func (d *daemon) lostMessage() string {
 	if len(d.o.hosts) <= 1 {
 		return "cathost connection lost — reconnecting"
 	}
-	return d.label + ": cathost connection lost — reconnecting"
+	return d.name() + ": cathost connection lost — reconnecting"
 }
 
 // handshakeTimeout bounds the hello/welcome exchange.

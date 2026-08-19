@@ -993,7 +993,7 @@ func (o *orch) Hosts() []app.HostInfo {
 		connected, lastErr := d.status()
 		out = append(out, app.HostInfo{
 			ID:        d.id,
-			Label:     d.label,
+			Label:     d.name(),
 			Connected: connected,
 			AddrKind:  d.kind,
 			Default:   id == o.defaultHost,

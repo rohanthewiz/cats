@@ -111,7 +111,7 @@ func (o *orch) usageMsg() (browserproto.Usage, bool) {
 		if d == nil {
 			continue
 		}
-		label := d.label
+		label := d.name()
 		if label == "" {
 			label = id
 		}

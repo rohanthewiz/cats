@@ -136,7 +136,12 @@ func (o *orch) applyHostRoster(configured []config.Host) error {
 		d := built[h.ID]
 		if d == nil {
 			d = o.hosts[h.ID]
-			d.label = h.DisplayLabel() // a rename lands without a redial
+			// A rename lands without a redial. setLabel rather than the field:
+			// this runs on the orch loop and the daemon's dial goroutine reads
+			// the label in every line it logs. spec needs no lock — it is
+			// written here and read only from the orch loop (the emitHost*
+			// events fire inside d.o.post closures, which run there).
+			d.setLabel(h.DisplayLabel())
 			d.spec = h
 		}
 		next[h.ID] = d
@@ -388,7 +393,7 @@ func (o *orch) detachFallbackLabel(detaching string) string {
 		id = localHostID
 	}
 	if d := o.hosts[id]; d != nil {
-		return d.label
+		return d.name()
 	}
 	return id
 }

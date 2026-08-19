@@ -274,7 +274,7 @@ func (w worktreeResponder) Fail(msg string) { w.r.Fail(msg) }
 // upgraded is a different fix from one that is unreachable.
 func (o *orch) hostCapabilityErr(hostID, what, feature string) string {
 	d := o.hostByID(hostID)
-	label := d.label
+	label := d.name()
 	if o.hosts[hostID] == nil && hostID != "" {
 		label = hostID // an id nobody is attached to: name what was asked for
 	}
