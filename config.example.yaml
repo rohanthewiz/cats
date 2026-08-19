@@ -188,3 +188,19 @@ ledger:
   retention: 20000                     # records kept; the oldest go first. A
                                        # count rather than an age, because it is
                                        # what keeps a query's scan bounded.
+
+# --- Runbooks -----------------------------------------------------------------
+# Runbooks are YAML files in ~/.config/cats/runbooks whose steps are control-API
+# commands (`catctl runbooks`, `catctl runbook <name>`). There is no switch for
+# running one — that is an ordinary command — but a runbook may also declare
+# `on:` and run ITSELF when something happens in the session, and that needs one
+# place to turn off.
+#
+# On by default: writing `on:` in the document is the opt-in, and a second one
+# here would only mean the feature looks broken the first time somebody uses it.
+# It is deliberately NOT settable through config.set — a runbook could then turn
+# its own triggers back on.
+runbooks:
+  triggers: true                       # false stops every `on:` clause from
+                                       # firing, without touching the files or
+                                       # the ability to run them by hand.

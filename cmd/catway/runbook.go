@@ -53,11 +53,13 @@ func (o *orch) RunbookList(r app.Responder) {
 	out := make([]app.RunbookInfo, 0, len(set.Books)+len(set.Broken))
 	for _, rb := range set.Books {
 		out = append(out, app.RunbookInfo{
-			Name:        rb.Name,
-			Description: rb.Description,
-			Path:        rb.Path,
-			Steps:       len(rb.Steps),
-			Vars:        varNames(rb),
+			Name:          rb.Name,
+			Description:   rb.Description,
+			Path:          rb.Path,
+			Steps:         len(rb.Steps),
+			Vars:          varNames(rb),
+			Triggers:      rb.TriggerEvents(),
+			TriggerStatus: o.runbookTriggerStatus(rb),
 		})
 	}
 	for _, b := range set.Broken {
@@ -108,14 +110,31 @@ type runbookRun struct {
 	rb    *runbook.Runbook
 	binds runbook.Bindings
 	steps []app.RunbookStepResult
-	r     app.Responder
-	i     int       // index of the step about to run
-	end   time.Time // the whole-run deadline
+	// r is the caller waiting on the result, and it is NIL for a triggered run —
+	// nothing asked, so there is nobody to answer. That is why every run also
+	// ends with a runbook_finished event: it is the only report a triggered run
+	// has, and making it the report for manual runs too means a client watching
+	// the stream never has to know which runs it will be told about.
+	r app.Responder
+	// source is "control" for runbook.run and "trigger" for an `on:` firing;
+	// trigger is the event name that started it, "" when a human did.
+	source  string
+	trigger string
+	i       int       // index of the step about to run
+	end     time.Time // the whole-run deadline
 	// failed records that some step errored and was not tolerated. The run then
 	// walks the remaining steps marking them Skipped rather than stopping dead,
 	// so the result says what did not happen as well as what did.
 	failed bool
 }
+
+// The two things that can start a run. They travel to a subscriber on
+// runbook_finished, so a log of what the session did can tell the runs somebody
+// asked for apart from the ones the session started by itself.
+const (
+	runbookSourceControl = "control"
+	runbookSourceTrigger = "trigger"
+)
 
 // RunbookRun answers runbook.run: load the named runbook, then walk its steps.
 func (o *orch) RunbookRun(r app.Responder, p app.RunbookRunParams) {
@@ -129,29 +148,59 @@ func (o *orch) RunbookRun(r app.Responder, p app.RunbookRunParams) {
 		r.Fail(err.Error())
 		return
 	}
-
-	// Vars are merged before anything runs, and an undeclared one is refused
-	// rather than ignored. `--var brnach=x` silently doing nothing is the same
-	// failure mode as a typo'd reference, one step further out: the run appears
-	// to succeed and does the wrong thing.
-	vars := map[string]any{}
-	for k, v := range rb.Vars {
-		vars[k] = v
-	}
-	for k, v := range p.Vars {
+	// Everything that can refuse the run is checked before the concurrency slot
+	// is taken, so a refused call leaves no accounting behind.
+	for k := range p.Vars {
 		if _, declared := rb.Vars[k]; !declared {
 			r.Fail(fmt.Sprintf("runbook %s declares no var %q", rb.Name, k))
 			return
 		}
-		vars[k] = v
+	}
+	if msg := o.claimRunbookSlot(rb.Name); msg != "" {
+		r.Fail(msg)
+		return
+	}
+	o.beginRunbook(rb, p.Vars, nil, runbookSourceControl, "", r)
+}
+
+// beginRunbook starts one run. The caller has already claimed its concurrency
+// slot (claimRunbookSlot for a manual run, reserveRunbook for a triggered one),
+// which is why this cannot fail: from here the run always reaches
+// finishRunbook, and finishRunbook always gives the slot back.
+//
+// event is the payload that triggered the run, bound under the reserved `event`
+// root so a step can name the pane that exited or the host that connected. It
+// is nil for a manual run, and the binding is then an EMPTY object rather than
+// absent: `{{ event.pane }}` in a hand-run triggered runbook then fails with
+// "event has no field \"pane\"" at the step that used it, which is true and
+// which stops the run, instead of resolving to something invented.
+func (o *orch) beginRunbook(rb *runbook.Runbook, vars map[string]string, event map[string]any,
+	source, trigger string, r app.Responder) {
+
+	// Declared defaults first, the caller's overrides on top. An override the
+	// runbook never declared was refused by the caller, not ignored: `--var
+	// brnach=x` silently doing nothing is the same failure mode as a typo'd
+	// reference, one step further out — the run appears to succeed and does the
+	// wrong thing.
+	merged := map[string]any{}
+	for k, v := range rb.Vars {
+		merged[k] = v
+	}
+	for k, v := range vars {
+		merged[k] = v
+	}
+	if event == nil {
+		event = map[string]any{}
 	}
 
 	run := &runbookRun{
-		rb:    rb,
-		binds: runbook.Bindings{"vars": vars},
-		steps: make([]app.RunbookStepResult, 0, len(rb.Steps)),
-		r:     r,
-		end:   time.Now().Add(app.MaxRunbookRuntime),
+		rb:      rb,
+		binds:   runbook.Bindings{"vars": merged, "event": event},
+		steps:   make([]app.RunbookStepResult, 0, len(rb.Steps)),
+		r:       r,
+		source:  source,
+		trigger: trigger,
+		end:     time.Now().Add(app.MaxRunbookRuntime),
 	}
 	o.advanceRunbook(run)
 }
@@ -328,21 +377,51 @@ func (o *orch) skipRest(run *runbookRun) {
 	}
 }
 
-// finishRunbook resolves the caller's responder exactly once.
+// finishRunbook ends a run exactly once: the slot goes back, the caller (if
+// there is one) gets its result, and the stream gets the outcome.
+//
+// The order matters in one place. The slot is released BEFORE the event, so a
+// runbook that triggers on something a later step of another runbook emits is
+// not refused for a run that has already finished. The event is emitted last
+// for the reason ui_action's is: a subscriber reading it knows the effects have
+// happened rather than that they are about to.
 func (o *orch) finishRunbook(run *runbookRun) {
-	if run.failed {
-		log.Printf("catway: runbook %s failed at step %d", run.rb.Name, failedIndex(run.steps))
-	}
-	run.r.OK(app.RunbookRunResult{Name: run.rb.Name, Steps: run.steps, Failed: run.failed})
-}
+	o.releaseRunbookSlot(run.rb.Name)
 
-// failedIndex is the 1-based index of the first step that errored, for the log
-// line. 0 when none did.
-func failedIndex(steps []app.RunbookStepResult) int {
-	for _, s := range steps {
-		if s.Error != "" {
-			return s.Index
+	idx, msg := firstFailure(run.steps)
+	if run.failed {
+		log.Printf("catway: runbook %s (%s) failed at step %d: %s", run.rb.Name, run.source, idx, msg)
+	}
+	if run.r != nil {
+		run.r.OK(app.RunbookRunResult{Name: run.rb.Name, Steps: run.steps, Failed: run.failed})
+	}
+
+	ran := 0
+	for _, st := range run.steps {
+		if !st.Skipped {
+			ran++
 		}
 	}
-	return 0
+	o.emitEvent(app.EventRunbookFinished, 0, app.RunbookFinishedEvent{
+		Name:       run.rb.Name,
+		Source:     run.source,
+		Trigger:    run.trigger,
+		Steps:      ran,
+		Failed:     run.failed,
+		FailedStep: idx,
+		Error:      msg,
+	})
+}
+
+// firstFailure is the 1-based index of the first step that errored and its
+// message, 0/"" when none did. One is enough for both the log line and the
+// event: a run stops at its first untolerated failure, and a run that continued
+// past one said so at the step.
+func firstFailure(steps []app.RunbookStepResult) (int, string) {
+	for _, s := range steps {
+		if s.Error != "" {
+			return s.Index, s.Error
+		}
+	}
+	return 0, ""
 }

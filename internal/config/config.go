@@ -51,6 +51,7 @@ type Config struct {
 	Push        Push        `yaml:"push"`
 	Editor      Editor      `yaml:"editor"`
 	Ledger      Ledger      `yaml:"ledger"`
+	Runbooks    Runbooks    `yaml:"runbooks"`
 }
 
 // --- hosts --------------------------------------------------------------------
@@ -447,6 +448,24 @@ type Ledger struct {
 	Retention int `yaml:"retention,omitempty"`
 }
 
+// Runbooks configures the runbook engine — specifically the only part of it
+// that acts without being asked.
+//
+// There is no switch for runbooks themselves: `runbook.run` is a command like
+// any other, and a file in the runbook directory is somebody's own automation.
+// Triggers are different because an `on:` clause runs steps nobody typed, so
+// there has to be one place that turns all of it off at once — a runaway, a
+// shared machine, a session where somebody wants to read a runbook before it
+// starts acting.
+//
+// On by default all the same: declaring `on:` in the document IS the opt-in,
+// and requiring a second one in a different file would only mean the feature
+// appears broken the first time it is used. The two files belong to the same
+// person and live in the same directory.
+type Runbooks struct {
+	Triggers bool `yaml:"triggers"`
+}
+
 // Editor is what cats knows about editors, which is deliberately almost
 // nothing: a set of agent labels that mark a pane as one, and an argv that
 // starts one. There is no editor integration behind this — pane.open_file emits
@@ -523,8 +542,9 @@ func Default() Config {
 		// list empty means the feature works out of the box for the setup it
 		// was built for, and the list is the extension point for anything else
 		// that reports itself over the hook API.
-		Editor: Editor{Agents: []string{"ced"}, Command: []string{"ced"}, Spawn: true},
-		Ledger: Ledger{Enabled: true},
+		Editor:   Editor{Agents: []string{"ced"}, Command: []string{"ced"}, Spawn: true},
+		Ledger:   Ledger{Enabled: true},
+		Runbooks: Runbooks{Triggers: true},
 		// Off by default, but with the shape filled in: a saved config then shows
 		// the operator the feature exists and what its knobs are, and the values
 		// round-trip equal to this default.

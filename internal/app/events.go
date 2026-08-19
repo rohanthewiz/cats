@@ -17,9 +17,11 @@ import "slices"
 // on the pane an event names.
 
 // Event names (events.subscribe). A subscription with no Events filter receives
-// all of them. The first four are sourced from the terminal backend (a pane's
-// child); the last three are model-structure changes the orchestrator derives by
-// diffing its session after each mutation (split/close/focus/tab/workspace).
+// all of them. They come from four places: the terminal backend (a pane's child
+// — exit, agent, title, cwd), the orchestrator's own doings (notify, action,
+// open_file), a diff of the session model after each mutation (added, removed,
+// focus — split/close/focus/tab/workspace), and the session at large (theme, the
+// host link, a finished runbook), which name no pane and so carry pane 0.
 const (
 	EventPaneExited = "pane_exited" // the pane's child process exited
 	EventPaneAgent  = "pane_agent"  // detected agent identity/state changed
@@ -45,17 +47,88 @@ const (
 	// asked about one pane — so a subscriber that wants both takes two streams, or
 	// one unfiltered stream and does its own pane matching.
 	EventThemeChanged = "theme_changed" // the effective theme changed (config.set / theme.save / theme.delete)
+
+	// EventHostConnected / EventHostDisconnected are the roster's transitions,
+	// and they are named for the LINK rather than for host.attach / host.detach
+	// on purpose. Those two commands edit the roster and answer immediately —
+	// host.attach returns before a single packet has been sent, because the dial
+	// has its own retry loop — so an event called "host_attached" would fire at
+	// a moment that has nothing to do with the command of nearly the same name,
+	// and would also fire on every reconnect, when nothing was attached at all.
+	//
+	// What a subscriber (and a runbook trigger) actually wants to know is when
+	// the machine became usable and when it stopped being usable, which is the
+	// handshake completing and the pump returning. Both are session-scoped: they
+	// name a host, not a pane, so they carry pane 0 and a pane-filtered
+	// subscription will not see them, exactly as theme_changed does.
+	EventHostConnected    = "host_connected"    // a cathost completed its handshake and is serving
+	EventHostDisconnected = "host_disconnected" // a cathost's link dropped (or was detached)
+
+	// EventRunbookFinished reports the outcome of one runbook run. It exists for
+	// the runs nobody is waiting on: a run started by an `on:` trigger has no
+	// caller to hand a RunbookRunResult back to, so without this a triggered
+	// runbook that failed halfway would leave no trace outside the log. Emitted
+	// for MANUAL runs too — a client that watches the stream should not have to
+	// know which runs it will be told about — and session-scoped for the same
+	// reason as the two above.
+	EventRunbookFinished = "runbook_finished"
 )
+
+// eventSpec is one entry in the event vocabulary: the name a subscriber filters
+// on, and a zero value of the payload it carries.
+//
+// The payload is here so the vocabulary is machine-readable rather than only
+// documented. A runbook trigger checks its `where:` keys and its
+// `{{ event.field }}` references against these structs at LOAD time, which is
+// the only way `where: {exit_cod: 0}` can be a refusal instead of a filter that
+// silently never matches — the same failure encoding/json's dropped-key
+// behaviour causes for command params, one layer out.
+type eventSpec struct {
+	Name    string
+	Payload any
+}
+
+// eventSpecs is the whole streaming vocabulary. Order is the reading order of
+// the const block above: pane facts, the one pane request, structure, session.
+var eventSpecs = []eventSpec{
+	{EventPaneExited, PaneExitedEvent{}},
+	{EventPaneAgent, PaneAgentEvent{}},
+	{EventPaneTitle, PaneTitleEvent{}},
+	{EventPaneCwd, PaneCwdEvent{}},
+	{EventPaneNotify, PaneNotifyEvent{}},
+	{EventUIAction, UIActionEvent{}},
+	{EventPaneOpenFile, PaneOpenFileEvent{}},
+
+	{EventPaneAdded, PaneRefEvent{}},
+	{EventPaneRemoved, PaneRefEvent{}},
+	{EventFocusChanged, PaneRefEvent{}},
+
+	{EventThemeChanged, ThemeChangedEvent{}},
+	{EventHostConnected, HostLinkEvent{}},
+	{EventHostDisconnected, HostLinkEvent{}},
+	{EventRunbookFinished, RunbookFinishedEvent{}},
+}
 
 // EventNames returns every event name events.subscribe can emit, in a stable
 // order — the vocabulary a client validates an Events filter against.
 func EventNames() []string {
-	return []string{
-		EventPaneExited, EventPaneAgent, EventPaneTitle, EventPaneCwd, EventPaneNotify,
-		EventUIAction, EventPaneOpenFile,
-		EventPaneAdded, EventPaneRemoved, EventFocusChanged,
-		EventThemeChanged,
+	out := make([]string, 0, len(eventSpecs))
+	for _, s := range eventSpecs {
+		out = append(out, s.Name)
 	}
+	return out
+}
+
+// EventPayload returns a zero value of the payload the named event carries, and
+// whether the name is in the vocabulary at all. A caller that only wants to
+// know an event exists ignores the first return.
+func EventPayload(name string) (any, bool) {
+	for _, s := range eventSpecs {
+		if s.Name == name {
+			return s.Payload, true
+		}
+	}
+	return nil, false
 }
 
 // PaneExitedEvent is the payload for EventPaneExited.
@@ -158,6 +231,52 @@ type PaneRefEvent struct {
 // it a client watching the theme had to re-issue config.get whenever anything
 // happened and diff the answer.
 type ThemeChangedEvent = ConfigTheme
+
+// HostLinkEvent is the payload for EventHostConnected / EventHostDisconnected:
+// which cathost changed state, and — on a disconnect — why.
+//
+// Pane is 0 and always will be: a host is not a pane. It is carried anyway
+// because every event on this stream has the field, and a subscriber's filter
+// (EventsSubscribeParams.Match) reads it unconditionally.
+//
+// Error is the disconnect's cause when there was one ("connection refused", a
+// handshake rejection), and "" both for a connect and for a link that was closed
+// deliberately — host.detach, or catway shutting down. A subscriber that wants
+// to distinguish "the box went away" from "I let it go" reads it; one that just
+// wants to know the host is unusable does not have to.
+type HostLinkEvent struct {
+	Pane  uint32 `json:"pane"`
+	Host  string `json:"host"`            // the roster id, as host.list reports it
+	Label string `json:"label,omitempty"` // its display name, "" when it is just the id
+	Addr  string `json:"addr,omitempty"`  // scheme://target, as configured
+	Error string `json:"error,omitempty"`
+}
+
+// RunbookFinishedEvent is the payload for EventRunbookFinished: one run of one
+// runbook is over, and this is how it went.
+//
+// It deliberately carries a SUMMARY rather than the RunbookRunResult a caller
+// gets back. A run's per-step list is the answer to "what happened", and the
+// caller who asked for the run already has it; this event answers "did the thing
+// I set up actually work", which is a question asked by whoever is watching the
+// stream — usually about a run nobody called at all.
+//
+// Trigger is the event name that started it, "" for a manual run. With Source it
+// makes a triggered run traceable back to its cause without correlating
+// timestamps across two streams.
+type RunbookFinishedEvent struct {
+	Pane    uint32 `json:"pane"` // always 0; a runbook belongs to the session, not a pane
+	Name    string `json:"name"`
+	Source  string `json:"source"` // "control" for runbook.run, "trigger" for an on: firing
+	Trigger string `json:"trigger,omitempty"`
+	Steps   int    `json:"steps"` // steps that ran (skipped ones are not counted)
+	Failed  bool   `json:"failed,omitempty"`
+	// FailedStep and Error name the FIRST step that failed, 0/"" when none did.
+	// One is enough: a runbook stops at its first untolerated failure, and a run
+	// that continued past one has already said so in its own log line.
+	FailedStep int    `json:"failed_step,omitempty"`
+	Error      string `json:"error,omitempty"`
+}
 
 // EventsSubscribeParams is the params object for events.subscribe. Both fields are
 // optional: an absent Pane matches every pane, an empty Events matches every event

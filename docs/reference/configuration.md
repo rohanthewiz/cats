@@ -389,6 +389,37 @@ The store lives beside the session state, in
 [`persistence.state_dir`](#persistence). A store that will not open is a logged
 line and a disabled feature, never a failure to start.
 
+## Runbooks
+
+One switch, and it is not about running runbooks:
+
+```yaml
+runbooks:
+  triggers: true
+```
+
+| Key | Default | Notes |
+|-----|---------|-------|
+| `triggers` | `true` | whether a runbook's `on:` clauses may fire |
+
+The switch is read per event rather than at startup, so `catctl reload` takes
+effect on the next thing that happens in the session.
+
+Running a runbook is an ordinary command (`runbook.run`), so there is nothing to
+switch on. A runbook that declares [`on:`](../protocols/control-api.md#triggers--on)
+is different: it runs steps nobody typed, so there has to be one place that stops
+all of it at once — a runaway, a shared machine, a session where somebody wants
+to read a runbook before it starts acting.
+
+On by default all the same. Writing `on:` in the document **is** the opt-in, and
+requiring a second one here would only mean the feature appears broken the first
+time it is used; the two files belong to the same person and live in the same
+directory. Turning it off leaves the files and the ability to run them by hand
+untouched, and `catctl runbooks` then says so in each runbook's `trigger_status`.
+
+It is deliberately **not** settable through `config.set`. A runbook's steps are
+control-API commands, so a runbook could otherwise turn its own triggers back on.
+
 ## Editor
 
 What cats knows about editors, which is deliberately almost nothing:

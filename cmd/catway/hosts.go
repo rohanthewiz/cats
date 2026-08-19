@@ -116,6 +116,14 @@ func (o *orch) applyHostRoster(configured []config.Host) error {
 			// host with no row in the roster above it.
 			o.dropHostStats(id)
 			o.dropOpenCommands(id)
+			// A detach ends the link as surely as the cable being pulled, and a
+			// subscriber watching host availability wants both. It is emitted
+			// only for `gone`: a readdress reconnects, and its own session loop
+			// will report the new link when it comes up.
+			//
+			// No Error, because nothing failed. A host that was not connected
+			// emits nothing — see emitHostDisconnected.
+			o.emitHostDisconnected(id, d.spec, nil)
 		}
 		d.stop()
 	}
@@ -163,6 +171,52 @@ func (o *orch) applyHostRoster(configured []config.Host) error {
 	o.syncCommandMarks()
 	o.broadcastHosts()
 	return nil
+}
+
+// emitHostConnected / emitHostDisconnected report a host's link coming up and
+// going down, strictly alternating: never two connects in a row, never a
+// disconnect for a link that was never up.
+//
+// The alternation is the whole reason these are functions rather than two
+// emitEvent calls. A host's session loop re-dials forever, so a machine that is
+// switched off produces a failed connection every few seconds — and a dial that
+// succeeds against a cathost that then rejects the handshake produces a session
+// error with no session before it. Without the gate, "the devbox went away"
+// would be an event every few seconds instead of an event, and a runbook
+// triggered on it would fire until its rate limit stopped it.
+//
+// hostLinkUp is what remembers, and it is deliberately the orchestrator's rather
+// than the daemon's: the daemon is rebuilt by applyHostRoster on a readdress,
+// which would reset the flag exactly when the alternation matters.
+func (o *orch) emitHostConnected(id string, spec config.Host) {
+	if o.hostLinkUp == nil {
+		o.hostLinkUp = map[string]bool{}
+	}
+	if o.hostLinkUp[id] {
+		return
+	}
+	o.hostLinkUp[id] = true
+	o.emitEvent(app.EventHostConnected, 0, app.HostLinkEvent{
+		Host: id, Label: spec.Label, Addr: spec.Addr,
+	})
+}
+
+// emitHostDisconnected is the other half. err is the session error when the link
+// broke by itself and nil for a deliberate detach — the difference between "the
+// box went away" and "I let it go", which a subscriber may reasonably act on
+// differently.
+func (o *orch) emitHostDisconnected(id string, spec config.Host, err error) {
+	if !o.hostLinkUp[id] {
+		return
+	}
+	delete(o.hostLinkUp, id)
+	msg := ""
+	if err != nil {
+		msg = err.Error()
+	}
+	o.emitEvent(app.EventHostDisconnected, 0, app.HostLinkEvent{
+		Host: id, Label: spec.Label, Addr: spec.Addr, Error: msg,
+	})
 }
 
 // panesOnHost lists the live panes currently resolving to a host.

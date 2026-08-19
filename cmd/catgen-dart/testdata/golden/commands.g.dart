@@ -1617,6 +1617,8 @@ class RunbookInfo {
     required this.path,
     this.steps = 0,
     this.vars = const <String>[],
+    this.triggers = const <String>[],
+    this.triggerStatus = '',
     this.error = '',
   });
 
@@ -1629,6 +1631,17 @@ class RunbookInfo {
   /// to a human — a palette entry, a completion — needs to know what it will be
   /// asked for before it runs anything.
   final List<String> vars;
+
+  /// Triggers are the event names this runbook runs itself on (`on:`), sorted
+  /// and de-duplicated. Empty for a runbook that only runs when asked.
+  final List<String> triggers;
+
+  /// TriggerStatus says why the triggers would not fire right now — suspended
+  /// after a runaway, a run already in flight, the feature switched off in the
+  /// config — and is "" when they are armed. It answers the one question a
+  /// listing cannot otherwise answer: "why did my runbook stop running?", whose
+  /// causes are all invisible state in the daemon.
+  final String triggerStatus;
   final String error;
 
   factory RunbookInfo.fromJson(Map<String, Object?> j) => RunbookInfo(
@@ -1637,6 +1650,8 @@ class RunbookInfo {
         path: asString(j['path']),
         steps: asInt(j['steps']),
         vars: asList(j['vars'], asString),
+        triggers: asList(j['triggers'], asString),
+        triggerStatus: asString(j['trigger_status']),
         error: asString(j['error']),
       );
 
@@ -1646,6 +1661,8 @@ class RunbookInfo {
         'path': path,
         if (steps != 0) 'steps': steps,
         if (vars.isNotEmpty) 'vars': vars,
+        if (triggers.isNotEmpty) 'triggers': triggers,
+        if (triggerStatus.isNotEmpty) 'trigger_status': triggerStatus,
         if (error.isNotEmpty) 'error': error,
       };
 }

@@ -1591,8 +1591,17 @@ type RunbookInfo struct {
 	// Vars are the declared parameter names, sorted. A caller offering a runbook
 	// to a human — a palette entry, a completion — needs to know what it will be
 	// asked for before it runs anything.
-	Vars  []string `json:"vars,omitempty"`
-	Error string   `json:"error,omitempty"`
+	Vars []string `json:"vars,omitempty"`
+	// Triggers are the event names this runbook runs itself on (`on:`), sorted
+	// and de-duplicated. Empty for a runbook that only runs when asked.
+	Triggers []string `json:"triggers,omitempty"`
+	// TriggerStatus says why the triggers would not fire right now — suspended
+	// after a runaway, a run already in flight, the feature switched off in the
+	// config — and is "" when they are armed. It answers the one question a
+	// listing cannot otherwise answer: "why did my runbook stop running?", whose
+	// causes are all invisible state in the daemon.
+	TriggerStatus string `json:"trigger_status,omitempty"`
+	Error         string `json:"error,omitempty"`
 }
 
 // RunbookListResult is CmdResult.Data for runbook.list.

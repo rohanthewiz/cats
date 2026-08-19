@@ -682,7 +682,9 @@ func (d *daemon) run() {
 		// Only this host's in-flight work is failed: a request or waiter on
 		// another host is still perfectly answerable, and failing it here would
 		// turn one machine's reboot into a session-wide outage.
+		lost := err
 		d.o.post(func() {
+			d.o.emitHostDisconnected(d.id, d.spec, lost)
 			d.o.flushPendingFor(d.id, "cathost connection lost")
 			d.o.flushWaitersFor(d.id, "cathost connection lost")
 			// Its meters described a machine that has stopped answering; that is
@@ -768,7 +770,15 @@ func (d *daemon) session(conn net.Conn) error {
 	d.setFeatures(w.Features)
 	d.setHookSocket(w.HookSocket)
 	d.setControlSocket(w.ControlSocket)
-	d.o.post(func() { d.o.broadcastHosts() }) // the roster's dot goes green
+	d.o.post(func() {
+		d.o.broadcastHosts() // the roster's dot goes green
+		// The event fires HERE, on the completed handshake, rather than in
+		// HostAttach: that command answers before a packet has been sent, and
+		// what a subscriber (or a runbook trigger) needs to know is when the
+		// machine became usable. It therefore also fires on every reconnect,
+		// which is the same fact arriving again.
+		d.o.emitHostConnected(d.id, d.spec)
+	})
 	d.reconcile(w.Panes)
 	// The probe is per-session and dies with the connection: it holds the conn
 	// it was started for and stops the moment d.conn is something else, so a

@@ -191,6 +191,17 @@ type orch struct {
 	actionTokens   map[string]actionToken
 	pushActions    bool
 	pushActionBase string
+	// hostLinkUp marks the hosts whose link is currently up, so the
+	// host_connected / host_disconnected events strictly alternate however many
+	// times the session loop re-dials. See emitHostConnected.
+	hostLinkUp map[string]bool
+	// runbooks is the `on:` trigger machinery (runbooktrigger.go): the indexed
+	// set of runbooks that declare triggers, the per-runbook rate/concurrency
+	// accounting, and the queue of runs a fired trigger reserved. Nil-safe —
+	// every field is a map created on first use — because most sessions have no
+	// runbooks at all and the whole subsystem should then cost one map lookup
+	// per emitted event.
+	runbooks runbookTriggers
 	// ledger is the command history (ledger.go), nil when disabled or when its
 	// store could not be opened. openCmds holds the commands that have started
 	// and not yet ended, keyed by pane — a pane runs one foreground command at a
@@ -596,6 +607,11 @@ func (o *orch) run() {
 		// in progress and no map is being ranged. Coalescing here also means a
 		// closure that drops three connections sends one census, not three.
 		o.flushClients()
+		// Runbook runs that a trigger reserved during the closure start HERE
+		// rather than inside emitEvent, so a runbook's own steps never run
+		// nested inside the subscriber fan-out that started them. See
+		// startReservedRunbooks.
+		o.startReservedRunbooks()
 	}
 }
 
@@ -1503,6 +1519,12 @@ func (o *orch) emitEvent(name string, pane uint32, data any) {
 			delete(o.subs, s)
 		}
 	}
+	// Runbook triggers subscribe to the same vocabulary a client does, and they
+	// do it HERE rather than through a ctlSubscriber so a runbook keeps working
+	// with nobody connected. The call is a map lookup on the event name when no
+	// runbook triggers on it, which is the case for every event in most
+	// sessions.
+	o.fireRunbookTriggers(name, data)
 }
 
 // seedStructure records the current pane set + focused pane without emitting, so

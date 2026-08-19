@@ -321,7 +321,26 @@ runbook is a sequence of side effects on a live desktop, so a typo found at step
 4 would leave the session half-changed with no undo.
 
 `catctl runbook` exits 1 when a step failed, so `catctl runbook deploy && ./ship.sh`
-stops. See [the control API](../protocols/control-api.md#runbooks).
+stops.
+
+A runbook can also declare what runs it, and then nobody has to type anything:
+
+```yaml
+on:
+  - event: pane_agent
+    where: {state: blocked, agent: claude}
+    min_interval: 30s
+steps:
+  - run: ui.notify
+    params: {title: "claude is stuck in pane {{ event.pane }}", pane: "{{ event.pane }}"}
+```
+
+A trigger is a control-API event (`catctl events` streams the same ones), filtered
+by `where:` on its payload, with the payload readable as `{{ event.… }}`. `catctl
+runbooks` shows each runbook's `triggers` and a `trigger_status` saying why they
+would not fire right now. Cron is not one of these: point launchd or systemd at
+`catctl runbook <name>`. Guardrails, the config switch, and the rest are in
+[the control API](../protocols/control-api.md#runbooks).
 
 Misc:
 

@@ -469,23 +469,93 @@ Vars with declared defaults, `{{ ref }}` into earlier steps' results, `expect:`,
 `continue_on_error:`. Every step is a §7 command; the engine re-enters the same
 dispatcher per step and holds no privileged path.
 
-### Phase 6b — `on:` triggers — **NOT STARTED**
+### Phase 6b — `on:` triggers — **DONE**
 
-Scoping phase 6 against the code turned up two premises in the original sentence that
-are not true, and one that costs more than it looks:
+As built. `on:` accepts an event name, a clause, or a list of either; a clause is
+`{event, where, min_interval}`; the firing payload is bound under the reserved
+root `event`. Two new session-scoped events had to exist first, plus one to
+report the runs nobody is waiting on.
 
-- **`host.attach` is a command, not an event.** There is no `host_attached` event in
-  `app.EventNames()`, so a trigger on it needs one emitted first. `pane_exited` and
-  `pane_agent` do exist and are ready to trigger on.
-- **"cron via cats-todo" is not a thing.** cats-todo's schedules are *one-shot* fire
-  times run by its own TUI tick loop (`schedule.go`, `ui.go` `fireDueSchedules`); a
-  closed manager marks them `Missed`. It is a todo app that drops prompts into panes,
-  not a scheduler service. Cron is free today by pointing launchd/systemd at
-  `catctl runbook run`; a scheduler inside catway is a separate decision.
-- **Autorun is the risky half, not the format.** A runbook triggered by `pane_exited`
-  can spawn panes that exit. Loop protection, a concurrency rule, and an answer for a
-  half-failed triggered run are all needed before the first `on:` fires — which is why
-  6a shipped the format first, so those cannot be baked into it wrongly.
+Deltas from the plan above, each found by writing it down or by running it:
+
+* **The event is `host_connected`, not `host_attached`.** `host.attach` edits the
+  roster and answers *before a packet has been sent* — the dial has its own retry
+  loop — so an event named after the command would fire at a moment that has
+  nothing to do with it, and would fire again on every reconnect when nothing was
+  attached. Named for the link, emitted on the completed handshake, with
+  `host_disconnected` for the other half. They **strictly alternate**
+  (`orch.hostLinkUp`): verified live, a killed cathost produces one
+  `host_disconnected` across twelve seconds of failed re-dials, not one per
+  attempt, and one `host_connected` when it comes back.
+* **`app.EventPayload` / a payload table is the enabling change.** The event
+  vocabulary was a list of names; triggers need it machine-readable, because
+  `where: {exit_cod: 0}` must be a *refusal* rather than a filter that silently
+  never matches. Same failure encoding/json's dropped keys cause for params, one
+  layer out — and the same fix, one layer out.
+* **`runbook.EventMap` fills in what `omitempty` drops.** Marshalling
+  `PaneExitedEvent{Pane: 3}` loses `exit_code` entirely, so a filter on
+  `exit_code: 0` — the *ordinary successful exit* — would have been the one filter
+  that could never match. Fields come from the struct, values through
+  encoding/json, so a trigger sees exactly the shape the load check validated.
+* **Numbers cross two decoders.** The filter is YAML (`0` is an int), the payload
+  is JSON (`0` is a float64). `==` would make every numeric filter silently false.
+* **No `{{ }}` for *which* event fired.** `theme_changed`'s payload already has a
+  `name` field, so injecting the event name would clobber it; and a runbook has no
+  branching, so "react differently per event" is two runbooks. One reserved root,
+  no magic.
+* **Four protections, and the one that matters is not the obvious one.**
+  (1) one run per runbook, dropped never queued; (2) a global cap of 4;
+  (3) 10 trigger starts per minute per runbook, then a 5-minute suspension;
+  (4) reserve at fire time, start on the loop's next turn. The tight self-loop is
+  cut by (1) — verified live: a runbook triggering on `pane_added` whose step is
+  `pane.split` stops after **one** iteration, because the pane it made appears
+  while the run still holds the slot. Only (3) can stop a *mutual* loop, since A
+  and B taking turns are never running at the same time — verified live with
+  ping/pong on `pane_added`/`pane_removed`: exactly 20 runs, both suspended, the
+  session intact.
+* **`runbook_finished` is the answer to the half-failed triggered run.** A
+  triggered run has no responder, so without it a run that failed at step 2 would
+  leave no trace outside the log. Manual runs emit it too — a stream client should
+  not have to know which runs it will be told about — carrying a summary rather
+  than the step list, because it answers "did the thing I set up work", not "what
+  happened".
+* **A manual run of a triggered runbook binds `event` to `{}`**, so
+  `{{ event.pane }}` fails at its own step with `event has no field "pane"` and
+  exits 1. True, and it stops; the alternative was inventing a value.
+* **The listing had to grow `trigger_status`.** Suspended, a run in flight, the
+  feature switched off — all invisible daemon state, all producing the identical
+  symptom of nothing happening.
+* **The index is the one place the "re-scan per call" rule bends.** `runbook.list`
+  and `runbook.run` still re-read the directory every call so "edit, run" cannot
+  run the previous version; the trigger index cannot, because it is consulted on
+  every emitted event and `pane_title` alone fires several times a second. One
+  second TTL over a name/size/mtime fingerprint, so a scan that changed nothing
+  skips the parse.
+* **`runbooks.triggers` is file-only and deliberately not in `config.set`** — a
+  runbook's steps are §7 commands, so it could otherwise turn its own triggers
+  back on. Read per event, so `catctl reload` takes effect immediately.
+* **A drain that hits its round budget posts its own next turn.** Found by the
+  live ping/pong: twenty runs need twenty rounds and the budget is eight, so the
+  remainder rides to the next loop turn — which in a session that then went
+  silent would never come, stranding a reservation whose slot is already held and
+  wedging that runbook at "already in flight" for good.
+
+Tests added: `internal/runbook/trigger_test.go` (the three spellings, every
+refusal — unknown event, unknown `where` key, unknown clause key, non-scalar
+filter, bad duration, self-triggering on `runbook_finished`, a duplicate
+unfiltered clause, `event` as a step id, a ref with no `on:`, a ref to a field no
+declared event carries — plus any-of matching, the cross-decoder numeric compare,
+`EventMap`'s zero fill, and a table check that every event in the vocabulary has
+a payload); `cmd/catway/runbooktrigger_test.go` (a trigger running a runbook off
+its payload, `where` filtering both ways, the zero exit code, the config switch
+both ways with its listing text, the listing's `triggers`, each of the four
+protections, the suspension not blocking a manual run, `min_interval`, the
+finish event's contents, and that `emitEvent` only *reserves*).
+
+Docs: `control-api.md` (four new event rows, the session-scoped note, the
+naming rationale, and a Triggers section), `cli.md`, `configuration.md`
+(a Runbooks section), `config.example.yaml`. catgen-dart goldens regenerated
+(`RunbookInfo` gained `triggers` / `trigger_status`); **cats-mobile regen owed**.
 
 ### Phase 6c — record-a-macro — **NOT STARTED**
 

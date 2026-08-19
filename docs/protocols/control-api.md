@@ -233,6 +233,24 @@ slow-connection drop.
 | `pane_removed` | a pane left the session |
 | `focus_changed` | the globally-focused pane changed |
 | `theme_changed` | the effective appearance changed (`config.set` / `theme.save` / `theme.delete`) |
+| `host_connected` | a cathost completed its handshake and is serving |
+| `host_disconnected` | a cathost's link dropped, or it was detached |
+| `runbook_finished` | one runbook run ended — see [Runbooks](#runbooks) |
+
+The last four name no pane. They carry `pane: 0`, so a pane-scoped subscription
+(`{"pane": 3}`) will not see them — a client that asked about one pane asked
+about one pane. Take two streams, or one unfiltered stream, if you want both.
+
+`host_connected` / `host_disconnected` are named for the **link**, not for
+`host.attach` / `host.detach`. Those commands edit the roster and answer
+immediately — `host.attach` returns before a packet has been sent, because the
+dial has its own retry loop — so an event named after them would fire at a
+moment that has nothing to do with them. What these report is the handshake
+completing and the pump returning, which is when the machine became usable and
+when it stopped being. They strictly alternate: a box that is switched off
+produces one `host_disconnected`, not one per reconnection attempt, and a
+`host_connected` fires again on every successful reconnect. `error` carries the
+cause when the link broke by itself and is empty for a deliberate detach.
 
 `pane_notify` carries `id` and `actions` when the notification declared buttons
 (see `ui.notify` below): a subscriber that wants to answer one — a chat relay, a
@@ -878,6 +896,100 @@ to be slow, so the server sizes its per-request backstop off the run's own limit
 (`app.MaxRunbookRuntime`, 5 minutes) rather than off one command's. A backstop
 below that would answer "command timed out" while the run carried on changing the
 session.
+
+#### Triggers — `on:`
+
+A runbook may declare the events that run it, and then nobody has to ask:
+
+```yaml
+name: tidy-up
+on:
+  - event: pane_exited
+    where: {exit_code: 0}
+  - event: pane_agent
+    where: {state: blocked, agent: claude}
+    min_interval: 30s
+steps:
+  - run: ui.notify
+    params:
+      title: "pane {{ event.pane }} is done"
+      pane: "{{ event.pane }}"
+```
+
+`on:` accepts an event name, a clause, or a list of either — `on: pane_exited`
+and the block above are the same kind of thing. A trigger is a **control-API
+event and nothing else**, the same way a step is a command and nothing else: if
+a runbook can react to it, a client subscribed to `events.subscribe` could
+already have reacted to it. That keeps "what can start a runbook?" answerable
+from the [event table](#event-names) rather than from the engine.
+
+* **`where:`** filters on the event's payload by exact match; every entry must
+  hold. A value written as a list is any-of, so `state: [blocked, idle]` is one
+  clause. Keys are checked against the event's payload **at load** — `exit_cod:
+  0` is a refusal, not a filter that silently never matches, which is the same
+  failure a misspelled param would be one layer out. Fields dropped by
+  `omitempty` are filled in with their zero values first, so `exit_code: 0` — the
+  ordinary successful exit — matches rather than being the one value that never
+  could.
+* **`min_interval:`** is a throttle, not a safety device. `pane_cwd` fires on
+  every `cd`, and a runbook reacting to "I moved to a new repo" wants the settled
+  answer rather than one run per path component.
+* **`{{ event.… }}`** is the firing event's payload, under the reserved root
+  `event` (a step id may not be called that, exactly as with `vars`). Field names
+  are checked at load against the union of the declared events' payloads. Running
+  a triggered runbook by hand binds `event` to an **empty object**, so
+  `{{ event.pane }}` then fails at the step that used it — true, and it stops the
+  run, rather than resolving to something invented.
+
+There is no `{{ }}` for *which* event fired. A runbook has no branching, so
+"react differently depending on the event" is two runbooks, which is also how it
+reads.
+
+##### What stops a runaway
+
+A runbook triggered by `pane_exited` can spawn panes that exit, and two runbooks
+can trigger each other. Four rules, in the order they apply:
+
+1. **One run per runbook**, whatever started it. A trigger firing while that
+   runbook is running is **dropped, never queued** — a queue would be a backlog
+   of stale side effects, since the event that queued a run described a session
+   the run in front of it is still changing. A manual `runbook.run` is refused
+   with the same rule, and says so.
+2. **A global cap** of four runs in flight, counting manual ones. It bounds one
+   event that matches many runbooks.
+3. **A rate limit** of 10 trigger-started runs per minute per runbook. Tripping
+   it **suspends** that runbook's triggers for 5 minutes. This is the rule that
+   actually terminates a mutual-trigger loop: neither of the first two can,
+   because A and B taking turns are never running at the same time. The
+   suspension expires by itself, and never blocks a manual run — the one thing it
+   must not do is stop somebody debugging the runbook that got suspended.
+4. **Reserve, then start.** A run's steps never execute inside the `emitEvent`
+   that started them; the orchestrator loop starts them on its next turn.
+
+`runbook.list` reports `triggers` (the event names) and `trigger_status`, which
+is why the triggers would not fire right now — suspended, a run in flight, the
+feature switched off — and empty when they are armed. Every one of those causes
+otherwise lives in daemon state nobody can see, and they all produce the same
+symptom: nothing happens.
+
+Set `runbooks.triggers: false` in the config to stop every `on:` clause at once.
+It is file-only and deliberately not reachable from `config.set`, since a runbook
+could then turn its own triggers back on.
+
+##### Every run ends with an event
+
+```json
+{"pane":0,"name":"tidy-up","source":"trigger","trigger":"pane_exited",
+ "steps":3,"failed":true,"failed_step":2,"error":"no pane 7"}
+```
+
+`runbook_finished` exists for the runs nobody is waiting on: a triggered run has
+no caller to hand a result to, so without it a runbook that failed halfway would
+leave no trace outside the log. Manual runs emit it too — a client watching the
+stream should not have to know which runs it will be told about — with `source`
+`"control"` and no `trigger`. It carries a summary rather than the per-step list,
+because it answers "did the thing I set up actually work", not "what happened";
+whoever asked for the run already has the second answer.
 
 ## Raw vs ergonomic
 

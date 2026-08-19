@@ -46,9 +46,13 @@ type Runbook struct {
 	// what makes `{{ vars.branch }}` checkable at load: an undeclared var is a
 	// typo, and a typo that reaches run time types the literal text
 	// "{{ vars.brnach }}" into somebody's shell.
-	Vars  map[string]string
-	Steps []Step
-	Path  string // the file it was read from, for diagnostics
+	Vars map[string]string
+	// Triggers are the `on:` clauses that make this runbook run itself. Empty
+	// for a runbook that only ever runs when asked, which is every runbook
+	// written before phase 6b and most of them after it.
+	Triggers []Trigger
+	Steps    []Step
+	Path     string // the file it was read from, for diagnostics
 }
 
 // Step is one §7 command invocation.
@@ -98,7 +102,11 @@ type doc struct {
 	Name        string            `yaml:"name"`
 	Description string            `yaml:"description"`
 	Vars        map[string]string `yaml:"vars"`
-	Steps       []docStep         `yaml:"steps"`
+	// On is read as the generic tree rather than a typed list because it accepts
+	// three spellings — a name, a clause, a list of either — and normalising them
+	// in one place (parseTriggers) reads better than three unmarshalers.
+	On    any       `yaml:"on"`
+	Steps []docStep `yaml:"steps"`
 }
 
 type docStep struct {
@@ -141,31 +149,70 @@ func Parse(data []byte, stem, path string) (*Runbook, error) {
 		return nil, fmt.Errorf("%s: %d steps exceeds the %d-step limit", path, len(d.Steps), maxSteps)
 	}
 
-	// bound is the set of names a `{{ ... }}` reference may root at, growing as
-	// the walk passes each step that declares an id. Checking against it in step
-	// order is what makes a FORWARD reference — `{{ later.pane }}` used before
-	// `later` has run — a load error rather than an empty string at run time.
-	bound := map[string]bool{}
+	triggers, err := parseTriggers(d.On, path)
+	if err != nil {
+		return nil, err
+	}
+	rb.Triggers = triggers
+
+	// ctx.bound is the set of names a `{{ ... }}` reference may root at, growing
+	// as the walk passes each step that declares an id. Checking against it in
+	// step order is what makes a FORWARD reference — `{{ later.pane }}` used
+	// before `later` has run — a load error rather than an empty string at run
+	// time.
+	ctx := &loadCtx{bound: map[string]bool{}}
 	if len(rb.Vars) > 0 {
-		bound[varsRoot] = true
+		ctx.bound[varsRoot] = true
+	}
+	if len(rb.Triggers) > 0 {
+		ctx.bound[eventRoot] = true
+		ctx.eventFields = triggerFieldUnion(rb.Triggers)
 	}
 
 	for i, ds := range d.Steps {
 		where := fmt.Sprintf("%s: step %d", path, i+1)
-		st, err := parseStep(ds, where, bound)
+		st, err := parseStep(ds, where, ctx)
 		if err != nil {
 			return nil, err
 		}
 		if st.ID != "" {
-			bound[st.ID] = true
+			ctx.bound[st.ID] = true
 		}
 		rb.Steps = append(rb.Steps, st)
 	}
 	return rb, nil
 }
 
+// loadCtx is what one document's steps are validated against: the reference
+// roots bound so far, and — when the runbook has triggers — the payload fields
+// `{{ event.… }}` may name.
+type loadCtx struct {
+	bound map[string]bool
+	// eventFields is the UNION of the declared events' payload fields, not the
+	// intersection. A runbook with two `on:` clauses is written once and runs
+	// for whichever fired, so a reference valid for one of them is not a typo —
+	// it is a field that will be missing on the other firing, and that is a run
+	// error with a precise message ("event has no field \"exit_code\"") rather
+	// than a load-time guess about which clause the author meant. What the union
+	// still catches is the thing worth catching: a field that exists on NO event
+	// the runbook can be started by.
+	eventFields map[string]bool
+}
+
+// triggerFieldUnion collects every payload field the declared triggers can
+// deliver.
+func triggerFieldUnion(ts []Trigger) map[string]bool {
+	out := map[string]bool{}
+	for _, t := range ts {
+		for k := range t.payloadFields {
+			out[k] = true
+		}
+	}
+	return out
+}
+
 // parseStep validates one step against the §7 table and the names bound so far.
-func parseStep(ds docStep, where string, bound map[string]bool) (Step, error) {
+func parseStep(ds docStep, where string, ctx *loadCtx) (Step, error) {
 	st := Step{
 		ID:              strings.TrimSpace(ds.ID),
 		Run:             strings.TrimSpace(ds.Run),
@@ -207,7 +254,10 @@ func parseStep(ds docStep, where string, bound map[string]bool) (Step, error) {
 		if st.ID == varsRoot {
 			return st, fmt.Errorf("%s: id %q is reserved for the runbook's declared vars", where, varsRoot)
 		}
-		if bound[st.ID] {
+		if st.ID == eventRoot {
+			return st, fmt.Errorf("%s: id %q is reserved for the event that triggered the run", where, eventRoot)
+		}
+		if ctx.bound[st.ID] {
 			return st, fmt.Errorf("%s: id %q is already used by an earlier step", where, st.ID)
 		}
 		if spec.Result == nil {
@@ -220,9 +270,8 @@ func parseStep(ds docStep, where string, bound map[string]bool) (Step, error) {
 		return st, fmt.Errorf("%s: %w", where, err)
 	}
 	for _, rf := range refs {
-		if !bound[rf.root()] {
-			return st, fmt.Errorf("%s: %s refers to %q, which no earlier step binds and no var declares",
-				where, rf.text, rf.root())
+		if err := ctx.checkRef(rf); err != nil {
+			return st, fmt.Errorf("%s: %w", where, err)
 		}
 	}
 	st.refs = refs
@@ -242,13 +291,41 @@ func parseStep(ds docStep, where string, bound map[string]bool) (Step, error) {
 			return st, fmt.Errorf("%s: expect must be exactly one reference, e.g. \"{{ %s.matched }}\"", where, st.ID)
 		}
 		root := erefs[0].root()
-		if root != st.ID && !bound[root] {
+		if root != st.ID && !ctx.bound[root] {
 			return st, fmt.Errorf("%s: expect refers to %q, which is neither this step's id nor anything bound earlier",
 				where, root)
 		}
 		st.expectRef = &erefs[0]
 	}
 	return st, nil
+}
+
+// checkRef proves one reference can resolve: its root is bound, and — for the
+// event root, whose fields are known from the trigger vocabulary — its first
+// segment names a field some declared event actually carries.
+//
+// Only the event root gets the second check. A step's result is bound from a
+// live command's return value, so its shape is known here too in principle, but
+// walking a result struct would duplicate what a run's own lookup error already
+// says precisely. The event root is different because a wrong field there means
+// a runbook that runs and does the wrong thing to the wrong pane, and because
+// the author is reading an event table rather than a command's result.
+func (c *loadCtx) checkRef(rf ref) error {
+	root := rf.root()
+	if !c.bound[root] {
+		if root == eventRoot {
+			// The likeliest cause by far, and the generic message would send the
+			// author looking for a missing step id.
+			return fmt.Errorf("%s refers to %q, but this runbook declares no `on:` trigger, so no event ever starts it",
+				rf.text, eventRoot)
+		}
+		return fmt.Errorf("%s refers to %q, which no earlier step binds and no var declares", rf.text, root)
+	}
+	if root == eventRoot && len(rf.path) > 1 && !c.eventFields[rf.path[1]] {
+		return fmt.Errorf("%s: no event this runbook triggers on carries a field %q; between them they carry %s",
+			rf.text, rf.path[1], strings.Join(sortedSet(c.eventFields), ", "))
+	}
+	return nil
 }
 
 // specFor looks one command up in the §7 table.
