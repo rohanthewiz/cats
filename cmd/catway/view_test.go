@@ -328,6 +328,61 @@ func TestViewerFollowsThePrimaryAcrossAChange(t *testing.T) {
 	_ = b
 }
 
+// A viewer that pinned a workspace can let go of it again. Init.workspace says
+// "start pinned" and its absence says "follow the primary"; workspace.focus
+// with no id is how a live connection gets back to the second state, which is
+// the return leg of a phone picking a desktop window to watch.
+func TestEmptyWorkspaceFocusFollowsThePrimaryAgain(t *testing.T) {
+	o, ws1, ws2, _, _ := twoWorkspaceOrch(t)
+	openWindow(o, ws1, 200, 60)
+	b := openWindow(o, ws2, 120, 40) // opened last, so b is the primary view
+
+	phone := &client{o: o, out: make(chan []byte, 256), viewer: true,
+		trans: make(map[uint32]*browserproto.FrameTranslator),
+		view:  view{visible: map[uint32]bool{}}}
+	// Pinned to ws1 at the handshake, while the primary is showing ws2.
+	o.registerConn(phone, &browserproto.Init{Viewer: true, Workspace: ws1})
+	if got := o.viewWS(phone); got != ws1 {
+		t.Fatalf("pinned viewer shows %q, want %q", got, ws1)
+	}
+
+	o.handleCmd(phone, cmd(t, "", browserproto.CmdWorkspaceFocus, browserproto.WorkspaceParams{}))
+
+	if phone.view.ws != "" {
+		t.Fatalf("the pin survived as %q; an empty id must clear it", phone.view.ws)
+	}
+	if got := o.viewWS(phone); got != ws2 {
+		t.Fatalf("un-pinned viewer follows %q, want the primary's %q", got, ws2)
+	}
+	// The desktop is untouched: un-pinning is a fact about one connection.
+	if b.view.ws != ws2 {
+		t.Fatalf("the primary window moved to %q", b.view.ws)
+	}
+	// And the phone still declares no geometry, so following ws2 must not have
+	// resized it. (registerConn was given no cols/rows at all.)
+	if o.areaFor(ws2).Width != 120 {
+		t.Fatalf("the viewer sized %s: %d cols", ws2, o.areaFor(ws2).Width)
+	}
+}
+
+// The same command from a caller with no view of its own — catctl, a hook
+// action — must not reach into the primary window and clear ITS pin. There is
+// no view to un-pin, so there is nothing to do.
+func TestEmptyWorkspaceFocusFromAViewLessCallerIsANoOp(t *testing.T) {
+	o, ws1, ws2, _, _ := twoWorkspaceOrch(t)
+	openWindow(o, ws1, 200, 60)
+	b := openWindow(o, ws2, 120, 40)
+
+	o.SetViewWorkspace("")
+
+	if b.view.ws != ws2 {
+		t.Fatalf("the primary window was un-pinned to %q", b.view.ws)
+	}
+	if got := o.viewWS(b); got != ws2 {
+		t.Fatalf("the primary window shows %q, want %q", got, ws2)
+	}
+}
+
 // A caller with no window (the control API path) acts on the primary view.
 func TestViewLessCallerActsOnThePrimary(t *testing.T) {
 	o, ws1, ws2, pane1, pane2 := twoWorkspaceOrch(t)

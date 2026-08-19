@@ -325,6 +325,21 @@ func TestWorkspaceFocusMovesTheViewNotTheSession(t *testing.T) {
 	if !r.failCall {
 		t.Fatal("workspace.focus accepted an unknown workspace")
 	}
+
+	// The empty id is not an unknown workspace: it is "no workspace", which
+	// clears the pin and puts the view back to following the primary. It has to
+	// reach the backend, because only the backend knows which connection asked.
+	r = &fakeResponder{log: log, wants: true}
+	d.Dispatch(CmdWorkspaceFocus, params(t, WorkspaceParams{}), r)
+	if r.failCall {
+		t.Fatalf("workspace.focus with no id failed: %s", r.errMsg)
+	}
+	if len(b.viewMoves) != 2 || b.viewMoves[1] != "" {
+		t.Fatalf("view moves = %v, want a second move to \"\" (un-pin)", b.viewMoves)
+	}
+	if s.ActiveWorkspaceID() != ws1 {
+		t.Fatalf("un-pinning moved the session default to %s", s.ActiveWorkspaceID())
+	}
 }
 
 // --- 4. the drift guard ----------------------------------------------------------

@@ -42,6 +42,7 @@
 //	tabnew                  cmd tab.create        tabfocus:NUM  cmd tab.focus
 //	tabclose[:NUM]          cmd tab.close         wsnew         cmd workspace.create
 //	wsfocus:ID              cmd workspace.focus — moves THIS connection's view only
+//	wsfocus:                 (empty ID) drop the pin and follow the primary view
 //	viewws:ID               poll until this connection's layout reports ID active
 //	                        (what --workspace opened on, and where wsfocus lands)
 //	views:ID[,ID…]          poll until the census's per-connection views are

@@ -174,11 +174,26 @@ func (o *orch) syncPrimaryActive() {
 // caller and moves the primary view instead, which is the session default and
 // therefore exactly what catctl has always done.
 //
+// An empty id un-pins the connection: it goes back to "" and follows the
+// primary view again, which is the state a viewer and an unqualified window
+// both start in. A phone that picked one desktop window to watch gets back to
+// "follow the desk" this way, and a window opened on a bookmarked ?ws= gets
+// back to whatever the user is actually in front of.
+//
 // The window's grid follows it: a sizer arriving on a workspace is the most
 // recent report for that workspace's area (decision 5, last reporter wins), so
 // its panes reflow to the window that is now showing them.
 func (o *orch) setViewWorkspace(c *client, wsID string) {
 	if c == nil {
+		if wsID == "" {
+			// Unpin, from a caller that owns no view: catctl, a hook action, a
+			// runbook step. There is nothing to unpin — those callers resolve
+			// through the primary view already — and the one thing this must
+			// NOT do is fall through to the primary and clear ITS pin, which
+			// would yank a desktop window off the workspace it is showing on
+			// behalf of a caller that never had a window.
+			return
+		}
 		c = o.primaryView()
 	}
 	if c == nil {

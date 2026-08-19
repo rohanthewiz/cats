@@ -34,6 +34,12 @@ type Backend interface {
 	// connection, while catctl, a hook action and a runbook step carry none and
 	// resolve to the session default (the primary view). The dispatcher has
 	// already checked that the workspace exists.
+	//
+	// An empty id CLEARS the issuing view's pin, putting it back to following
+	// the primary view. That is the state a viewer starts in, so the round trip
+	// "watch that window / go back to the desk" is one command in both
+	// directions. A caller with no view of its own has no pin to clear and the
+	// backend ignores it.
 	SetViewWorkspace(wsID string)
 
 	// ApplyModel reconciles pane PTYs with the session and rebroadcasts the
@@ -926,7 +932,19 @@ func (d *Dispatcher) dispatch(name string, dec ParamDecoder, r Responder) {
 		// frames for its panes, and no other window hears about it (except
 		// through the Clients census). From catctl, which has no window, the
 		// backend applies it to the primary view — what it has always done.
-		if d.session.WorkspaceByID(p.ID) == nil {
+		//
+		// An empty id is the inverse: it clears the pin, so the connection goes
+		// back to following the primary view. Init.workspace already says
+		// "start unpinned" by being absent; without this there is no way to get
+		// back there on a live socket, which is precisely what a phone needs
+		// after it picks a desktop window to watch — and what a window opened
+		// on "?ws=w2" needs to rejoin whatever the user is actually doing.
+		//
+		// Deliberately not capability-gated. A capability exists for a field a
+		// client cannot tell was dropped (see browserproto's caps doc); this is
+		// a command, and a server too old to know it answers ok:false with
+		// "unknown workspace", which is a perfectly detectable "no".
+		if p.ID != "" && d.session.WorkspaceByID(p.ID) == nil {
 			r.Fail(fmt.Sprintf("unknown workspace %s", p.ID))
 			return
 		}

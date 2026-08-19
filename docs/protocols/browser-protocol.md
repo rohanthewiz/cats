@@ -170,6 +170,17 @@ its WebSocket. Per-connection state is small and explicit:
 workspace that no longer exists) means "whatever the primary view is showing",
 which is what a single window has always got. Server capability: `window`.
 
+`workspace.focus` **with no id** is the inverse: it clears the connection's pin,
+so it follows the primary view again. Without it the only way back to "follow
+whatever the desktop is doing" would be a reconnect — which is the round trip a
+viewer needs once it picks a window to watch, and what a window opened on a
+bookmarked `?ws=` needs to rejoin the front window. It is not capability-gated:
+a server too old to know it answers `ok: false` with `unknown workspace`, and
+unlike a dropped `Init` field that is a detectable no. From a caller with no view
+of its own (`catctl`, a hook, a runbook step) it does nothing — there is no pin
+to clear, and clearing the primary window's would move a window on behalf of a
+caller that never had one.
+
 **Independence is per workspace.** Two connections on *different* workspaces are
 fully independent — own tab, own focus, own zoom, own grid; `workspace.focus`
 moves only the connection that sent it. Two connections on the *same* workspace
