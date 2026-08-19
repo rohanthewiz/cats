@@ -102,7 +102,7 @@ Mac app the windows to use it.
 
 ## Phases (each independently shippable, tests green)
 
-### Phase 1 — the view: per-connection viewport in catway — **NOT STARTED**
+### Phase 1 — the view: per-connection viewport in catway — **DONE**
 
 The architectural change. Everything after it is either a menu item or a window
 frame. Nothing in this phase is visible to a user who opens one window; the whole
@@ -243,7 +243,7 @@ No UI for opening a window (phase 2), no Mac windows (phase 3), no
 focused-window-wins sizing (phase 4). No change to the control API vocabulary —
 `workspace.focus` keeps its name and its catctl meaning.
 
-### Phase 2 — open a window, from the page — **NOT STARTED**
+### Phase 2 — open a window, from the page — **DONE**
 
 Small, and it is the phase that makes phase 1 usable on Mode 3 (any browser)
 and in any WKWebView that lets the page open windows.
@@ -265,7 +265,7 @@ Tests: a `probe` script with two connections on two views, asserting per-
 connection layouts; a page-level check that `?ws=` reaches `Init`. Docs:
 `getting-started.md` one line under the browser topology.
 
-### Phase 3 — Mac windows — **NOT STARTED**
+### Phase 3 — Mac windows — **DONE** (untested on device: the manual runbook in `standalone-mac.md` has not been run)
 
 `catapp` grows a window manager, in ObjC, and `webview_go` stops being the thing
 that owns the main UI window.
@@ -320,7 +320,7 @@ primary, quit with three windows, relaunch and find three.
 `standalone-mac.md` and `mac-client-linux-server.md` each gain a "Windows"
 section; `build-and-packaging.md` notes the new ObjC file in the cgo set.
 
-### Phase 4 — polish — **NOT STARTED, scoped**
+### Phase 4 — polish — **DONE in this repo**; the mobile client's `Clients.Views` UI is a cats-mobile change and is not started
 
 Each is independent and none is needed for the feature to be true.
 

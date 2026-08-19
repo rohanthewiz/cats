@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 
@@ -143,5 +144,36 @@ func TestRenderPageNoHead(t *testing.T) {
 	out := string(renderPage([]byte("<body>only</body>"), config.Default()))
 	if !strings.Contains(out, "cats-config-theme") || !strings.Contains(out, "<body>only</body>") {
 		t.Fatalf("no-head render dropped content:\n%s", out)
+	}
+}
+
+// The page is what turns a URL into a window: "?ws=w2" has to reach the server
+// as Init.Workspace, or a second window silently mirrors the first. Asserted on
+// the source because there is no headless browser here — and the failure it
+// guards is a rename of one field on one line.
+func TestPageForwardsWorkspaceQueryInInit(t *testing.T) {
+	src, err := os.ReadFile("web/index.html")
+	if err != nil {
+		t.Fatalf("read page: %v", err)
+	}
+	page := string(src)
+	for _, want := range []string{
+		`.get("ws")`,                // it reads the query parameter
+		`workspace: urlWorkspace()`, // …and sends it on the init message
+		`function openWindow(`,      // …and can open another window on a workspace
+		`case "clients":`,           // …and reads the per-view census
+	} {
+		if !strings.Contains(page, want) {
+			t.Errorf("page missing %q — multi-window depends on it", want)
+		}
+	}
+	// The init send must carry it: a helper defined but never wired is exactly
+	// the shape of this bug.
+	init := strings.Index(page, `t: "init"`)
+	if init < 0 {
+		t.Fatal("no init send in the page")
+	}
+	if ws := strings.Index(page[init:], "workspace: urlWorkspace()"); ws < 0 || ws > 400 {
+		t.Fatal("the init message does not carry the window's workspace")
 	}
 }

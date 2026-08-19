@@ -15,6 +15,15 @@ import "encoding/json"
 // panes to fit a phone. A viewer's Cols/Rows/CellWPx/CellHPx are ignored and its
 // Resize messages are dropped; it renders whatever grid the sizers established.
 // Omitted (false) is the historical behaviour, so browsers need no change.
+//
+// Workspace picks which workspace this connection opens on — the "which window
+// am I" field. Each connection is a view with its own workspace, active tab,
+// focus and grid, so two windows can show two projects side by side without
+// switching each other (server capability "window"). Omitted means "whatever
+// the primary view is showing", which is exactly what a single window has
+// always got, so today's clients are unchanged. An id that names no workspace
+// is not an error and falls back the same way: it typically comes from a URL
+// the user bookmarked before the workspace was closed.
 type Init struct {
 	T       Type    `json:"t"`
 	V       int     `json:"v"`
@@ -24,6 +33,8 @@ type Init struct {
 	CellWPx uint32  `json:"cell_w_px"`
 	CellHPx uint32  `json:"cell_h_px"`
 	Viewer  bool    `json:"viewer,omitempty"`
+	// Workspace is the public workspace id ("w2") this window opens on.
+	Workspace string `json:"workspace,omitempty"`
 }
 
 // --- Input events (§6, D4: structured, encoded server-side) --------------------

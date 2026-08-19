@@ -294,6 +294,18 @@ catctl events.subscribe --params '{"events":["pane_notify","pane_exited"]}'
 Every command below is available identically from the browser (`cmd` message) and
 `catctl`. `catctl commands` prints the live list.
 
+**Which window a command acts in.** A browser connection is a *view* — it shows
+one workspace — and every command that has an implicit workspace ("the active
+one") resolves it against the view that issued the command. So `tab.focus` in
+one window does not switch another window's tabs, and `workspace.focus` moves
+only the window that sent it.
+
+`catctl` has no window. Its commands resolve against the **primary view**: the
+most recently focused desktop window. That is what "the active workspace" and
+"the focused pane" have always meant, and with a single window open it is
+exactly the old behaviour. The same is true of hook actions, runbook steps, and
+anything else driving the session from outside a browser.
+
 Each command's params struct, result struct, and its two dispatch properties are
 also available as data — `app.CommandSpecs()`, described in
 [Protocols](index.md#the-command-table-as-data) — which is what a generated
@@ -362,12 +374,27 @@ catctl pane.split --params '{"direction":"v","command":["ced","main.go"]}'
 | `tab.focus` | `tab <num>` |
 | `tab.rename` | `rename-tab <num> <name...>` |
 | `tab.move` | — |
+| `tab.move_to_workspace` | — |
 | `workspace.create` | `new-ws [name...]` |
 | `workspace.close` | `close-ws [id]` |
 | `workspace.focus` | `ws <id>` |
 | `workspace.rename` | `rename-ws <id> <name...>` |
 | `workspace.move` | — |
 | `workspace.lock` | `lock-ws [id]` / `unlock-ws [id]` |
+
+`tab.move_to_workspace` moves a tab, with its panes and their live terminals,
+into another workspace: `{"workspace":"w2","num":3}`. That is how a tab travels
+between **windows** — a window is a view on one workspace — and it is the one
+tab verb that crosses a workspace boundary. Tab numbers and public pane ids are
+per workspace, so the tab is renumbered on arrival and the result reports its
+new number; `from` names the source workspace, defaulting to the caller's own
+view. Moving a workspace's last tab empties it, and an empty workspace is
+dropped, as `tab.close` does.
+
+> A moved pane's `CATS_PANE_ID` environment variable still names its old handle
+> — it was set when the process spawned and cannot be rewritten. Nothing breaks
+> (the `p_<raw>` form resolves in any workspace), but a script that cached the
+> `w1:p3` string is holding a handle that has moved.
 
 `tab.create` opens the tab in the active workspace unless it names one:
 `{"workspace":"w2"}` puts the tab there instead, without moving the viewport. It

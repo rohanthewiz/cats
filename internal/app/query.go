@@ -12,15 +12,22 @@ import (
 // CLI/control-API or browser to introspect. Every method here is a pure query
 // over the same single-goroutine Session, so it needs no locking.
 
-// Info returns a one-shot snapshot of the whole session (session.get).
-func (s *Session) Info() SessionInfoResult {
+// Info returns a one-shot snapshot of the whole session (session.get) as the
+// session-default view sees it.
+func (s *Session) Info() SessionInfoResult { return s.InfoIn("") }
+
+// InfoIn is Info answered for one view: "the active workspace" and "the focused
+// pane" are per-window facts once several windows are open (view.go), and
+// session.get issued from a window must describe that window — otherwise a
+// script running in window B reads window A's focus and acts on the wrong pane.
+func (s *Session) InfoIn(wsID string) SessionInfoResult {
 	res := SessionInfoResult{
-		ActiveWorkspace: s.ActiveWorkspace().ID,
+		ActiveWorkspace: s.viewWorkspace(wsID).ID,
 		Workspaces:      len(s.workspaces),
 		Panes:           s.totalPanes(),
 		Cwd:             s.cwd,
 	}
-	if id, ok := s.FocusedPane(); ok {
+	if id, ok := s.FocusedPaneIn(wsID); ok {
 		if pub, ok := s.PublicPaneID(id); ok {
 			res.FocusedPane = pub
 		}
@@ -29,13 +36,18 @@ func (s *Session) Info() SessionInfoResult {
 }
 
 // ListWorkspaces describes every workspace in order (workspace.list).
-func (s *Session) ListWorkspaces() []WorkspaceInfo {
+func (s *Session) ListWorkspaces() []WorkspaceInfo { return s.ListWorkspacesIn("") }
+
+// ListWorkspacesIn is ListWorkspaces with Active meaning "the one this view
+// shows" rather than "the one the session defaults to".
+func (s *Session) ListWorkspacesIn(wsID string) []WorkspaceInfo {
+	active := s.viewWorkspaceIndex(wsID)
 	out := make([]WorkspaceInfo, 0, len(s.workspaces))
 	for i, ws := range s.workspaces {
 		out = append(out, WorkspaceInfo{
 			ID:     ws.ID,
 			Name:   ws.DisplayName(),
-			Active: i == s.active,
+			Active: i == active,
 			Tabs:   len(ws.Tabs),
 			Locked: ws.Locked,
 			Host:   ws.HostID, // as stored: "" = whatever the default host is
@@ -49,7 +61,13 @@ func (s *Session) ListWorkspaces() []WorkspaceInfo {
 // no known workspace (tab.list). meta feeds tab auto-naming (TabDisplayName);
 // nil skips derivation and reports the plain custom-name-or-number.
 func (s *Session) ListTabs(workspaceID string, meta func(uint32) PaneMeta) (tabs []TabInfo, resolved string, ok bool) {
-	idx := s.active
+	return s.ListTabsIn("", workspaceID, meta)
+}
+
+// ListTabsIn is ListTabs with the caller's view supplying the default: an
+// unaddressed tab.list from a window lists *that window's* workspace.
+func (s *Session) ListTabsIn(viewWS, workspaceID string, meta func(uint32) PaneMeta) (tabs []TabInfo, resolved string, ok bool) {
+	idx := s.viewWorkspaceIndex(viewWS)
 	if workspaceID != "" {
 		i, found := s.workspaceIndexByID(workspaceID)
 		if !found {
@@ -76,8 +94,11 @@ func (s *Session) ListTabs(workspaceID string, meta func(uint32) PaneMeta) (tabs
 }
 
 // ListPanes describes every pane across all workspaces and tabs (pane.list).
-func (s *Session) ListPanes() []PaneInfo {
-	visible := s.visibleSet()
+func (s *Session) ListPanes() []PaneInfo { return s.ListPanesIn("") }
+
+// ListPanesIn is ListPanes with Visible meaning "on screen in this view".
+func (s *Session) ListPanesIn(wsID string) []PaneInfo {
+	visible := s.visibleSetIn(wsID)
 	var out []PaneInfo
 	for _, ws := range s.workspaces {
 		for _, tab := range ws.Tabs {
@@ -93,7 +114,13 @@ func (s *Session) ListPanes() []PaneInfo {
 // PaneInfoFor describes one pane addressed by internal id (nil target = the
 // focused pane), reporting ok=false when the pane is unknown (pane.get).
 func (s *Session) PaneInfoFor(target *layout.PaneID) (PaneInfo, bool) {
-	id, err := s.resolvePaneTarget(target)
+	return s.PaneInfoForIn("", target)
+}
+
+// PaneInfoForIn is PaneInfoFor resolved against a view: a nil target is that
+// window's focused pane, and Visible is "on screen in that window".
+func (s *Session) PaneInfoForIn(wsID string, target *layout.PaneID) (PaneInfo, bool) {
+	id, err := s.ResolvePaneTargetIn(wsID, target)
 	if err != nil {
 		return PaneInfo{}, false
 	}
@@ -105,7 +132,7 @@ func (s *Session) PaneInfoFor(target *layout.PaneID) (PaneInfo, bool) {
 	if tabIdx, ok := ws.FindTabIndexForPane(id); ok {
 		focused = ws.Tabs[tabIdx].Layout.Focused() == id
 	}
-	return s.paneInfo(ws, id, focused, s.visibleSet()[id]), true
+	return s.paneInfo(ws, id, focused, s.visibleSetIn(wsID)[id]), true
 }
 
 // paneInfo builds one PaneInfo, resolving the pane's public handle from its
@@ -121,9 +148,9 @@ func (s *Session) paneInfo(ws *workspace.Workspace, id layout.PaneID, focused, v
 	return info
 }
 
-// visibleSet is the current viewport's panes as a lookup set.
-func (s *Session) visibleSet() map[layout.PaneID]bool {
-	ids := s.VisiblePaneIDs()
+// visibleSetIn is one view's viewport panes as a lookup set.
+func (s *Session) visibleSetIn(wsID string) map[layout.PaneID]bool {
+	ids := s.VisiblePaneIDsIn(wsID)
 	set := make(map[layout.PaneID]bool, len(ids))
 	for _, id := range ids {
 		set[id] = true

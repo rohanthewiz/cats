@@ -62,9 +62,7 @@ func (o *orch) refreshPaneBranch(rt *paneRuntime) {
 	if rt.cwd == "" || !o.paneIsLocal(rt.id) {
 		if rt.branch != "" {
 			rt.branch = ""
-			if o.visible[rt.id] {
-				o.broadcast(browserproto.NewPaneBranch(rt.id, ""))
-			}
+			o.sendVisible(rt.id, browserproto.NewPaneBranch(rt.id, ""))
 		}
 		return
 	}
@@ -105,9 +103,7 @@ func (o *orch) setPaneBranch(pid uint32, cwd, branch string) {
 		return
 	}
 	rt.branch = branch
-	if o.visible[pid] {
-		o.broadcast(browserproto.NewPaneBranch(pid, branch))
-	}
+	o.sendVisible(pid, browserproto.NewPaneBranch(pid, branch))
 }
 
 // runPaneBranches is the periodic refresh pacer (own goroutine, started by
@@ -141,9 +137,7 @@ func (o *orch) applyPaneBranch(pid uint32, branch string) {
 	}
 	rt.branch = branch
 	rt.branchAt = time.Now() // keeps the local fallback quiet if the host later drops to v2
-	if o.visible[pid] {
-		o.broadcast(browserproto.NewPaneBranch(pid, branch))
-	}
+	o.sendVisible(pid, browserproto.NewPaneBranch(pid, branch))
 }
 
 // --- resolution (no orch state; runs off the loop goroutine) -----------------

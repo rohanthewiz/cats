@@ -204,9 +204,7 @@ func (o *orch) setAgentModel(pid uint32, model string) {
 	if agent == "" {
 		return
 	}
-	if o.visible[pid] {
-		o.broadcast(browserproto.NewPaneAgent(pid, agent, state, model, !rt.unseen))
-	}
+	o.sendVisible(pid, browserproto.NewPaneAgent(pid, agent, state, model, !rt.unseen))
 	// The sidebar's agents rollup names each row by its model, and it otherwise
 	// only ships on a state change — which is precisely the moment this read was
 	// kicked off from, so the rollup that went out then carried the *previous*

@@ -156,6 +156,13 @@ abstract final class Caps {
   /// routed and chat_* messages flow. Without it a client should hide its
   /// chat UI rather than let chat.send vanish into an unknown-command error.
   static const String chat = 'chat';
+
+  /// CapWindow: Init.Workspace is honoured — a connection is a view with its
+  /// own workspace, so workspace.focus moves only the window that sent it and
+  /// a resize reshapes only the workspace that window is showing. Without it,
+  /// opening a second window on another workspace fights the first, which is
+  /// exactly the failure a client cannot detect after the fact.
+  static const String window = 'window';
 }
 
 /// A cell rectangle. On the wire it is the bare array [x, y, w, h];
@@ -691,6 +698,47 @@ class ChatStateInfo {
       };
 }
 
+/// ClientView describes one connected window: the workspace it shows, the grid
+/// it declared (zero for a viewer, which declares none), whether its OS window
+/// is in the foreground, and whether it is the primary view — the most recently
+/// focused sizer, which is what a view-less caller (catctl, a hook, a runbook
+/// step) and every viewer resolve "the focused pane" through.
+class ClientView {
+  const ClientView({
+    required this.workspace,
+    this.cols = 0,
+    this.rows = 0,
+    this.focused = false,
+    this.viewer = false,
+    this.primary = false,
+  });
+
+  final String workspace;
+  final int cols;
+  final int rows;
+  final bool focused;
+  final bool viewer;
+  final bool primary;
+
+  factory ClientView.fromJson(Map<String, Object?> j) => ClientView(
+        workspace: asString(j['workspace']),
+        cols: asInt(j['cols']),
+        rows: asInt(j['rows']),
+        focused: asBool(j['focused']),
+        viewer: asBool(j['viewer']),
+        primary: asBool(j['primary']),
+      );
+
+  Map<String, Object?> toJson() => {
+        'workspace': workspace,
+        if (cols != 0) 'cols': cols,
+        if (rows != 0) 'rows': rows,
+        if (focused) 'focused': focused,
+        if (viewer) 'viewer': viewer,
+        if (primary) 'primary': primary,
+      };
+}
+
 /// Clients is the connected-client census, pushed on every connect and
 /// disconnect. Two questions it answers for a client that is not the only one
 /// looking:
@@ -702,6 +750,13 @@ class ChatStateInfo {
 ///     means nobody is driving it and the layout is whatever the last sizer left
 ///     behind, which is worth rendering differently from a live desktop's.
 ///
+/// Views answers the third question, the one multi-window introduced: "which
+/// workspace is each other window on?" A sidebar can then mark a workspace
+/// another window already shows (so "open in new window" does not silently make
+/// a duplicate), and a viewer can label the primary view it is following.
+/// Cols/Rows keep their old meaning — the primary view's grid — so a client that
+/// ignores Views is unchanged.
+///
 /// Wire type: `clients`.
 class Clients {
   const Clients({
@@ -709,6 +764,7 @@ class Clients {
     required this.sizers,
     required this.cols,
     required this.rows,
+    this.views = const <ClientView>[],
   });
 
   /// The `t` discriminator this class always carries. It is a property of
@@ -720,11 +776,16 @@ class Clients {
   final int cols;
   final int rows;
 
+  /// Views is one entry per connection, in no meaningful order. Additive:
+  /// absent from an older server, and safely ignorable.
+  final List<ClientView> views;
+
   factory Clients.fromJson(Map<String, Object?> j) => Clients(
         total: asInt(j['total']),
         sizers: asInt(j['sizers']),
         cols: asInt(j['cols']),
         rows: asInt(j['rows']),
+        views: asList(j['views'], (e) => ClientView.fromJson(asObj(e))),
       );
 
   Map<String, Object?> toJson() => {
@@ -733,6 +794,7 @@ class Clients {
         'sizers': sizers,
         'cols': cols,
         'rows': rows,
+        if (views.isNotEmpty) 'views': [for (final e in views) e.toJson()],
       };
 }
 
@@ -1152,6 +1214,15 @@ class Image {
 /// Resize messages are dropped; it renders whatever grid the sizers established.
 /// Omitted (false) is the historical behaviour, so browsers need no change.
 ///
+/// Workspace picks which workspace this connection opens on — the "which window
+/// am I" field. Each connection is a view with its own workspace, active tab,
+/// focus and grid, so two windows can show two projects side by side without
+/// switching each other (server capability "window"). Omitted means "whatever
+/// the primary view is showing", which is exactly what a single window has
+/// always got, so today's clients are unchanged. An id that names no workspace
+/// is not an error and falls back the same way: it typically comes from a URL
+/// the user bookmarked before the workspace was closed.
+///
 /// Wire type: `init`.
 class Init {
   const Init({
@@ -1162,6 +1233,7 @@ class Init {
     required this.cellWPx,
     required this.cellHPx,
     this.viewer = false,
+    this.workspace = '',
   });
 
   /// The `t` discriminator this class always carries. It is a property of
@@ -1176,6 +1248,9 @@ class Init {
   final int cellHPx;
   final bool viewer;
 
+  /// Workspace is the public workspace id ("w2") this window opens on.
+  final String workspace;
+
   factory Init.fromJson(Map<String, Object?> j) => Init(
         v: asInt(j['v']),
         cols: asInt(j['cols']),
@@ -1184,6 +1259,7 @@ class Init {
         cellWPx: asInt(j['cell_w_px']),
         cellHPx: asInt(j['cell_h_px']),
         viewer: asBool(j['viewer']),
+        workspace: asString(j['workspace']),
       );
 
   Map<String, Object?> toJson() => {
@@ -1195,6 +1271,7 @@ class Init {
         'cell_w_px': cellWPx,
         'cell_h_px': cellHPx,
         if (viewer) 'viewer': viewer,
+        if (workspace.isNotEmpty) 'workspace': workspace,
       };
 }
 

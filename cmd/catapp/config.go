@@ -32,6 +32,16 @@ type appConfig struct {
 	// mode 2. People who use it have a laptop that follows them between a home
 	// server, a work VPN and a relay, and switching meant deleting app.json.
 	Presets []remoteTarget `json:"presets,omitempty"`
+	// Windows is the window layout to restore at launch: one entry per window,
+	// with the workspace it was showing and where it sat on screen.
+	//
+	// It lives here, in the launcher's own settings, and not in the catway's
+	// session file: a window is a lens on the session, not part of it (catway
+	// persists nothing about windows at all), and a window layout is as
+	// client-local as the preset list beside it. A saved window whose workspace
+	// no longer exists still opens — the server falls back to the primary view —
+	// because a user's window layout should survive them tidying up projects.
+	Windows []savedWindow `json:"windows,omitempty"`
 }
 
 // remoteTarget is a catway a thin client can connect to: a relay host

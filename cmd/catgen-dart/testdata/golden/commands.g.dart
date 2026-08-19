@@ -90,6 +90,8 @@ abstract final class CmdName {
 
   static const String tabMove = 'tab.move';
 
+  static const String tabMoveToWorkspace = 'tab.move_to_workspace';
+
   static const String workspaceCreate = 'workspace.create';
 
   static const String workspaceClose = 'workspace.close';
@@ -1112,6 +1114,63 @@ class MoveTabParams {
   Map<String, Object?> toJson() => {
         'num': num,
         'index': index,
+      };
+}
+
+/// MoveTabToWorkspaceParams: tab.move_to_workspace — move a tab, with its panes
+/// and their live terminals, into another workspace. This is how a tab travels
+/// between WINDOWS: a window shows a workspace, so "drag this tab to that
+/// window" is "move this tab to that workspace".
+///
+/// Workspace is the destination and is required — the one thing a move cannot
+/// default. Num is the tab's public number in the SOURCE workspace, and From
+/// names that workspace ("" = the one the issuing window is showing, which is
+/// what a drag from its own tab strip means). Tab numbering is per workspace, so
+/// the tab arrives with a new number: the result reports it.
+class MoveTabToWorkspaceParams {
+  const MoveTabToWorkspaceParams({
+    required this.workspace,
+    required this.num,
+    this.from = '',
+  });
+
+  final String workspace;
+  final int num;
+  final String from;
+
+  factory MoveTabToWorkspaceParams.fromJson(Map<String, Object?> j) => MoveTabToWorkspaceParams(
+        workspace: asString(j['workspace']),
+        num: asInt(j['num']),
+        from: asString(j['from']),
+      );
+
+  Map<String, Object?> toJson() => {
+        'workspace': workspace,
+        'num': num,
+        if (from.isNotEmpty) 'from': from,
+      };
+}
+
+/// MoveTabToWorkspaceResult reports where the tab landed: its new public number
+/// in the destination workspace. The pane ids are unchanged, but their public
+/// handles are not — they are per workspace too.
+class MoveTabToWorkspaceResult {
+  const MoveTabToWorkspaceResult({
+    required this.workspace,
+    required this.num,
+  });
+
+  final String workspace;
+  final int num;
+
+  factory MoveTabToWorkspaceResult.fromJson(Map<String, Object?> j) => MoveTabToWorkspaceResult(
+        workspace: asString(j['workspace']),
+        num: asInt(j['num']),
+      );
+
+  Map<String, Object?> toJson() => {
+        'workspace': workspace,
+        'num': num,
       };
 }
 
@@ -3226,6 +3285,7 @@ const List<CommandSpec> kCommandSpecs = <CommandSpec>[
   CommandSpec('tab.focus', paramsRequired: true),
   CommandSpec('tab.rename', paramsRequired: true),
   CommandSpec('tab.move', paramsRequired: true),
+  CommandSpec('tab.move_to_workspace', paramsRequired: true),
   CommandSpec('workspace.create'),
   CommandSpec('workspace.close'),
   CommandSpec('workspace.focus', paramsRequired: true),
@@ -3407,6 +3467,10 @@ mixin CatsCommands implements CatsCommandTransport {
   Future<void> tabMove(MoveTabParams params) async {
     await invoke(CmdName.tabMove, params.toJson());
   }
+
+  /// `tab.move_to_workspace`
+  Future<MoveTabToWorkspaceResult> tabMoveToWorkspace(MoveTabToWorkspaceParams params) async =>
+      MoveTabToWorkspaceResult.fromJson(asObj(await invoke(CmdName.tabMoveToWorkspace, params.toJson())));
 
   /// `workspace.create`
   ///

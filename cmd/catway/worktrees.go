@@ -59,6 +59,14 @@ func (o *orch) StartWorktreeList(r app.Responder, p app.WorktreeListParams) {
 // answer that depended on which machine ran the operation would be a different
 // answer for the same request.
 func (o *orch) StartWorktreeCreate(r app.Responder, p app.WorktreeCreateParams) {
+	o.startWorktreeCreate(nil, r, p)
+}
+
+// startWorktreeCreate is StartWorktreeCreate with the issuing window carried
+// through, so the new workspace opens in the window that asked for it and not
+// in whichever one happens to be primary. nil = a caller with no window
+// (catctl, a runbook step), which lands on the primary view.
+func (o *orch) startWorktreeCreate(c *client, r app.Responder, p app.WorktreeCreateParams) {
 	host := o.paneHostID(o.anchorPane(p.Pane))
 	branch := p.Branch
 	if branch == "" {
@@ -85,6 +93,11 @@ func (o *orch) StartWorktreeCreate(r app.Responder, p app.WorktreeCreateParams) 
 			return
 		}
 		_ = o.session.RenameWorkspace(id, branch)
+		// CreateWorkspaceAtOn makes the new workspace the session default; move
+		// the issuing window onto it too (and, for a non-primary window,
+		// syncPrimaryActive inside applyModel puts the default back where it
+		// belongs — the primary's workspace).
+		o.setViewWorkspace(c, id)
 		o.applyModel()
 		r.OK(app.WorktreeCreateResult{Workspace: id, Branch: branch, Path: res.Path})
 	})
@@ -99,8 +112,14 @@ func (o *orch) StartWorktreeCreate(r app.Responder, p app.WorktreeCreateParams) 
 // machine resolved, since a "~/…" checkout typed by hand is only a real path
 // after that machine expanded it.
 func (o *orch) StartWorktreeOpen(r app.Responder, p app.WorktreeOpenParams) {
+	o.startWorktreeOpen(nil, r, p)
+}
+
+// startWorktreeOpen is StartWorktreeOpen with the issuing window carried
+// through — see startWorktreeCreate.
+func (o *orch) startWorktreeOpen(c *client, r app.Responder, p app.WorktreeOpenParams) {
 	host := o.paneHostID(o.anchorPane(p.Pane))
-	if o.focusWorkspaceOnPath(r, p.Path, host) {
+	if o.focusWorkspaceOnPath(c, r, p.Path, host) {
 		return
 	}
 	o.runWorktreeOp(r, host, worktree.OpRequest{Op: worktree.OpStat, Path: p.Path}, func(res worktree.OpResult) {
@@ -108,7 +127,7 @@ func (o *orch) StartWorktreeOpen(r app.Responder, p app.WorktreeOpenParams) {
 			r.Fail(res.Error)
 			return
 		}
-		if o.focusWorkspaceOnPath(r, res.Path, host) {
+		if o.focusWorkspaceOnPath(c, r, res.Path, host) {
 			return
 		}
 		id, err := o.session.CreateWorkspaceAtOn(res.Path, host)
@@ -116,6 +135,7 @@ func (o *orch) StartWorktreeOpen(r app.Responder, p app.WorktreeOpenParams) {
 			r.Fail(err.Error())
 			return
 		}
+		o.setViewWorkspace(c, id)
 		o.applyModel()
 		r.OK(app.WorktreeOpenResult{Workspace: id})
 	})
@@ -125,15 +145,18 @@ func (o *orch) StartWorktreeOpen(r app.Responder, p app.WorktreeOpenParams) {
 // reports whether it resolved r — so a caller can treat "already open" as the
 // whole answer. A focus that fails is also an answer: the workspace exists, so
 // creating a second one on the same checkout is not the recovery.
-func (o *orch) focusWorkspaceOnPath(r app.Responder, path, hostID string) bool {
+func (o *orch) focusWorkspaceOnPath(c *client, r app.Responder, path, hostID string) bool {
 	id := o.workspaceForPathOn(path, hostID)
 	if id == "" {
 		return false
 	}
-	if err := o.session.FocusWorkspace(id); err != nil {
-		r.Fail(err.Error())
+	if o.session.WorkspaceByID(id) == nil {
+		r.Fail("unknown workspace " + id)
 		return true
 	}
+	// The window that asked is the one that gets taken to the checkout; other
+	// windows keep showing what they were showing.
+	o.setViewWorkspace(c, id)
 	o.applyModel()
 	r.OK(app.WorktreeOpenResult{Workspace: id, AlreadyOpen: true})
 	return true

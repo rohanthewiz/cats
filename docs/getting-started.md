@@ -48,6 +48,11 @@ CATS_PASSWORD=changeme bin/catway --addr :8421
 Startup order is not load-bearing — `catway` dials `cathost` lazily and retries
 with backoff, so you can start either first and restart either independently.
 
+Open a second window on another workspace with `http://localhost:8421/?ws=w2`
+(or the sidebar row's **open in new window**): each browser window shows one
+workspace, with its own tab, focus and size, over the one running session.
+Closing a window closes nothing — see [Concepts](concepts.md#windows-and-views).
+
 For a trusted-localhost setup, `catway --auth none` skips the login entirely.
 `catway --tls` serves HTTPS with an auto-generated self-signed certificate.
 

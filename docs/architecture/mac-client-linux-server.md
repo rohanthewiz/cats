@@ -76,11 +76,11 @@ sequenceDiagram
 
   U->>APP: open Cats Client.app
   APP->>APP: loadAppConfig() -> mode "remote", Remote.URL ""
-  APP->>WK: SetHtml(connect page), Bind("catsConnect"/"catsForget"/"catsCancel")
+  APP->>WK: open a window on the connect page (catsApp message handler)
   U->>WK: enter https://host:8421
   WK->>APP: catsConnect(url, label)
   APP->>APP: saveAppConfig -> app.json (0600 in a 0700 dir)
-  APP->>WK: Dispatch: SetTitle("cats — host"), Navigate(url)
+  APP->>WK: retitle "cats — host", navigate every window
   WK->>GW: GET /
   GW-->>WK: 302 /login
   U->>GW: POST /login with the shared password
@@ -89,11 +89,27 @@ sequenceDiagram
   GW-->>WK: welcome, layout, pane frames
 ```
 
-On every later launch `app.json` already holds the URL, so the window navigates
-straight there. WKWebView persists the `hsess` cookie in its data store, so
-re-launch is one click until the cookie's TTL expires — or until `catway`
-restarts, which invalidates outstanding sessions because the cookie signing key
-is per-process.
+On every later launch `app.json` already holds the URL, so the saved windows
+open straight on it. WKWebView persists the `hsess` cookie in a data store
+shared by every window, so re-launch is one click — and one login serves all of
+them — until the cookie's TTL expires, or until `catway` restarts, which
+invalidates outstanding sessions because the cookie signing key is per-process.
+
+## Windows
+
+The thin client opens **native windows**, the same shell as
+[Mode 1](standalone-mac.md#windows): **Window → New Window** (⌘N), the sidebar
+row's **open in new window**, ⌘W to close one, and ⌘+/⌘-/⌘0 on the front
+window's page. Each window is a view on one workspace of the remote session, so
+a window per project works across the network exactly as it does locally —
+independent tab, focus, zoom and size per workspace, mirroring for two windows
+on the same one.
+
+The window layout (each window's workspace and frame) is restored from
+`app.json` at launch, beside the presets. Closing a window closes nothing on the
+Linux host; closing the *last* one quits the client, which the remote `catway`
+sees as clients disconnecting and nothing more — the session and every pane in
+it keep running.
 
 ### Host presets
 
@@ -105,21 +121,24 @@ Each one becomes a **preset** (`app.json`'s `presets`), and they appear in two
 places:
 
 * a native **Connect** menu, one item per catway with ⌘1–⌘9 for the first nine,
-  a checkmark on the one the window is showing, and **Connect to Another…**
+  a checkmark on the one the windows are showing, and **Connect to Another…**
   (⌘K) at the bottom;
 * the connect page itself, which is now reachable at any time rather than only
   on a first run — it lists the saved catways, takes a new URL and an optional
   name, and lets a row be forgotten.
 
-Switching is a **navigation in the same window**, not a relaunch, so the session
-cookie WKWebView holds for each host survives being away from it: moving back to
-a catway you were signed into does not ask for the password again.
+Switching is a **navigation of the windows already open**, not a relaunch, so
+the session cookie WKWebView holds for each host survives being away from it:
+moving back to a catway you were signed into does not ask for the password
+again. Every window moves together — a different catway is a different session,
+and leaving one window behind would put two servers' workspaces on screen with
+nothing to tell them apart.
 
 Two rules worth stating:
 
-* **Forgetting is not disconnecting.** Removing a row leaves the window where it
-  is. The current connection is a live session, and tidying a list is not a
-  reason to end it.
+* **Forgetting is not disconnecting.** Removing a row leaves the windows where
+  they are. The current connection is a live session, and tidying a list is not
+  a reason to end it.
 * **The current URL is stored on its own**, not as an index into the list. The
   app must open on the last-used catway even if `presets` is empty or was
   hand-edited into nonsense.

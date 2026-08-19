@@ -9,7 +9,10 @@ package main
 // Defined in menu_darwin.m — builds and installs the native macOS menu bar.
 // hostCount < 0 omits the Connect menu entirely (local mode has nothing to
 // connect to); 0 keeps the menu with only its "Connect to Another…" item.
-void installAppMenu(const char *appName, const char **hostNames, int hostCount, int currentHost);
+// windowMenu != 0 adds the Window menu (New Window ⌘N and the standard items);
+// it is left out of the single-window webview_go paths, which have nothing to
+// put in it.
+void installAppMenu(const char *appName, const char **hostNames, int hostCount, int currentHost, int windowMenu);
 */
 import "C"
 
@@ -35,6 +38,14 @@ func catappCleanup() {
 //export catappZoom
 func catappZoom(delta C.int) {
 	zoomFont(int(delta))
+}
+
+// catappMainTick drains the closures queued for the main thread (see
+// onMainThread). Called from window_darwin.m's catsDispatchMain.
+//
+//export catappMainTick
+func catappMainTick() {
+	drainMainQueue()
 }
 
 // catappConnectPreset is called from the Connect menu (menu_darwin.m). index is
@@ -89,7 +100,14 @@ func installConnectMenu(names []string, current int) {
 			arr = (**C.char)(unsafe.Pointer(&cs[0]))
 		}
 	}
-	C.installAppMenu(name, arr, count, C.int(current))
+	// The Window menu exists exactly when the native multi-window shell does.
+	// windows is nil in the error-sheet path, which is one webview_go window and
+	// has nothing to list.
+	windowMenu := C.int(0)
+	if windows != nil {
+		windowMenu = 1
+	}
+	C.installAppMenu(name, arr, count, C.int(current), windowMenu)
 }
 
 // appMenuName is the name shown in the app menu and its About/Hide/Quit items.

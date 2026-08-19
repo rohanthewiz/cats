@@ -10,6 +10,7 @@ import (
 
 	"github.com/rohanthewiz/cats/internal/layout"
 	"github.com/rohanthewiz/cats/internal/startdir"
+	"github.com/rohanthewiz/cats/internal/workspace"
 )
 
 // This file is the protocol-neutral §7 command dispatcher. It mutates the
@@ -25,6 +26,15 @@ import (
 type Backend interface {
 	// Area is the current viewport grid; directional nav resolves against it.
 	Area() layout.Rect
+
+	// SetViewWorkspace moves the *issuing* view to a workspace — what
+	// workspace.focus means once a window is a lens rather than the viewport.
+	// It is a Backend effect and not a Session mutation because only the
+	// backend knows which window asked: a browser command carries its
+	// connection, while catctl, a hook action and a runbook step carry none and
+	// resolve to the session default (the primary view). The dispatcher has
+	// already checked that the workspace exists.
+	SetViewWorkspace(wsID string)
 
 	// ApplyModel reconciles pane PTYs with the session and rebroadcasts the
 	// viewport (layout + agents + newly-visible chrome/frames). Called after a
@@ -284,6 +294,11 @@ func (d JSONParamDecoder) RawParams() []byte { return d.Raw }
 type Dispatcher struct {
 	session *Session
 	backend Backend
+	// view is the window this command was issued from (view.go). Every command
+	// that used to mean "the active workspace" means "this view's workspace"
+	// instead; the zero View is the view-less caller and resolves back to
+	// s.active, which is why catctl, hooks and runbook steps are unchanged.
+	view View
 	// rec is the backend's macro recorder, nil unless the backend has one. It
 	// is read from the backend at construction rather than set on the
 	// dispatcher, because dispatchers are built per call in places (the runbook
@@ -292,14 +307,41 @@ type Dispatcher struct {
 	rec Recorder
 }
 
-// NewDispatcher builds a dispatcher over a session and its runtime backend.
+// NewDispatcher builds a dispatcher over a session and its runtime backend for
+// a caller with no window — catctl, a hook action, a runbook step. Its commands
+// resolve against the session's default view (the primary window's workspace).
 func NewDispatcher(s *Session, b Backend) *Dispatcher {
-	d := &Dispatcher{session: s, backend: b}
+	return NewDispatcherFor(s, b, View{})
+}
+
+// NewDispatcherFor builds a dispatcher for a caller that *has* a window. The
+// browser path uses it, handing over the view its connection is showing, so two
+// windows on two workspaces no longer drive each other's tabs, focus or splits.
+func NewDispatcherFor(s *Session, b Backend, v View) *Dispatcher {
+	d := &Dispatcher{session: s, backend: b, view: v}
 	if rb, ok := b.(recorderBackend); ok {
 		d.rec = rb.Recorder()
 	}
 	return d
 }
+
+// ws is the workspace id this dispatcher's commands default to: the issuing
+// window's, or "" for a view-less caller (which every …In form reads as "the
+// session's active workspace"). Every use of it in the table below marks a
+// command that used to read s.active implicitly.
+func (d *Dispatcher) ws() string { return d.view.WorkspaceID }
+
+// viewWorkspace is the live workspace this dispatcher acts in — the target of
+// the workspace-lock checks and the default for commands that take an optional
+// workspace id. Never nil for a session with at least one workspace.
+func (d *Dispatcher) viewWorkspace() *workspace.Workspace {
+	return d.session.viewWorkspace(d.ws())
+}
+
+// viewWorkspaceID is viewWorkspace's id, resolved: a view naming a workspace
+// that has since been closed reports the one it actually falls back to, so a
+// command scoped by it cannot land in a workspace that no longer exists.
+func (d *Dispatcher) viewWorkspaceID() string { return d.viewWorkspace().ID }
 
 // Dispatch runs one §7 command. Loop-goroutine only (it shares the session with
 // the backend). Model-mutating commands call a Session method then reconcile via
@@ -334,10 +376,17 @@ func (d *Dispatcher) dispatch(name string, dec ParamDecoder, r Responder) {
 			bad(err)
 			return
 		}
-		if err := d.session.FocusPane(layout.PaneID(p.Pane)); err != nil {
+		// FocusPaneView, not FocusPane: the pane's tab records the new focus
+		// (session state, shared by every window showing it), while *which*
+		// window follows it into that workspace is the view's business. A
+		// click on a pane in another workspace still reveals it — in the
+		// window that clicked, and only there.
+		wsID, err := d.session.FocusPaneView(layout.PaneID(p.Pane))
+		if err != nil {
 			r.Fail(err.Error())
 			return
 		}
+		d.backend.SetViewWorkspace(wsID)
 		d.backend.BroadcastLayout() // focus flag moved; pane set unchanged
 		r.OK(nil)
 
@@ -352,7 +401,7 @@ func (d *Dispatcher) dispatch(name string, dec ParamDecoder, r Responder) {
 			r.Fail(fmt.Sprintf("bad direction %q", p.Dir))
 			return
 		}
-		moved, err := d.session.FocusPaneDirection(nav, d.backend.Area())
+		moved, err := d.session.FocusPaneDirectionIn(d.ws(), nav, d.backend.Area())
 		if err != nil {
 			r.Fail(err.Error())
 			return
@@ -368,7 +417,7 @@ func (d *Dispatcher) dispatch(name string, dec ParamDecoder, r Responder) {
 			bad(err)
 			return
 		}
-		if d.session.CyclePane(p.Next) {
+		if d.session.CyclePaneIn(d.ws(), p.Next) {
 			d.backend.BroadcastLayout()
 		}
 		r.OK(nil)
@@ -384,7 +433,7 @@ func (d *Dispatcher) dispatch(name string, dec ParamDecoder, r Responder) {
 			r.Fail(fmt.Sprintf("bad direction %q", p.Dir))
 			return
 		}
-		swapped, err := d.session.SwapPaneDirection(nav, d.backend.Area())
+		swapped, err := d.session.SwapPaneDirectionIn(d.ws(), nav, d.backend.Area())
 		if err != nil {
 			r.Fail(err.Error())
 			return
@@ -400,7 +449,7 @@ func (d *Dispatcher) dispatch(name string, dec ParamDecoder, r Responder) {
 			bad(err)
 			return
 		}
-		swapped, err := d.session.SwapPanes(layout.PaneID(p.Pane), layout.PaneID(p.Target))
+		swapped, err := d.session.SwapPanesIn(d.ws(), layout.PaneID(p.Pane), layout.PaneID(p.Target))
 		if err != nil {
 			r.Fail(err.Error())
 			return
@@ -418,7 +467,7 @@ func (d *Dispatcher) dispatch(name string, dec ParamDecoder, r Responder) {
 			bad(err)
 			return
 		}
-		if _, err := d.session.ToggleZoom(optPaneID(p.Pane)); err != nil {
+		if _, err := d.session.ToggleZoomIn(d.ws(), optPaneID(p.Pane)); err != nil {
 			r.Fail(err.Error())
 			return
 		}
@@ -436,7 +485,7 @@ func (d *Dispatcher) dispatch(name string, dec ParamDecoder, r Responder) {
 			r.Fail(fmt.Sprintf("bad border id %q", p.Border))
 			return
 		}
-		if err := d.session.ResizeBorder(path, p.Ratio); err != nil {
+		if err := d.session.ResizeBorderIn(d.ws(), path, p.Ratio); err != nil {
 			r.Fail(err.Error())
 			return
 		}
@@ -444,7 +493,7 @@ func (d *Dispatcher) dispatch(name string, dec ParamDecoder, r Responder) {
 		r.OK(nil)
 
 	case CmdPaneLast:
-		if d.session.FocusLastPane() {
+		if d.session.FocusLastPaneIn(d.ws()) {
 			d.backend.BroadcastLayout()
 		}
 		r.OK(nil)
@@ -485,7 +534,7 @@ func (d *Dispatcher) dispatch(name string, dec ParamDecoder, r Responder) {
 		// verb the automation happened to pick. A bare split is a shell the user
 		// asked for by hand and goes through.
 		if len(sp.Command) > 0 {
-			if ws := d.session.ActiveWorkspace(); ws != nil && ws.Locked {
+			if ws := d.viewWorkspace(); ws != nil && ws.Locked {
 				r.Fail(workspaceLockedErr(ws.ID, "run a command in"))
 				return
 			}
@@ -503,7 +552,7 @@ func (d *Dispatcher) dispatch(name string, dec ParamDecoder, r Responder) {
 		// with no host param that is the split pane's own machine, which is what
 		// SplitPane fills in below.
 		inherited := d.inheritedSplitCwd(optPaneID(sp.Pane), sp.Host)
-		np, err := d.session.SplitPaneOn(optPaneID(sp.Pane), dir, sp.Host)
+		np, err := d.session.SplitPaneOnIn(d.ws(), optPaneID(sp.Pane), dir, sp.Host)
 		if err != nil {
 			r.Fail(err.Error())
 			return
@@ -527,7 +576,7 @@ func (d *Dispatcher) dispatch(name string, dec ParamDecoder, r Responder) {
 			bad(err)
 			return
 		}
-		if _, err := d.session.ClosePane(optPaneID(cp.Pane)); err != nil {
+		if _, err := d.session.ClosePaneIn(d.ws(), optPaneID(cp.Pane)); err != nil {
 			r.Fail(err.Error())
 			return
 		}
@@ -654,7 +703,16 @@ func (d *Dispatcher) dispatch(name string, dec ParamDecoder, r Responder) {
 		// Resolve the target up front: everything below is scoped to it, and an
 		// unknown id has to fail before the create rather than silently landing
 		// the tab in the viewport instead of where the caller aimed it.
-		ws := d.session.WorkspaceByID(p.Workspace)
+		// An omitted workspace means "the one this window is showing", which
+		// with several windows open is no longer the same as "the session's
+		// active workspace". Resolved once, here, and used for the lock check,
+		// the cwd inheritance, the create and the rename below — passing ""
+		// down would let each of them re-resolve against a different default.
+		targetWS := p.Workspace
+		if targetWS == "" {
+			targetWS = d.viewWorkspaceID()
+		}
+		ws := d.session.WorkspaceByID(targetWS)
 		if ws == nil {
 			r.Fail(fmt.Sprintf("unknown workspace %s", p.Workspace))
 			return
@@ -685,8 +743,8 @@ func (d *Dispatcher) dispatch(name string, dec ParamDecoder, r Responder) {
 		if tabHost == "" {
 			tabHost = ws.HostID
 		}
-		inherited := d.inheritedTabCwd(p.Workspace, tabHost)
-		num, root, err := d.session.CreateTabInOn(p.Workspace, p.Host)
+		inherited := d.inheritedTabCwd(targetWS, tabHost)
+		num, root, err := d.session.CreateTabInOn(targetWS, p.Host)
 		if err != nil {
 			r.Fail(err.Error())
 			return
@@ -701,7 +759,7 @@ func (d *Dispatcher) dispatch(name string, dec ParamDecoder, r Responder) {
 			// the only failure would be a vanished tab — not worth failing the
 			// whole create over. Scoped to the same workspace: tab numbers are
 			// per workspace, so an unscoped rename would find a different tab.
-			_ = d.session.RenameTabIn(p.Workspace, num, p.Title)
+			_ = d.session.RenameTabIn(targetWS, num, p.Title)
 		}
 		// Stage the spawn override before ApplyModel: that call reconciles the
 		// daemon's PTY set and is what actually creates the pane's process. An
@@ -722,7 +780,7 @@ func (d *Dispatcher) dispatch(name string, dec ParamDecoder, r Responder) {
 			bad(err)
 			return
 		}
-		if err := d.session.CloseTab(p.Num); err != nil {
+		if err := d.session.CloseTabIn(d.ws(), p.Num); err != nil {
 			r.Fail(err.Error())
 			return
 		}
@@ -735,7 +793,7 @@ func (d *Dispatcher) dispatch(name string, dec ParamDecoder, r Responder) {
 			bad(err)
 			return
 		}
-		if err := d.session.FocusTab(p.Num); err != nil {
+		if err := d.session.FocusTabIn(d.ws(), p.Num); err != nil {
 			r.Fail(err.Error())
 			return
 		}
@@ -748,7 +806,7 @@ func (d *Dispatcher) dispatch(name string, dec ParamDecoder, r Responder) {
 			bad(err)
 			return
 		}
-		if err := d.session.RenameTab(p.Num, p.Name); err != nil {
+		if err := d.session.RenameTabIn(d.ws(), p.Num, p.Name); err != nil {
 			r.Fail(err.Error())
 			return
 		}
@@ -761,7 +819,7 @@ func (d *Dispatcher) dispatch(name string, dec ParamDecoder, r Responder) {
 			bad(err)
 			return
 		}
-		moved, err := d.session.MoveTab(p.Num, p.Index)
+		moved, err := d.session.MoveTabIn(d.ws(), p.Num, p.Index)
 		if err != nil {
 			r.Fail(err.Error())
 			return
@@ -770,6 +828,36 @@ func (d *Dispatcher) dispatch(name string, dec ParamDecoder, r Responder) {
 			d.backend.BroadcastLayout() // order changed; pane set unchanged
 		}
 		r.OK(nil)
+
+	case CmdTabMoveToWorkspace:
+		var p MoveTabToWorkspaceParams
+		if err := dec.Decode(&p); err != nil {
+			bad(err)
+			return
+		}
+		if p.Workspace == "" {
+			r.Fail("workspace is required")
+			return
+		}
+		// From defaults to the issuing window's workspace: dragging a tab out of
+		// a window's own strip is the case this exists for, and that window is
+		// the only one that knows which strip it was. Resolved here rather than
+		// passed as "" — MoveTabTo would read an empty source as the SESSION's
+		// active workspace, which is a different window's.
+		from := p.From
+		if from == "" {
+			from = d.viewWorkspaceID()
+		}
+		num, err := d.session.MoveTabTo(from, p.Num, p.Workspace)
+		if err != nil {
+			r.Fail(err.Error())
+			return
+		}
+		// ApplyModel, not BroadcastLayout: the tab left one workspace's viewport
+		// and joined another's, so both windows' visible pane sets changed and
+		// every pane is re-sized against its new workspace's grid.
+		d.backend.ApplyModel()
+		r.OK(MoveTabToWorkspaceResult{Workspace: p.Workspace, Num: num})
 
 	case CmdWorkspaceCreate:
 		var p WorkspaceCreateParams
@@ -802,16 +890,24 @@ func (d *Dispatcher) dispatch(name string, dec ParamDecoder, r Responder) {
 			// between these two lines, so the create still succeeds.
 			_ = d.session.RenameWorkspace(id, p.Name)
 		}
+		// The window that asked for a workspace is the one that wanted to be in
+		// it. Other windows stay where they are — a new workspace appearing in
+		// the sidebar is not a reason to move somebody else's screen.
+		d.backend.SetViewWorkspace(id)
 		d.backend.ApplyModel()
 		r.OK(WorkspaceCreateResult{ID: id})
 
 	case CmdWorkspaceClose:
 		var p WorkspaceParams
 		_ = dec.Decode(&p) // id optional → active workspace; ignore any decode error
-		var id *string
-		if p.ID != "" {
-			id = &p.ID
+		// An omitted id closes the workspace this window is showing, not the
+		// session default's — "close this workspace" from window B must not
+		// close window A's.
+		target := p.ID
+		if target == "" {
+			target = d.viewWorkspaceID()
 		}
+		id := &target
 		if err := d.session.CloseWorkspace(id); err != nil {
 			r.Fail(err.Error())
 			return
@@ -825,10 +921,16 @@ func (d *Dispatcher) dispatch(name string, dec ParamDecoder, r Responder) {
 			bad(err)
 			return
 		}
-		if err := d.session.FocusWorkspace(p.ID); err != nil {
-			r.Fail(err.Error())
+		// The command that used to switch every client at once. It now sets
+		// *this* view's workspace: the issuing window gets a new layout and the
+		// frames for its panes, and no other window hears about it (except
+		// through the Clients census). From catctl, which has no window, the
+		// backend applies it to the primary view — what it has always done.
+		if d.session.WorkspaceByID(p.ID) == nil {
+			r.Fail(fmt.Sprintf("unknown workspace %s", p.ID))
 			return
 		}
+		d.backend.SetViewWorkspace(p.ID)
 		d.backend.ApplyModel()
 		r.OK(nil)
 
@@ -867,7 +969,11 @@ func (d *Dispatcher) dispatch(name string, dec ParamDecoder, r Responder) {
 			bad(err)
 			return
 		}
-		changed, err := d.session.SetWorkspaceLock(p.ID, p.Locked)
+		lockTarget := p.ID
+		if lockTarget == "" {
+			lockTarget = d.viewWorkspaceID()
+		}
+		changed, err := d.session.SetWorkspaceLock(lockTarget, p.Locked)
 		if err != nil {
 			r.Fail(err.Error())
 			return
@@ -887,10 +993,12 @@ func (d *Dispatcher) dispatch(name string, dec ParamDecoder, r Responder) {
 		}
 		// Unlike pane.focus, the agents sidebar is global (§8): the target pane
 		// may live in another workspace/tab, so reveal it into the viewport.
-		if err := d.session.RevealPane(layout.PaneID(p.Pane)); err != nil {
+		wsID, err := d.session.RevealPaneView(layout.PaneID(p.Pane))
+		if err != nil {
 			r.Fail(err.Error())
 			return
 		}
+		d.backend.SetViewWorkspace(wsID)
 		d.backend.ApplyModel() // viewport may have changed (different workspace/tab)
 		r.OK(nil)
 
@@ -1253,10 +1361,10 @@ func (d *Dispatcher) dispatch(name string, dec ParamDecoder, r Responder) {
 	case CmdSessionGet:
 		// Read-only queries below answer straight from the session — no Backend
 		// effect, no async round-trip.
-		r.OK(d.session.Info())
+		r.OK(d.session.InfoIn(d.ws()))
 
 	case CmdWorkspaceList:
-		r.OK(WorkspaceListResult{Workspaces: d.session.ListWorkspaces()})
+		r.OK(WorkspaceListResult{Workspaces: d.session.ListWorkspacesIn(d.ws())})
 
 	case CmdTabList:
 		var p TabListParams
@@ -1266,7 +1374,7 @@ func (d *Dispatcher) dispatch(name string, dec ParamDecoder, r Responder) {
 		}
 		// Backend meta feeds auto-naming, so tab.list reports the same derived
 		// names the browser tab bar shows.
-		tabs, resolved, ok := d.session.ListTabs(p.Workspace, d.backend.PaneMeta)
+		tabs, resolved, ok := d.session.ListTabsIn(d.ws(), p.Workspace, d.backend.PaneMeta)
 		if !ok {
 			r.Fail(fmt.Sprintf("unknown workspace %q", p.Workspace))
 			return
@@ -1274,7 +1382,7 @@ func (d *Dispatcher) dispatch(name string, dec ParamDecoder, r Responder) {
 		r.OK(TabListResult{Workspace: resolved, Tabs: tabs})
 
 	case CmdPaneList:
-		panes := d.session.ListPanes()
+		panes := d.session.ListPanesIn(d.ws())
 		// Merge in the runtime-side metadata (agent/title/cwd) the session can't
 		// know; the backend answers from its per-pane runtime cache, so this is
 		// loop-local and cheap even for many panes.
@@ -1289,7 +1397,7 @@ func (d *Dispatcher) dispatch(name string, dec ParamDecoder, r Responder) {
 			bad(err)
 			return
 		}
-		info, ok := d.session.PaneInfoFor(optPaneID(p.Pane))
+		info, ok := d.session.PaneInfoForIn(d.ws(), optPaneID(p.Pane))
 		if !ok {
 			r.Fail("no such pane")
 			return
@@ -1391,7 +1499,7 @@ func (d *Dispatcher) inheritedTabCwd(wsID, host string) string {
 // Resolving "" through the roster instead would compare the source pane against
 // the *default* host and drop the cwd for every split of a guest pane.
 func (d *Dispatcher) inheritedSplitCwd(target *layout.PaneID, host string) string {
-	src, err := d.session.ResolvePaneTarget(target)
+	src, err := d.session.ResolvePaneTargetIn(d.ws(), target)
 	if err != nil {
 		return ""
 	}
@@ -1443,7 +1551,7 @@ func (d *Dispatcher) openFile(r Responder, p OpenFileParams) {
 		r.Fail("path is required")
 		return
 	}
-	anchor, err := d.session.ResolvePaneTarget(optPaneID(p.Pane))
+	anchor, err := d.session.ResolvePaneTargetIn(d.ws(), optPaneID(p.Pane))
 	if err != nil {
 		r.Fail(err.Error())
 		return
@@ -1499,11 +1607,11 @@ func (d *Dispatcher) openFile(r Responder, p OpenFileParams) {
 	}
 	// Starting an editor is starting a process in the workspace, so it answers
 	// to the same lock as tab.create and a split carrying a command.
-	if ws := d.session.ActiveWorkspace(); ws != nil && ws.Locked {
+	if ws := d.viewWorkspace(); ws != nil && ws.Locked {
 		r.Fail(workspaceLockedErr(ws.ID, "start an editor in"))
 		return
 	}
-	np, err := d.session.SplitPaneOn(&anchor, layout.Horizontal, p.Host)
+	np, err := d.session.SplitPaneOnIn(d.ws(), &anchor, layout.Horizontal, p.Host)
 	if err != nil {
 		r.Fail(err.Error())
 		return

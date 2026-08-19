@@ -135,11 +135,13 @@ flowchart TD
   D --> C
 ```
 
-Filtering happens at the **server → front end** hop, not at the seam. On
-`tab.focus` or `workspace.focus`, the server sends the new viewport's `layout`
-followed by a **full** frame per newly-visible pane, then that pane's cached
-chrome (`broadcastPaneChrome`) — which is why per-pane chrome can follow
-visibility without the front end losing anything it is showing.
+Filtering happens at the **server → front end** hop, not at the seam, and it is
+**per connection**: each connection is a *view* with its own workspace, so the
+question above is asked once per window. On `tab.focus` or `workspace.focus`,
+the server sends *that connection* the new viewport's `layout` followed by a
+**full** frame per newly-visible pane, then that pane's cached chrome — which is
+why per-pane chrome can follow visibility without the front end losing anything
+it is showing. A window showing another workspace hears none of it.
 
 The `agents` rollup is the deliberate exception: it covers every pane in the
 session, so the sidebar roster and the notification path have state for panes you
@@ -154,16 +156,48 @@ viewport state from carries only the active tab.
 
 ## Multiple connections
 
-Several front ends can be attached at once, all viewing one `app.Session`.
-Per-connection state is small and explicit:
+Several front ends can be attached at once, all viewing one `app.Session`. A
+connection is a **view**: a lens on the session that lives exactly as long as
+its WebSocket. Per-connection state is small and explicit:
 
 * one `FrameTranslator` per pane per connection (because `def_fg`/`def_bg` are
   per-connection),
-* the connection's viewport (which workspace/tab it is showing),
+* the connection's viewport — **which workspace it is showing**, and through
+  that workspace its active tab, focused pane and zoom,
 * its reported grid.
 
-Everything else is shared, so focus and layout are global, and the last client to
-`resize` sets the pane sizes for everyone.
+`Init.workspace` picks the workspace a connection opens on; omitted (or naming a
+workspace that no longer exists) means "whatever the primary view is showing",
+which is what a single window has always got. Server capability: `window`.
+
+**Independence is per workspace.** Two connections on *different* workspaces are
+fully independent — own tab, own focus, own zoom, own grid; `workspace.focus`
+moves only the connection that sent it. Two connections on the *same* workspace
+**mirror**: one active tab and one focused pane per workspace is the model, so
+they see the same thing, and the last one to `resize` sets that workspace's pane
+sizes (a resize never reaches a workspace the sender is not showing).
+
+**The primary view** is the most recently OS-focused non-viewer connection, per
+the `focus` up-message every connection already sends. It is what resolves:
+
+* a caller with no window at all — `catctl`, a hook action, a runbook step,
+  a `ui.notify` click-through: "the focused pane" is the primary view's,
+* a **viewer** (`Init.viewer`, e.g. the phone), which declares no workspace and
+  follows the primary — whichever desktop window the user touched last,
+* the session's persisted active workspace, so a cold start opens where you
+  were,
+* the `focus_changed` control event: one event stream with one focus. A
+  non-primary window moving its focus is a window-local fact until that window
+  becomes primary.
+
+Closing a connection **never mutates the session**. The workspace it was showing
+keeps running exactly as a workspace you switched away from, and keeps its last
+area so its panes hold their shape for the next window that opens on it. The
+only session-level effect is that the primary view may move.
+
+`clients` carries a `views` array — one entry per connection with its workspace,
+grid, focus and primary flag — so a front end can mark a workspace another
+window already has open, and a viewer can label the view it is following.
 
 ## Testing it headlessly
 

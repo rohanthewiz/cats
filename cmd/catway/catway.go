@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -160,13 +161,32 @@ type orch struct {
 	// address), which the config file alone cannot supply — a --socket flag may
 	// have overridden it.
 	cathostSocket string
-	area          layout.Rect
-	cellW         uint32
-	cellH         uint32
-	cwd           string
-	// visible is the current viewport's pane set (active workspace's active
-	// tab) — the panes whose frames stream to browsers (§8). Recomputed by
-	// refreshViewport whenever the viewport changes.
+	// area is the PRIMARY view's grid (view.go): the Backend.Area() contract,
+	// the grid the Clients census reports, and the fallback for a workspace no
+	// window has ever sized. Each workspace's own area lives in wsArea.
+	area  layout.Rect
+	cellW uint32
+	cellH uint32
+	cwd   string
+	// wsArea is each workspace's layout grid, keyed by public workspace id —
+	// the area of the sizer view that most recently reported while showing it
+	// (decision 5: last reporter wins). This is what stops a second window's
+	// 120x40 from reflowing the first window's 200x60: a resize touches only
+	// the workspace its window is showing. A workspace nobody shows keeps its
+	// last entry, so its panes keep their shape for the window that returns.
+	wsArea map[string]layout.Rect
+	// focusOrder is the connections in OS-focus recency order, most recent
+	// first. primaryView reads it to answer "which window did the user touch
+	// last"; see view.go for why that is the answer every view-less caller and
+	// every viewer resolves through.
+	focusOrder []*client
+	// visible is the UNION of every view's visible pane set — "is anyone
+	// looking at this pane". It gates the session-wide consumers (unseen
+	// badges, branch refresh, agent chrome, output scanners) and it is what
+	// decides whether a frame is worth translating at all; which *windows* a
+	// pane-scoped message goes to is the per-view question sendVisible answers.
+	// With no connection at all it stands in as the session default's viewport,
+	// so a headless catway behaves exactly as it did before views existed.
 	visible map[uint32]bool
 	// pendingReqs holds in-flight daemon round-trip commands (read, capture,
 	// directory listing, worktree) awaiting their reply, FIFO per key. The
@@ -583,6 +603,7 @@ func newOrchHostsWith(hosts []config.Host, cwd string, sess *app.Session) (*orch
 		cellW:          8,
 		cellH:          16,
 		cwd:            cwd,
+		wsArea:         make(map[string]layout.Rect),
 		visible:        make(map[uint32]bool),
 		pendingReqs:    make(map[reqKey][]*pending),
 		waiters:        make(map[uint32][]*waiter),
@@ -671,8 +692,20 @@ func (o *orch) post(fn func()) { o.mailbox <- fn }
 // BuildLayout pattern the layout's agent summary uses). The derived names are
 // recorded on lastTabNames so refreshTabNames can tell when a meta change
 // actually renamed something.
-func (o *orch) viewportLayout() browserproto.Layout {
-	msg := browserproto.BuildLayout(o.session.Workspaces(), o.session.ActiveIndex(), o.area)
+func (o *orch) viewportLayout() browserproto.Layout { return o.viewportLayoutFor(nil) }
+
+// viewportLayoutFor is viewportLayout for one connection: it builds the layout
+// of the workspace THAT window is showing, over that workspace's own area.
+// BuildLayout already took an index and an area — it was built for this; the
+// only thing missing was somebody to hand it a per-window pair.
+//
+// A nil connection is the view-less caller (a test, the session default), which
+// gets the session's active workspace over the primary area — byte for byte
+// what every client used to get.
+func (o *orch) viewportLayoutFor(c *client) browserproto.Layout {
+	wsID := o.viewWS(c)
+	idx, area := o.workspaceIndexOf(wsID), o.areaFor(wsID)
+	msg := browserproto.BuildLayout(o.session.Workspaces(), idx, area)
 	for i := range msg.Panes {
 		cols, rows := innerGrid(msg.Panes[i].Rect)
 		msg.Panes[i].Inner = browserproto.Rect{msg.Panes[i].Rect[0], msg.Panes[i].Rect[1] + chromeRows, cols, rows}
@@ -689,13 +722,46 @@ func (o *orch) viewportLayout() browserproto.Layout {
 			msg.Workspaces[i].Host = o.workspaceHostID(wss[i])
 		}
 	}
-	if ws := o.activeWorkspace(); ws != nil && len(ws.Tabs) == len(msg.Tabs) {
+	if ws := o.workspaceByID(wsID); ws != nil && len(ws.Tabs) == len(msg.Tabs) {
 		for i, tab := range ws.Tabs {
 			msg.Tabs[i].Name = o.session.TabDisplayName(tab, o.PaneMeta)
 		}
 	}
-	o.lastTabNames = tabNamesOf(msg)
 	return msg
+}
+
+// workspaceIndexOf is a workspace's position in the session, -1 when it names
+// none. BuildLayout renders an out-of-range index as "no active workspace",
+// which is the honest answer for a view whose workspace has been closed — but
+// viewWS resolves those away before we get here, so in practice it is never -1.
+func (o *orch) workspaceIndexOf(wsID string) int {
+	for i, ws := range o.session.Workspaces() {
+		if ws.ID == wsID {
+			return i
+		}
+	}
+	return -1
+}
+
+// workspaceByID resolves a workspace from its public id, nil for none.
+func (o *orch) workspaceByID(wsID string) *workspace.Workspace {
+	for _, ws := range o.session.Workspaces() {
+		if ws.ID == wsID {
+			return ws
+		}
+	}
+	return nil
+}
+
+// broadcastLayouts sends every connection the layout of the workspace it is
+// showing. It replaces the single broadcast of one shared viewport: with two
+// windows on two workspaces there is no one layout to send, and sending either
+// of them to both is the bug this whole slice exists to remove.
+func (o *orch) broadcastLayouts() {
+	for c := range o.conns {
+		o.send(c, o.viewportLayoutFor(c))
+	}
+	o.lastTabNames = o.viewedTabNames()
 }
 
 // activeWorkspace is the session's active workspace, nil when the index is
@@ -727,19 +793,46 @@ func tabNamesOf(msg browserproto.Layout) string {
 // pane every spinner tick) from spamming layouts when the derived name is
 // unaffected.
 func (o *orch) refreshTabNames() {
-	ws := o.activeWorkspace()
-	if ws == nil {
+	if o.viewedTabNames() == o.lastTabNames {
 		return
 	}
+	o.broadcastLayouts() // broadcastLayouts re-records lastTabNames
+}
+
+// viewedTabNames flattens the derived tab names of every workspace some window
+// is showing (plus the session default, so a headless catway still tracks one).
+// Diffing on it is what keeps meta churn — a busy agent retitling its pane every
+// spinner tick — from spamming layouts when no derived name actually moved.
+// Scoped to the *viewed* workspaces rather than all of them so a background
+// workspace's churn stays free.
+func (o *orch) viewedTabNames() string {
+	seen := map[string]bool{}
+	var ids []string
+	add := func(id string) {
+		if id != "" && !seen[id] {
+			seen[id] = true
+			ids = append(ids, id)
+		}
+	}
+	for c := range o.conns {
+		add(o.viewWS(c))
+	}
+	add(o.session.ActiveWorkspaceID())
+	slices.Sort(ids) // map iteration order must not change the digest
 	var b strings.Builder
-	for _, tab := range ws.Tabs {
-		b.WriteString(o.session.TabDisplayName(tab, o.PaneMeta))
+	for _, id := range ids {
+		ws := o.workspaceByID(id)
+		if ws == nil {
+			continue
+		}
+		b.WriteString(id)
 		b.WriteByte(0)
+		for _, tab := range ws.Tabs {
+			b.WriteString(o.session.TabDisplayName(tab, o.PaneMeta))
+			b.WriteByte(0)
+		}
 	}
-	if b.String() == o.lastTabNames {
-		return
-	}
-	o.broadcast(o.viewportLayout()) // viewportLayout re-records lastTabNames
+	return b.String()
 }
 
 // innerGrid is a pane rect's terminal grid after reserving the chrome row.
@@ -763,8 +856,14 @@ func (o *orch) desiredGrids() map[uint32][2]uint16 {
 		return h
 	}
 	for _, ws := range o.session.Workspaces() {
+		// Each workspace is sized against its OWN area — the grid of the window
+		// showing it — not one grid shared by the whole session. Off-screen tabs
+		// of that workspace ride along, as they always have: they are live PTYs
+		// that simply are not streamed, and they must already be the right shape
+		// for the window that switches to them.
+		area := o.areaFor(ws.ID)
 		for _, tab := range ws.Tabs {
-			for _, info := range tab.Layout.Panes(o.area) {
+			for _, info := range tab.Layout.Panes(area) {
 				grids[uint32(info.ID)] = [2]uint16{info.Rect.Width, gridRows(info.Rect.Height)}
 			}
 			// A zoomed tab renders its focused pane at the full area (§8, the
@@ -772,7 +871,7 @@ func (o *orch) desiredGrids() map[uint32][2]uint16 {
 			// hidden siblings keep their split-rect sizes above — they stay live
 			// PTYs so syncDaemon won't close them, and don't stream while hidden.
 			if tab.Zoomed {
-				grids[uint32(tab.Layout.Focused())] = [2]uint16{o.area.Width, gridRows(o.area.Height)}
+				grids[uint32(tab.Layout.Focused())] = [2]uint16{area.Width, gridRows(area.Height)}
 			}
 		}
 	}
@@ -1148,20 +1247,54 @@ func (o *orch) paneCwd(pid uint32) string {
 	return o.cwd
 }
 
-// refreshViewport recomputes the visible-pane set and returns the panes that
-// just became visible (a viewport change), so the loop can resend their chrome
-// and full frames.
-func (o *orch) refreshViewport() (added []uint32) {
-	next := make(map[uint32]bool)
-	for _, id := range o.session.VisiblePaneIDs() {
-		pid := uint32(id)
-		next[pid] = true
+// refreshViewport recomputes every view's visible-pane set and the union of
+// them, and reports what became newly visible — twice over, because the two
+// consumers ask different questions:
+//
+//   - added: panes newly visible to ANYBODY. A pane entering some window's
+//     viewport has its completions marked seen, once, no matter how many
+//     windows it entered.
+//   - perClient: panes newly visible to EACH window. Only those windows need a
+//     chrome resend and a reset translator; a window that was already showing
+//     the pane must not be handed a redundant full frame.
+//
+// With no connection at all, the union stands in as the session default's
+// viewport (see the o.visible field note), so a headless catway is unchanged.
+func (o *orch) refreshViewport() (added []uint32, perClient map[*client][]uint32) {
+	perClient = make(map[*client][]uint32)
+	union := make(map[uint32]bool)
+	for c := range o.conns {
+		// A view whose workspace was closed out from under it falls back to the
+		// primary's; write that back so the census and the next layout agree
+		// with what the window is actually being sent.
+		if c.view.ws != "" && o.session.WorkspaceByID(c.view.ws) == nil {
+			c.view.ws = ""
+			o.connsDirty = true
+		}
+		next := make(map[uint32]bool)
+		for _, id := range o.session.VisiblePaneIDsIn(o.viewWS(c)) {
+			pid := uint32(id)
+			next[pid] = true
+			union[pid] = true
+			if !c.view.visible[pid] {
+				perClient[c] = append(perClient[c], pid)
+			}
+		}
+		c.view.visible = next
+	}
+	if len(o.conns) == 0 {
+		for _, id := range o.session.VisiblePaneIDs() {
+			union[uint32(id)] = true
+		}
+	}
+	for pid := range union {
 		if !o.visible[pid] {
 			added = append(added, pid)
 		}
 	}
-	o.visible = next
-	return added
+	slices.Sort(added) // map iteration order must not leak into the effects below
+	o.visible = union
+	return added, perClient
 }
 
 // applyModel is the standard follow-up after a model-mutating command: sync the
@@ -1169,28 +1302,60 @@ func (o *orch) refreshViewport() (added []uint32) {
 // newly-visible panes (chrome + full frame), emit any structural events, and
 // arm the debounced session save.
 func (o *orch) applyModel() {
+	// The session default follows the primary view, so `active` keeps meaning
+	// "where you were" for persistence and for every caller with no window.
+	// First, because everything below resolves views through it.
+	o.syncPrimaryActive()
 	o.syncDaemon()
-	added := o.refreshViewport()
+	added, perClient := o.refreshViewport()
 	// Entering the viewport marks a pane's completions seen (cats: switching
-	// to a tab sets pane.seen on everything it shows).
+	// to a tab sets pane.seen on everything it shows). Union-scoped: one window
+	// looking at the pane is enough to have seen it.
 	for _, pid := range added {
 		if rt := o.panes[pid]; rt != nil {
 			rt.unseen = false
 		}
 	}
-	o.broadcast(o.viewportLayout())
+	o.broadcastLayouts()
 	o.broadcast(o.agentsMsg())
-	for _, pid := range added {
-		o.broadcastPaneChrome(pid)
-		o.resyncPane(pid)
-	}
+	o.resyncViews(perClient)
 	o.emitStructuralEvents()
 	o.broadcastTitle()
 	o.saveSoon()
 }
 
-// resyncPane forces every connection's translator for the pane to emit a full
-// frame and asks the daemon to replay one.
+// resyncViews hands each window the chrome and a full frame for the panes it
+// just gained. The chrome goes only to the windows that gained the pane; the
+// daemon replay is asked for once per pane, since the frame it produces fans
+// out through every connection's own translator anyway — and a window that was
+// already showing the pane simply gets a delta off its unreset translator.
+func (o *orch) resyncViews(perClient map[*client][]uint32) {
+	replay := map[uint32]bool{}
+	for c, pids := range perClient {
+		for _, pid := range pids {
+			o.sendPaneChrome(c, pid)
+			if t := c.trans[pid]; t != nil {
+				t.Reset() // this window needs a full frame, not a delta
+			}
+			replay[pid] = true
+		}
+	}
+	ids := make([]uint32, 0, len(replay))
+	for pid := range replay {
+		ids = append(ids, pid)
+	}
+	slices.Sort(ids) // deterministic β traffic makes the tests readable
+	for _, pid := range ids {
+		o.hostForPane(pid).send(orchestration.NewRequestResync(pid))
+	}
+}
+
+// resyncPane forces EVERY connection's translator for the pane to emit a full
+// frame and asks the daemon to replay one. It is the session-wide form, for the
+// moments when what every window holds is suspect — a daemon reconnect, where
+// the PTY behind the pane is a different process than the frames so far
+// described. The per-view form (a pane entering one window's viewport) is
+// resyncViews.
 func (o *orch) resyncPane(pid uint32) {
 	for c := range o.conns {
 		if t := c.trans[pid]; t != nil {
@@ -1583,9 +1748,16 @@ func (o *orch) seedStructure() {
 	o.structFocus = o.focusedPaneID()
 }
 
-// focusedPaneID is the globally-focused pane's internal id (0 if none).
+// focusedPaneID is the session's one focused pane for the consumers that need
+// exactly one: the focus_changed control event and its structFocus snapshot.
+//
+// It follows the PRIMARY view (view.go) — the window the user touched last. One
+// event stream with one focus is what subscribers expect, and "the window in
+// front" is the only reading of it that stays meaningful with several windows
+// open; a non-primary window moving its focus is a window-local fact until that
+// window becomes primary, at which point the event fires.
 func (o *orch) focusedPaneID() uint32 {
-	if id, ok := o.session.FocusedPane(); ok {
+	if id, ok := o.session.FocusedPaneIn(o.viewWS(o.primaryView())); ok {
 		return uint32(id)
 	}
 	return 0
@@ -1675,12 +1847,28 @@ func (o *orch) noteUsageAttention() {
 	o.RefreshUsage()
 }
 
-// paneSeen is the focus state a pane's program should believe: it is the
-// session's focused pane and somebody's window is in front to see it. Both
-// halves matter — a focused pane in a backgrounded app is not being watched,
-// and neither is a background pane in a focused app.
+// paneSeen is the focus state a pane's program should believe: some window is
+// in the OS foreground AND that window has this pane focused. Both halves
+// matter — a focused pane in a backgrounded app is not being watched, and
+// neither is a background pane in a focused app.
+//
+// With views the two halves compose PER WINDOW rather than session-wide. The
+// old form asked "is any window in front" and "is this the session's focused
+// pane" separately, which with two windows would tell a pane in window A's
+// workspace that it was focused because window B was in front. Answering it per
+// connection also makes the multi-window case strictly better than the old one:
+// two windows in front on two workspaces means two panes legitimately have
+// focus, and each program is told the truth about itself.
 func (o *orch) paneSeen(pid uint32) bool {
-	return o.anyClientFocused() && pid == o.focusedPaneID()
+	for c := range o.conns {
+		if !c.focused {
+			continue
+		}
+		if id, ok := o.session.FocusedPaneIn(o.viewWS(c)); ok && uint32(id) == pid {
+			return true
+		}
+	}
+	return false
 }
 
 // syncAppFocus reconciles every pane program's believed focus (appFocused)
@@ -1722,8 +1910,16 @@ func (o *orch) syncAppFocus() {
 // pair (StartRead/StartCapture) is above with the pending machinery. All run on
 // the loop goroutine.
 
-// Area is the current viewport grid.
+// Area is the primary view's grid — the answer for a caller with no window of
+// its own. A browser command resolves against its own window's grid instead;
+// see viewBackend in commands.go.
 func (o *orch) Area() layout.Rect { return o.area }
+
+// SetViewWorkspace moves the primary view to a workspace (app.Backend). It is
+// the view-less half of workspace.focus: catctl, a hook action and a runbook
+// step have no window, so "switch workspace" means the one the user last
+// touched — which is what it has always meant, there being only one before.
+func (o *orch) SetViewWorkspace(wsID string) { o.setViewWorkspace(nil, wsID) }
 
 // ApplyModel reconciles the daemon and rebroadcasts the viewport after a
 // model-mutating command.
@@ -1734,7 +1930,21 @@ func (o *orch) ApplyModel() { o.applyModel() }
 // here without touching the pane set (rename is a no-op diff). Focus and names
 // are durable state, so the debounced save is armed too.
 func (o *orch) BroadcastLayout() {
-	o.broadcast(o.viewportLayout())
+	o.syncPrimaryActive()
+	// Moving focus can move a window's pane set even though the session's is
+	// unchanged — pane.focus onto a pane in another workspace takes that window
+	// with it, and focusing a different pane inside a zoomed tab changes what
+	// the tab shows. Refreshing here is what keeps "the pane set did not
+	// change" true of the SESSION without leaving a window streaming panes it
+	// no longer displays.
+	added, perClient := o.refreshViewport()
+	for _, pid := range added {
+		if rt := o.panes[pid]; rt != nil {
+			rt.unseen = false
+		}
+	}
+	o.broadcastLayouts()
+	o.resyncViews(perClient)
 	o.emitStructuralEvents()
 	o.broadcastTitle()
 	o.saveSoon()
@@ -1744,9 +1954,7 @@ func (o *orch) BroadcastLayout() {
 // rides the chrome resend when the pane next becomes visible. The custom name it
 // reflects (pane.rename) is durable, so the save is armed.
 func (o *orch) BroadcastPaneTitle(pane uint32) {
-	if o.visible[pane] {
-		o.broadcast(browserproto.NewPaneTitle(pane, o.effectiveTitle(pane)))
-	}
+	o.sendVisible(pane, browserproto.NewPaneTitle(pane, o.effectiveTitle(pane)))
 	o.broadcastTitle()
 	o.refreshTabNames() // a pane custom name is the top auto-name rung
 	o.saveSoon()
@@ -1935,17 +2143,27 @@ func (o *orch) effectiveTitle(pid uint32) string {
 	return ""
 }
 
-// appTitle is the app-level browser-tab title (WS8): the focused pane's
-// effective title when it has one, otherwise the active workspace's name.
-func (o *orch) appTitle() string {
-	if id, ok := o.session.FocusedPane(); ok {
+// appTitle is the app-level browser-tab title (WS8) for the session default —
+// the primary view. Kept for the callers with no window of their own.
+func (o *orch) appTitle() string { return o.titleFor(nil) }
+
+// titleFor is the browser-tab title ONE window should show: its own focused
+// pane's effective title when it has one, otherwise the workspace it is
+// showing.
+//
+// Per window rather than broadcast, because with two windows on two projects a
+// single shared title is wrong in both of them — and the browser tab strip (or
+// the Mac window's title bar) is precisely where you look to tell two windows
+// apart.
+func (o *orch) titleFor(c *client) string {
+	wsID := o.viewWS(c)
+	if id, ok := o.session.FocusedPaneIn(wsID); ok {
 		if t := o.effectiveTitle(uint32(id)); t != "" {
 			return t
 		}
 	}
-	wss := o.session.Workspaces()
-	if i := o.session.ActiveIndex(); i >= 0 && i < len(wss) {
-		return wss[i].DisplayName()
+	if ws := o.workspaceByID(wsID); ws != nil {
+		return ws.DisplayName()
 	}
 	return ""
 }
@@ -1953,38 +2171,61 @@ func (o *orch) appTitle() string {
 // broadcastTitle pushes the app title to every browser when it changed —
 // called after anything that can move focus or retitle the focused pane.
 func (o *orch) broadcastTitle() {
-	if t := o.appTitle(); t != o.lastTitle {
-		o.lastTitle = t
-		o.broadcast(browserproto.NewTitle(t))
+	for c := range o.conns {
+		if t := o.titleFor(c); t != c.view.title {
+			c.view.title = t
+			o.send(c, browserproto.NewTitle(t))
+		}
 	}
+	// The session-default title is tracked too, for a session with nobody
+	// connected (a headless run, a test) — and so the value stays meaningful
+	// for anything that asks what the session is called.
+	o.lastTitle = o.appTitle()
 }
 
-// broadcastPaneChrome resends a pane's cached chrome to all connections (used
-// when a pane becomes visible after a viewport switch).
-func (o *orch) broadcastPaneChrome(pid uint32) {
+// sendPaneChrome resends a pane's cached chrome to ONE connection — the window
+// that just gained the pane in its viewport, or one that just registered. It is
+// per connection rather than a broadcast because a viewport switch is now a
+// per-window event: the other windows are showing something else and have no
+// use for this pane's title, cwd or branch.
+//
+// A nil connection broadcasts to all, which is what the pre-view world did and
+// what the daemon-reconnect path (where every window's picture is suspect)
+// still wants.
+func (o *orch) sendPaneChrome(c *client, pid uint32) {
 	rt := o.panes[pid]
 	if rt == nil {
 		return
 	}
-	o.broadcast(browserproto.PaneModes{T: browserproto.MsgPaneModes, Pane: pid,
+	out := func(m any) {
+		if c == nil {
+			o.broadcast(m)
+			return
+		}
+		o.send(c, m)
+	}
+	out(browserproto.PaneModes{T: browserproto.MsgPaneModes, Pane: pid,
 		Mouse: rt.modes.MouseMode != terminal.MouseNone, AltScreen: rt.modes.AlternateScreen,
 		Kitty: rt.modes.KittyKeyboardFlags})
 	if t := o.effectiveTitle(pid); t != "" {
-		o.broadcast(browserproto.NewPaneTitle(pid, t))
+		out(browserproto.NewPaneTitle(pid, t))
 	}
 	if rt.cwd != "" {
-		o.broadcast(browserproto.NewPaneCwd(pid, rt.cwd))
+		out(browserproto.NewPaneCwd(pid, rt.cwd))
 	}
 	if rt.branch != "" {
-		o.broadcast(browserproto.NewPaneBranch(pid, rt.branch))
+		out(browserproto.NewPaneBranch(pid, rt.branch))
 	}
 	if agent, state := rt.effectiveAgent(); agent != "" {
-		o.broadcast(browserproto.NewPaneAgent(pid, agent, state, rt.agentModel, true))
+		out(browserproto.NewPaneAgent(pid, agent, state, rt.agentModel, true))
 	}
 	if rt.exited != nil {
-		o.broadcast(browserproto.NewPaneExited(pid, *rt.exited))
+		out(browserproto.NewPaneExited(pid, *rt.exited))
 	}
 }
+
+// broadcastPaneChrome is sendPaneChrome to every connection.
+func (o *orch) broadcastPaneChrome(pid uint32) { o.sendPaneChrome(nil, pid) }
 
 // enqueue delivers bytes to a connection's writer, dropping the connection if
 // it can't keep up. Loop-goroutine only.
@@ -2007,7 +2248,15 @@ func (o *orch) dropConn(c *client) {
 		return
 	}
 	delete(o.conns, c)
+	o.forgetFocusOrder(c)
 	close(c.out)
+	// Closing a window never mutates the session (decision 8): the workspace it
+	// was showing keeps running exactly as a workspace you switched away from,
+	// and its area is remembered so the next window on it opens the same shape.
+	// The one session-level effect is that the primary view may have moved,
+	// which syncPrimaryActive picks up on the next model touch — and here, so a
+	// save landing before then records the surviving window's workspace.
+	o.syncPrimaryActive()
 	// Only flag it. Broadcasting the census from here would re-enter: dropConn's
 	// hottest caller is enqueue, which is itself running inside a broadcast loop
 	// over o.conns — so the census would iterate a map the outer range is still
@@ -2021,12 +2270,44 @@ func (o *orch) dropConn(c *client) {
 // "2 clients, 1 sizer" reads as one desktop and one phone along for the ride.
 func (o *orch) clientsMsg() browserproto.Clients {
 	sizers := 0
+	primary := o.primaryView()
+	views := make([]browserproto.ClientView, 0, len(o.conns))
 	for c := range o.conns {
 		if !c.viewer {
 			sizers++
 		}
+		views = append(views, browserproto.ClientView{
+			// The RESOLVED workspace, not c.view.ws: a viewer follows the
+			// primary and a stale id falls back, and a client rendering "also
+			// open in another window" needs the workspace actually on screen.
+			Workspace: o.viewWS(c),
+			Cols:      c.view.area.Width,
+			Rows:      c.view.area.Height,
+			Focused:   c.focused,
+			Viewer:    c.viewer,
+			Primary:   c == primary,
+		})
 	}
-	return browserproto.NewClients(len(o.conns), sizers, o.area.Width, o.area.Height)
+	// Sorted so a census is a function of the connection set and not of Go's map
+	// iteration order — otherwise every flush looks like a change to a client
+	// diffing the list.
+	slices.SortFunc(views, func(a, b browserproto.ClientView) int {
+		if a.Workspace != b.Workspace {
+			return strings.Compare(a.Workspace, b.Workspace)
+		}
+		switch {
+		case a.Primary != b.Primary:
+			if a.Primary {
+				return -1
+			}
+			return 1
+		case a.Cols != b.Cols:
+			return int(a.Cols) - int(b.Cols)
+		default:
+			return int(a.Rows) - int(b.Rows)
+		}
+	})
+	return browserproto.NewClientsWithViews(len(o.conns), sizers, o.area.Width, o.area.Height, views)
 }
 
 // flushClients broadcasts the census if the connection set (or the grid it
@@ -2095,6 +2376,12 @@ type client struct {
 	pong   chan []byte // ping payloads to echo back; see serve's ping handler
 	viewer bool
 	trans  map[uint32]*browserproto.FrameTranslator
+	// view is what this window is looking at: its workspace, its grid, and the
+	// pane set it streams (view.go). It is the per-connection half of what used
+	// to be one shared viewport, and it is the reason two windows can now show
+	// two projects without switching each other. Loop-goroutine only, except
+	// for the initial ws/visible written in serve before publication.
+	view view
 	// focused is this window's OS-level focus, per its Focus reports. Starts
 	// true in registerConn: a browser that just connected is in front until it
 	// says otherwise, which keeps clients that never report (older pages, ctl
@@ -2224,6 +2511,10 @@ func (o *orch) serve(ws *rweb.WSConn) error {
 		pong:   make(chan []byte, 4),
 		viewer: init.Viewer,
 		trans:  make(map[uint32]*browserproto.FrameTranslator)}
+	// The view is set before the client is published to the loop, like viewer:
+	// the writer goroutine must never see a half-built client. registerConn
+	// fills in the grid, which only it knows to accept or ignore.
+	c.view = view{ws: init.Workspace, visible: map[uint32]bool{}}
 
 	c.installKeepalive()
 	go c.writer()
@@ -2260,49 +2551,51 @@ func (o *orch) registerConn(c *client, init *browserproto.Init) {
 	c.focused = true // in front until its first Focus report says otherwise
 	o.conns[c] = struct{}{}
 	o.connsDirty = true
+	if c.view.visible == nil {
+		c.view.visible = map[uint32]bool{} // a test may build the client by hand
+	}
+	if c.view.ws == "" {
+		c.view.ws = init.Workspace
+	}
+	// A window that just opened is the one in front, so it becomes the primary
+	// view — matching c.focused above, and matching what a user means by
+	// opening a window. A viewer joins the list too but can never be primary
+	// (primaryView skips them); keeping it there costs nothing and means the
+	// list is simply "every connection, most recently focused first".
+	o.noteFocusOrder(c)
 	// A viewer declares no geometry: neither the cell grid nor the cell pixel
 	// metrics. Skipping the metrics matters as much as skipping the grid — they
 	// ride β create_pane/resize (see syncDaemon and the split path), so a phone's
 	// cell size would reach every pane's TERM even though its grid did not.
 	if !c.viewer {
 		if init.Cols > 0 && init.Rows > 0 {
-			o.area = layout.Rect{Width: init.Cols, Height: init.Rows}
+			c.view.area = layout.Rect{Width: init.Cols, Height: init.Rows}
+			// The grid lands on the workspace this window is showing, not on
+			// the session: a second window opening on another project must not
+			// reflow the first one's panes.
+			o.noteViewArea(c)
 		}
 		if init.CellWPx > 0 && init.CellHPx > 0 {
 			o.cellW, o.cellH = init.CellWPx, init.CellHPx
 		}
 	}
+	o.syncPrimaryActive()
 	o.syncDaemon() // the new grid may resize panes
 	o.refreshViewport()
 
 	o.send(c, browserproto.NewWelcome(""))
-	o.send(c, o.viewportLayout())
-	for _, id := range o.session.VisiblePaneIDs() {
+	o.send(c, o.viewportLayoutFor(c))
+	// This window's panes, not the session's: a connection that opened on w2
+	// gets w2's chrome and frames, and hears nothing about w1.
+	for _, id := range o.session.VisiblePaneIDsIn(o.viewWS(c)) {
 		pid := uint32(id)
 		rt := o.panes[pid]
 		if rt == nil {
 			continue
 		}
-		o.send(c, browserproto.PaneModes{T: browserproto.MsgPaneModes, Pane: pid,
-			Mouse: rt.modes.MouseMode != terminal.MouseNone, AltScreen: rt.modes.AlternateScreen,
-			Kitty: rt.modes.KittyKeyboardFlags})
-		// Effective title, not rt.title: a pane.rename custom name must survive
-		// a page reload just like it survives a viewport switch.
-		if t := o.effectiveTitle(pid); t != "" {
-			o.send(c, browserproto.NewPaneTitle(pid, t))
-		}
-		if rt.cwd != "" {
-			o.send(c, browserproto.NewPaneCwd(pid, rt.cwd))
-		}
-		if rt.branch != "" {
-			o.send(c, browserproto.NewPaneBranch(pid, rt.branch))
-		}
-		if agent, state := rt.effectiveAgent(); agent != "" {
-			o.send(c, browserproto.NewPaneAgent(pid, agent, state, rt.agentModel, true))
-		}
-		if rt.exited != nil {
-			o.send(c, browserproto.NewPaneExited(pid, *rt.exited))
-		}
+		// Effective titles, cwd, branch, agent, exit — the same cached chrome a
+		// pane entering the viewport gets, which is what sendPaneChrome is.
+		o.sendPaneChrome(c, pid)
 		c.translator(pid).Reset()
 		o.hostOf(rt).send(orchestration.NewRequestResync(pid))
 	}
@@ -2325,7 +2618,8 @@ func (o *orch) registerConn(c *client, init *browserproto.Init) {
 		// mid-conversation (or mid-permission-prompt) starts converged.
 		o.send(c, o.chat.Snapshot())
 	}
-	o.send(c, browserproto.NewTitle(o.appTitle()))
+	c.view.title = o.titleFor(c)
+	o.send(c, browserproto.NewTitle(c.view.title))
 	if !o.hostByID(o.defaultHost).connected() {
 		o.send(c, browserproto.NewError(0, "cathost daemon not connected — retrying"))
 	}
@@ -2355,15 +2649,22 @@ func (o *orch) registerConn(c *client, init *browserproto.Init) {
 // keystroke. Nothing is left to guess at: layout.workspaces[].locked already
 // names every locked workspace, and the viewport's pane set is what visibility
 // means, so a client can render the refusal before it types.
-func (o *orch) inputTarget(pane uint32) *paneRuntime {
+func (o *orch) inputTarget(c *client, pane uint32) *paneRuntime {
 	if pane == 0 {
-		id, ok := o.session.FocusedPane()
+		// The focused pane OF THE WINDOW THAT TYPED, not of the session. This
+		// is the whole point of a view for input: window B's keystrokes go
+		// where window B's cursor is, however window A has moved on.
+		id, ok := o.session.FocusedPaneIn(o.viewWS(c))
 		if !ok {
 			return nil
 		}
 		pane = uint32(id)
 	} else {
-		if !o.visible[pane] {
+		// "Visible" is now "visible in THIS window": frames stream per view, so
+		// a window's freshness proof is its own viewport and not some other
+		// window's. A client with no view at all (a test, an internal caller)
+		// falls back to the union, which is what it used to mean.
+		if !o.viewSees(c, pane) {
 			return nil
 		}
 		if ws := o.session.PaneWorkspace(layout.PaneID(pane)); ws != nil && ws.Locked {
@@ -2380,7 +2681,7 @@ func (o *orch) inputTarget(pane uint32) *paneRuntime {
 func (o *orch) handleUp(c *client, up any) {
 	switch m := up.(type) {
 	case *browserproto.Key:
-		rt := o.inputTarget(m.Pane)
+		rt := o.inputTarget(c, m.Pane)
 		if rt == nil {
 			return
 		}
@@ -2392,7 +2693,7 @@ func (o *orch) handleUp(c *client, up any) {
 
 	case *browserproto.Mouse:
 		rt := o.panes[m.Pane]
-		if rt == nil || rt.exited != nil || !o.visible[m.Pane] {
+		if rt == nil || rt.exited != nil || !o.viewSees(c, m.Pane) {
 			return
 		}
 		b, err := rt.enc.Mouse(*m)
@@ -2408,7 +2709,7 @@ func (o *orch) handleUp(c *client, up any) {
 		}
 
 	case *browserproto.Paste:
-		rt := o.inputTarget(m.Pane)
+		rt := o.inputTarget(c, m.Pane)
 		if rt == nil {
 			return
 		}
@@ -2421,14 +2722,50 @@ func (o *orch) handleUp(c *client, up any) {
 	case *browserproto.Focus:
 		// Viewers count: a phone in the foreground is somebody looking, even
 		// if it never owns the geometry.
-		if c == nil || c.focused == m.Focused {
+		if c == nil {
+			return
+		}
+		// Coming forward makes this the most recently touched window, and
+		// therefore the primary view — the one catctl, hook actions and every
+		// viewer resolve "the focused pane" through. The report was already on
+		// the wire for the pane-program focus below; this is bookkeeping on it,
+		// not a new signal.
+		//
+		// Checked BEFORE the no-op guard, and against the primary rather than
+		// against c.focused: a window that never reported a blur (it connected
+		// while already in front, or an older page that only reports focus-in)
+		// would otherwise be unable to claim the primary at all, and the whole
+		// session would keep resolving through a window the user has left.
+		if m.Focused {
+			if o.primaryView() != c {
+				o.noteFocusOrder(c)
+				o.syncPrimaryActive()
+				o.connsDirty = true // the census carries the primary flag
+			}
+			// The window in front owns its workspace's grid (areaFor), so
+			// record that grid as the workspace's last-known one too. Otherwise
+			// the panes snap back to some other window's size the moment this
+			// one is alt-tabbed away from, which is the opposite of what
+			// focused-window-wins is for.
+			o.noteViewArea(c)
+		}
+		if c.focused == m.Focused {
 			return
 		}
 		c.focused = m.Focused
+		o.connsDirty = true // the census carries each view's focus
+		// Focused window wins on sizing (areaFor), so coming forward or going
+		// away can change the grid of a workspace TWO windows are showing.
+		// Reconciled only in that case: a focus report is otherwise pure
+		// bookkeeping, and reflowing every pane on every alt-tab would be a
+		// resize storm for a session that has one window, which is most of them.
+		if o.sharedSizerWorkspace(o.viewWS(c)) {
+			o.applyModel()
+		}
 		o.syncAppFocus()
 
 	case *browserproto.Raw:
-		id, ok := o.session.FocusedPane()
+		id, ok := o.session.FocusedPaneIn(o.viewWS(c))
 		if ok && len(m.Data) > 0 {
 			o.hostForPane(uint32(id)).send(orchestration.NewInput(uint32(id), m.Data))
 		}
@@ -2440,7 +2777,13 @@ func (o *orch) handleUp(c *client, up any) {
 		if c.viewer || m.Cols == 0 || m.Rows == 0 {
 			return
 		}
-		o.area = layout.Rect{Width: m.Cols, Height: m.Rows}
+		// The resize lands on this window's view and, through it, on the
+		// workspace this window is showing — not on the session. Two windows on
+		// two workspaces no longer reflow each other; two windows on one still
+		// do, last reporter winning, which is the documented mirroring case
+		// (decision 5).
+		c.view.area = layout.Rect{Width: m.Cols, Height: m.Rows}
+		o.noteViewArea(c)
 		o.connsDirty = true // Clients carries the grid; it just changed
 		o.applyModel()
 

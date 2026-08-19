@@ -13,7 +13,6 @@ package app
 import (
 	"errors"
 	"fmt"
-	"slices"
 	"strconv"
 	"strings"
 
@@ -61,9 +60,12 @@ func (s *Session) Cwd() string { return s.cwd }
 // between runs (cf. cmd/catway's healStartDirs).
 func (s *Session) SetCwd(cwd string) { s.cwd = cwd }
 
-// FocusedPane resolves the active workspace's active tab's focused pane.
+// FocusedPane resolves the session-default view's focused pane: the active
+// workspace's active tab's focused leaf. A caller that has a window wants
+// FocusedPaneIn instead — with several windows open there is no single
+// "focused pane" any more, only the one each window has (see view.go).
 func (s *Session) FocusedPane() (layout.PaneID, bool) {
-	return s.ActiveWorkspace().FocusedPaneID()
+	return s.FocusedPaneIn("")
 }
 
 // AllPaneIDs lists every pane across all workspaces and tabs — the panes the
@@ -113,14 +115,7 @@ func (s *Session) PaneNeighbourhood(id layout.PaneID) (tab, workspace map[layout
 // tab) — the only panes whose frames stream to the browser (§8). A zoomed tab
 // shows only its focused pane, so that is the whole viewport.
 func (s *Session) VisiblePaneIDs() []layout.PaneID {
-	tab := s.ActiveWorkspace().ActiveTab()
-	if tab == nil {
-		return nil
-	}
-	if tab.Zoomed {
-		return []layout.PaneID{tab.Layout.Focused()}
-	}
-	return tab.Layout.PaneIDs()
+	return s.VisiblePaneIDsIn("")
 }
 
 // PublicPaneID resolves a pane's public handle ("w1:p3") from whichever
@@ -168,13 +163,16 @@ func (s *Session) PaneByPublicID(handle string) (layout.PaneID, bool) {
 
 // FocusPane focuses a pane within its owning tab (browser click-to-focus).
 func (s *Session) FocusPane(id layout.PaneID) error {
-	idx, ws := s.workspaceIndexOf(id)
-	if ws == nil {
-		return fmt.Errorf("unknown pane %d", id)
+	wsID, err := s.FocusPaneView(id)
+	if err != nil {
+		return err
 	}
-	tabIdx, _ := ws.FindTabIndexForPane(id)
-	ws.Tabs[tabIdx].Layout.FocusPane(id)
-	s.active = idx
+	// The view-less form also moves the session default, which is what a
+	// caller with no window means by "focus this": there is one viewport and
+	// this is it. A windowed caller uses FocusPaneView and moves its own view.
+	if i, ok := s.workspaceIndexByID(wsID); ok {
+		s.active = i
+	}
 	return nil
 }
 
@@ -185,14 +183,13 @@ func (s *Session) FocusPane(id layout.PaneID) error {
 // boundaries — the agents sidebar is global (§8), so agent.focus can target a
 // pane the browser cannot currently see.
 func (s *Session) RevealPane(id layout.PaneID) error {
-	idx, ws := s.workspaceIndexOf(id)
-	if ws == nil {
-		return fmt.Errorf("unknown pane %d", id)
+	wsID, err := s.RevealPaneView(id)
+	if err != nil {
+		return err
 	}
-	tabIdx, _ := ws.FindTabIndexForPane(id)
-	ws.SwitchTab(tabIdx)
-	ws.Tabs[tabIdx].Layout.FocusPane(id)
-	s.active = idx
+	if i, ok := s.workspaceIndexByID(wsID); ok {
+		s.active = i
+	}
 	return nil
 }
 
@@ -202,27 +199,7 @@ func (s *Session) RevealPane(id layout.PaneID) error {
 // means no pane lies that way (a no-op). Like FocusPane it stays within the
 // current viewport, so it never changes the active workspace/tab.
 func (s *Session) FocusPaneDirection(nav layout.NavDirection, area layout.Rect) (bool, error) {
-	tab := s.ActiveWorkspace().ActiveTab()
-	if tab == nil {
-		return false, errors.New("no active tab")
-	}
-	panes := tab.Layout.Panes(area)
-	var focused *layout.PaneInfo
-	for i := range panes {
-		if panes[i].IsFocused {
-			focused = &panes[i]
-			break
-		}
-	}
-	if focused == nil {
-		return false, errors.New("no focused pane")
-	}
-	target, ok := layout.FindInDirection(focused, nav, panes)
-	if !ok {
-		return false, nil // no neighbour in that direction
-	}
-	tab.Layout.FocusPane(target)
-	return true, nil
+	return s.FocusPaneDirectionIn("", nav, area)
 }
 
 // CyclePane moves focus to the next (next=true) or previous pane in the active
@@ -230,25 +207,7 @@ func (s *Session) FocusPaneDirection(nav layout.NavDirection, area layout.Rect) 
 // only when the tab has a single pane). Like FocusPane it stays within the
 // viewport.
 func (s *Session) CyclePane(next bool) bool {
-	tab := s.ActiveWorkspace().ActiveTab()
-	if tab == nil {
-		return false
-	}
-	ids := tab.Layout.PaneIDs()
-	if len(ids) < 2 {
-		return false
-	}
-	pos := slices.Index(ids, tab.Layout.Focused())
-	if pos < 0 {
-		pos = 0
-	}
-	n := len(ids)
-	step := 1
-	if !next {
-		step = -1
-	}
-	tab.Layout.FocusPane(ids[(pos+step+n)%n])
-	return true
+	return s.CyclePaneIn("", next)
 }
 
 // SwapPaneDirection swaps the focused pane with its nearest neighbour in the
@@ -257,78 +216,34 @@ func (s *Session) CyclePane(next bool) bool {
 // no error means no neighbour that way). Needs the viewport geometry to resolve
 // the neighbour.
 func (s *Session) SwapPaneDirection(nav layout.NavDirection, area layout.Rect) (bool, error) {
-	tab := s.ActiveWorkspace().ActiveTab()
-	if tab == nil {
-		return false, errors.New("no active tab")
-	}
-	panes := tab.Layout.Panes(area)
-	var focused *layout.PaneInfo
-	for i := range panes {
-		if panes[i].IsFocused {
-			focused = &panes[i]
-			break
-		}
-	}
-	if focused == nil {
-		return false, errors.New("no focused pane")
-	}
-	target, ok := layout.FindInDirection(focused, nav, panes)
-	if !ok {
-		return false, nil // no neighbour in that direction
-	}
-	tab.Layout.SwapPanes(focused.ID, target)
-	return true, nil
+	return s.SwapPaneDirectionIn("", nav, area)
 }
 
 // SwapPanes exchanges two panes' slots in the active tab's layout (the
 // drag-reorder drop), preserving split shape and ratios. Reports whether a
 // swap happened; both panes must be distinct members of the active tab.
 func (s *Session) SwapPanes(a, b layout.PaneID) (bool, error) {
-	tab := s.ActiveWorkspace().ActiveTab()
-	if tab == nil {
-		return false, errors.New("no active tab")
-	}
-	return tab.Layout.SwapPanes(a, b), nil
+	return s.SwapPanesIn("", a, b)
 }
 
 // ToggleZoom flips the active tab's zoom. When zooming, target (or the focused
 // pane if nil) becomes the sole visible pane at full size; when already zoomed,
 // it unzooms (target ignored). Reports the resulting zoom state.
 func (s *Session) ToggleZoom(target *layout.PaneID) (bool, error) {
-	tab := s.ActiveWorkspace().ActiveTab()
-	if tab == nil {
-		return false, errors.New("no active tab")
-	}
-	if !tab.Zoomed && target != nil {
-		if !slices.Contains(tab.Layout.PaneIDs(), *target) {
-			return false, fmt.Errorf("pane %d not in the active tab", *target)
-		}
-		tab.Layout.FocusPane(*target)
-	}
-	tab.Zoomed = !tab.Zoomed
-	return tab.Zoomed, nil
+	return s.ToggleZoomIn("", target)
 }
 
 // ResizeBorder sets the first-child ratio of the split identified by path
 // (decoded from the wire border id) in the active tab, changing the sizes of
 // the panes either side. A path that resolves to no split is a silent no-op.
 func (s *Session) ResizeBorder(path []bool, ratio float32) error {
-	tab := s.ActiveWorkspace().ActiveTab()
-	if tab == nil {
-		return errors.New("no active tab")
-	}
-	tab.Layout.SetRatioAt(path, ratio)
-	return nil
+	return s.ResizeBorderIn("", path, ratio)
 }
 
 // FocusLastPane toggles focus back to the active tab's previously-focused pane
 // (LastPane). Reports whether focus moved. A focus-only change, like FocusPane.
 func (s *Session) FocusLastPane() bool {
-	tab := s.ActiveWorkspace().ActiveTab()
-	if tab == nil {
-		return false
-	}
-	return tab.Layout.FocusLast()
+	return s.FocusLastPaneIn("")
 }
 
 // RenamePane pins (or clears, with "") a pane's custom title, overriding the
@@ -418,35 +333,14 @@ func (s *Session) SplitPaneOn(target *layout.PaneID, dir layout.Direction, hostI
 // being the backend's business via StageSpawn. An empty spec reproduces
 // SplitPane exactly.
 func (s *Session) SplitPaneWith(target *layout.PaneID, dir layout.Direction, spec workspace.SpawnSpec) (layout.PaneID, error) {
-	id, err := s.resolvePaneTarget(target)
-	if err != nil {
-		return 0, err
-	}
-	_, ws := s.workspaceIndexOf(id)
-	_, np, err := ws.SplitPane(id, dir, true, spec)
-	if err != nil {
-		return 0, err
-	}
-	return np.PaneID, nil
+	return s.SplitPaneWithIn("", target, dir, spec)
 }
 
 // ClosePane closes target (the focused pane if nil), returning the closed id.
 // The session always keeps at least one pane; closing a workspace's last pane
 // drops that workspace (when another remains).
 func (s *Session) ClosePane(target *layout.PaneID) (layout.PaneID, error) {
-	id, err := s.resolvePaneTarget(target)
-	if err != nil {
-		return 0, err
-	}
-	if s.totalPanes() <= 1 {
-		return 0, errors.New("cannot close the last pane")
-	}
-	idx, ws := s.workspaceIndexOf(id)
-	if ws.ClosePane(id) {
-		// The workspace closed its last pane in its last tab → drop it.
-		s.dropWorkspace(idx)
-	}
-	return id, nil
+	return s.ClosePaneIn("", target)
 }
 
 // --- Tab commands (§7) — the active workspace unless one is named ------------
@@ -547,36 +441,13 @@ func (s *Session) CreateTabInWith(wsID string, spec workspace.SpawnSpec) (int, l
 // CloseTab closes a tab (the active tab if num is nil) of the active workspace.
 // Closing a workspace's last tab drops the workspace (when another remains).
 func (s *Session) CloseTab(num *int) error {
-	ws := s.ActiveWorkspace()
-	idx := ws.ActiveTabIndex()
-	if num != nil {
-		i, ok := s.tabIndexByNumber(ws, *num)
-		if !ok {
-			return fmt.Errorf("unknown tab %d", *num)
-		}
-		idx = i
-	}
-	if len(ws.Tabs) > 1 {
-		ws.CloseTab(idx)
-		return nil
-	}
-	if len(s.workspaces) <= 1 {
-		return errors.New("cannot close the last tab")
-	}
-	s.dropWorkspace(s.active)
-	return nil
+	return s.CloseTabIn("", num)
 }
 
 // FocusTab switches the active workspace to the tab with the given public
 // number (a viewport change).
 func (s *Session) FocusTab(num int) error {
-	ws := s.ActiveWorkspace()
-	idx, ok := s.tabIndexByNumber(ws, num)
-	if !ok {
-		return fmt.Errorf("unknown tab %d", num)
-	}
-	ws.SwitchTab(idx)
-	return nil
+	return s.FocusTabIn("", num)
 }
 
 // RenameTab pins (or clears, with "") a tab's display name.
@@ -605,15 +476,7 @@ func (s *Session) RenameTabIn(wsID string, num int, name string) error {
 // insertion point idx (a gap position, 0..=len: len means "to the end").
 // Reports whether the order actually changed (false = a no-op move).
 func (s *Session) MoveTab(num, insertIdx int) (bool, error) {
-	ws := s.ActiveWorkspace()
-	srcIdx, ok := s.tabIndexByNumber(ws, num)
-	if !ok {
-		return false, fmt.Errorf("unknown tab %d", num)
-	}
-	if insertIdx < 0 || insertIdx > len(ws.Tabs) {
-		return false, fmt.Errorf("bad insert index %d", insertIdx)
-	}
-	return ws.MoveTab(srcIdx, insertIdx), nil
+	return s.MoveTabIn("", num, insertIdx)
 }
 
 // --- Workspace commands (§7) -------------------------------------------------
@@ -751,17 +614,7 @@ func (s *Session) ResolvePaneTarget(target *layout.PaneID) (layout.PaneID, error
 // --- Internal helpers --------------------------------------------------------
 
 func (s *Session) resolvePaneTarget(target *layout.PaneID) (layout.PaneID, error) {
-	if target != nil {
-		if _, ws := s.workspaceIndexOf(*target); ws == nil {
-			return 0, fmt.Errorf("unknown pane %d", *target)
-		}
-		return *target, nil
-	}
-	id, ok := s.FocusedPane()
-	if !ok {
-		return 0, errors.New("no focused pane")
-	}
-	return id, nil
+	return s.ResolvePaneTargetIn("", target)
 }
 
 func (s *Session) totalPanes() int {

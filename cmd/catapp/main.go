@@ -1,7 +1,7 @@
 //go:build darwin
 
 // Command catapp is the native desktop launcher for cats: a thin Go
-// supervisor around a WebKit window (github.com/webview/webview_go). It has two
+// supervisor around one or more WebKit windows (window_darwin.m). It has two
 // runtime modes, chosen by the build-time defaultMode and overridable per user
 // in app.json:
 //
@@ -13,14 +13,21 @@
 //     login page collects the password and the webview persists the session
 //     cookie across launches. This is Cats Client.app (make macapp-client).
 //
+// Either mode shows the UI in NATIVE windows (window_darwin.{m,go}): one
+// NSWindow + WKWebView each, all over one catway session. A window is a view on
+// one workspace — the server has treated every connection that way since
+// multi-window — so "a window per project on the second monitor" is a URL
+// (`?ws=<id>`) plus a window to put it in. webview_go remains only for the
+// startup error sheet, which is modal, single-window, and happens before any of
+// this exists.
+//
 // The launcher itself is plain Go (no -tags ghostty) — it only supervises
-// processes and shows a window; the terminal/VT work lives entirely in the
+// processes and shows windows; the terminal/VT work lives entirely in the
 // bundled catway/cathost binaries. It is macOS-only (WebKit + a native menu
 // via cgo), hence the darwin build constraint on every file in this package.
 package main
 
 import (
-	"fmt"
 	"log"
 	"net/url"
 	"os"
@@ -40,6 +47,10 @@ import (
 var defaultMode = "local"
 
 // Window geometry. Roomy default that still fits a laptop; the user can resize.
+// The native shell has its own copy of the size (kDefaultW/kDefaultH in
+// window_darwin.m, which is where a window is actually built); these stay as the
+// Go-side statement of the same default and as the title every window opens
+// with.
 const (
 	windowTitle  = "Cats Mux"
 	windowWidth  = 1280
@@ -83,9 +94,10 @@ func main() {
 }
 
 // runLocal supervises the in-bundle daemons and shows the UI they serve on
-// loopback. The backend is reaped when the window closes (Run returns), on a
-// Cmd-Q, or on a termination signal — all routed through runCleanup.
-func runLocal(_ appConfig) {
+// loopback. The backend is reaped when the LAST window closes (the app
+// delegate's applicationShouldTerminateAfterLastWindowClosed), on a Cmd-Q, or
+// on a termination signal — all routed through runCleanup.
+func runLocal(cfg appConfig) {
 	// Before any child exists: a GUI launch hands us launchd's bare PATH, and
 	// everything downstream (daemons → panes → plugin build steps) inherits it.
 	hydratePATH()
@@ -99,19 +111,23 @@ func runLocal(_ appConfig) {
 	defer runCleanup()
 	installSignalHandler()
 
-	w := newWindow(windowTitle)
-	defer w.Destroy()
-	w.Navigate("http://" + b.addr)
-	w.Run()
+	// The window set from the last run, or one window on a first run. A saved
+	// window whose workspace has since been closed still opens: the server
+	// resolves an unknown ?ws= to the primary view rather than erroring, so a
+	// window layout survives the projects it was made for.
+	m := startWindowShell("http://"+b.addr, windowTitle)
+	m.restore(cfg.Windows)
+	m.run()
 }
 
-// runRemote is the thin-client path: no local daemons, just a window pointed at
+// runRemote is the thin-client path: no local daemons, just windows pointed at
 // a catway.
 //
 // It keeps a list of them (appConfig.Presets) rather than one address, and a
-// Connect menu to move between them. The window is the same window throughout:
-// switching catways is a navigation, not a relaunch, so the session cookie the
-// webview holds for each host survives being away from it.
+// Connect menu to move between them. Switching catways is a navigation of the
+// windows already open, not a relaunch, so the session cookie WebKit holds for
+// each host survives being away from it — and the shared website data store
+// means one login serves every window.
 func runRemote(cfg appConfig) {
 	installSignalHandler() // no daemons to reap, but honour a clean quit uniformly
 
@@ -124,19 +140,17 @@ func runRemote(cfg appConfig) {
 	rt := &remoteRuntime{cfg: cfg}
 	activeRemote = rt
 
-	w := newWindow(windowTitle)
-	defer w.Destroy()
-	rt.w = w
-	if err := rt.bind(); err != nil {
-		showError("Could not initialise the connect form", err.Error())
-		return
-	}
+	m := startWindowShell(cfg.Remote.URL, windowTitle)
 	if cfg.Remote.URL != "" {
-		rt.show(cfg.Remote.URL)
+		m.setTitle(remoteTitle(cfg.Remote.URL))
+		m.restore(cfg.Windows)
+		rt.refreshMenu()
 	} else {
+		// First run: no catway to restore windows onto, so the connect form is
+		// the whole app until there is one.
 		rt.showConnect()
 	}
-	w.Run()
+	m.run()
 }
 
 // remoteRuntime is the thin client's state while the window is open: which
@@ -148,7 +162,6 @@ func runRemote(cfg appConfig) {
 // added). One place that changes all three is the only way they cannot drift.
 type remoteRuntime struct {
 	cfg appConfig
-	w   webview.WebView
 }
 
 // connect saves a target, makes it current, and navigates to it.
@@ -163,35 +176,46 @@ func (r *remoteRuntime) connect(rawURL, label string) {
 	r.show(u)
 }
 
-// forget drops a target from the list. The window is left where it is — see
-// appConfig.removePreset for why forgetting is not disconnecting.
+// forget drops a target from the list. The windows are left where they are —
+// see appConfig.removePreset for why forgetting is not disconnecting.
 func (r *remoteRuntime) forget(rawURL string) {
 	r.cfg.removePreset(rawURL)
 	r.save()
-	r.w.Dispatch(func() {
-		r.refreshMenu()
-		r.w.SetHtml(connectPage(r.cfg.Presets, r.cfg.Remote.URL, r.cfg.Remote.URL != ""))
-	})
+	r.showConnect()
 }
 
-// show points the window at a catway and re-titles it. Dispatched, because the
-// callers are a JS binding and a menu action, neither on the UI thread.
+// cancel goes back to the live session from the connect form, when there is one
+// to go back to.
+func (r *remoteRuntime) cancel() {
+	if r.cfg.Remote.URL != "" {
+		r.show(r.cfg.Remote.URL)
+	}
+}
+
+// show points EVERY window at a catway and re-titles them. All of them, because
+// a different catway is a different session: leaving one window on the old one
+// would put two servers' workspaces on screen with nothing to tell them apart.
+// Hopped onto the main thread, because the callers are a page message and a
+// menu action.
 func (r *remoteRuntime) show(rawURL string) {
-	r.w.Dispatch(func() {
+	onMainThread(func() {
 		r.refreshMenu()
-		r.w.SetTitle(remoteTitle(rawURL))
-		r.w.Navigate(rawURL)
+		if windows != nil {
+			windows.navigateAll(rawURL, remoteTitle(rawURL))
+		}
 	})
 }
 
-// showConnect renders the picker. Cancelling is offered only when there is a
-// session to go back to, so a first run cannot end up on a page with a button
-// that does nothing.
+// showConnect renders the picker in the front window. Cancelling is offered
+// only when there is a session to go back to, so a first run cannot end up on a
+// page with a button that does nothing.
 func (r *remoteRuntime) showConnect() {
-	r.w.Dispatch(func() {
+	onMainThread(func() {
 		r.refreshMenu()
-		r.w.SetTitle(windowTitle)
-		r.w.SetHtml(connectPage(r.cfg.Presets, r.cfg.Remote.URL, r.cfg.Remote.URL != ""))
+		if windows != nil {
+			windows.showHTML(connectPage(r.cfg.Presets, r.cfg.Remote.URL, r.cfg.Remote.URL != ""),
+				windowTitle)
+		}
 	})
 }
 
@@ -208,22 +232,6 @@ func (r *remoteRuntime) save() {
 // dispatched there.
 func (r *remoteRuntime) refreshMenu() {
 	installConnectMenu(presetNames(r.cfg.Presets), r.cfg.currentPreset())
-}
-
-// bind wires the connect page's three callbacks. They arrive off the UI thread,
-// which is why everything they reach dispatches.
-func (r *remoteRuntime) bind() error {
-	if err := r.w.Bind("catsConnect", r.connect); err != nil {
-		return err
-	}
-	if err := r.w.Bind("catsForget", r.forget); err != nil {
-		return err
-	}
-	return r.w.Bind("catsCancel", func() {
-		if r.cfg.Remote.URL != "" {
-			r.show(r.cfg.Remote.URL)
-		}
-	})
 }
 
 func presetNames(presets []remoteTarget) []string {
@@ -254,46 +262,20 @@ func selectPreset(index int) {
 	r.connect(p.URL, p.Label)
 }
 
-// newWindow builds the shared webview window (title + size) and installs the
-// native menu bar so Cmd-Q and the standard editing shortcuts work. debug is
-// false: no devtools in the shipped app.
-func newWindow(title string) webview.WebView {
-	w := webview.New(false)
-	uiWindow = w
-	installMenu() // NSApp now exists (created by webview.New); menu before Run()
-	w.SetTitle(title)
-	w.SetSize(windowWidth, windowHeight, webview.HintNone)
-	// Native clipboard bridge (clipboard.go): injected into every page the
-	// window loads; the catway UI prefers these over navigator.clipboard,
-	// which WKWebView blocks (empty reads, activation-gated writes). The
-	// window only ever loads the configured catway UI, so exposing the
-	// pasteboard to the page does not leak it to arbitrary content.
-	if err := w.Bind("catsClipWrite", clipboardWrite); err != nil {
-		log.Printf("clipboard write bridge unavailable: %v", err)
-	}
-	if err := w.Bind("catsClipRead", clipboardRead); err != nil {
-		log.Printf("clipboard read bridge unavailable: %v", err)
-	}
-	return w
-}
-
-// uiWindow is the single UI window, kept for the View menu's zoom actions.
-// Menu actions fire only while Run() is blocking, so the reference is valid
-// whenever zoomFont is reached.
-var uiWindow webview.WebView
-
-// zoomFont steps the terminal font size in the page (+1/-1, 0 = reset) by
-// calling the hook the UI exposes for exactly this path — see catappZoom in
-// menu_darwin.go for why the native menu owns ⌘+/⌘-/⌘0. The guard on the JS
-// side keeps this a no-op on pages without the hook (connect form, login).
+// zoomFont steps the terminal font size (+1/-1, 0 = reset) in the FRONT
+// window's page, by calling the hook the UI exposes for exactly this path — see
+// catappZoom in menu_darwin.go for why the native menu owns ⌘+/⌘-/⌘0. The guard
+// on the JS side keeps this a no-op on pages without the hook (connect form,
+// login).
+//
+// "The front window", not "the window": with several windows open, a
+// process-global reference would zoom whichever one happened to be stored,
+// which is the window you are not looking at as often as not.
 func zoomFont(delta int) {
-	w := uiWindow
-	if w == nil {
+	if windows == nil {
 		return
 	}
-	w.Dispatch(func() {
-		w.Eval(fmt.Sprintf("window.catsAdjustFont && window.catsAdjustFont(%d)", delta))
-	})
+	onMainThread(func() { windows.zoomKeyWindow(delta) })
 }
 
 // remoteTitle labels the window with the connected host so a thin client that

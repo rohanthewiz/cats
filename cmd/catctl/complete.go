@@ -395,6 +395,8 @@ var probeFlags = []flagSpec{
 	{"--timeout", "expect/modes poll timeout", true, dirNoFiles},
 	{"--life", "connection lifetime limit", true, dirNoFiles},
 	{"--token", "shared access token (WS10 auth)", true, dirNoFiles},
+	{"--viewer", "connect as a viewer: declare no grid", false, dirNoFiles},
+	{"--workspace", "open this connection on a workspace (e.g. w2)", true, dirNoFiles},
 }
 
 func completeProbe(rest []string, cur string) ([]candidate, string) {

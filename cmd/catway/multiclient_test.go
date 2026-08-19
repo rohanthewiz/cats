@@ -191,14 +191,17 @@ func TestAddressedPasteReachesTheNamedPane(t *testing.T) {
 // typing into. Same rule Mouse already takes.
 func TestAddressedInputRefusedForInvisiblePane(t *testing.T) {
 	o, _, other := mcOrch(t)
-	delete(o.visible, other) // as if the viewport had moved on
+	// As if the viewport had moved on. A nil client means "no view of its own",
+	// which inputTarget answers from the union — the pre-view meaning of the
+	// gate, and what these tests are about.
+	delete(o.visible, other)
 
-	if rt := o.inputTarget(other); rt != nil {
+	if rt := o.inputTarget(nil, other); rt != nil {
 		t.Fatal("addressed input accepted for a pane outside the viewport")
 	}
 	// The runtime is still there and still reachable through focus — the gate is
 	// about the addressing, not about the pane being gone.
-	if rt := o.inputTarget(0); rt == nil {
+	if rt := o.inputTarget(nil, 0); rt == nil {
 		t.Fatal("focus-routed input refused; the visibility gate leaked onto pane 0")
 	}
 }
@@ -214,14 +217,14 @@ func TestAddressedInputRefusedInLockedWorkspace(t *testing.T) {
 		t.Fatalf("SetWorkspaceLock: %v", err)
 	}
 
-	if rt := o.inputTarget(other); rt != nil {
+	if rt := o.inputTarget(nil, other); rt != nil {
 		t.Fatal("addressed input accepted into a locked workspace")
 	}
 
 	// Focus-routed input is untouched. The lock closes the workspace to
 	// automation, not to the person whose keyboard owns the focused pane — the
 	// same asymmetry pane.send_input has against someone typing in the terminal.
-	rt := o.inputTarget(0)
+	rt := o.inputTarget(nil, 0)
 	if rt == nil || rt.id != focused {
 		t.Fatalf("focus-routed input refused by the lock: got %v, want pane %d", rt, focused)
 	}
@@ -235,10 +238,10 @@ func TestInputRefusedForExitedPane(t *testing.T) {
 	o.panes[other].exited = &code
 	o.panes[focused].exited = &code
 
-	if rt := o.inputTarget(other); rt != nil {
+	if rt := o.inputTarget(nil, other); rt != nil {
 		t.Fatal("addressed input accepted for an exited pane")
 	}
-	if rt := o.inputTarget(0); rt != nil {
+	if rt := o.inputTarget(nil, 0); rt != nil {
 		t.Fatal("focus-routed input accepted for an exited pane")
 	}
 }

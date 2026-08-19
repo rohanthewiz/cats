@@ -89,9 +89,10 @@ func (o *orch) publishAgent(rt *paneRuntime) {
 		rt.unseen = !o.visible[rt.id]
 	}
 
-	if o.visible[rt.id] {
-		o.broadcast(browserproto.NewPaneAgent(rt.id, agent, state, rt.agentModel, !rt.unseen))
-	}
+	// Per view: the windows showing this pane get the chrome, the ones showing
+	// another workspace do not. The unseen flag above stays union-scoped — one
+	// window looking is enough to have seen a completion (decision 6).
+	o.sendVisible(rt.id, browserproto.NewPaneAgent(rt.id, agent, state, rt.agentModel, !rt.unseen))
 	o.broadcast(o.agentsMsg())
 	o.refreshTabNames() // an agent appearing/leaving moves its tab's auto-name rung
 	o.emitEvent(app.EventPaneAgent, rt.id, app.PaneAgentEvent{Pane: rt.id, Agent: agent, State: state})

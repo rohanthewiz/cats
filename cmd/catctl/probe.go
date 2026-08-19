@@ -41,7 +41,12 @@
 //	title:PANE:TEXT         poll until a pane's title equals TEXT (PANE may be "f")
 //	tabnew                  cmd tab.create        tabfocus:NUM  cmd tab.focus
 //	tabclose[:NUM]          cmd tab.close         wsnew         cmd workspace.create
-//	wsfocus:ID              cmd workspace.focus (ID e.g. w1)
+//	wsfocus:ID              cmd workspace.focus — moves THIS connection's view only
+//	viewws:ID               poll until this connection's layout reports ID active
+//	                        (what --workspace opened on, and where wsfocus lands)
+//	views:ID[,ID…]          poll until the census's per-connection views are
+//	                        exactly these workspaces (sorted, viewers included as
+//	                        the workspace they follow)
 //	agentfocus:PANE         cmd agent.focus — reveal+focus a pane (may cross ws/tab)
 //	reloadconfig            cmd server.reload_config (awaits ack)
 //	serverstop              cmd server.stop (awaits ack; catway then exits)
@@ -57,6 +62,14 @@
 // Pass --viewer to connect as a second client that declares no grid: the server
 // ignores its size and its resizes, so a probe can drive a live session without
 // reshaping the desktop's panes underneath it.
+//
+// Pass --workspace to open the connection as a WINDOW on a chosen workspace
+// (Init.Workspace). Two probes with different --workspace values are two
+// independent views of one session: each has its own active tab, focus and
+// grid, and neither switches the other. That is the headless form of "a window
+// per project", and the CI check for it — run one probe with --workspace w1 and
+// another with w2, then assert with viewws and rect that a resize in one leaves
+// the other's pane rects alone.
 //
 // Example:
 //
@@ -99,11 +112,12 @@ func runProbe(args []string) int {
 	life := fs.Duration("life", 120*time.Second, "connection lifetime limit")
 	token := fs.String("token", "", "shared access token sent as Authorization: Bearer (WS10 auth)")
 	viewer := fs.Bool("viewer", false, "connect as a viewer: declare no grid, never resize the session")
+	workspace := fs.String("workspace", "", "open this connection on a workspace (e.g. w2); empty = the primary view's")
 	if err := fs.Parse(args); err != nil {
 		return 2 // flag already reported the problem (and prints defaults on -h)
 	}
 
-	if err := probeRun(*rawURL, *cols, *rows, *script, *timeout, *life, *token, *viewer); err != nil {
+	if err := probeRun(*rawURL, *cols, *rows, *script, *timeout, *life, *token, *viewer, *workspace); err != nil {
 		fmt.Fprintf(os.Stderr, "catctl probe: FAIL: %v\n", err)
 		return 1
 	}
@@ -157,7 +171,7 @@ type probe struct {
 
 // probeRun dials the catway, performs the WS upgrade + init handshake, starts
 // the frame-folding reader, then executes the op script sequentially.
-func probeRun(rawURL string, cols, rows int, script string, timeout, life time.Duration, token string, viewer bool) error {
+func probeRun(rawURL string, cols, rows int, script string, timeout, life time.Duration, token string, viewer bool, workspace string) error {
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		return err
@@ -185,7 +199,8 @@ func probeRun(rawURL string, cols, rows int, script string, timeout, life time.D
 		reads: map[string]*browserproto.CmdResult{}}
 
 	init := browserproto.Init{T: browserproto.MsgInit, V: browserproto.ProtocolVersion,
-		Cols: uint16(cols), Rows: uint16(rows), DPR: 1, CellWPx: 8, CellHPx: 16, Viewer: viewer}
+		Cols: uint16(cols), Rows: uint16(rows), DPR: 1, CellWPx: 8, CellHPx: 16, Viewer: viewer,
+		Workspace: workspace}
 	if viewer {
 		// Send zeros as well as the flag. The server ignores a viewer's geometry
 		// either way, so declaring nothing is what an honest viewer looks like on
@@ -196,10 +211,14 @@ func probeRun(rawURL string, cols, rows int, script string, timeout, life time.D
 	if err := p.send(init); err != nil {
 		return err
 	}
+	on := ""
+	if workspace != "" {
+		on = " on " + workspace
+	}
 	if viewer {
-		fmt.Printf("→ init v%d viewer (no grid declared)\n", browserproto.ProtocolVersion)
+		fmt.Printf("→ init v%d viewer (no grid declared)%s\n", browserproto.ProtocolVersion, on)
 	} else {
-		fmt.Printf("→ init v%d %dx%d\n", browserproto.ProtocolVersion, cols, rows)
+		fmt.Printf("→ init v%d %dx%d%s\n", browserproto.ProtocolVersion, cols, rows, on)
 	}
 
 	go p.reader()
@@ -540,6 +559,50 @@ func (p *probe) exec(op string, timeout time.Duration) error {
 			}
 			if time.Now().After(deadline) {
 				return fmt.Errorf("timeout: want total=%d sizers=%d, have %v", wantTotal, wantSizers, got)
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+
+	case "viewws":
+		// viewws:ID — which workspace THIS connection is showing, per the layout
+		// the server built for it. With several windows open there is no single
+		// "active workspace" any more, so this is the only honest way to ask.
+		deadline := time.Now().Add(timeout)
+		for {
+			got := p.activeWorkspace()
+			if got == arg {
+				fmt.Printf("✓ this view shows %s\n", arg)
+				return nil
+			}
+			if time.Now().After(deadline) {
+				return fmt.Errorf("timeout: this view shows %q, want %q", got, arg)
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+
+	case "views":
+		// views:w1,w2 — the census's per-connection breakdown, sorted. Polled
+		// for the same reason clients is: another window's connect is not
+		// something this script gets to observe the timing of.
+		want := strings.Split(arg, ",")
+		slices.Sort(want)
+		deadline := time.Now().Add(timeout)
+		for {
+			p.mu.Lock()
+			var got []string
+			if p.clients != nil {
+				for _, v := range p.clients.Views {
+					got = append(got, v.Workspace)
+				}
+			}
+			p.mu.Unlock()
+			slices.Sort(got)
+			if slices.Equal(got, want) {
+				fmt.Printf("✓ views = %v\n", got)
+				return nil
+			}
+			if time.Now().After(deadline) {
+				return fmt.Errorf("timeout: views = %v, want %v", got, want)
 			}
 			time.Sleep(100 * time.Millisecond)
 		}
@@ -1413,6 +1476,22 @@ func (p *probe) layoutCount(kind string) int {
 	default:
 		return len(p.layout.Panes)
 	}
+}
+
+// activeWorkspace is the workspace this connection's last layout reports as
+// active — this window's view, not the session's.
+func (p *probe) activeWorkspace() string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.layout == nil {
+		return ""
+	}
+	for _, w := range p.layout.Workspaces {
+		if w.Active {
+			return w.ID
+		}
+	}
+	return ""
 }
 
 // focusedPane resolves the focused pane id from the last layout.

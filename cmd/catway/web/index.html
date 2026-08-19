@@ -559,6 +559,10 @@
      the two can differ. Pinned before the agent rollup at the right edge. */
   #ws-list li.ws .wshost { color:var(--muted); font-size:calc(10px * var(--sb-scale));
     flex:none; margin-left:4px; }
+  /* "Also open in another window": the same muted weight as the host badge —
+     it reports, it does not warn. */
+  #ws-list li.ws .wswin { color:var(--muted); font-size:calc(10px * var(--sb-scale));
+    flex:none; margin-left:4px; }
   #pane-list li, #agent-list li { cursor:pointer; }
   #pane-list li:hover, #agent-list li:hover { background:var(--panel2); }
   #pane-list li.focused { background:var(--chrome-focus); color:var(--fg-strong); }
@@ -1602,6 +1606,7 @@
 
   function applyLayout(msg) {
     layoutMsg = msg;
+    syncWindowURL(msg);
     // Zoom is tab state but renders as pane state: a zoomed tab sends only its
     // focused pane, whose header carries the ZOOM chip (see renderChrome).
     tabZoomed = msg.tabs.some((t) => t.active && t.zoomed);
@@ -2262,6 +2267,10 @@
           hb.title = "new panes in this workspace run on " + hostLabel(w.host);
           li.appendChild(hb);
         }
+        // "Also open in another window" rides here for the same reason the host
+        // badge does: it is a fact about the workspace, not about a pane.
+        const win = otherWindowMark(windowsOnWorkspace(w.id));
+        if (win) li.appendChild(win);
         // The todo mark sits with the name — it says something about the project,
         // not about a pane — while the agent counts stay pinned to the right edge.
         const todo = todoMark(todos.get(w.id) || 0);
@@ -4166,6 +4175,13 @@
         }
         break;
       case "layout": applyLayout(msg); break;
+      // The census: how many clients, and what each of them is looking at. Only
+      // the sidebar reads it, so a re-render of the workspace list is the whole
+      // reaction.
+      case "clients":
+        clientsMsg = msg;
+        if (layoutMsg) renderWorkspaces(layoutMsg);
+        break;
       case "pane_frame": {
         const p = pane(msg.pane);
         p.W = msg.w; p.H = msg.h; p.cells = msg.cells; p.links = msg.links || [];
@@ -5622,8 +5638,25 @@
       items.push({ label: "new tab on…", sub: hostChoices((h) => sendCmd("tab.create", { host: h })) });
     }
     items.push({ label: "rename tab…", fn: () => renameTab(t) });
+    // Move the tab, with its panes and their live terminals, to another
+    // workspace — which is how a tab travels between WINDOWS, a window being a
+    // view on one workspace. Offered only when there is somewhere to send it.
+    const elsewhere = otherWorkspaces();
+    if (elsewhere.length) {
+      items.push({ label: "move tab to…", sub: elsewhere.map((w) => ({
+        label: w.name + (windowsOnWorkspace(w.id) ? " (open in another window)" : ""),
+        fn: () => sendCmd("tab.move_to_workspace", { workspace: w.id, num: t.num }),
+      })) });
+    }
     if (count > 1) items.push({ label: "close tab", danger: true, fn: () => sendCmd("tab.close", { num: t.num }) });
     return items;
+  }
+
+  // otherWorkspaces is every workspace except the one this window is showing —
+  // the destinations a tab can be moved to.
+  function otherWorkspaces() {
+    if (!layoutMsg) return [];
+    return layoutMsg.workspaces.filter((w) => !w.active);
   }
 
   // hostChoices turns the roster into submenu rows, one per host, calling fn
@@ -5640,6 +5673,11 @@
   function wsMenuItems(w) {
     return [
       { label: "new workspace…", fn: newWorkspace },
+      // A second window on this workspace, leaving the current one where it is.
+      // Two windows on ONE workspace mirror each other; the useful shape is one
+      // window per project, which is why this sits on the row rather than on
+      // the section heading.
+      { label: "open in new window", fn: () => openWindow(w.id) },
       { label: "rename workspace…", fn: () => renameWorkspace(w) },
       { label: w.locked ? "unlock workspace" : "lock workspace", fn: () => toggleWorkspaceLock(w) },
       "-",
@@ -6205,6 +6243,8 @@
       for (const w of layoutMsg.workspaces) {
         items.push({ kind: "ws", label: w.name + " (" + w.id + ")", meta: w.active ? "active" : "",
           fn: () => { if (!w.active) sendCmd("workspace.focus", { id: w.id }); } });
+        items.push({ kind: "ws", label: "open " + w.name + " in new window", meta: w.id,
+          fn: () => openWindow(w.id) });
       }
       for (const t of layoutMsg.tabs) {
         items.push({ kind: "tab", label: t.name, meta: t.active ? "active" : "",
@@ -6780,6 +6820,90 @@
     window.addEventListener("keydown", req);
   })();
 
+  // ---- Windows ----
+  //
+  // A window is a connection with a view. The server holds one session; each
+  // connection says which workspace it is showing, and gets that workspace's
+  // layout, frames and chrome. Nothing here is persisted — the URL IS the
+  // window's state, which is what makes a bookmarked "?ws=w2" reopenable.
+
+  // urlWorkspace is the workspace this window opens on, "" for the default. A
+  // stale id (the workspace was closed since the bookmark was made) is not an
+  // error: the server falls back to the primary view.
+  function urlWorkspace() {
+    return new URLSearchParams(location.search).get("ws") || "";
+  }
+
+  // openWindow opens a new browser window on a workspace. In a browser this is
+  // a tab or a window per the user's own settings; in the Mac app the shell
+  // intercepts window.open and makes it a native NSWindow.
+  function openWindow(wsID) {
+    const url = location.pathname + (wsID ? "?ws=" + encodeURIComponent(wsID) : "");
+    const w = window.open(url, "_blank");
+    if (!w) toast("your browser blocked the new window — allow popups for this site");
+  }
+
+  // syncWindowURL keeps this window's address in step with the workspace it is
+  // showing. Two things depend on it and neither is cosmetic:
+  //
+  //   * a reload (⌘R, a reconnect after sleep) lands back on the same
+  //     workspace instead of following the primary window somewhere else;
+  //   * the Mac app reads ?ws= off each window's live URL to remember the
+  //     window layout across launches — a workspace switch inside a window is
+  //     recorded with no extra protocol at all.
+  //
+  // replaceState, not pushState: switching workspaces inside a window is not a
+  // navigation, and filling the back button with them would make ⌘[ mean
+  // something unhelpful.
+  function syncWindowURL(msg) {
+    let active = "";
+    for (const w of msg.workspaces) if (w.active) active = w.id;
+    if (!active) return;
+    const want = location.pathname + "?ws=" + encodeURIComponent(active) + location.hash;
+    if (location.pathname + location.search + location.hash === want) return;
+    try { history.replaceState(null, "", want); } catch (_) { /* file:// and the like */ }
+  }
+
+  // clientsMsg is the last census (the `clients` down-message): who else is
+  // connected and, per connection, which workspace they are showing. It is what
+  // lets a row say "already open in another window" instead of quietly opening
+  // a duplicate.
+  let clientsMsg = null;
+
+  // windowsOnWorkspace counts the OTHER windows showing a workspace. Our own
+  // view is excluded by dropping one entry for the workspace this window is
+  // showing — the census does not name connections, and it does not need to:
+  // exactly one of its entries is us, and it is on our workspace.
+  function windowsOnWorkspace(wsID) {
+    if (!clientsMsg || !clientsMsg.views) return 0;
+    let n = 0;
+    for (const v of clientsMsg.views) if (v.workspace === wsID && !v.viewer) n++;
+    if (wsID === activeWorkspaceID()) n -= 1; // that one is this window
+    return Math.max(0, n);
+  }
+
+  // activeWorkspaceID is the workspace THIS window is showing, per the layout
+  // the server built for this connection.
+  function activeWorkspaceID() {
+    if (!layoutMsg) return "";
+    for (const w of layoutMsg.workspaces) if (w.active) return w.id;
+    return "";
+  }
+
+  // otherWindowMark is the "also open in another window" badge on a workspace
+  // row. Deliberately quiet — it is information, not a warning: two windows on
+  // one workspace mirror each other, which is legal and occasionally what you
+  // want.
+  function otherWindowMark(n) {
+    if (n < 1) return null;
+    const el = document.createElement("span");
+    el.className = "wswin";
+    el.textContent = n > 1 ? "\u29c9" + n : "\u29c9";
+    el.title = n === 1 ? "also open in another window"
+                       : "also open in " + n + " other windows";
+    return el;
+  }
+
   // ---- Session ----
   function connect() {
     const proto = location.protocol === "https:" ? "wss" : "ws";
@@ -6790,8 +6914,15 @@
       // section for the rest of the session. The reconnect's layout re-queries.
       clearTimeout(paneInvWait); paneInvWait = null;
       paneInvBusy = false; paneInvAgain = false;
+      // ?ws=<id> is what makes this window a window: the server treats each
+      // connection as a view on one workspace, so a second tab opened on
+      // "?ws=w2" shows w2 with its own tab, focus and size while this one stays
+      // where it is. Omitted (the plain URL) means "whatever the primary window
+      // is showing", which is the single-window behaviour. Re-read per connect
+      // so a reconnect lands back on the same workspace.
       sendMsg({ t: "init", v: PV, cols, rows, dpr,
-        cell_w_px: Math.round(cellW * dpr), cell_h_px: Math.round(cellH * dpr) });
+        cell_w_px: Math.round(cellW * dpr), cell_h_px: Math.round(cellH * dpr),
+        workspace: urlWorkspace() });
       // The server assumes a fresh connection is in front; correct it straight
       // away if this window actually reconnected while in the background.
       if (!winFocused) sendMsg({ t: "focus", focused: false });

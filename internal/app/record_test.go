@@ -86,6 +86,13 @@ var recordedParamClasses = map[string]map[string]string{
 		"index": ClassPlain,
 		"num":   ClassPlain,
 	},
+	// Workspace ids and tab numbers are model coordinates, not handles: a
+	// replay against a session with the same shape means the same thing.
+	"tab.move_to_workspace": {
+		"workspace": ClassPlain,
+		"num":       ClassPlain,
+		"from":      ClassPlain,
+	},
 	"workspace.create": {
 		"host":  ClassPlain,
 		"mkdir": ClassPlain,

@@ -95,9 +95,29 @@ terminal grid is one row shorter than the pane.
 ## Zoom and visibility
 
 A tab can be **zoomed**: one pane fills the tab while the others stay live. Only
-the *active* workspace's *active* tab streams frames to the front end; every
-other pane keeps running on `cathost` but produces no traffic. That is the whole
-visibility policy — see [Keystroke to pixel](architecture/request-lifecycle.md).
+the workspace's *active* tab streams frames to the front end; every other pane
+keeps running on `cathost` but produces no traffic. That is the whole visibility
+policy — see [Keystroke to pixel](architecture/request-lifecycle.md).
+
+## Windows and views
+
+A **window** is a connection with a view: the workspace it is showing. It is not
+part of the session — nothing about a window is persisted by the server, and a
+window lives exactly as long as its socket.
+
+*A window shows a workspace; windows on different workspaces are independent;
+windows on the same one mirror.* Independent means own tab, own focused pane,
+own zoom, own grid — a switch or a resize in one window does not touch the
+other. Mirroring means what it says: one active tab and one focused pane per
+workspace is the model, so two windows on one workspace show the same thing.
+
+Closing a window never closes anything in the session. A workspace no window is
+showing keeps running exactly as a background workspace does.
+
+Callers with no window of their own — `catctl`, a hook action, a runbook step —
+and viewers such as the phone resolve through the **primary view**: the desktop
+window you touched last. The session's persisted "active workspace" tracks it,
+so a cold start opens where you were.
 
 ## Agents
 

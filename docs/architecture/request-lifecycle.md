@@ -102,12 +102,14 @@ newly-visible pane calls `Reset()`.
 ## Visibility policy
 
 Every pane in every workspace is a live PTY on `cathost`, running whether or not
-anyone is looking. But **only the active workspace's active tab streams frames**.
+anyone is looking. But frames stream only for the panes **some window is
+showing** — each connection is a view onto one workspace, and it streams that
+workspace's active tab.
 
 ```mermaid
 flowchart TD
   A["all panes<br/>live PTYs on cathost"]
-  B["active workspace's active tab<br/>streams pane_frame / pane_diff"]
+  B["each window's workspace + active tab<br/>streams pane_frame / pane_diff<br/>to THAT window"]
   C["everything else<br/>runs, buffers, emits no frames"]
   D["chrome events (cwd, title, agent, exit)<br/>flow for ALL panes"]
 
@@ -115,6 +117,11 @@ flowchart TD
   A --> C
   A --> D
 ```
+
+With one window open this is exactly the old rule. With two, "visible" splits in
+two: the *union* of every window's viewport is what decides whether a frame is
+worth translating at all (and whether an unseen badge clears), while each
+window's own viewport decides which windows the frame is sent to.
 
 Chrome events are the exception and must be: that is how a background agent's
 "blocked" badge or a finished-task toast reaches you while you are in another

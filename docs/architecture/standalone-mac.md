@@ -158,18 +158,70 @@ handler would never fire. The menu action calls back into Go
 
 WKWebView restricts `navigator.clipboard`: reads resolve empty, and writes
 demand a user activation that a WebSocket-driven copy (OSC 52 from a pane, a
-`read` command) never has. `catapp` binds `catsClipWrite` / `catsClipRead` into
-every page, backed by `/usr/bin/pbcopy` and `/usr/bin/pbpaste`, and the UI
-prefers them when present. The window only ever loads the configured `catway`
-UI, so exposing the pasteboard to the page does not leak it to arbitrary
-content.
+`read` command) never has. `catapp` injects `catsClipWrite` / `catsClipRead` into
+every page of every window (a `WKScriptMessageHandlerWithReply`, so the page's
+read is still a promise), backed by `/usr/bin/pbcopy` and `/usr/bin/pbpaste`,
+and the UI prefers them when present. The windows only ever load the configured
+`catway` UI, so exposing the pasteboard to the page does not leak it to
+arbitrary content.
+
+## Windows
+
+The app opens **native windows**: one `NSWindow` + `WKWebView` each
+(`cmd/catapp/window_darwin.m`), all over the one running session. Every
+connection is a view on one workspace, so a window is just `?ws=<id>` in a
+`WKWebView`.
+
+| Action | What it does |
+|---|---|
+| **Window → New Window** (⌘N) | a window on the primary view — another window on what you are doing |
+| sidebar row → **open in new window** | a window on *that* workspace (the page's `window.open`, intercepted in `WKUIDelegate`) |
+| **Close Window** (⌘W) | closes the window; the workspace it showed keeps running |
+| ⌘+ / ⌘- / ⌘0 | font size in the **front** window's page |
+
+Windows on different workspaces are independent — own tab, own focus, own zoom,
+own size. Windows on the same workspace mirror. Closing a window never closes
+anything in the session. See [Concepts](../concepts.md#windows-and-views).
+
+All windows share one `WKWebsiteDataStore`, so cookies and page storage (the
+font size, sidebar widths) are one set across them.
+
+**Restore.** The window layout — each window's workspace and frame — is saved in
+`app.json` beside the mode and the presets, debounced on every open, close, move
+and resize. It is client state: `catway` persists nothing about windows at all.
+The page keeps its own `?ws=` in step with the workspace it is showing
+(`history.replaceState`), which is how a switch inside a window is remembered
+without any extra protocol. A saved window whose workspace no longer exists
+still opens — the server falls back to the primary view — because a window
+layout should survive tidying up projects.
+
+`setFrameAutosaveName` is deliberately not used: it keys by a fixed name, and N
+windows need N frames whose names we choose.
+
+### Manual runbook
+
+There is no Go test for Objective-C. On a clean `make macapp` install (a stale
+bundle is the usual cause of a "bug" here — check the installed build first):
+
+1. ⌘N — a second window opens on the same workspace and mirrors the first.
+2. Sidebar row → **open in new window** on another workspace — the two windows
+   now show different projects; switching tabs or splitting in one leaves the
+   other alone.
+3. Resize one window — the other window's panes keep their shape.
+4. Close the first window — the second keeps working, and its workspace's panes
+   are untouched.
+5. ⌘+ in one window — only that window's text changes size.
+6. Open three windows, ⌘Q, relaunch — three windows come back on the same
+   workspaces, at the same frames.
+7. Close the last window — the app quits and the daemons are reaped (check with
+   `pgrep cathost`).
 
 ## Shutdown
 
 ```mermaid
 stateDiagram-v2
   [*] --> Running
-  Running --> Cleanup : window closed (Run returns)
+  Running --> Cleanup : last window closed
   Running --> Cleanup : Cmd-Q via native menu
   Running --> Cleanup : SIGINT / SIGTERM
   Cleanup --> TermGateway : sync.Once guard
@@ -178,9 +230,12 @@ stateDiagram-v2
   Sockets --> [*] : unlink stray TMPDIR sockets
 ```
 
-Three paths reach teardown — window close (deferred), ⌘Q (the Objective-C Quit
-action calls the cgo-exported `catappCleanup`), and a signal handler — and all
-funnel through one `sync.Once`, so the daemons are reaped exactly once.
+Three paths reach teardown — the **last** window closing
+(`applicationShouldTerminateAfterLastWindowClosed` is YES, and
+`applicationWillTerminate:` calls the cgo-exported `catappCleanup`), ⌘Q (the
+Objective-C Quit action calls the same), and a signal handler — and all funnel
+through one `sync.Once`, so the daemons are reaped exactly once. Closing one
+window out of three reaps nothing: only the last one ends the app.
 
 Teardown is reverse order: SIGTERM `catway` first (it saves session state and
 exits within its own short grace window), then SIGTERM `cathost`. Each daemon
@@ -205,7 +260,7 @@ user learns why nothing appeared. It is also logged for a dev terminal.
 | One double-click; no daemons to remember | macOS only |
 | No password, no TLS, no exposure | Sessions end with the app (by design, today) |
 | Offline — nothing leaves the machine | Requires the full ghostty/Zig toolchain to build |
-| Native menu, clipboard and zoom integration | Unsigned: other Macs need right-click → Open |
+| Native windows, menu, clipboard and zoom integration | Unsigned: other Macs need right-click → Open |
 
 Mode 1 is a superset — `app.json` can flip it to `remote` and point it at
 another `catway`. Keeping [Mode 2](mac-client-linux-server.md) as its own target

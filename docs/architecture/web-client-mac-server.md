@@ -108,23 +108,40 @@ mid-session expiry. A long-lived WebSocket outlives its cookie's TTL.
 
 ## Multiple simultaneous clients
 
-Several browsers can be connected at once. They are **not** independent
-sessions: there is exactly one `app.Session`, so everyone sees the same
-workspaces, tabs, panes and focus. A second client is a second view, not a
-second workspace set.
+Several browsers can be connected at once. They share one `app.Session` —
+one set of workspaces, tabs and panes, all live — but each connection is a
+**view**: it shows one workspace, with that workspace's own active tab, focused
+pane, zoom and grid. That is what makes "a window per project on the second
+monitor" work on every topology, over the one running session.
+
+Open a second window on a chosen workspace with `?ws=<id>` (the page forwards it
+as `init.workspace`), or from the sidebar's **Open in new window**.
 
 Consequences worth knowing:
 
-* Focus, splits and tab switches are global. Two people (or two devices) fight
-  over focus if they both drive it.
-* Each client reports its own grid via `init`/`resize`. The orchestrator keeps
-  one desired size per pane, so the **last reporter wins** — a phone connecting
-  to a session driven from a desktop will resize everyone's panes.
+* **Different workspaces are independent.** `workspace.focus`, `tab.focus`,
+  splits, zoom and focus in one window do not touch another window on another
+  workspace. Each window resizes only the workspace it is showing.
+* **The same workspace mirrors.** Two windows on one workspace see the same tab
+  and the same focused pane — one active tab per workspace is the model — and
+  the **last reporter wins** on that workspace's pane sizes.
+* **A viewer follows the primary view.** A phone (`init.viewer`) declares no
+  geometry and no workspace; it shows whichever desktop window the user touched
+  last, and never resizes anything.
+* **`catctl` acts on the primary view** — the most recently focused desktop
+  window. It has no window of its own, and neither do hook actions or runbook
+  steps.
+* **Closing a window closes nothing.** The workspace it showed keeps running,
+  exactly as a workspace you switched away from, and keeps its pane sizes for
+  the next window that opens on it.
 * Broadcast messages (`notify`, `title`, `shutdown`, `update_ready`) go to all
-  connected clients.
-* A late joiner gets a full resync from cached runtime state — layout, per-pane
-  chrome, and a full `pane_frame` per visible pane — so it never sees a partial
-  screen.
+  connected clients; per-pane chrome and frames go only to the windows showing
+  that pane.
+* A late joiner gets a full resync from cached runtime state — the layout of
+  *its* workspace, per-pane chrome, and a full `pane_frame` per pane it is
+  showing — so it never sees a partial screen.
+* Two people driving the *same* workspace still fight over focus. Give them a
+  workspace each and they do not.
 
 ## Serving on the LAN
 

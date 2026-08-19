@@ -31,11 +31,17 @@ const (
 	// routed and chat_* messages flow. Without it a client should hide its
 	// chat UI rather than let chat.send vanish into an unknown-command error.
 	CapChat = "chat"
+	// CapWindow: Init.Workspace is honoured — a connection is a view with its
+	// own workspace, so workspace.focus moves only the window that sent it and
+	// a resize reshapes only the workspace that window is showing. Without it,
+	// opening a second window on another workspace fights the first, which is
+	// exactly the failure a client cannot detect after the fact.
+	CapWindow = "window"
 )
 
 // serverCaps is what this server advertises. Unexported so a caller cannot
 // mutate the advertised set through the shared backing array.
-var serverCaps = []string{CapViewer, CapKeyPane, CapClients, CapChat}
+var serverCaps = []string{CapViewer, CapKeyPane, CapClients, CapChat, CapWindow}
 
 // Welcome is the server's reply to Init. A version mismatch or rejection sets
 // Error and the server closes the socket; otherwise the server immediately
@@ -70,16 +76,47 @@ func NewWelcome(errMsg string) Welcome {
 //     grid (non-viewers), and Cols/Rows is the grid they settled on. Sizers == 0
 //     means nobody is driving it and the layout is whatever the last sizer left
 //     behind, which is worth rendering differently from a live desktop's.
+//
+// Views answers the third question, the one multi-window introduced: "which
+// workspace is each other window on?" A sidebar can then mark a workspace
+// another window already shows (so "open in new window" does not silently make
+// a duplicate), and a viewer can label the primary view it is following.
+// Cols/Rows keep their old meaning — the primary view's grid — so a client that
+// ignores Views is unchanged.
 type Clients struct {
 	T      Type   `json:"t"`
 	Total  int    `json:"total"`
 	Sizers int    `json:"sizers"`
 	Cols   uint16 `json:"cols"`
 	Rows   uint16 `json:"rows"`
+	// Views is one entry per connection, in no meaningful order. Additive:
+	// absent from an older server, and safely ignorable.
+	Views []ClientView `json:"views,omitempty"`
+}
+
+// ClientView describes one connected window: the workspace it shows, the grid
+// it declared (zero for a viewer, which declares none), whether its OS window
+// is in the foreground, and whether it is the primary view — the most recently
+// focused sizer, which is what a view-less caller (catctl, a hook, a runbook
+// step) and every viewer resolve "the focused pane" through.
+type ClientView struct {
+	Workspace string `json:"workspace"`
+	Cols      uint16 `json:"cols,omitempty"`
+	Rows      uint16 `json:"rows,omitempty"`
+	Focused   bool   `json:"focused,omitempty"`
+	Viewer    bool   `json:"viewer,omitempty"`
+	Primary   bool   `json:"primary,omitempty"`
 }
 
 func NewClients(total, sizers int, cols, rows uint16) Clients {
 	return Clients{T: MsgClients, Total: total, Sizers: sizers, Cols: cols, Rows: rows}
+}
+
+// NewClientsWithViews is NewClients carrying the per-window breakdown.
+func NewClientsWithViews(total, sizers int, cols, rows uint16, views []ClientView) Clients {
+	c := NewClients(total, sizers, cols, rows)
+	c.Views = views
+	return c
 }
 
 // --- Layout & chrome (§3) -----------------------------------------------------

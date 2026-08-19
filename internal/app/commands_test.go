@@ -82,6 +82,24 @@ type fakeBackend struct {
 	// staged records StageSpawn calls so tab.create tests can assert the
 	// override reached the backend (and, via the log, before applyModel).
 	staged map[uint32]SpawnOverride
+	// view is the window this fake stands in for, and viewMoves records every
+	// SetViewWorkspace the dispatcher asked for — the two halves of the
+	// per-window viewport (view.go). The fake applies a move to its own view,
+	// the way catway applies it to the issuing connection, so a test can drive
+	// a sequence of commands as one window.
+	view      View
+	viewMoves []string
+}
+
+// SetViewWorkspace moves the fake's view, standing in for catway moving the
+// issuing connection's. The session's active workspace is deliberately NOT
+// touched: that is the runtime's primary-view bookkeeping, not the
+// dispatcher's, and a test that asserted it here would be asserting the
+// old shared-viewport behaviour under a new name.
+func (b *fakeBackend) SetViewWorkspace(wsID string) {
+	b.view.WorkspaceID = wsID
+	b.viewMoves = append(b.viewMoves, wsID)
+	b.rec("setViewWorkspace")
 }
 
 // Recorder makes the fake a recording backend (record.go). It is nil in every
@@ -358,8 +376,11 @@ func TestDispatchFocus(t *testing.T) {
 	if !r.okCall || r.failCall {
 		t.Fatalf("focus should ack ok: ok=%v fail=%v (%q)", r.okCall, r.failCall, r.errMsg)
 	}
-	if got := *h.log; len(got) != 2 || got[0] != "broadcastLayout" || got[1] != "ok" {
-		t.Fatalf("focus effects = %v, want [broadcastLayout ok]", got)
+	// setViewWorkspace first: pane.focus reveals the pane in the *issuing*
+	// window, so the view moves to the pane's workspace before the layout that
+	// window is about to be sent is built.
+	if got := *h.log; len(got) != 3 || got[0] != "setViewWorkspace" || got[1] != "broadcastLayout" || got[2] != "ok" {
+		t.Fatalf("focus effects = %v, want [setViewWorkspace broadcastLayout ok]", got)
 	}
 	if len(h.s.VisiblePaneIDs()) != 1 {
 		t.Fatalf("focus must not change the pane set")
@@ -1065,8 +1086,11 @@ func TestDispatchWorkspaceCreate(t *testing.T) {
 		}
 		// The rename must land before applyModel, so the workspace never reaches
 		// observers under its auto-name first.
-		if lg := *h.log; len(lg) != 2 || lg[0] != "applyModel" || lg[1] != "ok" {
-			t.Fatalf("workspace.create effects = %v, want [applyModel ok]", lg)
+		// The issuing window follows the workspace it just created, and it does
+		// so before applyModel — the layout that call broadcasts is the one
+		// that has to show the new workspace already active in this window.
+		if lg := *h.log; len(lg) != 3 || lg[0] != "setViewWorkspace" || lg[1] != "applyModel" || lg[2] != "ok" {
+			t.Fatalf("workspace.create effects = %v, want [setViewWorkspace applyModel ok]", lg)
 		}
 		r = h.resp()
 		h.d.Dispatch(CmdWorkspaceList, noParams(), r)

@@ -237,6 +237,59 @@ func (w *Workspace) MoveTab(sourceIdx, insertIdx int) bool {
 	return true
 }
 
+// DetachTab removes the tab at idx and hands it to the caller, unregistering
+// its panes' public numbers here. Unlike CloseTab it will give up the LAST tab
+// as well: the caller is moving the tab somewhere else, and whether an emptied
+// workspace should then be dropped is the session's decision, not the
+// workspace's. The panes' terminals are untouched — nothing is despawned,
+// because nothing is closing.
+//
+// It is the first half of moving a tab between workspaces; AdoptTab is the
+// second.
+func (w *Workspace) DetachTab(idx int) (*Tab, bool) {
+	if idx < 0 || idx >= len(w.Tabs) {
+		return nil, false
+	}
+	tab := w.Tabs[idx]
+	w.Tabs = append(w.Tabs[:idx], w.Tabs[idx+1:]...)
+	for paneID := range tab.Panes {
+		w.unregisterPane(paneID)
+	}
+	if w.activeTab >= len(w.Tabs) {
+		w.activeTab = max(0, len(w.Tabs)-1)
+	} else if idx <= w.activeTab && w.activeTab > 0 {
+		w.activeTab--
+	}
+	return tab, true
+}
+
+// AdoptTab appends a tab detached from another workspace and returns its index.
+//
+// The tab is renumbered — public tab numbers and public pane ids ("w1:p3") are
+// per workspace, so a tab arriving from elsewhere gets the next number here,
+// exactly as a newly created one would, and each of its panes gets the next
+// public pane number. The internal pane ids and the terminals behind them are
+// untouched: the panes keep running, they simply answer to a new handle.
+//
+// One consequence worth stating: a pane's CATS_PANE_ID environment variable was
+// set when its process spawned and cannot be rewritten, so a moved pane's
+// environment names its old handle. Nothing breaks — the "p_<raw>" fallback
+// form resolves regardless of workspace (see Session.PaneByPublicID) — but a
+// script that cached the "w1:p3" string will be pointing at a handle that has
+// moved on.
+func (w *Workspace) AdoptTab(tab *Tab) int {
+	tab.Number = w.nextPublicTabNumber
+	w.nextPublicTabNumber++
+	// In-order, so the arriving panes are numbered left to right rather than in
+	// map-iteration order — the numbers are what a person reads off the header.
+	for _, paneID := range tab.Layout.PaneIDs() {
+		n := w.nextPublicPaneNumber
+		w.registerNewPaneWithNumber(paneID, n)
+	}
+	w.Tabs = append(w.Tabs, tab)
+	return len(w.Tabs) - 1
+}
+
 // CloseActiveTab closes the active tab.
 func (w *Workspace) CloseActiveTab() bool {
 	return w.CloseTab(w.activeTab)

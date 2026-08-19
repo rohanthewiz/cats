@@ -43,6 +43,7 @@ const (
 	CmdTabFocus           = "tab.focus"
 	CmdTabRename          = "tab.rename"
 	CmdTabMove            = "tab.move"
+	CmdTabMoveToWorkspace = "tab.move_to_workspace"
 	CmdWorkspaceCreate    = "workspace.create"
 	CmdWorkspaceClose     = "workspace.close"
 	CmdWorkspaceFocus     = "workspace.focus"
@@ -330,6 +331,8 @@ var commandSpecs = []CommandSpec{
 	{Name: CmdTabFocus, Params: TabParams{}, ParamsRequired: true, Recorded: true},
 	{Name: CmdTabRename, Params: RenameTabParams{}, ParamsRequired: true, Recorded: true},
 	{Name: CmdTabMove, Params: MoveTabParams{}, ParamsRequired: true, Recorded: true},
+	{Name: CmdTabMoveToWorkspace, Params: MoveTabToWorkspaceParams{}, Result: MoveTabToWorkspaceResult{},
+		ParamsRequired: true, Recorded: true},
 
 	// Workspaces.
 	{Name: CmdWorkspaceCreate, Params: WorkspaceCreateParams{}, Result: WorkspaceCreateResult{}, Recorded: true},
@@ -806,6 +809,30 @@ type RenameTabParams struct {
 type MoveTabParams struct {
 	Num   int `json:"num"`
 	Index int `json:"index"`
+}
+
+// MoveTabToWorkspaceParams: tab.move_to_workspace — move a tab, with its panes
+// and their live terminals, into another workspace. This is how a tab travels
+// between WINDOWS: a window shows a workspace, so "drag this tab to that
+// window" is "move this tab to that workspace".
+//
+// Workspace is the destination and is required — the one thing a move cannot
+// default. Num is the tab's public number in the SOURCE workspace, and From
+// names that workspace ("" = the one the issuing window is showing, which is
+// what a drag from its own tab strip means). Tab numbering is per workspace, so
+// the tab arrives with a new number: the result reports it.
+type MoveTabToWorkspaceParams struct {
+	Workspace string `json:"workspace"`
+	Num       int    `json:"num"`
+	From      string `json:"from,omitempty"`
+}
+
+// MoveTabToWorkspaceResult reports where the tab landed: its new public number
+// in the destination workspace. The pane ids are unchanged, but their public
+// handles are not — they are per workspace too.
+type MoveTabToWorkspaceResult struct {
+	Workspace string `json:"workspace"`
+	Num       int    `json:"num"`
 }
 
 // MoveWorkspaceParams: workspace.move — reorder the workspace list. Index is an

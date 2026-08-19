@@ -48,8 +48,13 @@
 
 static CatsMenuTarget *gMenuTarget = nil;
 
+// The app delegate, which owns New Window. Defined in window_darwin.m; nil in
+// the single-window paths (the error sheet), which is what windowMenu == 0
+// already says.
+extern id catsWindowMenuTarget(void);
+
 void installAppMenu(const char *cAppName, const char **hostNames, int hostCount,
-                    int currentHost) {
+                    int currentHost, int windowMenu) {
     @autoreleasepool {
         if (!gMenuTarget) {
             gMenuTarget = [[CatsMenuTarget alloc] init];
@@ -143,6 +148,46 @@ void installAppMenu(const char *cAppName, const char **hostNames, int hostCount,
                                 action:@selector(zoomActual:)
                          keyEquivalent:@"0"];
         [zoomActual setTarget:gMenuTarget];
+
+        // --- Window menu ------------------------------------------------------
+        // Only for the native multi-window shell (window_darwin.m). The single
+        // webview_go paths — the startup error sheet — have exactly one window
+        // and nothing to offer here; an inert "New Window" would be worse than
+        // no menu.
+        //
+        // New Window opens on the PRIMARY view: the server resolves an omitted
+        // workspace to whichever window the user touched last, which is what
+        // "another window on what I am doing" means. Opening a window on a
+        // specific project is the sidebar's job (its row's "open in new
+        // window"), where the project is on screen to point at.
+        if (windowMenu) {
+            NSMenuItem *windowItem = [[NSMenuItem alloc] init];
+            [mainMenu addItem:windowItem];
+            NSMenu *windowMenuEl = [[NSMenu alloc] initWithTitle:@"Window"];
+            [windowItem setSubmenu:windowMenuEl];
+
+            NSMenuItem *newWin = [windowMenuEl addItemWithTitle:@"New Window"
+                                                         action:@selector(newWindow:)
+                                                  keyEquivalent:@"n"];
+            [newWin setTarget:catsWindowMenuTarget()];
+            [windowMenuEl addItem:[NSMenuItem separatorItem]];
+            // nil targets: AppKit routes these through the responder chain to
+            // the key window, which is the whole point of a Window menu.
+            [windowMenuEl addItemWithTitle:@"Minimize"
+                                    action:@selector(performMiniaturize:)
+                             keyEquivalent:@"m"];
+            [windowMenuEl addItemWithTitle:@"Zoom" action:@selector(performZoom:) keyEquivalent:@""];
+            [windowMenuEl addItemWithTitle:@"Close Window"
+                                    action:@selector(performClose:)
+                             keyEquivalent:@"w"];
+            [windowMenuEl addItem:[NSMenuItem separatorItem]];
+            [windowMenuEl addItemWithTitle:@"Bring All to Front"
+                                    action:@selector(arrangeInFront:)
+                             keyEquivalent:@""];
+            // Handing it to NSApp is what makes AppKit keep the list of open
+            // windows at the foot of the menu current by itself.
+            [NSApp setWindowsMenu:windowMenuEl];
+        }
 
         // --- Connect menu -----------------------------------------------------
         // The thin client's saved catways. hostCount < 0 means this mode has

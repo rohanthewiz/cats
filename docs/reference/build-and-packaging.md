@@ -20,7 +20,7 @@ flowchart TB
   end
 
   subgraph cgoonly["cgo, but no ghostty tag"]
-    C1["catapp — WebKit + a native menu"]
+    C1["catapp — WebKit windows + a native menu"]
   end
 
   VT["third_party/libghostty-vt<br/>vendored Zig source"]
@@ -168,6 +168,16 @@ rather than building them, so `make vt` must have run first.
 `catapp` itself is always built here with plain `go build` — cgo on for WebKit,
 **no** `-tags ghostty`, and `-ldflags "-X main.defaultMode=…"`.
 
+Two Objective-C files are in the cgo set, both picked up automatically by their
+`_darwin` suffix (no Makefile entry to keep in step):
+
+| File | What it is |
+|---|---|
+| `cmd/catapp/menu_darwin.m` | the menu bar — App, Edit, View (⌘+/⌘-/⌘0), Window (New Window ⌘N), and the thin client's Connect list |
+| `cmd/catapp/window_darwin.m` | the multi-window shell — `NSWindow` + `WKWebView` per window, the app delegate, the pasteboard and connect-form bridges |
+
+They link `-framework Cocoa -framework WebKit`.
+
 Bundle layout:
 
 ```
@@ -199,7 +209,7 @@ needs a one-time **right-click → Open**.
 | Same OS/arch | `make binaries` |
 | macOS → Linux, tagged | **avoid**. CGO cross-compilation needs a Linux cross-toolchain *and* libghostty built for the Linux target. Build on the Linux host (`make vt && make binaries`) or pull the release tarball |
 | Anything → `catctl` | trivial, it is pure Go |
-| Anything → `catapp` | macOS only (WebKit + a native menu via cgo, with a `darwin` build constraint on every file in the package) |
+| Anything → `catapp` | macOS only (WebKit windows + a native menu via cgo, with a `darwin` build constraint on every file in the package) |
 
 On Linux, CGO links glibc dynamically, so build on the same distro family you run
 on.

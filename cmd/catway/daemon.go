@@ -977,7 +977,14 @@ func (d *daemon) dispatch(mt orchestration.MessageType, payload []byte) {
 			if !o.visible[ev.PaneID] {
 				return
 			}
+			// One translation per connection that is SHOWING the pane. A window
+			// on another workspace neither gets the frame nor advances its
+			// translator, so when it does switch to this pane it is handed a
+			// full frame (resyncViews) rather than a delta off a stale base.
 			for c := range o.conns {
+				if !c.view.visible[ev.PaneID] {
+					continue
+				}
 				msg := c.translator(ev.PaneID).Translate(ev.Frame)
 				if b, err := browserproto.Marshal(msg); err == nil {
 					o.enqueue(c, b)
@@ -1012,9 +1019,7 @@ func (d *daemon) dispatch(mt orchestration.MessageType, payload []byte) {
 				return
 			}
 			rt.title = ev.Title
-			if o.visible[ev.PaneID] {
-				o.broadcast(browserproto.NewPaneTitle(ev.PaneID, o.effectiveTitle(ev.PaneID)))
-			}
+			o.sendVisible(ev.PaneID, browserproto.NewPaneTitle(ev.PaneID, o.effectiveTitle(ev.PaneID)))
 			o.broadcastTitle()
 			o.refreshTabNames() // an auto-named tab may be riding this title
 			o.emitEvent(app.EventPaneTitle, ev.PaneID, app.PaneTitleEvent{Pane: ev.PaneID, Title: ev.Title})
@@ -1031,9 +1036,7 @@ func (d *daemon) dispatch(mt orchestration.MessageType, payload []byte) {
 				return
 			}
 			rt.cwd = ev.Cwd
-			if o.visible[ev.PaneID] {
-				o.broadcast(browserproto.NewPaneCwd(ev.PaneID, ev.Cwd))
-			}
+			o.sendVisible(ev.PaneID, browserproto.NewPaneCwd(ev.PaneID, ev.Cwd))
 			// The cwd is what the branch is resolved against, so a move is the
 			// one moment the header's branch is knowably wrong. The sweep would
 			// catch it within seconds; this makes the pair land together.
@@ -1088,9 +1091,7 @@ func (d *daemon) dispatch(mt orchestration.MessageType, payload []byte) {
 			}
 			code := ev.ExitCode
 			rt.exited = &code
-			if o.visible[ev.PaneID] {
-				o.broadcast(browserproto.NewPaneExited(ev.PaneID, ev.ExitCode))
-			}
+			o.sendVisible(ev.PaneID, browserproto.NewPaneExited(ev.PaneID, ev.ExitCode))
 			o.emitEvent(app.EventPaneExited, ev.PaneID, app.PaneExitedEvent{Pane: ev.PaneID, ExitCode: ev.ExitCode})
 			o.resolveWaitersOnExit(ev.PaneID) // no more output will come
 			o.clearHookOnExit(rt)             // a late hook packet must not resurrect a dead agent
@@ -1147,9 +1148,7 @@ func (o *orch) applyPaneModes(ev orchestration.PaneModes) {
 			o.hostOf(rt).send(orchestration.NewInput(rt.id, b))
 		}
 	}
-	if o.visible[ev.PaneID] {
-		o.broadcast(browserproto.ModesFrom(ev))
-	}
+	o.sendVisible(ev.PaneID, browserproto.ModesFrom(ev))
 }
 
 // inputModesFrom rehydrates the β pane_modes mirror into the emulator-side
