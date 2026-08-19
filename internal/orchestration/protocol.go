@@ -102,31 +102,33 @@ const (
 	MsgControlReply MessageType = "control_reply"
 
 	// Go → Rust (events).
-	MsgWelcome        MessageType = "welcome"
-	MsgPaneFrame      MessageType = "pane_frame"
-	MsgPaneOutput     MessageType = "pane_output"
-	MsgPaneCwd        MessageType = "pane_cwd"
-	MsgPaneAgent      MessageType = "pane_agent"
-	MsgPaneClipboard  MessageType = "pane_clipboard"
-	MsgPaneTitle      MessageType = "pane_title"
-	MsgPaneSelection  MessageType = "pane_selection"
-	MsgPaneText       MessageType = "pane_text"
-	MsgPaneModes      MessageType = "pane_modes"
-	MsgPaneBranch     MessageType = "pane_branch"
-	MsgPaneExited     MessageType = "pane_exited"
-	MsgPong           MessageType = "pong"
-	MsgHostStats      MessageType = "host_stats"
-	MsgCommandStart   MessageType = "command_start"
-	MsgCommandEnd     MessageType = "command_end"
-	MsgBlockResult    MessageType = "block_result"
-	MsgDirListing     MessageType = "dir_listing"
-	MsgWorktreeResult MessageType = "worktree_result"
-	MsgFileResult     MessageType = "file_result"
-	MsgHookReport     MessageType = "hook_report"
-	MsgControlOpen    MessageType = "control_open"
-	MsgControlData    MessageType = "control_data"
-	MsgControlClose   MessageType = "control_close"
-	MsgError          MessageType = "error"
+	MsgWelcome    MessageType = "welcome"
+	MsgPaneFrame  MessageType = "pane_frame"
+	MsgPaneOutput MessageType = "pane_output"
+	MsgPaneCwd    MessageType = "pane_cwd"
+	MsgPaneAgent  MessageType = "pane_agent"
+	// MsgPaneAgentSession names the conversation behind the detected agent.
+	MsgPaneAgentSession MessageType = "pane_agent_session"
+	MsgPaneClipboard    MessageType = "pane_clipboard"
+	MsgPaneTitle        MessageType = "pane_title"
+	MsgPaneSelection    MessageType = "pane_selection"
+	MsgPaneText         MessageType = "pane_text"
+	MsgPaneModes        MessageType = "pane_modes"
+	MsgPaneBranch       MessageType = "pane_branch"
+	MsgPaneExited       MessageType = "pane_exited"
+	MsgPong             MessageType = "pong"
+	MsgHostStats        MessageType = "host_stats"
+	MsgCommandStart     MessageType = "command_start"
+	MsgCommandEnd       MessageType = "command_end"
+	MsgBlockResult      MessageType = "block_result"
+	MsgDirListing       MessageType = "dir_listing"
+	MsgWorktreeResult   MessageType = "worktree_result"
+	MsgFileResult       MessageType = "file_result"
+	MsgHookReport       MessageType = "hook_report"
+	MsgControlOpen      MessageType = "control_open"
+	MsgControlData      MessageType = "control_data"
+	MsgControlClose     MessageType = "control_close"
+	MsgError            MessageType = "error"
 )
 
 // --- Capabilities ------------------------------------------------------------
@@ -682,6 +684,37 @@ func NewPaneAgent(id uint32, agent, state string, visibleBlocker, visibleWorking
 		State:          state,
 		VisibleBlocker: visibleBlocker,
 		VisibleWorking: visibleWorking,
+	}
+}
+
+// PaneAgentSession reports which conversation the pane's detected agent process
+// is in — claude's session id and, in time, its equivalents — as read from that
+// agent's own pid-keyed registry (detect.AgentSessionID).
+//
+// It is the daemon's to report for the same reason the branch is: the pids and
+// the registry are on the machine the agent runs on. And it is a message of its
+// own rather than a field on PaneAgent because it moves on a different clock —
+// pane_agent fires on every state flip, several times a turn, while the session
+// changes only when a conversation starts.
+//
+// SessionID is "" for "no answer" (the agent keeps no readable registry, or has
+// not written its entry yet); Agent is "" once the agent has left the pane, which
+// retracts the session with it. A client that does not know this message ignores
+// it — the orchestrator's dispatch drops unknown event types — so an older peer
+// simply keeps the behaviour it had.
+type PaneAgentSession struct {
+	Type      MessageType `json:"type"`
+	PaneID    uint32      `json:"pane_id"`
+	Agent     string      `json:"agent"`
+	SessionID string      `json:"session_id"`
+}
+
+func NewPaneAgentSession(id uint32, agent, sessionID string) PaneAgentSession {
+	return PaneAgentSession{
+		Type:      MsgPaneAgentSession,
+		PaneID:    id,
+		Agent:     agent,
+		SessionID: sessionID,
 	}
 }
 

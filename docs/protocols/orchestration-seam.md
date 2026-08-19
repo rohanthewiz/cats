@@ -100,6 +100,7 @@ without racing the daemon's own post-hello replay. Unknown pane ids are ignored.
 | `pane_cwd` | `pane_id`, `cwd` | from OSC 7, or the process probe |
 | `pane_branch` | `pane_id`, `branch` | v3. The git branch of the pane's cwd — `""` outside a repository, `@<sha>` while detached. Resolved **daemon-side**, because the cwd is a path on the daemon's filesystem |
 | `pane_agent` | `pane_id`, agent label, state, visibility flags | `""` = plain shell; state is `idle` / `working` / `blocked` / `unknown` |
+| `pane_agent_session` | `pane_id`, agent label, `session_id` | Which conversation the pane's agent process is in, traced from its pid to the agent's own registry of live processes (`~/.claude/sessions/<pid>.json`). Resolved **daemon-side** — the pids and the registry are on the machine the agent runs on. `""` = no answer; an empty agent retracts it. Additive: a peer that does not know the type ignores it |
 | `pane_clipboard` | `pane_id`, `data` (base64) | reconstructed OSC 52; empty data = clear |
 | `pane_title` | `pane_id`, `title` | OSC 0/2; empty = clear |
 | `pane_selection` | `pane_id`, `text` | reply to `request_selection`, one per request |
@@ -456,6 +457,12 @@ on another machine:
   a dialog — so a path that does not exist here would fail `chdir` and produce a
   pane born dead. The daemon falls back to `$HOME` and emits an `error` naming
   both directories, so the pane is usable and nobody is misled about where it is.
+* **`pane_agent_session`** is the same argument again: the process table and the
+  agent's pid-keyed registry only exist next to the agent. It is what lets the
+  model readout name *this* pane's conversation instead of guessing from the
+  working directory — a guess that answers two panes running one agent in one
+  repository with whichever session wrote last (see
+  `docs/subsystems/agent-detection.md`).
 * **`pane_branch`** is resolved here for the same reason in reverse: reading
   `.git/HEAD` on the orchestrator's machine against a remote pane's path finds
   either nothing or — worse — a same-named checkout of its own, sitting on a

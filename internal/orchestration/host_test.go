@@ -222,6 +222,53 @@ func TestHostReportsAgent(t *testing.T) {
 	t.Fatal("never received pane_agent with agent=codex")
 }
 
+// The pane's agent is traced to the conversation it is in, off its own pid and
+// the registry the agent keeps of its live processes — no hook, and nothing
+// installed. That is what tells two panes running one agent in one directory
+// apart; see detect.AgentSessionID.
+func TestHostReportsAgentSession(t *testing.T) {
+	// The host reads the registry out of its own environment, and the pane
+	// inherits it, so one setting covers both ends of the fixture.
+	root := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", root)
+
+	c := startTestHost(t)
+
+	cp := NewCreatePane(9, 40, 5)
+	cp.Command = "/bin/bash"
+	// A foreground process advertising argv[0]="claude" that writes claude's own
+	// registry entry for itself — keyed by its pid, which is the only handle the
+	// terminal has on it — and then stays alive long enough to be probed.
+	cp.Args = []string{"-c", `exec -a claude sh -c '` +
+		`mkdir -p "$CLAUDE_CONFIG_DIR/sessions"; ` +
+		`printf "{\"pid\":%d,\"sessionId\":\"sess-live\"}" $$ > "$CLAUDE_CONFIG_DIR/sessions/$$.json"; ` +
+		`sleep 20'`}
+	if err := WriteMessage(c, cp); err != nil {
+		t.Fatalf("create_pane: %v", err)
+	}
+
+	deadline := time.Now().Add(20 * time.Second)
+	for time.Now().Before(deadline) {
+		typ, payload := readEvent(t, c)
+		switch typ {
+		case MsgPaneAgentSession:
+			var ps PaneAgentSession
+			if err := json.Unmarshal(payload, &ps); err != nil {
+				t.Fatalf("decode pane_agent_session: %v", err)
+			}
+			if ps.PaneID != 9 {
+				t.Fatalf("pane_agent_session for pane %d, want 9", ps.PaneID)
+			}
+			if ps.Agent == "claude" && ps.SessionID == "sess-live" {
+				return
+			}
+		case MsgError:
+			t.Fatalf("unexpected error event: %s", string(payload))
+		}
+	}
+	t.Fatal("never received pane_agent_session naming the running conversation")
+}
+
 func TestHostReportsAgentWorkingState(t *testing.T) {
 	c := startTestHost(t)
 

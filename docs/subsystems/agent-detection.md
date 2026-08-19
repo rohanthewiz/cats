@@ -234,7 +234,38 @@ The port is unix-only — on Windows every target reports not-supported.
 | state | badge colour, plus the sidebar workspace summary |
 | `blocked` transition | a toast, and a permission-gated system notification (`notify` kind `attention`) |
 | background `idle` after `working` | `notify` kind `finished`, and the pane is marked **unseen** — the "done" marker |
-| current model | re-read periodically per agent pane, shown in the pane hover card |
+| current model | re-read periodically per agent pane, shown in the pane hover card and naming each row of the sidebar's AGENTS rollup |
 
 A notification is suppressed entirely when the pane it concerns is already
 visible — the front end makes that call, since only it knows what is on screen.
+
+## Which conversation a pane is in
+
+The model is not reported by any identity channel — detection reads the screen,
+and a hook fires once per session, so a model named there would go stale the
+moment the user switches with `/model`. It is read from the tail of the agent's
+own history, which names the model behind every message it wrote.
+
+That makes *which history* the question, and there are three answers, in falling
+order of confidence:
+
+| Channel | How | Needs |
+|---------|-----|-------|
+| hook | the agent reports its own session id (`pane.report_agent_session`) | `catctl integration install` |
+| detected | the daemon traces the pane's foreground process to the agent's registry of live processes — `~/.claude/sessions/<pid>.json` — and reads the session id out of it (`pane_agent_session`) | nothing |
+| cwd | the most recently written history under the pane's working directory | nothing |
+
+The last one is a guess, and the reason the first two exist: two panes running
+one agent in one repository share a working directory, so it resolves both to
+whichever session wrote last — both rows name one pane's model, and both flip
+together when either pane switches models. The detected channel is what covers
+the ordinary pane, since most panes have no integration installed.
+
+Every candidate pid in the pane's foreground process group is tried, in order,
+because the process carrying the *name* need not be the one keeping the state: a
+shim called `claude` is what argv identifies, while the registry entry belongs to
+the binary it started.
+
+Agents that keep no such registry (everything but claude today) still fall back
+to the cwd guess, and a pane on another machine carries no model at all — the
+history lives beside the agent.

@@ -109,6 +109,12 @@ type pane struct {
 	lastVisBlocker bool
 	lastVisWorking bool
 	hasAgent       bool // a pane_agent has been emitted at least once
+	// The conversation behind the detected agent, as last reported via
+	// pane_agent_session: the agent it belongs to (an id only names a history
+	// belonging to the agent that wrote it) and the id itself.
+	lastSessionAgent string
+	lastSessionID    string
+	hasSession       bool // a pane_agent_session has been emitted at least once
 	// Branch state, written by the branch pump and read by resync. branchCwd is
 	// the directory lastBranch was resolved for, which is what separates "we
 	// already answered this" from "the pane moved" — the throttle only applies
@@ -190,6 +196,29 @@ func (p *pane) setAgentMeta(agent, state string, visBlocker, visWorking bool) {
 	p.lastVisBlocker, p.lastVisWorking = visBlocker, visWorking
 	p.hasAgent = true
 	p.metaMu.Unlock()
+}
+
+// setAgentSessionMeta records the last-emitted agent session for resync and
+// reports whether it changed what the client has been told, so the caller emits
+// pane_agent_session only on a real change.
+//
+// A pane that has never reported one stays silent while there is nothing to say:
+// the empty answer is the state every pane starts in, and a client that never
+// hears it is not missing anything. Once one has been reported, going back to
+// empty IS news — it is how a client learns the agent left, or that the identity
+// it was keyed on is no longer valid — so it is emitted.
+func (p *pane) setAgentSessionMeta(agent, sessionID string) (changed bool) {
+	p.metaMu.Lock()
+	defer p.metaMu.Unlock()
+	if !p.hasSession && agent == "" && sessionID == "" {
+		return false
+	}
+	if p.hasSession && p.lastSessionAgent == agent && p.lastSessionID == sessionID {
+		return false
+	}
+	p.lastSessionAgent, p.lastSessionID = agent, sessionID
+	p.hasSession = true
+	return true
 }
 
 // branchDue reports the directory whose branch is worth resolving now, if any:
@@ -782,6 +811,7 @@ func (h *Host) resyncPane(p *pane) {
 	agent, state := p.lastAgent, p.lastAgentState
 	vb, vw, hasAgent := p.lastVisBlocker, p.lastVisWorking, p.hasAgent
 	branch, hasBranch := p.lastBranch, p.hasBranch
+	sessAgent, sessID, hasSession := p.lastSessionAgent, p.lastSessionID, p.hasSession
 	p.metaMu.Unlock()
 	if cwd != "" {
 		h.emit(NewPaneCwd(p.id, cwd))
@@ -797,6 +827,13 @@ func (h *Host) resyncPane(p *pane) {
 	// pane is not in a repository), not a missing one.
 	if hasBranch {
 		h.emit(NewPaneBranch(p.id, branch))
+	}
+	// Replayed for the same reason: a reconnecting client has to be told which
+	// conversation the pane's agent is in, since nothing else will say so until
+	// the next time it changes — which for a pane sitting in one session is
+	// never.
+	if hasSession {
+		h.emit(NewPaneAgentSession(p.id, sessAgent, sessID))
 	}
 }
 
@@ -990,6 +1027,12 @@ func (h *Host) detectPump(p *pane) {
 	var lastProcessCheck time.Time
 	lastForegroundPgid := noPGID
 	var hasProcessProbe bool
+	// agentPids are the processes the current agent label was read off, and
+	// lastSessionCheck paces the registry lookup that turns them into a
+	// conversation id. Both survive across ticks: the process probe below is
+	// throttled, so most ticks never re-read the pids.
+	var agentPids []int
+	var lastSessionCheck time.Time
 	var acquisitionStartedAt time.Time
 	var hasAcquisition bool
 
@@ -1051,7 +1094,9 @@ func (h *Host) detectPump(p *pane) {
 			hadProcessProbe := hasProcessProbe
 			hasProcessProbe = true
 			prevAgent := presence.currentAgent()
-			changed := presence.observeProcessProbe(detect.ForegroundAgent(p.ptmx.Fd()))
+			probed, probedPids := detect.ForegroundAgentPIDs(p.ptmx.Fd())
+			changed := presence.observeProcessProbe(probed)
+			agentPids = probedPids
 			lastForegroundPgid = foregroundPgid
 			if presence.currentAgent() != "" {
 				hasAcquisition = false // identified — no need to keep acquiring
@@ -1067,6 +1112,25 @@ func (h *Host) detectPump(p *pane) {
 		}
 
 		agent := presence.currentAgent()
+
+		// Which conversation this agent is in. Re-resolved on a cadence rather
+		// than only on change, because the pid is stable across a conversation
+		// boundary: `/clear` and a resume start a new session inside the running
+		// process, and only a re-read of its registry entry shows that. The read
+		// is one small file, and only for agents that keep such a registry — every
+		// other label costs a map lookup (detect.AgentSessionID).
+		//
+		// An agent that has just left (agent == "") resolves to "", which retracts
+		// the session so nothing downstream keeps reading a history the pane no
+		// longer has.
+		if agentChanged || now.Sub(lastSessionCheck) >= agentSessionInterval {
+			lastSessionCheck = now
+			sessionID := detect.AgentSessionID(agent, agentPids)
+			if p.setAgentSessionMeta(agent, sessionID) {
+				h.emit(NewPaneAgentSession(p.id, agent, sessionID))
+			}
+		}
+
 		if agentChanged {
 			pending.clear()
 			hasLastScanSeq = false
