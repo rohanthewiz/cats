@@ -139,6 +139,12 @@ func generate(root, flutterRoot string) (map[string]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Both root sets are in; the file tags are final. Check them before a single
+	// byte is emitted, so a broken split fails here rather than in whatever tool
+	// eventually reads the output.
+	if err := reg.checkFileDeps(); err != nil {
+		return nil, err
+	}
 
 	files := map[string]string{}
 	defer func() {
@@ -384,6 +390,13 @@ func emitCommands(src *source, reg *registry, calls []commandCall) (string, erro
 	e.p("import 'dart:typed_data';")
 	e.nl()
 	e.p("import 'codec.g.dart';")
+	// commands.g.dart depends on wire.g.dart, and the dependency can only point
+	// this way. A class is written wherever it was FIRST reached, and every wire
+	// root is discovered before the first command root — so a type used by both
+	// (LedgerEntry, NotifyAction) always lands in wire, and a wire class can
+	// never reference a commands class. That ordering is what makes this import
+	// safe rather than the first half of a cycle; checkFileDeps enforces it.
+	e.p("import 'wire.g.dart';")
 	e.nl()
 	e.p("// ignore_for_file: unused_import")
 	e.nl()

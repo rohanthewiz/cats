@@ -321,6 +321,14 @@ func namedArray(t reflect.Type) *arrayClass {
 // generated file, in a stable order. Scoping by file matters: RowCol is reached
 // only from ReadParams and Rect only from the layout chrome, so an unscoped
 // answer would define both in both files and neither would compile.
+//
+// Placement follows the same first-reached rule as a class: an array class used
+// by BOTH files is emitted only in wire, because commands.g.dart imports
+// wire.g.dart and a second declaration of Rect would be a duplicate, not a
+// second copy. Nothing shares one today (Rect is wire-only, RowCol
+// commands-only), which is exactly why the rule has to be written down — the
+// breakage would arrive with the first shared field and read as a Dart error
+// nowhere near its cause.
 func (r *registry) usedArrayClasses(file string) []*arrayClass {
 	seen := map[string]*arrayClass{}
 	for _, c := range r.classes {
@@ -338,11 +346,78 @@ func (r *registry) usedArrayClasses(file string) []*arrayClass {
 			}
 		}
 	}
+	if file != fileWire {
+		// Subtract whatever wire already declares; see the placement note above.
+		for _, c := range r.classes {
+			if c.file != fileWire {
+				continue
+			}
+			for _, f := range c.fields {
+				if ac := namedArray(f.rt); ac != nil {
+					delete(seen, ac.dart)
+				}
+				if f.rt.Kind() == reflect.Slice || f.rt.Kind() == reflect.Map {
+					if ac := namedArray(deref(f.rt.Elem())); ac != nil {
+						delete(seen, ac.dart)
+					}
+				}
+			}
+		}
+	}
 	out := make([]*arrayClass, 0, len(seen))
 	for _, name := range sortedKeys(seen) {
 		out = append(out, seen[name])
 	}
 	return out
+}
+
+// checkFileDeps enforces the one invariant the commands→wire import rests on:
+// no class in wire.g.dart may reference a class in commands.g.dart.
+//
+// Discovery order already guarantees it — messageRoots runs to completion
+// before commandRoots, so every type reachable from a wire message is tagged
+// `wire` before a command is looked at, and a shared type is therefore always
+// on the wire side. This function exists because that guarantee lives in the
+// ORDER OF TWO CALLS in generate(), which a future edit could swap without any
+// visible signal. The failure it would cause is an import cycle in Dart,
+// reported by a tool cats does not run.
+func (r *registry) checkFileDeps() error {
+	for _, name := range r.order {
+		c := r.classes[name]
+		if c.file != fileWire {
+			continue
+		}
+		for _, f := range c.fields {
+			for _, ref := range r.structRefs(f.rt) {
+				if ref.file == fileWire {
+					continue
+				}
+				return fmt.Errorf("wire class %s references %s, which is emitted into "+
+					"%s.g.dart — wire.g.dart cannot import it without a cycle. "+
+					"Discovery order (messageRoots before commandRoots) is supposed to "+
+					"make this impossible; check generate()", c.dart, ref.dart, ref.file)
+			}
+		}
+	}
+	return nil
+}
+
+// structRefs returns the classes a field's type mentions: the struct itself, or
+// the element type of a slice/map. Pointers are already stripped by the caller
+// for the top level, not for elements.
+func (r *registry) structRefs(t reflect.Type) []*classDef {
+	if namedArray(t) != nil || t == rawMessageType || isByteSlice(t) {
+		return nil
+	}
+	switch t.Kind() {
+	case reflect.Struct:
+		if c, ok := r.byKey[typeKey(t)]; ok {
+			return []*classDef{c}
+		}
+	case reflect.Slice, reflect.Array, reflect.Map:
+		return r.structRefs(deref(t.Elem()))
+	}
+	return nil
 }
 
 // --- helpers -------------------------------------------------------------------

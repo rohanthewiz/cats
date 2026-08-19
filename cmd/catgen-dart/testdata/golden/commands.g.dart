@@ -21,6 +21,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'codec.g.dart';
+import 'wire.g.dart';
 
 // ignore_for_file: unused_import
 
