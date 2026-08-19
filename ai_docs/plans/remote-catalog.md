@@ -461,11 +461,38 @@ libghostty's screen model. Worth doing only with that cost understood rather tha
 away — and the three verbs people actually reach for (jump, copy, send to chat) are shipped
 without it.
 
-### Phase 6 — runbooks
+### Phase 6a — runbooks: the format, the engine, manual run — **DONE**
 
-YAML steps over the §7 vocabulary with params and `on:` triggers (manual, `host.attach`,
-agent state, `pane_exited`, cron via cats-todo). Record-a-macro from live use; guardrail
-automations.
+YAML steps over the §7 vocabulary, in `~/.config/cats/runbooks`, run by
+`runbook.list` / `runbook.run` and `catctl runbooks` / `catctl runbook <name> [k=v]`.
+Vars with declared defaults, `{{ ref }}` into earlier steps' results, `expect:`,
+`continue_on_error:`. Every step is a §7 command; the engine re-enters the same
+dispatcher per step and holds no privileged path.
+
+### Phase 6b — `on:` triggers — **NOT STARTED**
+
+Scoping phase 6 against the code turned up two premises in the original sentence that
+are not true, and one that costs more than it looks:
+
+- **`host.attach` is a command, not an event.** There is no `host_attached` event in
+  `app.EventNames()`, so a trigger on it needs one emitted first. `pane_exited` and
+  `pane_agent` do exist and are ready to trigger on.
+- **"cron via cats-todo" is not a thing.** cats-todo's schedules are *one-shot* fire
+  times run by its own TUI tick loop (`schedule.go`, `ui.go` `fireDueSchedules`); a
+  closed manager marks them `Missed`. It is a todo app that drops prompts into panes,
+  not a scheduler service. Cron is free today by pointing launchd/systemd at
+  `catctl runbook run`; a scheduler inside catway is a separate decision.
+- **Autorun is the risky half, not the format.** A runbook triggered by `pane_exited`
+  can spawn panes that exit. Loop protection, a concurrency rule, and an answer for a
+  half-failed triggered run are all needed before the first `on:` fires — which is why
+  6a shipped the format first, so those cannot be baked into it wrongly.
+
+### Phase 6c — record-a-macro — **NOT STARTED**
+
+There is nothing to record from. The ledger stores *shell* commands via OSC 133
+(`internal/ledger`); no journal of §7 commands exists anywhere. That journal is the
+work, and it has a privacy dimension the ledger does not — `chat.send` params and
+`config.set` secrets would flow through it.
 
 ### Phase 7 — file transfer through cathost
 
