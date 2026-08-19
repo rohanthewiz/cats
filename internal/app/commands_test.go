@@ -37,6 +37,7 @@ type fakeBackend struct {
 	editor         EditorInfo
 	lastLedger     LedgerListParams
 	ledgerEntries  []LedgerEntry
+	lastRunbook    RunbookRunParams
 	lastOpen       OpenFileParams
 	lastOpenPane   uint32
 	lastCapture    Responder
@@ -145,6 +146,17 @@ func (b *fakeBackend) LedgerList(r Responder, p LedgerListParams) {
 	b.rec("ledgerList:" + p.Host + ":" + p.Contains)
 	b.lastLedger = p
 	r.OK(LedgerListResult{Entries: b.ledgerEntries})
+}
+
+func (b *fakeBackend) RunbookList(r Responder) {
+	b.rec("runbookList")
+	r.OK(RunbookListResult{})
+}
+
+func (b *fakeBackend) RunbookRun(r Responder, p RunbookRunParams) {
+	b.rec("runbookRun:" + p.Name)
+	b.lastRunbook = p
+	r.OK(RunbookRunResult{Name: p.Name})
 }
 
 func (b *fakeBackend) OpenFileIn(pane uint32, p OpenFileParams) {

@@ -258,7 +258,27 @@ func run() int {
 	if !resp.OK {
 		return 1
 	}
+	// A runbook that RAN but whose steps failed is a successful command with an
+	// unsuccessful result, and the two must not look the same from a shell:
+	// `catctl runbook deploy && ./ship.sh` has to stop. Every other verb here
+	// reports the command's fate, because for every other verb they are the
+	// same fate.
+	if method == app.CmdRunbookRun && runbookFailed(resp) {
+		return 1
+	}
 	return 0
+}
+
+// runbookFailed reports whether a runbook.run result says some step failed. An
+// undecodable payload is NOT treated as a failure: the run's own answer is the
+// authority, and inventing one from a parse error would turn a catctl-side bug
+// into a false alarm in somebody's deploy script.
+func runbookFailed(resp ctlproto.Response) bool {
+	var data app.RunbookRunResult
+	if err := json.Unmarshal(resp.Data, &data); err != nil {
+		return false
+	}
+	return data.Failed
 }
 
 // printResult renders a Response for a human: the pretty-printed Data payload on

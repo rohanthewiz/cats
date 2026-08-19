@@ -49,6 +49,7 @@ const (
 	argCycleDir                  // next|prev
 	argTheme                     // installed theme names, from theme.list
 	argDetachHost                // detachable cathost ids, from host.list
+	argRunbook                   // runbook names, from runbook.list
 )
 
 // usageErr reports malformed subcommand arguments; its message is the verb's
@@ -129,6 +130,17 @@ var subcommands = []subcommand{
 	{"history", app.CmdLedgerList, "history [count]", nil, "recent commands across every pane and host", buildHistory},
 	{"output", app.CmdLedgerOutput, "output <pane> <block>", []argKind{argPane}, "print a recorded command's output, if it is still in the pane", buildBlock},
 	{"jump", app.CmdLedgerJump, "jump <pane> <block>", []argKind{argPane}, "put a recorded command's output on screen", buildBlock},
+
+	// Runbooks. `runbooks` lists, `runbook <name>` runs — the same plural/
+	// singular pair as themes, and for the same reason: the listing and the
+	// action are different enough that one verb taking an optional argument
+	// would make "did I just run something?" depend on argument count.
+	//
+	// Vars are trailing `key=value` words rather than repeated flags, because
+	// the whole line is then one readable sentence: `catctl runbook deploy
+	// branch=main`.
+	{"runbooks", app.CmdRunbookList, "runbooks", nil, "list the runbooks in the config directory", noParams},
+	{"runbook", app.CmdRunbookRun, "runbook <name> [key=value ...]", []argKind{argRunbook}, "run a runbook's steps in order", buildRunbook},
 
 	// Misc.
 	{"agent", app.CmdAgentFocus, "agent <pane>", []argKind{argPane}, "reveal an agent's pane", buildPane},
@@ -285,6 +297,30 @@ func buildOpenFile(args []string) (json.RawMessage, error) {
 // buildHistory: history [count]. Only the count is positional — filtering by
 // host, cwd, a substring or "only the ones that failed" goes through
 // `catctl ledger.list --params …`, which is the shape a script writes anyway.
+// buildRunbook reads `runbook <name> [key=value ...]`.
+//
+// A word with no `=` is rejected rather than folded into the name: a runbook
+// name is a single identifier, so a second bare word is always either a typo or
+// a var whose `=` was eaten by the shell, and guessing which would run the
+// wrong runbook.
+func buildRunbook(args []string) (json.RawMessage, error) {
+	if len(args) == 0 {
+		return nil, usageErr{"runbook <name> [key=value ...]"}
+	}
+	p := app.RunbookRunParams{Name: args[0]}
+	for _, a := range args[1:] {
+		k, v, ok := strings.Cut(a, "=")
+		if !ok || k == "" {
+			return nil, fmt.Errorf("%q is not a key=value var", a)
+		}
+		if p.Vars == nil {
+			p.Vars = map[string]string{}
+		}
+		p.Vars[k] = v
+	}
+	return marshal(p)
+}
+
 func buildHistory(args []string) (json.RawMessage, error) {
 	p := app.LedgerListParams{}
 	switch len(args) {

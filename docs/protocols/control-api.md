@@ -458,6 +458,7 @@ new panes rather than a location.
 | `ledger.list` | `history [count]` |
 | `ledger.output` / `ledger.jump` | `output <pane> <block>` / `jump <pane> <block>` |
 | `pane.open_file` | `open <path> [line]` |
+| `runbook.list` / `runbook.run` | `runbooks` / `runbook <name> [key=value ...]` |
 | `agent.focus` | `agent <pane>` |
 | `usage.refresh` | — |
 | `server.reload_config` | `reload` |
@@ -715,6 +716,168 @@ A host whose cathost predates the `list_dir` capability answers with an `error`
 naming the host rather than with this machine's directories. `host.list`'s
 `lists_dirs` is how a client knows in advance, and is what the browser gates its
 picker on.
+
+### Runbooks
+
+A runbook is a YAML file in `~/.config/cats/runbooks` (`$XDG_CONFIG_HOME/cats/runbooks`)
+whose steps are §7 commands, run in order against the live session.
+
+```bash
+catctl runbooks                                  # name, description, step count, declared vars
+catctl runbook morning
+catctl runbook deploy branch=main
+catctl runbook.run --params '{"name":"deploy","vars":{"branch":"main"}}'
+```
+
+```yaml
+description: the three panes I always start with
+vars:
+  repo: ~/src/api
+steps:
+  - run: workspace.create
+    params: {name: api, path: "{{ vars.repo }}"}
+    id: ws
+  - run: pane.send_input
+    params: {pane: "{{ ws.pane }}", text: "make dev\n"}
+  - run: pane.wait_for_output
+    params: {pane: "{{ ws.pane }}", pattern: "listening on", timeout_ms: 60000}
+    id: up
+    expect: "{{ up.matched }}"
+  - run: ui.notify
+    params: {title: "morning runbook done"}
+```
+
+**A step is a command, not a script line.** There is no runbook verb for
+sleeping, branching or shelling out, and there is no runbook-only implementation
+of anything: `runbook.run` re-enters the very same dispatcher a browser `cmd` and
+a `catctl` request go through, once per step. So "what can a runbook do?" is
+answerable without reading its source — exactly what its caller could already do,
+in one round trip instead of five. Waiting for a shell to finish is
+`pane.wait_for_output`; telling somebody it finished is `ui.notify`. Automation
+that genuinely needs control flow is a program, and a program can hold this
+socket itself.
+
+The one command a step may not be is `runbook.run`. Everything else is bounded by
+what the table offers; a runbook running a runbook is not bounded at all, and the
+recursion would surface as a wedged loop rather than as a mistake in a file.
+
+#### References
+
+A step with an `id` binds its **result** under that name for later steps.
+References use the wire field names — `{{ ws.pane }}` is the field `catctl commands`
+documents, not the Go one, because no runbook author has a reason to know the Go
+one. A path may index a list: `{{ list.panes.0.pane }}`.
+
+Substitution has two modes, and the distinction is what makes references usable:
+
+| Written | Sends |
+|---------|-------|
+| `pane: "{{ ws.pane }}"` | the **number** `3` — the value with its type intact |
+| `text: "cd {{ vars.repo }} && make"` | the string, with the value interpolated |
+
+A value that is *exactly* one reference keeps its type, because `pane` is a
+`uint32` on the wire and the string `"3"` there is a decode error. A reference
+embedded in longer text is stringified, because the surrounding characters prove
+the author wanted text.
+
+`vars` are declared with their defaults in the document and overridden per run.
+Declaring them is what makes `{{ vars.branch }}` checkable; passing one the
+runbook never declared is **refused**, not ignored, because a silently dropped
+var makes the run succeed at doing the wrong thing.
+
+#### `expect` — succeeded is not the same as happened
+
+`pane.wait_for_output` reports a **timeout** as a successful call returning
+`matched: false`. That is right for a client, which asked a question and got an
+answer. It is wrong for a sequence: "wait for the build, then deploy" has to
+stop when the build never finished, and without help the run would sail into the
+deploy having noticed nothing.
+
+`expect:` is a reference that must resolve to a **truthy** value after the step
+has run:
+
+```yaml
+  - run: pane.wait_for_output
+    params: {pane: 3, pattern: "BUILD OK", timeout_ms: 300000}
+    id: build
+    expect: "{{ build.matched }}"
+```
+
+It needs an `id:` on its own step, since what it asserts on is usually that
+step's own result. Falsy means `false`, `0`, `""`, an empty list or object, or
+`null`; a field that does not **exist** is an error rather than a falsy value,
+because asserting on a field that is not there is a mistake in the runbook.
+
+The alternative was teaching the engine about `wait_for_output`'s result shape.
+That is worse: the engine would then know one command specially, and the next
+result field meaning "did not happen" — `ledger.output`'s `found` — would need
+the same edit. One step-level assertion covers the class.
+
+#### Everything checkable is checked at load
+
+A runbook is a sequence of side effects on a live desktop — panes get split,
+input gets typed — and there is no undo. A mistake found at step 4 has already
+let steps 1–3 change the session. So `runbook.run` validates the whole document
+before dispatching anything, and refuses on:
+
+- a `run:` that is not a command in the table
+- a command whose params are required, with none given
+- **a param key the command's params struct has no field for**
+- an `id` on a command that returns no data, a duplicate `id`, or the reserved
+  name `vars`
+- a reference to a step that has not run yet, or to an undeclared var
+- an unclosed `{{`
+
+The param-key check matters more than it looks. `encoding/json` **ignores** a key
+it has no field for, so `timeout_secs` where the struct says `timeout_ms` is not
+an error anywhere in the system — the command runs with the field at its zero
+value and reports success. In a client that is a bug you see in the output. In a
+runbook it is a step that appears to work and quietly did something else, three
+steps before the one that matters:
+
+```
+step 1: pane.wait_for_output has no param "timeout_secs";
+        it takes lines, pane, pattern, regex, timeout_ms
+```
+
+`runbook.list` reports files that **failed** to parse alongside the ones that
+loaded, each with its error. A runbook simply missing from the list looks exactly
+like one that was never written, and the two need different fixes.
+
+#### Results
+
+```json
+{"name":"morning","steps":[
+  {"index":1,"id":"ws","run":"workspace.create"},
+  {"index":2,"run":"pane.send_input","error":"no pane 7"},
+  {"index":3,"run":"ui.notify","skipped":true}],
+ "failed":true}
+```
+
+`catctl runbook` **exits 1** when `failed` is set. A runbook that ran but whose
+steps failed is a successful command with an unsuccessful result, and
+`catctl runbook deploy && ./ship.sh` has to stop.
+
+A failed step stops the run, and every step after it is reported `skipped`.
+"Did not run" and "ran fine" are the two things that must not look alike to
+whoever is working out what state the session was left in. `continue_on_error:
+true` on a step tolerates its failure — the failure is still recorded.
+
+Step results deliberately carry **no data**. A `capture` mid-runbook would put a
+screenful of text in the reply for every client that sees it, and the value is
+already where it is useful: bound under the step's id for the steps that follow.
+A runbook whose product is data ends by putting it somewhere.
+
+The directory is re-scanned on **every** call, so editing a file and immediately
+running it runs the new steps. Caching would make "edit, run" execute the
+previous version — a staleness bug whose symptom is a correct-looking run of the
+wrong thing.
+
+`runbook.run` is the second method after `pane.wait_for_output` that is *meant*
+to be slow, so the server sizes its per-request backstop off the run's own limit
+(`app.MaxRunbookRuntime`, 5 minutes) rather than off one command's. A backstop
+below that would answer "command timed out" while the run carried on changing the
+session.
 
 ## Raw vs ergonomic
 

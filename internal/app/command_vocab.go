@@ -150,6 +150,18 @@ const (
 	CmdLedgerOutput = "ledger.output"
 	CmdLedgerJump   = "ledger.jump"
 
+	// Runbooks: a YAML file whose steps are §7 commands, run in order against
+	// the live session. runbook.list enumerates what is on disk, runbook.run
+	// executes one.
+	//
+	// A runbook confers no privilege. Every step is a command in this table, so
+	// the answer to "what can a runbook do" is "what its caller could already
+	// do, in one round trip instead of five" — which is why there is no runbook
+	// verb for sleeping, branching, or shelling out. Automation that needs
+	// those is a program, and a program can hold the control socket itself.
+	CmdRunbookList = "runbook.list"
+	CmdRunbookRun  = "runbook.run"
+
 	// Host commands (the HOSTS section's buttons + catctl): attach a cathost to
 	// the running session, or detach one. They are §7 commands rather than a
 	// config-file-only setting for the same reason config.set is one — a browser
@@ -317,6 +329,12 @@ var commandSpecs = []CommandSpec{
 	{Name: CmdLedgerList, Params: LedgerListParams{}, Result: LedgerListResult{}, ReplyRequired: true},
 	{Name: CmdLedgerOutput, Params: LedgerBlockParams{}, Result: LedgerOutputResult{}, ReplyRequired: true, ParamsRequired: true},
 	{Name: CmdLedgerJump, Params: LedgerBlockParams{}, ParamsRequired: true},
+
+	// Runbooks. The listing is reply-gated like every other query; the run is
+	// not, because its product is the effects its steps had — a caller that
+	// stops listening still wanted the panes opened.
+	{Name: CmdRunbookList, Result: RunbookListResult{}, ReplyRequired: true},
+	{Name: CmdRunbookRun, Params: RunbookRunParams{}, Result: RunbookRunResult{}, ParamsRequired: true},
 
 	// Hosts. Both writers echo the new roster, so a client repaints from the
 	// reply instead of waiting for the hosts push that also follows.
@@ -638,6 +656,20 @@ const (
 	// above this so a waiter always resolves on its own timer first.
 	MaxWaitTimeout = 10 * time.Minute
 )
+
+// MaxRunbookRuntime bounds one runbook.run end to end.
+//
+// It lives here rather than in the executor for the same reason MaxWaitTimeout
+// does: runbook.run is the second command in the vocabulary that is MEANT to
+// take a long time, so the ctlproto server has to size its per-request backstop
+// above it. A backstop below the run's own limit would hand the caller "command
+// timed out" while the run carried on changing their session — the worst of
+// both answers, since they would neither know it failed nor know it was still
+// going.
+//
+// A runbook is a macro a human triggered and is waiting on, not a daemon; past
+// this point the honest answer is that it did not finish.
+const MaxRunbookRuntime = 5 * time.Minute
 
 // WaitTimeout resolves a wait's TimeoutMs into a duration: 0 ⇒ the default, and
 // anything above MaxWaitTimeout is clamped.
@@ -1540,6 +1572,77 @@ type LedgerOutputResult struct {
 	// block does not need a second round trip against a buffer that has moved.
 	StartRow uint32 `json:"start_row,omitempty"`
 	EndRow   uint32 `json:"end_row,omitempty"`
+}
+
+// --- Runbook params & results (§7, runbook.list / runbook.run) ---------------
+
+// RunbookInfo is one runbook in the listing.
+//
+// Error is set for a file that would not parse, and such an entry carries a
+// Path and nothing else useful. Reporting it is the point: a runbook that is
+// simply absent from the list looks exactly like one that was never written,
+// and the two need different fixes. Name is then the file's stem, which is what
+// the author would have addressed it by.
+type RunbookInfo struct {
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	Path        string `json:"path"`
+	Steps       int    `json:"steps,omitempty"`
+	// Vars are the declared parameter names, sorted. A caller offering a runbook
+	// to a human — a palette entry, a completion — needs to know what it will be
+	// asked for before it runs anything.
+	Vars  []string `json:"vars,omitempty"`
+	Error string   `json:"error,omitempty"`
+}
+
+// RunbookListResult is CmdResult.Data for runbook.list.
+type RunbookListResult struct {
+	// Dir is the directory that was scanned, reported so "no runbooks" can be
+	// acted on — the usual cause is that the directory does not exist yet.
+	Dir      string        `json:"dir,omitempty"`
+	Runbooks []RunbookInfo `json:"runbooks"`
+}
+
+// RunbookRunParams: runbook.run.
+//
+// Vars override the runbook's declared defaults. They are strings on the wire
+// regardless of how the step uses them, because they arrive from a CLI argument
+// or a form field where everything is a string; a step that needs a number
+// interpolates the var into a field the server decodes.
+type RunbookRunParams struct {
+	Name string            `json:"name"`
+	Vars map[string]string `json:"vars,omitempty"`
+}
+
+// RunbookStepResult reports what became of one step.
+//
+// It deliberately does NOT carry the step's returned data. A capture or a read
+// in the middle of a runbook would put a screenful of text in the run's result
+// for every client that sees it, and the value is already where it is useful —
+// bound under the step's id for the steps that follow. A runbook whose product
+// is data ends by putting it somewhere: ui.notify, chat.send, a file.
+type RunbookStepResult struct {
+	Index int    `json:"index"` // 1-based, matching how a load error names a step
+	ID    string `json:"id,omitempty"`
+	Run   string `json:"run"`
+	Error string `json:"error,omitempty"`
+	// Skipped marks a step that never ran because an earlier one failed. It is
+	// distinct from an empty Error — "did not run" and "ran fine" are the two
+	// things a reader must not confuse when deciding what state the session is
+	// in after a failed run.
+	Skipped bool `json:"skipped,omitempty"`
+}
+
+// RunbookRunResult is CmdResult.Data for runbook.run.
+//
+// Failed is derived (any step with an Error that was not tolerated), but it is
+// carried explicitly because the common caller is a shell asking one question:
+// did this work? Making it walk the step list to find out invites the walk
+// being written wrong.
+type RunbookRunResult struct {
+	Name   string              `json:"name"`
+	Steps  []RunbookStepResult `json:"steps"`
+	Failed bool                `json:"failed,omitempty"`
 }
 
 // --- Editor params & results (§7, pane.open_file) ----------------------------

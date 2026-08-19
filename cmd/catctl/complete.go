@@ -423,6 +423,8 @@ func argCandidates(kind argKind, words []string) []candidate {
 		return liveThemes(words)
 	case argDetachHost:
 		return liveDetachableHosts(words)
+	case argRunbook:
+		return liveRunbooks(words)
 	case argDirection:
 		return []candidate{{"left", ""}, {"right", ""}, {"up", ""}, {"down", ""}}
 	case argSplitDir:
@@ -532,6 +534,26 @@ func liveWorkspaces(words []string) []candidate {
 			desc = strings.TrimPrefix(desc+" · active", " · ")
 		}
 		out = append(out, candidate{w.ID, desc})
+	}
+	return out
+}
+
+// liveRunbooks offers the runbooks on the server's disk. A broken file is
+// offered too, described by its error: it is a name the user meant to be able
+// to run, and completing it and being told why it will not run beats it silently
+// not existing.
+func liveRunbooks(words []string) []candidate {
+	var res app.RunbookListResult
+	if !liveCall(words, app.CmdRunbookList, &res) {
+		return nil
+	}
+	out := make([]candidate, 0, len(res.Runbooks))
+	for _, rb := range res.Runbooks {
+		desc := rb.Description
+		if rb.Error != "" {
+			desc = "does not load: " + rb.Error
+		}
+		out = append(out, candidate{rb.Name, desc})
 	}
 	return out
 }

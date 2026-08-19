@@ -271,6 +271,58 @@ catctl host.attach --params '{"id":"box","addr":"tls://box.lan:8422","token_file
 it, so they respawn as new shells on the default host. See
 [hosts](configuration.md#editing-the-roster-without-a-restart).
 
+Runbooks — a YAML file whose steps are §7 commands, run in order:
+
+```bash
+catctl runbooks                 # what is in ~/.config/cats/runbooks
+catctl runbook morning          # run one
+catctl runbook deploy branch=main env=staging   # ...with its declared vars
+```
+
+Every step **is** a command from the table above, so a runbook can do exactly
+what you could do with a handful of `catctl` calls and nothing more. There is no
+step for sleeping, branching or shelling out: waiting for a shell is
+`pane.wait_for_output`, and automation that needs real control flow is a program,
+which can hold the control socket itself.
+
+```yaml
+# ~/.config/cats/runbooks/morning.yaml
+description: the three panes I always start with
+vars:
+  repo: ~/src/api
+steps:
+  - run: workspace.create
+    params: {name: api, path: "{{ vars.repo }}"}
+    id: ws
+  - run: tab.create
+    params: {name: server, command: "make dev"}
+  - run: pane.wait_for_output
+    params: {pane: "{{ ws.pane }}", pattern: "listening on", timeout_ms: 60000}
+    id: up
+    expect: "{{ up.matched }}"
+  - run: ui.notify
+    params: {title: "morning runbook done"}
+```
+
+A step's result binds under its `id`, and later steps read **wire** field names
+out of it — `{{ ws.pane }}` is the field `catctl commands` documents, not a Go
+name. A reference alone in its value keeps the value's type (`pane: "{{ ws.pane }}"`
+sends the number); one embedded in longer text is interpolated.
+
+`expect:` is there because *succeeded* and *happened* are different claims:
+`pane.wait_for_output` reports a timeout as a successful call returning
+`matched: false`, so without it "wait for the build, then deploy" would deploy
+after a wait that never matched.
+
+Everything checkable is checked **before the first step runs**: unknown command
+names, missing required params, a param key the command does not have, a
+reference to a step that has not run yet, a var that was never declared. A
+runbook is a sequence of side effects on a live desktop, so a typo found at step
+4 would leave the session half-changed with no undo.
+
+`catctl runbook` exits 1 when a step failed, so `catctl runbook deploy && ./ship.sh`
+stops. See [the control API](../protocols/control-api.md#runbooks).
+
 Misc:
 
 ```bash

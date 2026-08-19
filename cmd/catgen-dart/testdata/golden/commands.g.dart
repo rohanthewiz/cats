@@ -154,6 +154,10 @@ abstract final class CmdName {
 
   static const String ledgerJump = 'ledger.jump';
 
+  static const String runbookList = 'runbook.list';
+
+  static const String runbookRun = 'runbook.run';
+
   static const String hostAttach = 'host.attach';
 
   static const String hostDetach = 'host.detach';
@@ -1599,6 +1603,177 @@ class ResizeBorderParams {
       };
 }
 
+/// RunbookInfo is one runbook in the listing.
+///
+/// Error is set for a file that would not parse, and such an entry carries a
+/// Path and nothing else useful. Reporting it is the point: a runbook that is
+/// simply absent from the list looks exactly like one that was never written,
+/// and the two need different fixes. Name is then the file's stem, which is what
+/// the author would have addressed it by.
+class RunbookInfo {
+  const RunbookInfo({
+    required this.name,
+    this.description = '',
+    required this.path,
+    this.steps = 0,
+    this.vars = const <String>[],
+    this.error = '',
+  });
+
+  final String name;
+  final String description;
+  final String path;
+  final int steps;
+
+  /// Vars are the declared parameter names, sorted. A caller offering a runbook
+  /// to a human — a palette entry, a completion — needs to know what it will be
+  /// asked for before it runs anything.
+  final List<String> vars;
+  final String error;
+
+  factory RunbookInfo.fromJson(Map<String, Object?> j) => RunbookInfo(
+        name: asString(j['name']),
+        description: asString(j['description']),
+        path: asString(j['path']),
+        steps: asInt(j['steps']),
+        vars: asList(j['vars'], asString),
+        error: asString(j['error']),
+      );
+
+  Map<String, Object?> toJson() => {
+        'name': name,
+        if (description.isNotEmpty) 'description': description,
+        'path': path,
+        if (steps != 0) 'steps': steps,
+        if (vars.isNotEmpty) 'vars': vars,
+        if (error.isNotEmpty) 'error': error,
+      };
+}
+
+/// RunbookListResult is CmdResult.Data for runbook.list.
+class RunbookListResult {
+  const RunbookListResult({
+    this.dir = '',
+    required this.runbooks,
+  });
+
+  /// Dir is the directory that was scanned, reported so "no runbooks" can be
+  /// acted on — the usual cause is that the directory does not exist yet.
+  final String dir;
+  final List<RunbookInfo> runbooks;
+
+  factory RunbookListResult.fromJson(Map<String, Object?> j) => RunbookListResult(
+        dir: asString(j['dir']),
+        runbooks: asList(j['runbooks'], (e) => RunbookInfo.fromJson(asObj(e))),
+      );
+
+  Map<String, Object?> toJson() => {
+        if (dir.isNotEmpty) 'dir': dir,
+        'runbooks': [for (final e in runbooks) e.toJson()],
+      };
+}
+
+/// RunbookRunParams: runbook.run.
+///
+/// Vars override the runbook's declared defaults. They are strings on the wire
+/// regardless of how the step uses them, because they arrive from a CLI argument
+/// or a form field where everything is a string; a step that needs a number
+/// interpolates the var into a field the server decodes.
+class RunbookRunParams {
+  const RunbookRunParams({
+    required this.name,
+    this.vars = const <String, String>{},
+  });
+
+  final String name;
+  final Map<String, String> vars;
+
+  factory RunbookRunParams.fromJson(Map<String, Object?> j) => RunbookRunParams(
+        name: asString(j['name']),
+        vars: asMap(j['vars'], asString),
+      );
+
+  Map<String, Object?> toJson() => {
+        'name': name,
+        if (vars.isNotEmpty) 'vars': vars,
+      };
+}
+
+/// RunbookRunResult is CmdResult.Data for runbook.run.
+///
+/// Failed is derived (any step with an Error that was not tolerated), but it is
+/// carried explicitly because the common caller is a shell asking one question:
+/// did this work? Making it walk the step list to find out invites the walk
+/// being written wrong.
+class RunbookRunResult {
+  const RunbookRunResult({
+    required this.name,
+    required this.steps,
+    this.failed = false,
+  });
+
+  final String name;
+  final List<RunbookStepResult> steps;
+  final bool failed;
+
+  factory RunbookRunResult.fromJson(Map<String, Object?> j) => RunbookRunResult(
+        name: asString(j['name']),
+        steps: asList(j['steps'], (e) => RunbookStepResult.fromJson(asObj(e))),
+        failed: asBool(j['failed']),
+      );
+
+  Map<String, Object?> toJson() => {
+        'name': name,
+        'steps': [for (final e in steps) e.toJson()],
+        if (failed) 'failed': failed,
+      };
+}
+
+/// RunbookStepResult reports what became of one step.
+///
+/// It deliberately does NOT carry the step's returned data. A capture or a read
+/// in the middle of a runbook would put a screenful of text in the run's result
+/// for every client that sees it, and the value is already where it is useful —
+/// bound under the step's id for the steps that follow. A runbook whose product
+/// is data ends by putting it somewhere: ui.notify, chat.send, a file.
+class RunbookStepResult {
+  const RunbookStepResult({
+    required this.index,
+    this.id = '',
+    required this.run,
+    this.error = '',
+    this.skipped = false,
+  });
+
+  /// 1-based, matching how a load error names a step
+  final int index;
+  final String id;
+  final String run;
+  final String error;
+
+  /// Skipped marks a step that never ran because an earlier one failed. It is
+  /// distinct from an empty Error — "did not run" and "ran fine" are the two
+  /// things a reader must not confuse when deciding what state the session is
+  /// in after a failed run.
+  final bool skipped;
+
+  factory RunbookStepResult.fromJson(Map<String, Object?> j) => RunbookStepResult(
+        index: asInt(j['index']),
+        id: asString(j['id']),
+        run: asString(j['run']),
+        error: asString(j['error']),
+        skipped: asBool(j['skipped']),
+      );
+
+  Map<String, Object?> toJson() => {
+        'index': index,
+        if (id.isNotEmpty) 'id': id,
+        'run': run,
+        if (error.isNotEmpty) 'error': error,
+        if (skipped) 'skipped': skipped,
+      };
+}
+
 /// ScrollParams: scroll. Delta lines: negative scrolls up into history,
 /// positive back toward the live bottom (β ScrollViewport semantics).
 class ScrollParams {
@@ -2728,6 +2903,8 @@ const List<CommandSpec> kCommandSpecs = <CommandSpec>[
   CommandSpec('ledger.list', replyRequired: true),
   CommandSpec('ledger.output', paramsRequired: true, replyRequired: true),
   CommandSpec('ledger.jump', paramsRequired: true),
+  CommandSpec('runbook.list', replyRequired: true),
+  CommandSpec('runbook.run', paramsRequired: true),
   CommandSpec('host.attach', paramsRequired: true),
   CommandSpec('host.detach', paramsRequired: true),
   CommandSpec('session.get'),
@@ -3054,6 +3231,17 @@ mixin CatsCommands implements CatsCommandTransport {
   Future<void> ledgerJump(LedgerBlockParams params) async {
     await invoke(CmdName.ledgerJump, params.toJson());
   }
+
+  /// `runbook.list`
+  ///
+  /// Reply-gated server-side: a `cmd` with no id is dropped without running.
+  /// This method always correlates, so it always runs.
+  Future<RunbookListResult> runbookList() async =>
+      RunbookListResult.fromJson(asObj(await invoke(CmdName.runbookList, null)));
+
+  /// `runbook.run`
+  Future<RunbookRunResult> runbookRun(RunbookRunParams params) async =>
+      RunbookRunResult.fromJson(asObj(await invoke(CmdName.runbookRun, params.toJson())));
 
   /// `host.attach`
   Future<HostListResult> hostAttach(HostAttachParams params) async =>

@@ -173,6 +173,21 @@ type Backend interface {
 	LedgerOutput(r Responder, p LedgerBlockParams)
 	LedgerJump(r Responder, p LedgerBlockParams)
 
+	// RunbookList enumerates the runbooks on disk (runbook.list) and RunbookRun
+	// executes one (runbook.run).
+	//
+	// They are on the Backend seam for the reason the dispatcher holds no
+	// filesystem and no clock: a runbook is a file, and running one is a chain
+	// of dispatches that outlives the single call the dispatcher models. The
+	// backend re-enters this very Dispatcher once per step, which is what keeps
+	// a runbook step and a client command the same thing — there is no second
+	// implementation of any command for runbooks to use.
+	//
+	// RunbookRun resolves r only when the last step has finished, so a caller
+	// that waits for the reply knows the whole sequence is done.
+	RunbookList(r Responder)
+	RunbookRun(r Responder, p RunbookRunParams)
+
 	// RefreshUsage asks the backend's rate-limit poller to take a reading now
 	// (usage.refresh). It returns immediately: the read is one network round
 	// trip on the poller's own goroutine, and its result reaches clients as a
@@ -999,6 +1014,28 @@ func (d *Dispatcher) Dispatch(name string, dec ParamDecoder, r Responder) {
 			return // a listing yields only a result
 		}
 		d.backend.LedgerList(r, p)
+
+	case CmdRunbookList:
+		if !r.WantsReply() {
+			return // a listing yields only a result
+		}
+		d.backend.RunbookList(r)
+
+	case CmdRunbookRun:
+		var p RunbookRunParams
+		if err := dec.Decode(&p); err != nil {
+			bad(err)
+			return
+		}
+		// Shape-only: whether a runbook by this name exists, and whether its
+		// steps still address live panes, are the backend's — it holds the
+		// directory and the session.
+		p.Name = strings.TrimSpace(p.Name)
+		if p.Name == "" {
+			r.Fail("name is required")
+			return
+		}
+		d.backend.RunbookRun(r, p)
 
 	case CmdLedgerOutput:
 		// The reply gate comes FIRST, before any validation: a reply-required

@@ -94,6 +94,10 @@ func (s *Server) handle(req Request) Response {
 // timeout can run up to app.MaxWaitTimeout. It sits above that ceiling so the
 // backend's waiter always resolves on its own timer first; this only trips if the
 // dispatch itself wedges (a bug), keeping the goroutine bounded.
+//
+// runbook.run gets the same treatment below, off app.MaxRunbookRuntime. Both are
+// the same rule: a command the protocol expects to be slow must not be cut off
+// by a backstop meant for one that is not.
 const awaitBackstop = app.MaxWaitTimeout + 15*time.Second
 
 // dispatchAndWait runs the command through the dispatch func and blocks for its
@@ -103,8 +107,13 @@ const awaitBackstop = app.MaxWaitTimeout + 15*time.Second
 // wedged dispatch — a generous one for wait_for_output, which is meant to block.
 func (s *Server) dispatchAndWait(req Request) Response {
 	backstop := s.timeout
-	if req.Method == app.CmdWaitForOutput {
+	switch req.Method {
+	case app.CmdWaitForOutput:
 		backstop = awaitBackstop
+	case app.CmdRunbookRun:
+		// A runbook resolves only when its last step has, so its backstop is
+		// sized off the run's own limit rather than off one command's.
+		backstop = app.MaxRunbookRuntime + 15*time.Second
 	}
 	cr := &chanResponder{ch: make(chan Response, 1), id: req.ID}
 	s.dispatch(req.Method, req.Params, cr)

@@ -226,3 +226,51 @@ func TestSubcommandRegistryIntegrity(t *testing.T) {
 		}
 	}
 }
+
+// A runbook that ran but whose steps failed is a successful command with an
+// unsuccessful result. The shell has to be able to tell them apart, or
+// `catctl runbook deploy && ./ship.sh` ships after a failed deploy.
+func TestRunbookFailedDrivesTheExitCode(t *testing.T) {
+	mk := func(v any) ctlproto.Response {
+		raw, err := json.Marshal(v)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return ctlproto.Response{OK: true, Data: raw}
+	}
+	if runbookFailed(mk(app.RunbookRunResult{Name: "x"})) {
+		t.Error("a clean run must exit 0")
+	}
+	if !runbookFailed(mk(app.RunbookRunResult{Name: "x", Failed: true})) {
+		t.Error("a failed run must exit non-zero")
+	}
+	// An undecodable payload is not invented into a failure: a catctl-side bug
+	// must not become a false alarm in somebody's deploy script.
+	if runbookFailed(ctlproto.Response{OK: true, Data: []byte("not json")}) {
+		t.Error("an undecodable result must not report failure")
+	}
+}
+
+// buildRunbook turns the trailing words into vars, and refuses a bare one — a
+// second word with no '=' is either a typo or a var whose '=' the shell ate,
+// and guessing which would run the wrong runbook.
+func TestBuildRunbookVars(t *testing.T) {
+	raw, err := buildRunbook([]string{"deploy", "branch=main", "env=staging"})
+	if err != nil {
+		t.Fatalf("buildRunbook: %v", err)
+	}
+	var p app.RunbookRunParams
+	if err := json.Unmarshal(raw, &p); err != nil {
+		t.Fatal(err)
+	}
+	if p.Name != "deploy" || p.Vars["branch"] != "main" || p.Vars["env"] != "staging" {
+		t.Fatalf("params = %+v", p)
+	}
+
+	if _, err := buildRunbook([]string{"deploy", "main"}); err == nil {
+		t.Error("a bare second word must be refused, not folded into the name")
+	}
+	if _, err := buildRunbook(nil); err == nil {
+		t.Error("no name must be a usage error")
+	}
+}

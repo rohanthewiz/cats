@@ -181,6 +181,7 @@ func TestArgKindsMatchSynopsis(t *testing.T) {
 		argCycleDir:   {"prev"},
 		argTheme:      {"name"},
 		argDetachHost: {"id"},
+		argRunbook:    {"name"},
 	}
 	for _, sc := range subcommands {
 		// Operands in the synopsis, in order: <x> and [x] alike.
