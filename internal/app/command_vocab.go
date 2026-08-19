@@ -150,6 +150,29 @@ const (
 	CmdLedgerOutput = "ledger.output"
 	CmdLedgerJump   = "ledger.jump"
 
+	// File transfer: stat a path, read a slice of a file, write a slice of a
+	// file — on whichever machine the addressed pane runs on.
+	//
+	// They are RANGED rather than whole-file, and that is the shape of the whole
+	// feature: every hop between a caller and a remote disk is a whole-message
+	// transport with a ceiling (the seam's 8 MiB frame, the control relay's
+	// 4 MiB line), and JSON costs 4/3 of a payload in base64. So the chunking is
+	// the caller's loop over a stateless positional primitive — `catctl cp` is
+	// that loop — and nothing is held open between one chunk and the next.
+	//
+	// file.get with neither offset nor length REFUSES a file bigger than one
+	// chunk instead of answering with its first megabyte. The prefix would be
+	// indistinguishable from the whole file to a caller that did not check
+	// `eof`, and a caller asking for a whole file without ranging it is exactly
+	// the caller who would not check.
+	//
+	// file.put writes through a part file and renames on the last chunk, so an
+	// interrupted transfer leaves `.name.cats-part` rather than a truncated file
+	// under the name something is about to read.
+	CmdFileStat = "file.stat"
+	CmdFileGet  = "file.get"
+	CmdFilePut  = "file.put"
+
 	// Runbooks: a YAML file whose steps are §7 commands, run in order against
 	// the live session. runbook.list enumerates what is on disk, runbook.run
 	// executes one.
@@ -329,6 +352,13 @@ var commandSpecs = []CommandSpec{
 	{Name: CmdLedgerList, Params: LedgerListParams{}, Result: LedgerListResult{}, ReplyRequired: true},
 	{Name: CmdLedgerOutput, Params: LedgerBlockParams{}, Result: LedgerOutputResult{}, ReplyRequired: true, ParamsRequired: true},
 	{Name: CmdLedgerJump, Params: LedgerBlockParams{}, ParamsRequired: true},
+
+	// Files. get and stat are queries and reply-gated: bytes with nowhere to go
+	// are not worth reading off a disk on another machine. put is an effect and
+	// is not — a caller that stops listening still wanted the file written.
+	{Name: CmdFileStat, Params: FileStatParams{}, Result: FileStatResult{}, ReplyRequired: true, ParamsRequired: true},
+	{Name: CmdFileGet, Params: FileGetParams{}, Result: FileGetResult{}, ReplyRequired: true, ParamsRequired: true},
+	{Name: CmdFilePut, Params: FilePutParams{}, Result: FilePutResult{}, ParamsRequired: true},
 
 	// Runbooks. The listing is reply-gated like every other query; the run is
 	// not, because its product is the effects its steps had — a caller that
@@ -1700,6 +1730,113 @@ type OpenFileResult struct {
 	Pane    uint32 `json:"pane"`
 	Host    string `json:"host"`
 	Spawned bool   `json:"spawned,omitempty"`
+}
+
+// --- File transfer params & results (§7, file.stat / file.get / file.put) ----
+
+// Every file command names its file the same way, with three fields that are
+// repeated rather than embedded because they carry the same meaning each time
+// and this vocabulary spells its params out (see OpenFileParams, which names
+// the identical trio for the same reasons).
+//
+// Path travels raw. "~" is the answering machine's user's home and a relative
+// path resolves against the anchor pane's live cwd ON THAT MACHINE, neither of
+// which this side can work out about a disk it may not be able to see — a path
+// is only half an identity, and the same string on two boxes names two files.
+//
+// Pane is the ANCHOR: it picks the machine, and it is what a relative path
+// resolves against. Nil means the focused pane, the same neighbour rule splits
+// and new tabs use.
+//
+// Host overrides the anchor's machine, for the reason PathListParams.Host and
+// OpenFileParams.Host exist — a caller may be naming a file on a box no current
+// pane is anchored to, which is exactly what `catctl cp devbox:/etc/hosts .`
+// does. When Host is set and the anchor pane is on a different machine the
+// anchor's cwd is dropped rather than used: resolving a relative path against a
+// directory from another filesystem is worse than having no anchor at all.
+
+// FileStatParams: file.stat — what is at this path.
+type FileStatParams struct {
+	Path string  `json:"path"`
+	Pane *uint32 `json:"pane,omitempty"`
+	Host string  `json:"host,omitempty"`
+}
+
+// FileStatResult is CmdResult.Data for file.stat. Path is the RESOLVED absolute
+// path, which is the field a caller wanted as often as the size: it asked about
+// "~/notes.md" and only the answering machine knows what that is.
+type FileStatResult struct {
+	Path  string `json:"path"`
+	Host  string `json:"host"`
+	Size  int64  `json:"size"`
+	Mode  uint32 `json:"mode"`
+	Dir   bool   `json:"dir"`
+	MTime int64  `json:"mtime,omitempty"` // unix seconds, on the answering machine
+}
+
+// FileGetParams: file.get — read a slice of a file.
+//
+// Offset and Length are the transfer's chunking, done by the caller (see
+// CmdFileGet). Both absent means "the whole file", which succeeds only when the
+// file fits in one chunk and is refused by size otherwise — the refusal is
+// deliberate and is explained at CmdFileGet.
+type FileGetParams struct {
+	Path   string  `json:"path"`
+	Pane   *uint32 `json:"pane,omitempty"`
+	Host   string  `json:"host,omitempty"`
+	Offset int64   `json:"offset,omitempty"`
+	Length int64   `json:"length,omitempty"`
+}
+
+// FileGetResult is CmdResult.Data for file.get.
+//
+// Data is base64 on the wire (Go renders []byte that way, and the generated
+// Dart client receives a Uint8List), so a text file and a binary one are the
+// same call.
+//
+// Size is the whole file's size and EOF reports that this slice reached the end
+// of it. EOF is what a loop terminates on rather than arithmetic over Size: the
+// file may be growing, and a log that gained a line between two chunks should
+// end the transfer rather than fail its length check.
+type FileGetResult struct {
+	Path   string `json:"path"`
+	Host   string `json:"host"`
+	Size   int64  `json:"size"`
+	Offset int64  `json:"offset"`
+	Data   []byte `json:"data,omitempty"`
+	EOF    bool   `json:"eof"`
+}
+
+// FilePutParams: file.put — write a slice of a file.
+//
+// More marks a chunk that is not the last, and its default is what makes the
+// simple call simple: absent means this put IS the whole file, so a one-shot
+// caller gets an atomic create-and-rename with no flag at all, while a chunking
+// loop sets it on every chunk except the final one.
+//
+// Overwrite defaults false. Replacing a file is the one irreversible thing in
+// this vocabulary, and a transfer that would do it by accident is refused with
+// the fix named in the message.
+type FilePutParams struct {
+	Path      string  `json:"path"`
+	Pane      *uint32 `json:"pane,omitempty"`
+	Host      string  `json:"host,omitempty"`
+	Data      []byte  `json:"data,omitempty"`
+	Offset    int64   `json:"offset,omitempty"`
+	More      bool    `json:"more,omitempty"`
+	Mode      uint32  `json:"mode,omitempty"`
+	Overwrite bool    `json:"overwrite,omitempty"`
+}
+
+// FilePutResult is CmdResult.Data for file.put. Complete reports that the file
+// is now in place under its final name — false for every chunk of a transfer
+// that is still running, since until the rename the bytes are in a part file.
+type FilePutResult struct {
+	Path     string `json:"path"`
+	Host     string `json:"host"`
+	Written  int    `json:"written"`
+	Complete bool   `json:"complete"`
+	Size     int64  `json:"size,omitempty"`
 }
 
 // EditorInfo is the backend's editor policy, as the dispatcher needs it: which

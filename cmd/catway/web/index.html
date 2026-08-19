@@ -711,6 +711,12 @@
   .pane { position:absolute; box-sizing:border-box; }
   .pane.dragging { opacity:.5; }
   .pane.droptarget { outline:2px solid var(--accent); outline-offset:-2px; }
+  /* A file dragged in from the desktop. Distinct from .droptarget (an in-app
+     pane swap) because it means something different — bytes are about to be
+     written to that pane's machine — so it gets a wash as well as an edge. */
+  .pane.filedrop { outline:2px dashed var(--accent); outline-offset:-2px; }
+  .pane.filedrop::after { content:""; position:absolute; inset:0; pointer-events:none;
+                          background:var(--accent); opacity:.10; }
   /* Pane chrome = the per-pane header strip (restored; it left in the green-
      theme facelift and its absence hurt more than the row it costs). Exactly
      one terminal row tall (the server reserves chromeRows in each pane's inner
@@ -1469,6 +1475,7 @@
     chrome.addEventListener("dblclick", () => renamePane(id));
     chrome.addEventListener("contextmenu", (e) => { e.preventDefault(); openCtx(e.clientX, e.clientY, paneMenuItems(id)); });
     attachMouse(p);
+    attachDrop(p);
     panes.set(id, p);
     return p;
   }
@@ -4647,6 +4654,127 @@
     window.addEventListener("mousemove", move);
     window.addEventListener("mouseup", up);
     move(ev0);
+  }
+
+  // ---- Drag-and-drop upload ----
+  //
+  // Dropping a file on a pane writes it into that pane's working directory, on
+  // that pane's machine. The destination is named by NOT naming it: file.put
+  // resolves a relative path against the anchor pane's live cwd on the host the
+  // pane runs on, so the browser sends a bare filename and never learns either.
+  // A cwd read here would also be the cwd as of the last pane_cwd event, which
+  // is a different directory from the one the pane is in now if somebody just
+  // cd'd — and the file would land in the wrong place with no way to tell.
+  //
+  // The chunking is the same loop `catctl cp` runs, for the same reason (see
+  // internal/filexfer): every hop to the destination disk is a whole-message
+  // transport with a ceiling.
+  const UPLOAD_CHUNK = 1 << 20;   // filexfer.MaxChunk; a larger chunk is refused
+  const UPLOAD_TIMEOUT_MS = 60000; // one chunk, not one transfer
+
+  // hasFiles distinguishes a file dragged in from the desktop from every
+  // in-app drag (pane swaps, sidebar reordering), which carry no Files type and
+  // must not light up a drop target that would try to upload them.
+  function hasFiles(ev) {
+    const dt = ev.dataTransfer;
+    return !!dt && Array.prototype.indexOf.call(dt.types || [], "Files") >= 0;
+  }
+
+  function attachDrop(p) {
+    // dragenter/dragleave fire for every child element the pointer crosses, so
+    // a plain add/remove pair would flicker the highlight off the moment the
+    // cursor moved from the canvas onto the chrome. Counting depth is the
+    // standard fix and the only reliable one.
+    let depth = 0;
+    const clear = () => { depth = 0; p.el.classList.remove("filedrop"); };
+    p.el.addEventListener("dragenter", (ev) => {
+      if (!hasFiles(ev)) return;
+      ev.preventDefault();
+      if (depth++ === 0) p.el.classList.add("filedrop");
+    });
+    p.el.addEventListener("dragover", (ev) => {
+      if (!hasFiles(ev)) return;
+      ev.preventDefault();                  // without this the drop never fires
+      ev.dataTransfer.dropEffect = "copy";
+    });
+    p.el.addEventListener("dragleave", () => { if (depth > 0 && --depth === 0) clear(); });
+    p.el.addEventListener("drop", (ev) => {
+      if (!hasFiles(ev)) return;
+      ev.preventDefault();                  // else the browser navigates to the file
+      clear();
+      for (const f of ev.dataTransfer.files) uploadFile(p, f);
+    });
+  }
+
+  // uploadFile sends one dropped file to the pane's cwd, a chunk at a time.
+  //
+  // Nothing is overwritten. A name already taken on the far side comes back as
+  // a refusal from file.put and is shown as one — the alternative is a silent
+  // replacement of somebody's file on a machine the person dropping may not
+  // even be looking at.
+  async function uploadFile(p, file) {
+    // A basename, never a path. Browsers hand over the leaf name for a plain
+    // file but a RELATIVE path for a directory drop, and a path here would
+    // write outside the pane's cwd — including upward, given "..". Dotfiles
+    // keep their dot: ".bashrc" is a name, while "." and ".." are not.
+    let name = (file.name || "file").split(/[\\/]/).pop();
+    if (!name || name === "." || name === "..") name = "file";
+    const total = file.size;
+    let offset = 0;
+    try {
+      do {
+        const buf = new Uint8Array(await file.slice(offset, offset + UPLOAD_CHUNK).arrayBuffer());
+        const more = offset + buf.length < total;
+        await putChunk(p.id, name, buf, offset, more);
+        offset += buf.length;
+      } while (offset < total);
+      toast(name + " → " + (p.pub || "pane " + p.id) + " (" + fmtBytes(total) + ")");
+    } catch (err) {
+      // The offset is in the message because a failed transfer leaves a
+      // .name.cats-part fragment on the far side, and knowing how far it got is
+      // the difference between "retry" and "go and look".
+      toast("upload of " + name + " failed at " + fmtBytes(offset) + ": " + err.message);
+    }
+  }
+
+  // putChunk is one file.put as a promise. The timeout is per chunk rather than
+  // per transfer, and it exists because a dropped WebSocket resolves no
+  // callback at all: without it a broken link would leave the upload hanging
+  // with no toast either way.
+  function putChunk(pane, path, bytes, offset, more) {
+    return new Promise((resolve, reject) => {
+      let done = false;
+      const timer = setTimeout(() => {
+        if (done) return;
+        done = true;
+        reject(new Error("timed out"));
+      }, UPLOAD_TIMEOUT_MS);
+      sendCmdAwait("file.put", { pane, path, offset, more, data: b64encodeBytes(bytes) }, (msg) => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        if (msg.ok) resolve(msg.data);
+        else reject(new Error(msg.error || "refused"));
+      });
+    });
+  }
+
+  // b64encodeBytes renders a byte array as base64, which is how Go decodes a
+  // []byte field. Chunked through String.fromCharCode because spreading a
+  // megabyte of bytes into one call overflows the argument stack.
+  function b64encodeBytes(bytes) {
+    let s = "";
+    const step = 0x8000;
+    for (let i = 0; i < bytes.length; i += step) {
+      s += String.fromCharCode.apply(null, bytes.subarray(i, i + step));
+    }
+    return btoa(s);
+  }
+
+  function fmtBytes(n) {
+    if (n < 1024) return n + " B";
+    if (n < 1024 * 1024) return (n / 1024).toFixed(1) + " KB";
+    return (n / (1024 * 1024)).toFixed(1) + " MB";
   }
 
   function attachMouse(p) {

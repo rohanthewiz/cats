@@ -224,6 +224,9 @@ var specParams = map[string]any{
 	CmdRead:          ReadParams{Pane: 1, Cursor: [2]uint32{0, 4}},
 	CmdCapture:       CaptureParams{Pane: 1},
 	CmdWaitForOutput: WaitForOutputParams{Pane: 1, Pattern: "ok"},
+	CmdFileStat:      FileStatParams{Path: "/tmp/x"},
+	CmdFileGet:       FileGetParams{Path: "/tmp/x"},
+	CmdFilePut:       FilePutParams{Path: "/tmp/x", Data: []byte("hi")},
 }
 
 func specDecoder(t *testing.T, name string) jsonDec {

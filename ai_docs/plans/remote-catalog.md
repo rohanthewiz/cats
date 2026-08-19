@@ -557,17 +557,203 @@ naming rationale, and a Triggers section), `cli.md`, `configuration.md`
 (a Runbooks section), `config.example.yaml`. catgen-dart goldens regenerated
 (`RunbookInfo` gained `triggers` / `trigger_status`); **cats-mobile regen owed**.
 
-### Phase 6c — record-a-macro — **NOT STARTED**
+### Phase 6c — record-a-macro — **NOT STARTED, scoped**
 
-There is nothing to record from. The ledger stores *shell* commands via OSC 133
-(`internal/ledger`); no journal of §7 commands exists anywhere. That journal is the
-work, and it has a privacy dimension the ledger does not — `chat.send` params and
-`config.set` secrets would flow through it.
+Turn a stretch of live use into a runbook file: do the thing once by hand, then
+ask for it back as YAML. 6a and 6b already built everything downstream of that
+sentence — the document format, `params:`, step refs, `on:` — so the whole of
+6c is upstream of it: there is nothing to record from.
 
-### Phase 7 — file transfer through cathost
+The ledger records *shell* commands via OSC 133 (`internal/ledger`); no journal
+of §7 commands exists anywhere. That journal is the work.
 
-The last third of the ced trio: drag-drop upload into a pane's cwd, `file.get`,
-`catctl cp host:path .`. Chunked over the seam behind a `file_transfer` capability.
+#### Where the journal hooks
+
+`app.Dispatcher.Dispatch` and nowhere else. It is the one choke point every
+caller already funnels through — browser `cmd`, catctl, the control relay,
+plugin binaries, a runbook's own steps, a trigger's run — so a recorder placed
+there records the vocabulary rather than one client's use of it. Anywhere else
+is a second vocabulary that starts drifting the day it is written.
+
+That it also catches runbook steps is a feature, not an accident: recording
+while a runbook runs should produce a runbook that does the same thing.
+
+#### What is recorded, and the flag that decides
+
+Effects, not queries. A macro containing `pane.list` is noise, and the caller
+that ran it was looking at something, not doing something.
+
+"Has an effect" is not derivable from the table as it stands — `pane.split`
+returns a result and is very much an effect — so it is a **third dispatch
+property beside `ReplyRequired` and `ParamsRequired`**, declared per command in
+`commandSpecs`. Declared, not inferred, for the reason the other two are: the
+next command added must have to answer the question, and a default that guesses
+means it never gets asked.
+
+#### The privacy dimension, and why it needs a build-breaking test
+
+`chat.send` carries whatever was typed to an agent, `config.set` carries
+whatever value was set, and `pane.send_input` carries keystrokes — which is
+simultaneously the most private field in the vocabulary and the one a macro
+exists to replay. So redaction is per FIELD, not per command, and it cannot
+live in the recorder: it is a property of the params struct, declared beside the
+field as a struct tag (`cats:"secret"`), walked by the same reflection
+`runbook.EventMap` already uses on event payloads.
+
+The default for an untagged field has to be "recorded" — a recorder that
+dropped fields it did not recognise would silently emit runbooks that do not
+reproduce what was done, which is 6b's `omitempty` bug wearing a different hat.
+Which means the safety has to come from somewhere else: **a table test that
+fails the build when a params struct carries a field no classification covers**,
+in the manner of `TestCommandSpecsRouted`. The omission fails a test rather
+than leaking a secret into a file on disk.
+
+#### Always-on journal, or armed recording
+
+The decision the phase turns on, and the recommendation is the smaller one.
+
+* **Armed** — `runbook.record start` / `stop` / `cancel`, held in memory, never
+  written until a name is given. Nothing exists unless somebody asked for it, so
+  the privacy question above shrinks to "what goes in the file the user just
+  asked for", and the ledger's whole retention/eviction apparatus is not needed.
+* **Always-on** — a durable journal with retention, from which a time range is
+  sliced ("make a runbook out of the last ten minutes"). Strictly more powerful,
+  and strictly worse to own: a durable store of every parameter of every command
+  including every chat message, kept by default, on a machine somebody else may
+  administer.
+
+Take armed. It is the feature as named — "I did this once, do it again" — and
+the always-on journal can be built later on top of the same recorder, at which
+point its retention and its redaction have a working implementation to inherit
+rather than a design to invent.
+
+#### The hard part: pane ids do not survive the recording
+
+This is why 6c is not an afternoon. A recorded `pane.send_input {pane: 7}`
+replays into whatever pane 7 happens to be tomorrow, which is somebody else's
+terminal. So the emitter has to **rewrite pane references into step refs**:
+a pane produced by an earlier recorded `pane.split` becomes
+`{{ steps.<id>.pane }}`, exactly as a hand-written runbook would spell it.
+
+A pane reference the recording did not create has no honest rewrite. The
+options are to refuse the recording (naming the step), or to emit the literal id
+with a comment saying it will not survive. Refusing is more in keeping with
+everything else here — a runbook that loads and then does the wrong thing is the
+failure mode the load checks exist to prevent — but the common case is a
+recording that starts in an existing pane, so a refusal has to come with the fix
+in the same sentence: split first, or record from a fresh tab.
+
+Consecutive `pane.send_input` calls to one pane coalesce into one step. A
+keystroke-per-step recording is technically faithful and unreadable, and
+readability is the point of emitting YAML rather than a blob.
+
+#### Shape of the work
+
+* `internal/app` — the record flag on `CommandSpec`, the `cats:"secret"` tag on
+  the params structs, the classification test, and the recorder hook in
+  `Dispatch`
+* `internal/runbook` — an emitter (steps → the document the loader accepts) plus
+  the pane-ref rewrite, tested by round-tripping through `runbook.Load`
+* `cmd/catway` — the armed recorder's state, `runbook.record`, and the write
+* Docs: `control-api.md`, `cli.md`, a `runbook.record` verb in catctl
+
+### Phase 7 — file transfer through cathost — **DONE**
+
+The last third of the ced trio. `file.stat` / `file.get` / `file.put` are §7
+commands over a `file_transfer` seam capability, `catctl cp` is the loop over
+them, and dropping a file on a pane in the browser uploads it into that pane's
+cwd on that pane's machine.
+
+Deltas from the plan line above, each found by writing it down:
+
+* **Ranged, not chunked-on-the-seam.** The plan said "chunked over the seam",
+  which would have put a streaming protocol — open, pump, close — inside the
+  seam. The transports forbid it being that simple anyway: a seam frame caps at
+  8 MiB, the control relay caps one client line at 4 MiB, and JSON renders bytes
+  as base64 at 4/3 the size. A streaming API would have had to invent its own
+  chunking to fit inside those, and would then have owned half-open transfers
+  and file descriptors held for a client that went away. So the primitive is
+  **stateless and positional** (offset + length), the chunking is the CALLER's
+  loop, and the seam carries one request and one answer per chunk. One message
+  pair, one capability, nothing held open — and the one-shot case ("read this
+  40-line config") needs no loop at all.
+* **A whole-file read of a large file is REFUSED, not truncated.** `file.get`
+  with neither offset nor length means "the whole file" and answers with an
+  error naming the size when it will not fit in one chunk. Handing back the
+  first megabyte with `eof:false` would be indistinguishable from the whole file
+  to a caller that did not check the flag — and a caller asking for a whole file
+  without ranging it is exactly the caller who would not check. The same family
+  of bug as 6b's `omitempty`: the failure is silent and looks like success.
+* **`more` is inverted on purpose.** A write marks the chunks that are NOT last,
+  so the default — no flag — is "this put is the whole file", and the naive
+  one-shot caller gets an atomic write for free. The obvious spelling (`final`
+  on the last chunk) would have made every flagless call write a part file that
+  never lands.
+* **Writes go through a part file and rename.** `.name.cats-part`, renamed by
+  the chunk that is not `more`. An interrupted transfer therefore leaves a
+  visible fragment rather than a truncated file under the name a script is about
+  to read — which matters here precisely because the client doing the chunking
+  is on the far side of a network that can drop. The overwrite refusal runs on
+  every chunk, not only the first, and a refusal removes its own now-dead
+  fragment rather than leaving litter.
+* **`MaxChunk` is a constant, not a config key.** 1 MiB, in `internal/filexfer`,
+  because it is not a preference — it is what the transports allow. A knob would
+  let an operator pick a value that makes every transfer through a relayed pane
+  fail, with a symptom ("connection closed") a long way from the setting.
+* **No config gate at all, deliberately.** The considered `files.enabled` was
+  dropped: it would sit on catway while the disk being exposed is the HOST's,
+  and it would gate a capability that grants no new privilege — a control-socket
+  caller can already `pane.send_input` a `cat` and read the pane back, and a
+  peer holding the seam can already spawn arbitrary processes there
+  (`create_pane` takes a command and an argv). `path.list` and the worktree
+  commands read and write another machine's filesystem with no switch either.
+* **Local files take the in-process path**, like `path.list` and unlike the
+  worktree commands. The "one implementation" argument that makes a worktree op
+  go to the daemon even locally does not apply: a file operation IS
+  `internal/filexfer`, so calling it directly is the same code, and it means
+  transfer works against a local cathost too old to advertise the capability.
+* **The browser never learns the cwd.** A drop sends a bare filename and lets
+  `file.put` resolve it against the anchor pane's live cwd on that pane's
+  machine. Reading a cwd client-side would have used the value as of the last
+  `pane_cwd` event, so a file dropped just after somebody `cd`'d would land in
+  the previous directory with nothing to indicate it.
+* **`catctl cp` owns its runner** rather than joining the ergonomic verb table,
+  because every entry there is one request and this is a loop; and it dispatches
+  before the global flag re-parse, because `-f` is its own flag and its operands
+  are paths.
+
+Verified live against two cathosts and an isolated catway (own `XDG_CONFIG_HOME`,
+own state dir, sockets under `/tmp/f7`): a 3 MB binary copied host→local
+byte-identical over three chunks; local→host; host→host; `.` and a trailing
+slash as destinations; the overwrite refusal and `-f`; a missing file, a missing
+destination directory and an unknown host each refused by name; `~` resolved on
+the ANSWERING machine; a relative path resolved against the anchor pane's cwd,
+and that anchor correctly DROPPED when the addressed host was not the anchor's;
+mode carried, so a copied script stayed executable; a deliberately abandoned put
+leaving only `.half.bin.cats-part`, and the next chunk renaming it into place.
+The browser half was driven headlessly by a WebSocket client sending the page's
+own `file.put` sequence: 2.5 MB into a pane on the remote host in three chunks,
+checksum-identical, landing in that pane's cwd — and a second drop of the same
+name refused.
+
+Tests added: `internal/filexfer/filexfer_test.go` (stat, path resolution, every
+read range including a read at and past EOF, the whole-file refusal and the
+clamp, the part-file discipline, both overwrite refusals, the retry truncation,
+mode, and a chunked round trip over binary data); `internal/app/commands_test.go`
+(params passed through unaltered and unexpanded, the path requirement, negative
+ranges, `file.put` running without a reply channel while its two siblings do
+not, and the two flag defaults); `cmd/catway/files_test.go` (the round trip to a
+remote host, the capability refusal, an unknown host, the anchor-cwd rule in both
+directions, a filesystem error becoming the command's error, id-matched replies
+answered out of order, a host dropping mid-transfer, and the local in-process
+path never touching the seam); `cmd/catctl/cp_test.go` (the scp notation and the
+four ways it is ambiguous).
+
+Docs: `orchestration-seam.md` (the message pair, the capability row, a File
+transfer section), `control-api.md` (the command rows and a File transfer
+section), `cli.md` (a Files block under the verbs). catgen-dart goldens
+regenerated — `[]byte` lands as `Uint8List`, so the mobile client gets typed
+`file.get` / `file.put` — **cats-mobile regen owed**.
 
 ### Phase 8 — adjacent stars
 

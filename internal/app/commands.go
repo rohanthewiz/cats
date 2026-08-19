@@ -160,6 +160,19 @@ type Backend interface {
 	EditorConfig() EditorInfo
 	OpenFileIn(pane uint32, p OpenFileParams)
 
+	// StartFileStat / StartFileGet / StartFilePut are the file-transfer commands
+	// (file.stat / file.get / file.put). All three resolve r later, because all
+	// three may be a round trip to another machine's disk — and are off-loop
+	// even for this machine's, since a read can land on a cold network mount.
+	//
+	// They are on the Backend seam for the reason path.list is: the dispatcher
+	// holds no host roster and no panes, and the two things a file command needs
+	// before it can run — which machine, and what a relative path resolves
+	// against — are both answers only the backend has.
+	StartFileStat(r Responder, p FileStatParams)
+	StartFileGet(r Responder, p FileGetParams)
+	StartFilePut(r Responder, p FilePutParams)
+
 	// LedgerList answers a command-history query (ledger.list). On the Backend
 	// seam because the store is the backend's, and synchronous: the whole
 	// dataset is an in-memory B-tree, so the scan is a filtered walk rather than
@@ -1003,6 +1016,66 @@ func (d *Dispatcher) Dispatch(name string, dec ParamDecoder, r Responder) {
 			return
 		}
 		d.openFile(r, p)
+
+	case CmdFileStat:
+		// The reply gate comes FIRST, before any validation, the way
+		// ledger.output's does: a reply-required command sent with nowhere to
+		// answer is a no-op, not a refusal nobody can read.
+		if !r.WantsReply() {
+			return
+		}
+		var p FileStatParams
+		if err := dec.Decode(&p); err != nil {
+			bad(err)
+			return
+		}
+		if p.Path == "" {
+			r.Fail("path is required")
+			return
+		}
+		d.backend.StartFileStat(r, p) // async: the disk answers later
+
+	case CmdFileGet:
+		// Reply gate first, as above — and here it is more than a rule: the
+		// bytes ARE the result, so a get with nowhere to send them must not
+		// touch a disk on another machine at all.
+		if !r.WantsReply() {
+			return
+		}
+		var p FileGetParams
+		if err := dec.Decode(&p); err != nil {
+			bad(err)
+			return
+		}
+		if p.Path == "" {
+			r.Fail("path is required")
+			return
+		}
+		if p.Offset < 0 || p.Length < 0 {
+			// Checked here rather than left to the filesystem because a negative
+			// offset is a caller bug in arithmetic, and it should be named as one
+			// on the machine that made it rather than travelling to another box
+			// to come back as an unhelpful read error.
+			r.Fail("offset and length cannot be negative")
+			return
+		}
+		d.backend.StartFileGet(r, p)
+
+	case CmdFilePut:
+		var p FilePutParams
+		if err := dec.Decode(&p); err != nil {
+			bad(err)
+			return
+		}
+		if p.Path == "" {
+			r.Fail("path is required")
+			return
+		}
+		if p.Offset < 0 {
+			r.Fail("offset cannot be negative")
+			return
+		}
+		d.backend.StartFilePut(r, p)
 
 	case CmdLedgerList:
 		var p LedgerListParams

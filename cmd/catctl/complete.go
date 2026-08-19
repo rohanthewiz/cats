@@ -104,6 +104,7 @@ var families = []candidate{
 	{"integration", "install/remove agent hooks (offline)"},
 	{"plugin", "manage and launch plugins"},
 	{"probe", "browser-protocol WebSocket probe"},
+	{"cp", "copy a file to or from a cathost"},
 	{"completion", "print a shell completion script"},
 	{"commands", "list the raw §7 method names"},
 	{"pair", "mint a device-pairing code (QR)"},
@@ -182,6 +183,13 @@ func completeCatctl(words []string) ([]candidate, string) {
 		return completePlugin(rest, cur)
 	case "probe":
 		return completeProbe(rest, cur)
+	case "cp":
+		// Paths on both sides, one of which may be host:path — so the shell's own
+		// file completion is what the user wants here, and a candidate list
+		// would replace it with a worse one. The remote half gets no completion
+		// at all, deliberately: completing it means a directory listing on
+		// another machine between two keystrokes.
+		return nil, dirFiles
 	case "completion":
 		if len(rest) == 0 && !strings.HasPrefix(cur, "-") {
 			return filter(shellCandidates(), cur), dirNoFiles

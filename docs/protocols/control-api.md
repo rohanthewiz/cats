@@ -476,6 +476,7 @@ new panes rather than a location.
 | `ledger.list` | `history [count]` |
 | `ledger.output` / `ledger.jump` | `output <pane> <block>` / `jump <pane> <block>` |
 | `pane.open_file` | `open <path> [line]` |
+| `file.stat` / `file.get` / `file.put` | `cp [-f] <src> <dst>` (a loop over all three) |
 | `runbook.list` / `runbook.run` | `runbooks` / `runbook <name> [key=value ...]` |
 | `agent.focus` | `agent <pane>` |
 | `usage.refresh` | — |
@@ -503,6 +504,79 @@ catway can no longer reach.
 
 Git work runs **off** the orchestrator loop at both ends, so a slow
 `git worktree add` never stalls input on either machine.
+
+### File transfer
+
+`file.stat`, `file.get` and `file.put` read and write files on the machine an
+addressed pane runs on. `catctl cp` is the loop over them:
+
+```bash
+catctl cp devbox:/var/log/build.log .      # from a cathost
+catctl cp ./patch.diff devbox:~/work/      # to one
+catctl cp devbox:notes.md laptop:notes.md  # between two
+catctl cp -f ./config.yaml devbox:/etc/app/config.yaml   # -f allows a replace
+```
+
+Either operand may be `host:path`, in the scp notation. A leading `/`, `.` or
+`~` makes an operand local regardless of what follows, so `./weird:name` is a
+path rather than a host.
+
+**Which machine, and what a relative path means.** Both commands take `pane`
+(the anchor — it picks the machine, and a relative path resolves against that
+pane's live cwd *there*) and `host` (which overrides the anchor's machine, for
+naming a file on a box no pane is anchored to). Paths travel **raw**: `~` is the
+answering machine's user's home, and expanding it here would name a directory in
+this machine's account. When `host` names a different machine than the anchor
+pane's, the anchor cwd is dropped rather than used — a cwd from another
+filesystem is not an anchor, it is a plausible-looking wrong answer.
+
+**These are ranged, not streaming.** Every hop between a caller and a remote disk
+is a whole-message transport with a ceiling — the orchestration seam's 8 MiB
+frame, the control relay's 4 MiB line — and JSON renders bytes as base64, which
+costs 4/3 of the payload on each. So the chunking is the **caller's loop** over a
+stateless positional primitive: one megabyte per request, nothing held open
+between chunks, a dropped link losing a chunk rather than a transfer.
+
+| Params | Meaning |
+|--------|---------|
+| `path` | the file, raw (see above). Required. |
+| `pane` / `host` | which machine, as above |
+| `offset` / `length` | `file.get`: the slice to read. `length` is clamped to 1 MiB. |
+| `data` | `file.put`: the bytes, base64 |
+| `more` | `file.put`: this is **not** the last chunk. Absent means the put is the whole file. |
+| `mode` | `file.put`: permissions for a file it creates (`0644` by default) |
+| `overwrite` | `file.put`: allow replacing an existing file. Absent means refuse. |
+
+`file.get` with **neither** `offset` nor `length` means "the whole file", and is
+**refused by size** when the file does not fit in one chunk rather than answered
+with its first megabyte. A prefix with `eof: false` is indistinguishable from a
+whole file to a caller that did not check the flag, and a caller asking for a
+whole file without ranging it is exactly that caller. A `file.get` result carries
+`size` (the whole file) and `eof` (this slice reached the end); a transfer loop
+terminates on `eof`, not on arithmetic, so a log that grew mid-copy ends where it
+ends.
+
+`file.put` writes through a **part file** and renames on the chunk that is not
+`more`. So the destination name never holds a half-written file — an interrupted
+transfer leaves `.name.cats-part` beside it, under a name nothing will mistake
+for the real thing. Overwrite is refused on every chunk, not only the first, and
+a refusal cleans up its own fragment.
+
+Both are refused by name on a cathost too old to advertise the `file_transfer`
+capability, rather than answered from the wrong disk. A file on **this** catway's
+own machine is read in-process rather than round-tripped to the local cathost,
+so transfer works there even against an old local daemon.
+
+**Dragging a file onto a pane in the browser** uploads it into that pane's
+working directory, on that pane's machine, through the same `file.put`. The
+browser sends a bare filename and never learns the cwd — the anchor pane resolves
+it — which is also why it cannot land in the wrong directory when somebody has
+just `cd`'d.
+
+**No new privilege.** Anything holding the control socket can already
+`pane.send_input` a `cat` and read the pane back, and anything holding the
+orchestration seam can already spawn arbitrary processes on that machine. What
+changes is that neither has to any more.
 
 ### Command history
 

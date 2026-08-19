@@ -99,6 +99,13 @@ func runHelp(args []string) int {
 		fmt.Fprintln(os.Stderr, "catctl probe [--url ws://...] [--script '...'] [--cols N] [--rows N]")
 		fmt.Fprintln(os.Stderr, "  headless browser-protocol WebSocket probe; op reference: cmd/catctl/probe.go")
 		return 0
+	case "cp":
+		fmt.Fprintln(os.Stderr, "catctl "+cpUsage)
+		fmt.Fprintln(os.Stderr, "  copy one file between this machine and a cathost, or between two cathosts;")
+		fmt.Fprintln(os.Stderr, "  -f replaces an existing destination (refused otherwise)")
+		fmt.Fprintln(os.Stderr, "  e.g. catctl cp devbox:/var/log/build.log .")
+		fmt.Fprintln(os.Stderr, "       catctl cp ./patch.diff devbox:~/work/")
+		return 0
 	case "commands":
 		fmt.Fprintln(os.Stderr, "catctl commands — print the raw §7 method names, one per line")
 		return 0

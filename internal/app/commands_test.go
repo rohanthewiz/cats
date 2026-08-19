@@ -62,6 +62,10 @@ type fakeBackend struct {
 	lastPlgUninP   PluginUninstallParams
 	lastPathList   Responder
 	lastPathP      PathListParams
+	lastFileStatP  FileStatParams
+	lastFileGetP   FileGetParams
+	lastFilePutP   FilePutParams
+	lastFileGet    Responder
 	// paneMeta is the canned per-pane metadata PaneMeta answers with (nil ⇒ all
 	// zero values), letting pane.list/pane.get tests assert the merge.
 	paneMeta map[uint32]PaneMeta
@@ -236,6 +240,21 @@ func (b *fakeBackend) StartPathList(r Responder, p PathListParams) {
 	b.rec("pathList")
 	b.lastPathList = r
 	b.lastPathP = p
+}
+func (b *fakeBackend) StartFileStat(r Responder, p FileStatParams) {
+	b.rec("fileStat")
+	b.lastFileStatP = p
+	r.OK(FileStatResult{Path: p.Path})
+}
+func (b *fakeBackend) StartFileGet(r Responder, p FileGetParams) {
+	b.rec("fileGet")
+	b.lastFileGetP = p
+	b.lastFileGet = r
+}
+func (b *fakeBackend) StartFilePut(r Responder, p FilePutParams) {
+	b.rec("filePut")
+	b.lastFilePutP = p
+	r.OK(FilePutResult{Path: p.Path, Written: len(p.Data), Complete: !p.More})
 }
 func (b *fakeBackend) ConfigGet(r Responder) { b.rec("cfgGet"); r.OK(ConfigGetResult{Path: "/cfg"}) }
 func (b *fakeBackend) ConfigSet(r Responder, p ConfigSetParams) {
@@ -2375,3 +2394,103 @@ func TestOpenFileRefusals(t *testing.T) {
 }
 
 func ptrU32(v uint32) *uint32 { return &v }
+
+// --- file transfer (file.stat / file.get / file.put) -------------------------
+
+// The dispatcher validates shape and passes the rest through: which machine and
+// what a relative path resolves against are the backend's answers, so the params
+// must arrive there unaltered.
+func TestDispatchFileGetPassesParamsThrough(t *testing.T) {
+	h := newCmdHarness(t)
+	pane := uint32(7)
+	r := h.resp()
+
+	h.d.Dispatch(CmdFileGet, params(t, FileGetParams{
+		Path: "~/notes.md", Pane: &pane, Host: "devbox", Offset: 4096, Length: 1024,
+	}), r)
+
+	got := h.b.lastFileGetP
+	if got.Path != "~/notes.md" || got.Host != "devbox" || got.Offset != 4096 || got.Length != 1024 {
+		t.Errorf("params reached the backend as %+v", got)
+	}
+	if got.Pane == nil || *got.Pane != 7 {
+		t.Errorf("pane anchor lost: %v", got.Pane)
+	}
+	// The path is NOT expanded here: "~" is the answering machine's home.
+	if got.Path != "~/notes.md" {
+		t.Errorf("the dispatcher resolved a path it cannot resolve: %q", got.Path)
+	}
+}
+
+// A path is the one field with no sensible default, so all three commands refuse
+// an empty one by name rather than passing it to a filesystem to complain about.
+func TestDispatchFileCommandsRequireAPath(t *testing.T) {
+	for _, name := range []string{CmdFileStat, CmdFileGet, CmdFilePut} {
+		t.Run(name, func(t *testing.T) {
+			h := newCmdHarness(t)
+			r := h.resp()
+			h.d.Dispatch(name, params(t, map[string]any{"path": ""}), r)
+			if !r.failCall || !strings.Contains(r.errMsg, "path is required") {
+				t.Errorf("empty path: ok=%v fail=%v msg=%q", r.okCall, r.failCall, r.errMsg)
+			}
+		})
+	}
+}
+
+// Negative arithmetic is a caller bug, and it is named here — on the machine
+// that made it — rather than travelling to another box to come back as an
+// unhelpful read error.
+func TestDispatchFileNegativeRanges(t *testing.T) {
+	h := newCmdHarness(t)
+	r := h.resp()
+	h.d.Dispatch(CmdFileGet, params(t, FileGetParams{Path: "/x", Offset: -1}), r)
+	if !r.failCall || !strings.Contains(r.errMsg, "negative") {
+		t.Errorf("negative offset: fail=%v msg=%q", r.failCall, r.errMsg)
+	}
+
+	h2 := newCmdHarness(t)
+	r2 := h2.resp()
+	h2.d.Dispatch(CmdFileGet, params(t, FileGetParams{Path: "/x", Length: -8}), r2)
+	if !r2.failCall {
+		t.Errorf("negative length was accepted")
+	}
+
+	h3 := newCmdHarness(t)
+	r3 := h3.resp()
+	h3.d.Dispatch(CmdFilePut, params(t, FilePutParams{Path: "/x", Offset: -1}), r3)
+	if !r3.failCall || !strings.Contains(r3.errMsg, "negative") {
+		t.Errorf("negative put offset: fail=%v msg=%q", r3.failCall, r3.errMsg)
+	}
+}
+
+// file.put is an effect, so unlike its two siblings it still runs for a caller
+// that cannot receive the result — a browser drop that sends no id still wanted
+// the file written.
+func TestDispatchFilePutRunsWithoutAReplyChannel(t *testing.T) {
+	h := newCmdHarness(t)
+	r := &fakeResponder{log: h.log, wants: false}
+
+	h.d.Dispatch(CmdFilePut, params(t, FilePutParams{Path: "/tmp/x", Data: []byte("hi")}), r)
+
+	if h.b.lastFilePutP.Path != "/tmp/x" {
+		t.Errorf("a reply-less put did not reach the backend: %+v", h.b.lastFilePutP)
+	}
+	if string(h.b.lastFilePutP.Data) != "hi" {
+		t.Errorf("data lost: %q", h.b.lastFilePutP.Data)
+	}
+}
+
+// The chunk flag's default is the safety property: absent More means "this put
+// is the whole file", so the naive one-shot caller gets an atomic write with no
+// flag at all.
+func TestDispatchFilePutDefaultsToComplete(t *testing.T) {
+	h := newCmdHarness(t)
+	r := h.resp()
+	h.d.Dispatch(CmdFilePut, params(t, map[string]any{"path": "/tmp/x", "data": []byte("hi")}), r)
+	if h.b.lastFilePutP.More {
+		t.Error("a put with no More flag was treated as a chunk of a longer transfer")
+	}
+	if h.b.lastFilePutP.Overwrite {
+		t.Error("a put with no Overwrite flag was allowed to clobber")
+	}
+}

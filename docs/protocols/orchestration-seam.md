@@ -85,6 +85,7 @@ without racing the daemon's own post-hello replay. Unknown pane ids are ignored.
 | `request_command_marks` | `on` | turn shell-integration scanning on or off for this connection. Capability: `command_ledger` |
 | `request_list_dir` | `pane_id`, `dir`, `base`, `recents`, `live` | list a directory **on the daemon's filesystem**; answered with `dir_listing`. Capability: `list_dir` |
 | `request_worktree` | `id`, `req` (`op`, `cwd`, `path`, `branch`, `root`, `force`) | run one git-worktree operation **on the daemon's machine**; answered with `worktree_result` carrying the same `id`. Capability: `worktree` |
+| `request_file` | `id`, `req` (`op`, `path`, `base`, `offset`, `length`, `data`, `more`, `mode`, `overwrite`) | stat, read a slice of, or write a slice of a file **on the daemon's filesystem**; answered with `file_result` carrying the same `id`. Capability: `file_transfer` |
 | `hook_reply` | `id`, `payload` | the answer to a `hook_report`, written back to the waiting hook client verbatim |
 | `control_reply` | `id`, `payload` | bytes from the orchestrator's control server, written to the relayed client verbatim |
 | `shutdown` | — | ask a persistent daemon to exit and tear down all panes |
@@ -112,6 +113,7 @@ without racing the daemon's own post-hello replay. Unknown pane ids are ignored.
 | `command_end` | `pane_id`, `exit`, `duration_ms` | it finished. `exit` is **absent** when the shell reported none — deliberately distinct from `0` |
 | `dir_listing` | `pane_id`, `listing` | reply to `request_list_dir`, one per request. A path that does not resolve is `exists:false` with a reason, not an error event |
 | `worktree_result` | `id`, `result` | reply to `request_worktree`, matched by `id` rather than by order — git runs off the dispatch goroutine, so two operations finish in whichever order git finishes them. A git failure is `result.error` (with `result.dirty` for the escalation), not an error event |
+| `file_result` | `id`, `result` | reply to `request_file`, matched by `id` rather than by order — a transfer is a loop of independent chunks, so several are outstanding at once and each finishes when its disk does. A filesystem failure is `result.error`, not an error event |
 | `hook_report` | `id`, `payload` | one agent hook request that arrived on the daemon's own hook socket, forwarded **verbatim**. Capability: `hook_relay` |
 | `control_open` | `id` | a connection arrived on the daemon's control relay socket. Capability: `control_relay` |
 | `control_data` | `id`, `payload` | bytes from that connection, forwarded **verbatim** |
@@ -163,6 +165,7 @@ reads correctly as "the base protocol only".
 | `hook_relay` | `hook_report` / `hook_reply`, plus `welcome.hook_socket` | agent hook reports from panes on this machine — see below |
 | `control_relay` | `control_open` / `control_data` / `control_reply` / `control_close`, plus `welcome.control_socket` | the orchestrator's control API, for in-pane tooling on this machine — see below |
 | `command_ledger` | `request_command_marks` / `command_start` / `command_end` | the command history, read out of this machine's panes — see below |
+| `file_transfer` | `request_file` / `file_result` | `file.stat` / `file.get` / `file.put` and `catctl cp` reaching this machine's disk — see below |
 
 ### Liveness
 
@@ -397,6 +400,51 @@ time the cursor has already moved past the output.
 A command whose `D` never arrives (its shell was replaced, the integration is
 half-installed) is closed at the next prompt with **no** status: a record saying
 "finished, status unknown" is true, and one that stays running is not.
+
+### File transfer
+
+`request_file` is the same principle applied to bytes: the file is on the
+daemon's disk, so the daemon is the one that reads or writes it. `path` travels
+**unexpanded** for the reasons `request_list_dir`'s `dir` does, and `base` is the
+same anchor — the addressed pane's live cwd on that machine.
+
+One message pair carries all three operations (`op: stat | read | write`),
+because they are one primitive with a field rather than three protocols, and
+because a daemon that could read but not write would be a state no build
+produces and every client would then have to handle. Both ends call the same
+`internal/filexfer` code; the only difference is which process runs it.
+
+**Ranged, not streaming.** A read takes an `offset` and a `length` and a write
+takes an `offset` and its `data`; nothing is held open between one request and
+the next. The reason is the ceilings this protocol and the ones around it
+impose: a seam frame is capped at 8 MiB, the control relay caps one client line
+at 4 MiB, and JSON renders bytes as base64 at 4/3 the size. A streaming API would
+have to invent its own chunking to fit inside those anyway, and would then own
+half-open transfers and file descriptors held for a client that went away. So
+the chunking is the caller's loop — `catctl cp` — over 1 MiB requests
+(`filexfer.MaxChunk`, a constant rather than a setting, because it is what the
+transports allow rather than a preference).
+
+Two consequences worth stating:
+
+* A read of a whole file with no `offset` or `length` is **refused by size** when
+  the file will not fit in one chunk, rather than answered with its first
+  megabyte. A prefix with `eof:false` is indistinguishable from a whole file to a
+  caller that did not check.
+* A write lands in a **part file** (`.name.cats-part`) and is renamed into place
+  by the chunk that is not `more`. An interrupted transfer therefore leaves a
+  visible fragment rather than a truncated file under the name something else is
+  about to read — which matters here precisely because the client doing the
+  chunking is on the far side of a network that can drop.
+
+`id` correlates the reply, and unlike the pane-FIFO round trips it cannot be
+replaced by order: the work runs off the dispatch goroutine (a read can land on a
+cold network mount) and a transfer has several requests outstanding at once.
+
+Advertising the capability is **not** a new privilege. A peer holding this seam
+already spawns arbitrary processes on this machine — `create_pane` takes a
+command and an argv — so it could already read any file by running `cat` in a
+pane and asking for the pane's text. What changes is that it no longer has to.
 
 ## Why the daemon resolves cwd and branch
 

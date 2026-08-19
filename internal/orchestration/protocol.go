@@ -17,6 +17,7 @@ import (
 	"io"
 	"time"
 
+	"github.com/rohanthewiz/cats/internal/filexfer"
 	"github.com/rohanthewiz/cats/internal/hostmeter"
 	"github.com/rohanthewiz/cats/internal/pathpick"
 	"github.com/rohanthewiz/cats/internal/terminal"
@@ -94,8 +95,11 @@ const (
 	MsgRequestBlock    MessageType = "request_block"
 	MsgRequestListDir  MessageType = "request_list_dir"
 	MsgRequestWorktree MessageType = "request_worktree"
-	MsgHookReply       MessageType = "hook_reply"
-	MsgControlReply    MessageType = "control_reply"
+	// MsgRequestFile asks for one file operation on the daemon's own disk —
+	// stat, a ranged read, a ranged write.
+	MsgRequestFile  MessageType = "request_file"
+	MsgHookReply    MessageType = "hook_reply"
+	MsgControlReply MessageType = "control_reply"
 
 	// Go → Rust (events).
 	MsgWelcome        MessageType = "welcome"
@@ -117,6 +121,7 @@ const (
 	MsgBlockResult    MessageType = "block_result"
 	MsgDirListing     MessageType = "dir_listing"
 	MsgWorktreeResult MessageType = "worktree_result"
+	MsgFileResult     MessageType = "file_result"
 	MsgHookReport     MessageType = "hook_report"
 	MsgControlOpen    MessageType = "control_open"
 	MsgControlData    MessageType = "control_data"
@@ -188,6 +193,22 @@ const (
 	// means the DURATION is measured where the command ran, rather than
 	// including a network hop whose size varies with the wifi.
 	FeatureCommandLedger = "command_ledger"
+	// FeatureFileTransfer: the daemon can stat, read and write files on its own
+	// filesystem (MsgRequestFile → MsgFileResult), which is what carries
+	// file.get / file.put / file.stat to a pane on another machine.
+	//
+	// It is one capability for all three because they are one primitive with an
+	// op field (filexfer.OpRequest), and because a daemon that could read but
+	// not write would be a state no build produces and every client would then
+	// have to handle.
+	//
+	// Advertising it is not a new privilege. Anything holding this seam already
+	// spawns arbitrary processes on this machine (create_pane takes a command
+	// and an argv), so a peer that can read a file could already read it by
+	// running cat in a pane and asking for the pane's text. What changes is that
+	// it no longer has to, which is the difference between a feature and a
+	// workaround — see the plan's decision 2 for the same argument one layer up.
+	FeatureFileTransfer = "file_transfer"
 )
 
 // --- Commands (Rust → Go) ---------------------------------------------------
@@ -598,7 +619,7 @@ func NewWelcomeAt(version int, errMsg string, panes []uint32) Welcome {
 // cannot alter the daemon's advertisement by holding onto it.
 func Features() []string {
 	return []string{FeaturePing, FeatureHostStats, FeatureListDir, FeatureWorktree,
-		FeatureHookRelay, FeatureControlRelay, FeatureCommandLedger}
+		FeatureHookRelay, FeatureControlRelay, FeatureCommandLedger, FeatureFileTransfer}
 }
 
 type PaneFrame struct {
@@ -949,6 +970,47 @@ type WorktreeResult struct {
 
 func NewWorktreeResult(id uint64, res worktree.OpResult) WorktreeResult {
 	return WorktreeResult{Type: MsgWorktreeResult, ID: id, Result: res}
+}
+
+// RequestFile asks the daemon to run one file operation on ITS filesystem, and
+// FileResult answers it. The payload is the shared filexfer.OpRequest for the
+// reason RequestWorktree carries worktree.OpRequest: both ends call filexfer.Do
+// with it, and a wire-local copy of the request shape would be a second
+// implementation of the operation waiting to happen.
+//
+// ID is an explicit correlation handle rather than the pane-FIFO the listing
+// and text round trips use. A transfer is a client-side loop of independent
+// requests — see the filexfer package doc — so several are legitimately in
+// flight for one machine at once, and each runs off the dispatch goroutine and
+// finishes when its disk finishes.
+//
+// There is no pane id anywhere in this pair, which is the point: a file is a
+// property of the MACHINE. The pane a caller named only decided which machine
+// to ask and what a relative path resolves against, and both of those were
+// settled on the client before this message was built.
+type RequestFile struct {
+	Type MessageType        `json:"type"`
+	ID   uint64             `json:"id"`
+	Req  filexfer.OpRequest `json:"req"`
+}
+
+func NewRequestFile(id uint64, req filexfer.OpRequest) RequestFile {
+	return RequestFile{Type: MsgRequestFile, ID: id, Req: req}
+}
+
+// FileResult answers a RequestFile, echoing its ID. A filesystem failure — no
+// such file, a refused overwrite, a directory where a file was wanted — is
+// carried INSIDE the result rather than as an Error event, exactly as a git
+// failure is: it is the answer to the question that was asked, where an Error
+// event is a pane-level toast about the connection.
+type FileResult struct {
+	Type   MessageType       `json:"type"`
+	ID     uint64            `json:"id"`
+	Result filexfer.OpResult `json:"result"`
+}
+
+func NewFileResult(id uint64, res filexfer.OpResult) FileResult {
+	return FileResult{Type: MsgFileResult, ID: id, Result: res}
 }
 
 // HookReport forwards one request that arrived on the daemon's hook socket,

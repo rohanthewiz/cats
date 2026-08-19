@@ -342,6 +342,27 @@ would not fire right now. Cron is not one of these: point launchd or systemd at
 `catctl runbook <name>`. Guardrails, the config switch, and the rest are in
 [the control API](../protocols/control-api.md#runbooks).
 
+Files:
+
+```bash
+catctl cp devbox:/var/log/build.log .        # from a cathost
+catctl cp ./patch.diff devbox:~/work/        # to one
+catctl cp devbox:notes.md laptop:notes.md    # between two
+catctl cp -f ./config.yaml devbox:/etc/app/config.yaml   # -f allows a replace
+```
+
+Either operand may be `host:path`, in the scp notation; a leading `/`, `.` or `~`
+makes it local whatever follows, so `./weird:name` is a path. A destination that
+is a directory (or ends in `/`) takes the source's basename, as `cp` does.
+
+Nothing is overwritten without `-f`, and a transfer that fails part-way leaves a
+`.name.cats-part` fragment rather than a truncated file under the destination's
+own name. `cp` copies one file: no recursion, no globbing, no ownership.
+
+`cp` is a **loop** over `file.stat`, `file.get` and `file.put` — the only verb
+here that is more than one command — because every hop to a remote disk has a
+message-size ceiling. See [the control API](../protocols/control-api.md#file-transfer).
+
 Misc:
 
 ```bash

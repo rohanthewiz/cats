@@ -929,6 +929,16 @@ func (d *daemon) dispatch(mt orchestration.MessageType, payload []byte) {
 		// off its dispatch goroutine, so a listing asked for second can answer
 		// first, and the id is what keeps the two answers apart.
 		o.post(func() { o.resolvePending(hostKey(d.id, ev.ID), ev.Result) })
+	case orchestration.MsgFileResult:
+		var ev orchestration.FileResult
+		if err := json.Unmarshal(payload, &ev); err != nil {
+			return
+		}
+		// Matched on (host, id) like a worktree result, and for a stronger
+		// reason: this daemon answers file requests off its dispatch goroutine
+		// and a transfer has several outstanding at once, so order says nothing
+		// about which chunk came back.
+		o.post(func() { o.resolvePending(fileKey(d.id, ev.ID), ev.Result) })
 	case orchestration.MsgCommandStart:
 		var ev orchestration.CommandStart
 		if err := json.Unmarshal(payload, &ev); err != nil {

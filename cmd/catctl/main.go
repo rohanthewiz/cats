@@ -15,6 +15,7 @@
 //	catctl integration <install|uninstall|status|help> ...  agent hook installers
 //	catctl plugin <install|link|uninstall|list|run|help> ...  plugin host
 //	catctl probe [--url ...] [--script ...]   browser-protocol WebSocket probe
+//	catctl cp [-f] <src> <dst>                copy a file to or from a cathost
 //
 // The integration family is an offline verb: it installs/removes the
 // cats shell-hook integrations for coding agents (claude, codex, kimi, ...)
@@ -25,6 +26,13 @@
 // ~/.config/cats/plugins (install from GitHub / link a local checkout /
 // uninstall / list) offline, while `plugin run` resolves an action's argv
 // locally and launches it in a fresh tab via tab.create's spawn params.
+//
+// `catctl cp` is the one verb that is a LOOP of §7 commands rather than a single
+// one: it stats the source, then reads and writes a chunk at a time until the
+// source reports eof. Either operand may be `host:path`, so it copies to a
+// cathost, from one, or between two. The chunking is the client's because every
+// hop between here and a remote disk is a whole-message transport with a ceiling
+// — see internal/filexfer.
 //
 // The probe verb is the other transport exception: it speaks the WS9 browser
 // WebSocket protocol to a catway's /ws endpoint — not the control socket —
@@ -146,6 +154,14 @@ func run() int {
 	// --script, ...), so like integration it dispatches before the re-parse.
 	if method == "probe" {
 		return runProbe(rest[1:])
+	}
+
+	// cp is a LOOP of §7 commands rather than one, so it owns its runner the way
+	// probe does — and it has to dispatch before the re-parse for a second
+	// reason: its -f is its own flag and its operands are paths, neither of
+	// which the global FlagSet should see.
+	if method == "cp" {
+		return runCP(rest[1:], ctlproto.ResolveSocket(*socket), *timeout)
 	}
 
 	// help takes a topic (a verb, a family, a raw method) that the global FlagSet
@@ -376,6 +392,8 @@ Usage:
   catctl plugin run <id> [action]                 launch a plugin action in a new tab
   catctl probe [--url ws://...] [--script '...']  browser-protocol WebSocket probe
                                                (op reference: cmd/catctl/probe.go)
+  catctl cp [-f] <src> <dst>                 copy a file to/from a cathost
+                                               (either side may be host:path)
 
 Verbs:
 `)

@@ -211,6 +211,11 @@ type orch struct {
 	// which are id-correlated rather than pane-FIFO — two can be in flight for
 	// one pane and the daemon answers them in whichever order it resolves them.
 	nextBlockReq uint64
+	// nextFileReq allocates ids for file operations (file.stat / file.get /
+	// file.put) on a remote host. Id-correlated for the block lookup's reason
+	// and one more: a transfer is a loop of chunks, so a `catctl cp` has several
+	// in flight against one machine at a time.
+	nextFileReq  uint64
 	openCmds     map[uint32]*openCmd
 	ledgerLogged map[string]bool
 	// structPanes (pane id → public handle) and structFocus snapshot the model's
@@ -389,6 +394,7 @@ const (
 	reqListDir                  // path.list on a remote host → dir_listing
 	reqWorktree                 // worktree.* on any host → worktree_result
 	reqBlock                    // ledger.output / ledger.jump → block_result
+	reqFile                     // file.stat / file.get / file.put → file_result
 )
 
 // label names the command for user-facing errors ("<label> timed out").
@@ -402,6 +408,8 @@ func (k reqKind) label() string {
 		return "worktree command"
 	case reqBlock:
 		return "block lookup"
+	case reqFile:
+		return "file transfer"
 	}
 	return "read"
 }
@@ -413,8 +421,11 @@ func (k reqKind) label() string {
 // failing it at five seconds would report a failure for work that then quietly
 // succeeds.
 func (k reqKind) timeout() time.Duration {
-	if k == reqWorktree {
+	switch k {
+	case reqWorktree:
 		return worktreeTimeout
+	case reqFile:
+		return fileTimeout
 	}
 	return reqTimeout
 }
@@ -441,6 +452,14 @@ func paneKey(pane uint32, kind reqKind) reqKey { return reqKey{kind: kind, pane:
 // hostKey is the key for a host-addressed, id-correlated round trip.
 func hostKey(host string, id uint64) reqKey {
 	return reqKey{kind: reqWorktree, id: id, host: host}
+}
+
+// fileKey is the key for one file operation. Id-correlated rather than
+// pane-FIFO because a transfer is a client-side loop of independent chunks (see
+// internal/filexfer), so several are legitimately outstanding for one machine at
+// once and the daemon answers each when its disk does.
+func fileKey(host string, id uint64) reqKey {
+	return reqKey{kind: reqFile, id: id, host: host}
 }
 
 // blockKey is the key for a block lookup. Id-correlated like a worktree request
@@ -479,6 +498,13 @@ type pending struct {
 const (
 	reqTimeout      = 5 * time.Second
 	worktreeTimeout = 5 * time.Minute
+	// fileTimeout bounds one chunk of a transfer, not a transfer: the chunking
+	// is the caller's loop. It is longer than the default because the read is
+	// off a disk that may be a cold network mount on a machine across a link,
+	// and far shorter than the worktree's because one chunk is at most
+	// filexfer.MaxChunk — a request that has not been answered in half a minute
+	// is a lost one, and a `catctl cp` loop is better told so than left hanging.
+	fileTimeout = 30 * time.Second
 )
 
 // modelSpawner satisfies workspace.PaneSpawner without touching the daemon: the

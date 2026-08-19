@@ -18,6 +18,7 @@ import (
 
 	"github.com/creack/pty"
 	"github.com/rohanthewiz/cats/internal/detect"
+	"github.com/rohanthewiz/cats/internal/filexfer"
 	"github.com/rohanthewiz/cats/internal/gitbranch"
 	"github.com/rohanthewiz/cats/internal/pathpick"
 	"github.com/rohanthewiz/cats/internal/terminal"
@@ -622,6 +623,24 @@ func (h *Host) dispatch(typ MessageType, payload []byte) error {
 		// finishes them.
 		go func() {
 			h.emit(NewWorktreeResult(c.ID, worktree.Do(c.Req)))
+		}()
+	case MsgRequestFile:
+		var c RequestFile
+		if err := json.Unmarshal(payload, &c); err != nil {
+			h.emit(NewError(0, "bad request_file: "+err.Error()))
+			return nil
+		}
+		// Off the dispatch goroutine, for the listing's reason rather than the
+		// worktree's: a read is bounded at filexfer.MaxChunk so it cannot take
+		// minutes, but the disk it comes off can be a cold network mount, and
+		// the connection's reader is what every keystroke in every pane arrives
+		// through.
+		//
+		// Id-matched rather than ordered, because a client's transfer loop has
+		// several of these outstanding at once and they finish in whatever order
+		// the filesystem finishes them.
+		go func() {
+			h.emit(NewFileResult(c.ID, filexfer.Do(c.Req)))
 		}()
 	case MsgRequestBlock:
 		var c RequestBlock
