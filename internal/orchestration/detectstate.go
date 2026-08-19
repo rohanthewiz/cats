@@ -31,6 +31,12 @@ const (
 	// detectInterval is the base cadence for probing a pane's foreground agent
 	// and (when due) scanning its screen.
 	detectInterval = 300 * time.Millisecond
+	// agentSessionInterval paces the agent-session registry lookup (which
+	// conversation the pane's agent process is in). It is deliberately far slower
+	// than the state cadence: a session changes when a conversation starts, while
+	// state flips several times a turn. Fast enough that a new conversation is
+	// named well within the model readout's own 20s refresh.
+	agentSessionInterval = 3 * time.Second
 	// detectPendingIdleRecheck is the faster cadence used while a Working→Idle
 	// transition is being confirmed, so the debounce resolves quickly.
 	detectPendingIdleRecheck = 100 * time.Millisecond

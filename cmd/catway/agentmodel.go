@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/rohanthewiz/cats/internal/browserproto"
+	"github.com/rohanthewiz/cats/internal/orchestration"
 )
 
 // A pane's current model — the LLM its coding agent is running under — surfaced
@@ -22,10 +23,23 @@ import (
 // per session, so a model reported there would go stale the moment the user
 // switches with /model. What is live is the agent's own on-disk history, which it
 // appends to as it answers and which names the model that produced each message.
-// So the model is read from that history's tail: exact when the pane's hook has
-// reported its resumable session id, best-effort from the pane's cwd otherwise (a
-// pane whose integration is not installed still gets an answer, which is the
-// common case).
+// So the model is read from that history's tail.
+//
+// Which history is the pane's is the whole problem, and there are three answers,
+// in falling order of confidence:
+//
+//	hook       the pane's own agent reported its session id (hooks.go). Exact,
+//	           but only once `catctl integration install` has been run.
+//	detected   the host traced the pane's foreground process to the agent's
+//	           pid-keyed registry and read the session id out of it
+//	           (detect.AgentSessionID, arriving as pane_agent_session). Exact
+//	           too, and needs nothing installed — it is what covers the ordinary
+//	           pane.
+//	cwd        the most recently written history under the pane's working
+//	           directory. A guess, and the reason the first two exist: two panes
+//	           running one agent in one repository share a cwd, so this answers
+//	           both with whichever session wrote last — both rows name one pane's
+//	           model, and both flip together when either pane switches.
 //
 // Which agents can be read is a table — modelResolvers — rather than a chain of
 // comparisons, because the two entries have the same shape: a root directory
@@ -104,6 +118,11 @@ const (
 	// modelEffortSep joins the model with the effort it ran at, matching the
 	// hover card's own "agent · state" spelling.
 	modelEffortSep = " · "
+	// sessionSourceDetect labels a session ref the host traced rather than one an
+	// agent reported, so the two are distinguishable on a pane that has both.
+	// It is deliberately not one of the hook seam's "cats:<agent>" sources: those
+	// name an installed integration, and this is the absence of one.
+	sessionSourceDetect = "detect"
 	// maxEffortLen bounds what is accepted as an effort label — the values are
 	// words ("low", "medium", "high", "xhigh", "max").
 	maxEffortLen = 16
@@ -132,12 +151,17 @@ func (o *orch) refreshAgentModel(rt *paneRuntime, agent string) {
 	}
 	rt.modelBusy = true
 	pid, cwd := rt.id, rt.cwd
-	session := ""
 	// The session ref only names a history belonging to the agent that reported
 	// it. A pane that ran claude and then copilot still carries the older agent's
 	// ref until the new one's hook fires, and handing claude's id to copilot's
-	// reader would at best miss and at worst name someone else's directory.
+	// reader would at best miss and at worst name someone else's directory. So
+	// both channels are filtered on the agent actually running, and the hook wins
+	// where they disagree: it is the agent speaking for itself, while the detected
+	// one is read from the outside off a pid that may have just been replaced.
+	session := ""
 	if s := rt.agentSession; s != nil && s.agent == agent && s.kind == "id" {
+		session = s.value
+	} else if s := rt.detectedSession; s != nil && s.agent == agent {
 		session = s.value
 	}
 	read := resolver.read
@@ -158,6 +182,17 @@ func (o *orch) setAgentModel(pid uint32, model string) {
 	}
 	rt.modelBusy = false
 	rt.modelAt = time.Now()
+	if rt.modelDirty {
+		// The pane's conversation changed under this read (applyPaneAgentSession),
+		// so what came back names the model of a history that is no longer the
+		// pane's. Publish nothing and read the new one — the throttle goes with it,
+		// since what it would be pacing is a correction.
+		rt.modelDirty = false
+		rt.modelAt = time.Time{}
+		agent, _ := rt.effectiveAgent()
+		o.refreshAgentModel(rt, agent)
+		return
+	}
 	agent, state := rt.effectiveAgent()
 	if _, known := modelResolvers[agent]; !known {
 		model = ""
@@ -180,6 +215,49 @@ func (o *orch) setAgentModel(pid uint32, model string) {
 	// /model switch) would never correct itself. The rebuild is session-wide but
 	// only happens when the model actually moved, which is rare.
 	o.broadcast(o.agentsMsg())
+}
+
+// applyPaneAgentSession records the conversation the host traced the pane's agent
+// process to, and re-reads the model straight away when it moved.
+//
+// The re-read cannot wait for the ordinary refresh: until this arrives the pane
+// was resolving its model by cwd, which for two panes in one repository is a
+// neighbour's transcript. The stale-throttle is cleared rather than respected for
+// the same reason — what it is throttling is a read of the wrong file.
+//
+// A report naming no session (or no agent) drops the ref. That is not "keep what
+// we had": the pane's agent left, or the host can no longer trace it, and the cwd
+// fallback is a better answer than an identity that has stopped being this pane's.
+func (o *orch) applyPaneAgentSession(ev orchestration.PaneAgentSession) {
+	rt := o.panes[ev.PaneID]
+	if rt == nil {
+		return
+	}
+	var ref *agentSessionRef
+	// isTranscriptID gates what the host sent for the same reason a hook report is
+	// gated: the value goes into a glob pattern, and this end does not get to
+	// assume the other end validated it.
+	if ev.Agent != "" && isTranscriptID(ev.SessionID) {
+		ref = &agentSessionRef{source: sessionSourceDetect, agent: ev.Agent, kind: "id", value: ev.SessionID}
+	}
+	if sameSessionRef(rt.detectedSession, ref) {
+		return
+	}
+	rt.detectedSession = ref
+	// A read already in flight is reading the previous identity's history; its
+	// answer must not settle as this one's (see setAgentModel).
+	rt.modelDirty = rt.modelBusy
+	rt.modelAt = time.Time{}
+	agent, _ := rt.effectiveAgent()
+	o.refreshAgentModel(rt, agent)
+}
+
+// sameSessionRef compares two optional session refs, nil (no identity) included.
+func sameSessionRef(a, b *agentSessionRef) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
 }
 
 // runAgentModels is the periodic refresh pacer (own goroutine, started by main),

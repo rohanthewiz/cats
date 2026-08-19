@@ -1059,6 +1059,16 @@ func (d *daemon) dispatch(mt orchestration.MessageType, payload []byte) {
 		}
 		o.post(func() { o.onPaneAgent(ev) })
 
+	case orchestration.MsgPaneAgentSession:
+		var ev orchestration.PaneAgentSession
+		if err := json.Unmarshal(payload, &ev); err != nil {
+			return
+		}
+		// The host resolved this against its own process table and the agent's
+		// own registry, both of which only exist on the machine the agent runs
+		// on (agentmodel.go).
+		o.post(func() { o.applyPaneAgentSession(ev) })
+
 	case orchestration.MsgPaneClipboard:
 		var ev orchestration.PaneClipboard
 		if err := json.Unmarshal(payload, &ev); err != nil {

@@ -30,15 +30,40 @@ func ForegroundPGID(fd uintptr) int {
 // group of the terminal whose master fd is fd, or "" for a plain shell /
 // unidentified program. Prefers the process-group leader, then any member.
 func ForegroundAgent(fd uintptr) string {
+	agent, _ := ForegroundAgentPIDs(fd)
+	return agent
+}
+
+// ForegroundAgentPIDs is ForegroundAgent plus every pid in the group that
+// identified as that agent, leader first. nil whenever the label is "".
+//
+// The pids are what turn "this pane runs claude" into "this pane runs *that*
+// conversation": an agent keeps a registry of its live processes keyed by pid
+// (AgentSessionID), and a pid is the only handle on it a terminal has. Without
+// one, two panes running the same agent in the same directory are
+// indistinguishable from the outside, and anything keyed on the directory alone
+// answers both with whichever session wrote last.
+//
+// All of them rather than one, because the process that carries the *name* need
+// not be the one that keeps the state: a shim or wrapper script called claude is
+// what argv identifies, while the registry entry belongs to the real binary it
+// exec'd or forked. The caller tries them in order and takes the first that
+// answers.
+func ForegroundAgentPIDs(fd uintptr) (string, []int) {
 	pgid := int(C.fg_pgrp(C.int(fd)))
 	if pgid <= 0 {
-		return ""
+		return "", nil
 	}
 	entries, err := os.ReadDir("/proc")
 	if err != nil {
-		return identifyPidLinux(pgid)
+		// /proc unreadable: the leader is the only pid we still hold.
+		if label := identifyPidLinux(pgid); label != "" {
+			return label, []int{pgid}
+		}
+		return "", nil
 	}
-	leader := ""
+	var agent string
+	var matched []int
 	for _, e := range entries {
 		pid, err := strconv.Atoi(e.Name())
 		if err != nil {
@@ -52,13 +77,17 @@ func ForegroundAgent(fd uintptr) string {
 			continue
 		}
 		if pid == pgid {
-			return label
+			// The leader's label wins outright, and its pid leads the list.
+			agent = label
+			matched = append([]int{pid}, matched...)
+			continue
 		}
-		if leader == "" {
-			leader = label
+		if agent == "" {
+			agent = label
 		}
+		matched = append(matched, pid)
 	}
-	return leader
+	return agent, matched
 }
 
 // ProcessCwd returns pid's current working directory, or "" when it cannot be

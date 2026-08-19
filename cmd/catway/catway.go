@@ -91,6 +91,17 @@ type paneRuntime struct {
 	agentModel string
 	modelAt    time.Time
 	modelBusy  bool
+	// modelDirty marks a pane whose agent identity moved while a read was in
+	// flight: what that read brings back is the previous conversation's answer,
+	// so it is discarded and re-read rather than published.
+	modelDirty bool
+	// detectedSession is the conversation the pane's agent process is in, as the
+	// host resolved it from the agent's own pid-keyed registry
+	// (orchestration.PaneAgentSession). It is the fallback for agentSession: the
+	// hook seam is exact but only armed once the user has installed the
+	// integration, while this needs nothing of the agent at all. nil when the
+	// host reported none — an agent that keeps no such registry, or no agent.
+	detectedSession *agentSessionRef
 	// unseen marks an agent completion that landed while the pane was off the
 	// viewport (cats's pane.seen, inverted so the zero value means seen).
 	// Set by publishAgent on a finished transition, cleared when the pane

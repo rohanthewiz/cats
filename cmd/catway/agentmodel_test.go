@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rohanthewiz/cats/internal/layout"
 	"github.com/rohanthewiz/cats/internal/orchestration"
 )
 
@@ -477,4 +478,124 @@ func TestRefreshAgentModelSkipsRemotePanes(t *testing.T) {
 	if !local.modelBusy {
 		t.Fatal("a local pane should have started a transcript read")
 	}
+}
+
+// --- the pane a transcript belongs to -----------------------------------------
+
+// Two panes running claude in one repository share a working directory, so the
+// cwd fallback resolves both to whichever transcript was written last: one pane's
+// model on both rows, and both flipping together whenever either pane switches
+// models. The session id the host traces off each pane's own process is what
+// separates them.
+func TestDetectedSessionSeparatesPanesSharingACwd(t *testing.T) {
+	o, first, _ := hookOrch(t)
+	id, err := o.session.SplitPane(nil, layout.Horizontal)
+	if err != nil {
+		t.Fatalf("SplitPane: %v", err)
+	}
+	o.syncDaemon()
+	second := o.panes[uint32(id)]
+	if second == nil {
+		t.Fatal("the split pane has no runtime")
+	}
+
+	projects := t.TempDir()
+	o.modelRoots["claude"] = projects
+	cwd := "/Users/x/proj"
+	first.cwd, second.cwd = cwd, cwd
+	writeTranscript(t, projects, "-Users-x-proj", "sess-a.jsonl", time.Minute, assistant("claude-fable-5"))
+	writeTranscript(t, projects, "-Users-x-proj", "sess-b.jsonl", 0, assistant("claude-opus-5"))
+
+	// Before the host says anything, both panes can only guess — and they guess
+	// the same, which is the bug this exists to fix.
+	o.onPaneAgent(orchestration.PaneAgent{PaneID: first.id, Agent: "claude", State: "working"})
+	o.onPaneAgent(orchestration.PaneAgent{PaneID: second.id, Agent: "claude", State: "working"})
+	waitFor(t, o, func() bool { return first.agentModel != "" && second.agentModel != "" })
+	if first.agentModel != "claude-opus-5" || second.agentModel != "claude-opus-5" {
+		t.Fatalf("cwd fallback: models = %q / %q, want the newest transcript on both",
+			first.agentModel, second.agentModel)
+	}
+
+	// The host traces each pane's process to its own conversation.
+	o.applyPaneAgentSession(orchestration.PaneAgentSession{PaneID: first.id, Agent: "claude", SessionID: "sess-a"})
+	o.applyPaneAgentSession(orchestration.PaneAgentSession{PaneID: second.id, Agent: "claude", SessionID: "sess-b"})
+	waitFor(t, o, func() bool { return first.agentModel == "claude-fable-5" })
+	if second.agentModel != "claude-opus-5" {
+		t.Fatalf("second pane model = %q, want claude-opus-5", second.agentModel)
+	}
+	// And the rollup — the sidebar's agents list — names the rows apart.
+	if got := rollupItem(t, o, first.id).Model; got != "claude-fable-5" {
+		t.Fatalf("rollup model = %q, want claude-fable-5", got)
+	}
+
+	// A new conversation in the same pane is a new id, and the model moves with
+	// it without waiting on the periodic refresh.
+	writeTranscript(t, projects, "-Users-x-proj", "sess-c.jsonl", 2*time.Hour, assistant("claude-sonnet-5"))
+	o.applyPaneAgentSession(orchestration.PaneAgentSession{PaneID: first.id, Agent: "claude", SessionID: "sess-c"})
+	waitFor(t, o, func() bool { return first.agentModel == "claude-sonnet-5" })
+}
+
+// What the host reports is gated on this end too: an id that is not a bare token
+// would travel into a glob pattern, and a report naming no agent (the agent left
+// the pane) retracts the identity rather than leaving the pane keyed on it.
+func TestDetectedSessionRejectsUnusableRefs(t *testing.T) {
+	o, rt, _ := hookOrch(t)
+	projects := t.TempDir()
+	o.modelRoots["claude"] = projects
+	rt.cwd = "/Users/x/proj"
+	writeTranscript(t, projects, "-Users-x-proj", "cwd.jsonl", 0, assistant("claude-opus-5"))
+	writeTranscript(t, projects, "-elsewhere", "sess-a.jsonl", 0, assistant("claude-fable-5"))
+
+	for _, bad := range []orchestration.PaneAgentSession{
+		{PaneID: rt.id, Agent: "claude", SessionID: "../../etc/passwd"},
+		{PaneID: rt.id, Agent: "claude", SessionID: "sess-*"},
+		{PaneID: rt.id, Agent: "claude", SessionID: ""},
+		{PaneID: rt.id, Agent: "", SessionID: "sess-a"},
+	} {
+		o.applyPaneAgentSession(bad)
+		if rt.detectedSession != nil {
+			t.Fatalf("%+v: kept ref %+v, want none", bad, rt.detectedSession)
+		}
+	}
+
+	// A ref for an agent that is not the one running is not used either: the id
+	// names a history only its own agent wrote.
+	o.applyPaneAgentSession(orchestration.PaneAgentSession{PaneID: rt.id, Agent: "copilot", SessionID: "sess-a"})
+	o.onPaneAgent(orchestration.PaneAgent{PaneID: rt.id, Agent: "claude", State: "working"})
+	waitFor(t, o, func() bool { return rt.agentModel != "" })
+	if rt.agentModel != "claude-opus-5" {
+		t.Fatalf("model = %q, want the cwd fallback's claude-opus-5", rt.agentModel)
+	}
+}
+
+// A read is in flight against the identity the pane had when it started. If the
+// pane's conversation moves under it — the ordinary case, since the host's report
+// is what corrects a cwd guess — the answer that comes back names a history that
+// is no longer this pane's, and publishing it would leave the wrong model up
+// until the next sweep.
+func TestModelReadOvertakenByAnIdentityChangeIsDiscarded(t *testing.T) {
+	o, rt, _ := hookOrch(t)
+	projects := t.TempDir()
+	o.modelRoots["claude"] = projects
+	rt.cwd = "/Users/x/proj"
+	writeTranscript(t, projects, "-Users-x-proj", "sess-a.jsonl", 0, assistant("claude-opus-5"))
+	writeTranscript(t, projects, "-elsewhere", "sess-b.jsonl", 0, assistant("claude-fable-5"))
+
+	o.onPaneAgent(orchestration.PaneAgent{PaneID: rt.id, Agent: "claude", State: "working"})
+	waitFor(t, o, func() bool { return rt.agentModel != "" })
+
+	// A read in flight, and the host names the pane's real conversation while it
+	// is out.
+	rt.modelBusy = true
+	o.applyPaneAgentSession(orchestration.PaneAgentSession{PaneID: rt.id, Agent: "claude", SessionID: "sess-b"})
+	if !rt.modelDirty {
+		t.Fatal("an identity change during a read must mark the read stale")
+	}
+
+	// The overtaken read lands: its answer is dropped, and the pane re-reads.
+	o.setAgentModel(rt.id, "claude-sonnet-5")
+	if rt.agentModel == "claude-sonnet-5" {
+		t.Fatal("published the overtaken read's model")
+	}
+	waitFor(t, o, func() bool { return rt.agentModel == "claude-fable-5" })
 }
