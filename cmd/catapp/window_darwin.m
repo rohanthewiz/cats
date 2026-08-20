@@ -63,6 +63,47 @@ static NSString *gAppName = @"Cats";
 // before its page has finished loading.
 static NSString *gWindowTitle = @"Cats Mux";
 
+// --- global ownership -----------------------------------------------------------
+//
+// cgo compiles this file WITHOUT ARC — it passes no -fobjc-arc, and the flag is
+// a package-wide CFLAG here, so it would land on cgo's generated C too. Nothing
+// in this file is retained for us.
+//
+// Locals are unaffected: every entry point runs inside an @autoreleasepool that
+// outlives them. A GLOBAL is not. Assigned the result of a convenience
+// constructor ([NSMutableArray array], [NSString stringWithUTF8String:]) it
+// holds a +0, pool-owned object that is deallocated when that pool drains at
+// the closing brace — leaving the global pointing at freed memory:
+//
+//   catsAppStart:        gWindows = [NSMutableArray array];   // +0, pool-owned
+//   } // pool drains ────────────────────────────────────────► gWindows dangles
+//   catsSetWindowTitle:  for (wc in gWindows) { ... }         // reads freed memory
+//
+// which is a hard SIGSEGV on the next read, not the nil-message no-op that a
+// merely-empty global would be. So every global here is assigned a +1 object and
+// owns it for the life of the process. The two helpers below are that rule for
+// the string globals, which are also reassigned (a thin client retitles every
+// window each time it connects somewhere else).
+
+// catsOwnedString copies a C string into an NSString this file owns (+1). Never
+// nil — these become window titles, and a nil title is not what a caller who
+// passed a bad byte sequence meant.
+static NSString *catsOwnedString(const char *s) {
+    NSString *out = s ? [[NSString alloc] initWithUTF8String:s] : nil;
+    return out ? out : [[NSString alloc] init];
+}
+
+// catsSetTitleGlobal replaces gWindowTitle and releases the string it held.
+// Releasing the previous value is safe on the very first call too: the
+// initializer above is a compile-time constant string, whose release is a no-op.
+// The windows themselves are unaffected — NSWindow.title is a copy property, so
+// a window that was given the old title still owns its own.
+static void catsSetTitleGlobal(const char *cTitle) {
+    NSString *prev = gWindowTitle;
+    gWindowTitle = catsOwnedString(cTitle);
+    [prev release];
+}
+
 // --- shared configuration ------------------------------------------------------
 
 // catsUserScript defines the page-side half of both bridges. Injected at
@@ -242,8 +283,12 @@ static CatsAppDelegate *gDelegate = nil;
 // app a regular foreground app. Must run on the main thread, before any window.
 void catsAppStart(const char *cAppName) {
     @autoreleasepool {
-        gAppName = [NSString stringWithUTF8String:cAppName];
-        gWindows = [NSMutableArray array];
+        NSString *prevName = gAppName;
+        gAppName = catsOwnedString(cAppName);
+        [prevName release];
+        if (!gWindows) {
+            gWindows = [[NSMutableArray alloc] init]; // owned for the life of the process
+        }
         [NSApplication sharedApplication];
         [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
         if (!gDelegate) {
@@ -330,7 +375,7 @@ void catsShowHTMLInKeyWindow(const char *cHTML, const char *cTitle) {
 void catsNavigateAll(const char *cURL, const char *cTitle) {
     @autoreleasepool {
         NSURL *url = [NSURL URLWithString:[NSString stringWithUTF8String:cURL]];
-        gWindowTitle = [NSString stringWithUTF8String:cTitle];
+        catsSetTitleGlobal(cTitle);
         if (gWindows.count == 0) {
             catsOpenWindow(cURL, 0, 0, 0, 0);
             return;
@@ -400,7 +445,7 @@ char *catsWindowsJSON(void) {
 // every window rather than only the one that navigated first.
 void catsSetWindowTitle(const char *cTitle) {
     @autoreleasepool {
-        gWindowTitle = [NSString stringWithUTF8String:cTitle];
+        catsSetTitleGlobal(cTitle);
         for (CatsWindowController *wc in gWindows) {
             wc.window.title = gWindowTitle;
         }
