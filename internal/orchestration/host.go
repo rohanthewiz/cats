@@ -21,6 +21,7 @@ import (
 	"github.com/rohanthewiz/cats/internal/filexfer"
 	"github.com/rohanthewiz/cats/internal/gitbranch"
 	"github.com/rohanthewiz/cats/internal/pathpick"
+	"github.com/rohanthewiz/cats/internal/shellenv"
 	"github.com/rohanthewiz/cats/internal/terminal"
 	"github.com/rohanthewiz/cats/internal/worktree"
 )
@@ -848,11 +849,42 @@ func (h *Host) createPane(c CreatePane) error {
 	cwd, cwdNote := h.resolveSpawnCwd(c.Cwd)
 
 	name := c.Command
+	env := c.Env
 	if name == "" {
 		name = defaultShell()
+	} else {
+		// An explicit command is exec'd directly, with no shell in between to
+		// source the user's rc files — so both halves of "where do programs live"
+		// have to be answered here. shellenv.Lookup resolves the program against
+		// the login shell's PATH as well as ours (Go resolves a bare name with
+		// *this process's* PATH, never with cmd.Env) and hands back the PATH the
+		// child should run with.
+		//
+		// This is the backstop for a daemon holding a bare PATH: launchd gives a
+		// GUI-launched app /usr/bin:/bin:/usr/sbin:/sbin, catapp's own hydration
+		// (cmd/catapp/shellenv.go) can fail or time out, and a cathost started by
+		// anything other than a shell never had a user PATH to begin with. Without
+		// it, `tab.create {command: ["claude"]}` cannot find an agent installed
+		// under ~/.local/bin and degrades to the shell fallback below — which
+		// looks, to whatever was driving the launch, like an agent that started
+		// and then ignored everything typed at it.
+		resolved, envPATH := shellenv.Lookup(name)
+		name = resolved
+		if envPATH != "" {
+			// Copied rather than mutated: c.Env belongs to the caller's message,
+			// and an explicit PATH in it is the caller's decision to keep.
+			merged := make(map[string]string, len(c.Env)+1)
+			for k, v := range c.Env {
+				merged[k] = v
+			}
+			if _, pinned := merged["PATH"]; !pinned {
+				merged["PATH"] = envPATH
+			}
+			env = merged
+		}
 	}
 	cmd := exec.Command(name, c.Args...)
-	cmd.Env = buildEnv(c.Env)
+	cmd.Env = buildEnv(env)
 	if cwd != "" {
 		cmd.Dir = cwd
 	}
@@ -865,7 +897,7 @@ func (h *Host) createPane(c CreatePane) error {
 		// there; match that outcome.
 		h.emit(NewError(c.PaneID, fmt.Sprintf("command %q: %v — falling back to shell", name, err)))
 		cmd = exec.Command(defaultShell())
-		cmd.Env = buildEnv(c.Env)
+		cmd.Env = buildEnv(env)
 		if cwd != "" {
 			cmd.Dir = cwd
 		}

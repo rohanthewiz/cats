@@ -7,57 +7,9 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
+
+	"github.com/rohanthewiz/cats/internal/shellenv"
 )
-
-// A login shell's PATH arrives wrapped in whatever an interactive rc file
-// printed; only the fenced value may survive.
-func TestBetweenMarkers(t *testing.T) {
-	cases := []struct {
-		name string
-		in   string
-		want string
-	}{
-		{"bare", shellEnvMarker + "/usr/bin:/bin" + shellEnvMarker, "/usr/bin:/bin"},
-		{"rc noise around it", "Sourcing custom configs...\n" + shellEnvMarker + "/opt/go/bin" + shellEnvMarker + "\n$ ", "/opt/go/bin"},
-		{"no markers", "command not found", ""},
-		{"unterminated", shellEnvMarker + "/usr/bin", ""},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := betweenMarkers(tc.in, shellEnvMarker); got != tc.want {
-				t.Fatalf("betweenMarkers = %q, want %q", got, tc.want)
-			}
-		})
-	}
-}
-
-// The shell's PATH wins on order, but an inherited-only entry must not be lost.
-func TestMergePATH(t *testing.T) {
-	got := mergePATH("/opt/go/bin:/usr/bin:/bin", "/usr/bin:/bin:/managed/only:")
-	want := "/opt/go/bin:/usr/bin:/bin:/managed/only"
-	if got != want {
-		t.Fatalf("mergePATH = %q, want %q", got, want)
-	}
-}
-
-// The shell invocation itself: whatever the user's login shell is, the fenced
-// PATH must come back parseable through real rc files.
-func TestLoginShellPATH(t *testing.T) {
-	shell := os.Getenv("SHELL")
-	if shell == "" {
-		shell = "/bin/zsh"
-	}
-	if _, err := exec.LookPath(shell); err != nil {
-		t.Skipf("no usable login shell: %v", err)
-	}
-	got := loginShellPATH()
-	if got == "" {
-		t.Fatalf("loginShellPATH returned nothing for %s", shell)
-	}
-	if !strings.Contains(got, "/bin") {
-		t.Fatalf("loginShellPATH = %q, expected something PATH-shaped", got)
-	}
-}
 
 // The bug this file exists for: a GUI launch starts with launchd's bare PATH,
 // and after hydration the toolchain the user has in their shell must be
@@ -77,13 +29,14 @@ func TestHydratePATHOnGUILaunch(t *testing.T) {
 	t.Setenv("PATH", bare)
 
 	// The expectation has to be derived *after* PATH is set to the launchd-bare
-	// value, because loginShellPATH is not a pure function: the shell it spawns
+	// value, because the probe is not a pure function: the shell it spawns
 	// inherits our PATH, and an rc file's customary `export PATH="$HOME/bin:$PATH"`
 	// folds that inherited value into what comes back. Reading it beforehand
 	// measures a different environment than the one hydratePATH will see — under
 	// `go test` the toolchain directory the test binary runs with leaks into the
-	// first reading and not the second.
-	shellPath := loginShellPATH()
+	// first reading and not the second. (shellenv memoises the probe, so this
+	// call is also what pins the value hydratePATH goes on to use.)
+	shellPath := shellenv.LoginPATH()
 	if shellPath == "" {
 		t.Skip("login shell yielded no PATH to adopt")
 	}
