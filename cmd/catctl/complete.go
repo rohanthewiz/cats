@@ -106,6 +106,7 @@ var families = []candidate{
 	{"probe", "browser-protocol WebSocket probe"},
 	{"cp", "copy a file to or from a cathost"},
 	{"completion", "print a shell completion script"},
+	{"shellinit", "cats shell setup: PATH + plugin shell hooks"},
 	{"commands", "list the raw §7 method names"},
 	{"pair", "mint a device-pairing code (QR)"},
 	{"help", "show help for catctl or one verb"},
@@ -190,7 +191,7 @@ func completeCatctl(words []string) ([]candidate, string) {
 		// at all, deliberately: completing it means a directory listing on
 		// another machine between two keystrokes.
 		return nil, dirFiles
-	case "completion":
+	case "completion", "shellinit":
 		if len(rest) == 0 && !strings.HasPrefix(cur, "-") {
 			return filter(shellCandidates(), cur), dirNoFiles
 		}

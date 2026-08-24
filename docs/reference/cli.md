@@ -116,6 +116,7 @@ catctl help [verb]                              the verb table, or one verb's pa
 catctl commands                                 list the raw method names
 catctl pair                                     pair a phone with a scannable code
 catctl completion <bash|zsh|fish>               shell completion script
+catctl shellinit <bash|zsh|fish>                cats shell setup: PATH + plugin shell hooks
 catctl integration <install|uninstall|status|help> ...
 catctl plugin <install|link|uninstall|list|run|update|help> ...
 catctl probe [--url ...] [--script ...]
@@ -441,6 +442,29 @@ lives in Go and cannot drift from a hand-written shell script. The generated
 scripts only know the wire format: `value<TAB>description` lines terminated by a
 `:nofiles` / `:files` / `:dirs` directive.
 
+### `catctl shellinit`
+
+Cats shell setup, emitted for evaluation at shell startup (the same
+generation-time pattern as `catctl completion`): a guarded prepend of the cats
+bin dir (`~/.cats/bin`, where [plugin binaries](../subsystems/plugins.md#binaries-on-path)
+are exposed; `$CATS_BIN_DIR` overrides), then one guarded source line per
+installed plugin declaring a [`[shell]` snippet](../subsystems/plugins.md#shell-hooks)
+for that shell.
+
+The recommended install is `catctl integration install shell`, whose sourced
+script evaluates this itself. To wire it by hand instead:
+
+```bash
+echo 'eval "$(catctl shellinit bash)"' >> ~/.bashrc
+echo 'eval "$(catctl shellinit zsh)"'  >> ~/.zshrc
+echo 'catctl shellinit fish | source'  >> ~/.config/fish/config.fish
+```
+
+Because the installed plugin set is read at every generation, installing a
+plugin makes its tool and shell hooks live in the next terminal you open, and
+uninstalling one needs no rc-file cleanup — its lines simply stop being
+emitted.
+
 #### Plugins complete themselves
 
 A plugin can claim a command name in its manifest, and the generated script
@@ -514,10 +538,13 @@ catctl integration install shell zsh        # ...or a named one
 catctl integration uninstall shell zsh
 ```
 
-`shell` is the one target that is not an agent: it installs the OSC 133 marks a
-shell prints around its prompt and each command, which are what the
-[command history](../protocols/control-api.md#command-history) is built on.
-`bash`, `zsh` and `fish` are supported.
+`shell` is the one target that is not an agent: it installs cats's general
+shell setup. The sourced script carries the OSC 133 marks a shell prints
+around its prompt and each command — what the
+[command history](../protocols/control-api.md#command-history) is built on —
+and, since v2, the cats tool setup: `~/.cats/bin` on PATH and an eval of
+[`catctl shellinit`](#catctl-shellinit) for plugin shell hooks. `bash`, `zsh`
+and `fish` are supported.
 
 It writes a script under `~/.config/cats/shell/` and **one guarded block** in
 your rc file:

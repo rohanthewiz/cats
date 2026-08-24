@@ -52,6 +52,20 @@ type Manifest struct {
 	Build       []BuildStep  `toml:"build"`
 	Actions     []Action     `toml:"actions"`
 	Completions []Completion `toml:"completions"`
+	// Bin lists plugin-root-relative paths (herdr convention: "./bin/tool")
+	// whose base names the host exposes on the user's PATH by symlinking them
+	// into the cats bin directory (~/.cats/bin). Declared explicitly rather
+	// than derived — from bin/ contents (a build can produce helpers not meant
+	// for PATH) or from [[completions]] (claiming to complete a command is not
+	// a claim to provide it).
+	Bin []string `toml:"bin"`
+	// Shell maps a shell name ("zsh", "bash", "fish") to a plugin-root-relative
+	// script that `catctl shellinit <shell>` emits a source line for. This is
+	// how a plugin contributes code that must run *inside* the user's shell —
+	// functions that cd, keybindings, hooks — which no spawned process can do
+	// on its behalf. Emission happens at shell startup from the installed set,
+	// so uninstalling a plugin needs no rc-file surgery to undo it.
+	Shell map[string]string `toml:"shell"`
 }
 
 // BuildStep is one [[build]] entry: a command run in the plugin root at
@@ -178,7 +192,53 @@ func (m Manifest) Validate() error {
 			return fmt.Errorf("completions[%q]: needs a command, or subcommands/flags to offer", c.Binary)
 		}
 	}
+	seenBin := map[string]bool{}
+	for i, b := range m.Bin {
+		rel, err := localRel(b)
+		if err != nil {
+			return fmt.Errorf("bin[%d]: %w", i, err)
+		}
+		// The base name becomes a filename in the shared bin directory, so it
+		// gets the same syntax bound as a completion binary — and two entries
+		// sharing a base would silently fight over one link.
+		base := filepath.Base(rel)
+		if !binaryPattern.MatchString(base) {
+			return fmt.Errorf("bin[%d]: invalid name %q (letters, digits, '.', '_', '-')", i, base)
+		}
+		if seenBin[base] {
+			return fmt.Errorf("duplicate bin name %q", base)
+		}
+		seenBin[base] = true
+	}
+	for shell, path := range m.Shell {
+		if !slices.Contains(shellNames, shell) {
+			return fmt.Errorf("shell: unknown shell %q (one of %s)", shell, strings.Join(shellNames, ", "))
+		}
+		if _, err := localRel(path); err != nil {
+			return fmt.Errorf("shell.%s: %w", shell, err)
+		}
+	}
 	return nil
+}
+
+// shellNames are the shells `catctl shellinit` can emit for — the same set
+// `catctl completion` generates.
+var shellNames = []string{"bash", "zsh", "fish"}
+
+// localRel cleans a manifest path and enforces that it stays inside the plugin
+// root: these paths are joined under the plugins root (bin link targets, shell
+// source lines), so an absolute path or a ".." escape would let a manifest
+// reach outside the tree the host manages.
+func localRel(p string) (string, error) {
+	p = strings.TrimSpace(p)
+	if p == "" {
+		return "", fmt.Errorf("empty path")
+	}
+	rel := filepath.Clean(p)
+	if filepath.IsAbs(rel) || !filepath.IsLocal(rel) {
+		return "", fmt.Errorf("path %q must be relative and stay inside the plugin", p)
+	}
+	return rel, nil
 }
 
 // FindCompletion resolves a completion entry by the command name typed in the

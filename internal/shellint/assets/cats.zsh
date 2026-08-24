@@ -1,10 +1,18 @@
 # cats shell integration — OSC 133 semantic prompts + the command line.
-# managed by cats — CATS_INTEGRATION_ID=shell CATS_INTEGRATION_VERSION=1
+# managed by cats — CATS_INTEGRATION_ID=shell CATS_INTEGRATION_VERSION=2
 #
 # See cats.bash for what the marks mean. zsh needs none of bash's DEBUG-trap
 # bookkeeping: preexec and precmd are real hooks that fire exactly once each.
 
 [[ -o interactive ]] || return 0
+
+# Cats tool setup: the plugin bin dir on PATH, then whatever `catctl
+# shellinit` emits (the same PATH guard again, plus a source line per plugin
+# shell hook). The PATH line here is a bootstrap duplicate on purpose — catctl
+# itself may live only in ~/.cats/bin — and both sides guard against the entry
+# already being present, so evaluating twice adds nothing twice.
+case ":$PATH:" in *":$HOME/.cats/bin:"*) ;; *) export PATH="$HOME/.cats/bin:$PATH" ;; esac
+command -v catctl >/dev/null 2>&1 && eval "$(catctl shellinit zsh 2>/dev/null)"
 
 __cats_osc() { printf '\033]%s\033\\' "$1" }
 

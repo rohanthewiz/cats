@@ -1,6 +1,7 @@
 package shellint
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -171,8 +172,10 @@ func TestStatusDetectsHalfInstalls(t *testing.T) {
 			t.Fatalf("install: %v", err)
 		}
 		script, _ := ScriptPath(Zsh)
+		// Rewrite whatever stamp the current asset carries, so the simulated
+		// downgrade survives future version bumps.
 		body := strings.Replace(readFile(t, script),
-			"CATS_INTEGRATION_VERSION=1", "CATS_INTEGRATION_VERSION=0", 1)
+			fmt.Sprintf("CATS_INTEGRATION_VERSION=%d", Version), "CATS_INTEGRATION_VERSION=0", 1)
 		if err := os.WriteFile(script, []byte(body), 0o644); err != nil {
 			t.Fatalf("downgrade: %v", err)
 		}
@@ -272,4 +275,20 @@ func readFile(t *testing.T, path string) string {
 		t.Fatalf("read %s: %v", path, err)
 	}
 	return string(b)
+}
+
+// v2's addition: every asset carries the cats tool setup — the guarded
+// ~/.cats/bin PATH prepend and the shellinit eval — so a shell that installed
+// the integration needs nothing else for plugin tools to work.
+func TestAssetsCarryToolSetup(t *testing.T) {
+	for sh, asset := range map[string]string{
+		"bash": bashAsset, "zsh": zshAsset, "fish": fishAsset,
+	} {
+		if !strings.Contains(asset, `.cats/bin`) {
+			t.Errorf("%s asset lacks the cats bin PATH prepend", sh)
+		}
+		if !strings.Contains(asset, "catctl shellinit "+sh) {
+			t.Errorf("%s asset lacks the shellinit eval", sh)
+		}
+	}
 }

@@ -1,6 +1,13 @@
-// Package shellint installs cats's shell integration: the OSC 133 marks a shell
-// prints around its prompt and each command, which are what the command ledger
-// is built on.
+// Package shellint installs cats's shell integration — cats's general setup
+// for the user's own shell. Two things ride in it:
+//
+//   - the OSC 133 marks a shell prints around its prompt and each command,
+//     which are what the command ledger is built on;
+//   - cats tool setup: the cats bin dir (~/.cats/bin, where the plugin host
+//     exposes plugin binaries) on PATH, plus an eval of `catctl shellinit`,
+//     which emits a source line per installed plugin's [shell] snippet. The
+//     eval-at-startup indirection is what keeps plugin installs and
+//     uninstalls out of rc files entirely.
 //
 // It is deliberately NOT one of internal/integration's Targets. Those wire a
 // coding agent to a running cats server by editing that agent's own config
@@ -48,7 +55,10 @@ var fishAsset string
 
 // Version is stamped in every asset as CATS_INTEGRATION_VERSION and is what
 // Status compares against, mirroring internal/integration's marker scheme.
-const Version = 1
+//
+// 2: the assets grew the cats tool setup (PATH + `catctl shellinit` eval), so
+// v1 installs correctly report Outdated until re-installed.
+const Version = 2
 
 const (
 	beginMarker = "# >>> cats shell integration >>>"

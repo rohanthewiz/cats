@@ -44,6 +44,9 @@ Two things worth doing on day one:
 
 ```bash
 echo 'eval "$(catctl completion zsh)"' >> ~/.zshrc   # completion knows live pane ids
+catctl integration install shell                     # prompt marks for the command ledger,
+                                                     # plus ~/.cats/bin (plugin tools) on PATH
+                                                     # and plugin shell hooks
 catctl integration install claude                    # richer agent state via hooks
 ```
 

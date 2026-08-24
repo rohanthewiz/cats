@@ -28,6 +28,7 @@ import (
 	"context"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -99,14 +100,55 @@ func Between(s, marker string) string {
 // Exported so tests can build sample output without restating the literal.
 const Marker = marker
 
-// Merge puts the login shell's entries first and appends any inherited entry
-// the shell didn't mention. The inherited PATH is almost always a subset, but a
+// CatsBinEnvVar overrides the cats bin directory. The name and default mirror
+// internal/plugin's BinDirEnvVar/BinDir by value rather than by import:
+// shellenv sits under everything that spawns processes and stays
+// dependency-light on purpose.
+const CatsBinEnvVar = "CATS_BIN_DIR"
+
+// CatsBin resolves the cats bin directory ($CATS_BIN_DIR > ~/.cats/bin) — the
+// symlink farm where the plugin host exposes plugin binaries. "" when home
+// cannot be resolved, which callers treat as "no such directory".
+func CatsBin() string {
+	if dir := os.Getenv(CatsBinEnvVar); dir != "" {
+		return dir
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".cats", "bin")
+}
+
+// catsBinEntry is CatsBin gated on the directory actually existing: a machine
+// with no plugin binaries should not get a phantom PATH entry, and the stat
+// doubles as the feature switch — the entry appears the moment the plugin host
+// first populates the farm. Stat'ed per call rather than memoised because pane
+// creation is rare and an install mid-session should take effect immediately.
+func catsBinEntry() string {
+	dir := CatsBin()
+	if dir == "" {
+		return ""
+	}
+	if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
+		return ""
+	}
+	return dir
+}
+
+// Merge puts the cats bin directory first (when it exists — see catsBinEntry),
+// then the login shell's entries, then any inherited entry the shell didn't
+// mention. The inherited PATH is almost always a subset of the login one, but a
 // managed Mac can inject an entry at the launchd level that no shell startup
 // file repeats, and dropping it would be a regression.
+//
+// The cats bin dir leads so plugin-managed tools win over stale hand-installed
+// copies in ~/bin — the same ordering `catctl shellinit` emits for the user's
+// own shell, so a pane and a terminal agree on which binary a name means.
 func Merge(shellPath, inherited string) string {
 	seen := make(map[string]bool)
 	var merged []string
-	for _, list := range []string{shellPath, inherited} {
+	for _, list := range []string{catsBinEntry(), shellPath, inherited} {
 		for entry := range strings.SplitSeq(list, ":") {
 			if entry == "" || seen[entry] {
 				continue
@@ -143,11 +185,14 @@ func Lookup(name string) (path string, envPATH string) {
 	inherited := os.Getenv("PATH")
 	login := LoginPATH()
 
+	// Merged unconditionally, not just when the probe answered: Merge also
+	// injects the cats bin dir, and gating on the probe would mean a machine
+	// where the login shell cannot be run never sees plugin binaries either —
+	// two unrelated failures coupled for no reason. envPATH stays "" only when
+	// merging genuinely produced nothing beyond what the caller already has.
 	envPATH = ""
-	if login != "" {
-		if merged := Merge(login, inherited); merged != inherited {
-			envPATH = merged
-		}
+	if merged := Merge(login, inherited); merged != inherited {
+		envPATH = merged
 	}
 
 	if name == "" || strings.ContainsRune(name, os.PathSeparator) {

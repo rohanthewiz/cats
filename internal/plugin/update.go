@@ -64,6 +64,12 @@ func Update(id string, out io.Writer) (inst Installed, updated bool, err error) 
 		return Installed{}, false, err
 	}
 	if newSha == oldSha {
+		// Even a no-op update reconciles bin links: it is cheap, idempotent,
+		// and the one natural moment a plugin installed before the bin farm
+		// existed (or whose links were deleted by hand) gets them back.
+		if err := SyncBinLinks(inst, out); err != nil && out != nil {
+			fmt.Fprintf(out, "warning: bin links: %v\n", err)
+		}
 		return inst, false, nil
 	}
 
@@ -98,6 +104,11 @@ func Update(id string, out io.Writer) (inst Installed, updated bool, err error) 
 	fresh, err := Get(id)
 	if err != nil {
 		return Installed{}, false, err
+	}
+	// A rollback above leaves the farm untouched on purpose: links target the
+	// stable <root>/<id> path, so the restored tree satisfies them unchanged.
+	if err := SyncBinLinks(fresh, out); err != nil && out != nil {
+		fmt.Fprintf(out, "warning: bin links: %v\n", err)
 	}
 	return fresh, true, nil
 }

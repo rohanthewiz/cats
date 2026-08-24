@@ -181,6 +181,12 @@ func Uninstall(id string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	// Bin links go first, so a removal that dies midway cannot leave dangling
+	// links behind an already-gone plugin. Ownership is a textual prefix test
+	// on link targets, so this needs no manifest — a broken plugin still
+	// cleans up. The farm is a convenience: a failure here must not block
+	// getting rid of the plugin itself.
+	_ = RemoveBinLinks(id)
 	if fi.Mode()&os.ModeSymlink != 0 {
 		target, _ := os.Readlink(entry)
 		if err := os.Remove(entry); err != nil {
@@ -216,6 +222,25 @@ func CompletionArgv(inst Installed, c Completion) []string {
 		argv[0] = filepath.Join(inst.Dir, argv[0])
 	}
 	return argv
+}
+
+// ShellSnippetPath resolves inst's [shell] entry for shell into an absolute
+// file path, anchored to the installed dir the way ActionArgv anchors an
+// action — for a dev-linked plugin that is the real checkout, so an edit to
+// the snippet takes effect on the next shell without re-linking. false when
+// the plugin declares nothing for this shell, or declares something the
+// manifest bounds would reject (an unvalidated caller's manifest never gets to
+// point a source line outside its tree).
+func ShellSnippetPath(inst Installed, shell string) (string, bool) {
+	rel, ok := inst.Shell[shell]
+	if !ok {
+		return "", false
+	}
+	clean, err := localRel(rel)
+	if err != nil {
+		return "", false
+	}
+	return filepath.Join(inst.Dir, clean), true
 }
 
 // LookupCompletion finds the installed plugin that claims a shell command name.

@@ -37,10 +37,14 @@ func writePlugin(t *testing.T, manifest string) string {
 }
 
 // testRoot points the package at a scratch plugins root via the env override.
+// The bin dir is pinned alongside it: install/link/uninstall now reconcile bin
+// links, and without the pin they would read (and could write) the user's real
+// ~/.cats/bin.
 func testRoot(t *testing.T) string {
 	t.Helper()
 	root := filepath.Join(t.TempDir(), "plugins")
 	t.Setenv(DirEnvVar, root)
+	t.Setenv(BinDirEnvVar, filepath.Join(t.TempDir(), "bin"))
 	return root
 }
 
@@ -84,6 +88,17 @@ func TestManifestValidate(t *testing.T) {
 				{Binary: "x", Command: []string{"./y"}},
 			}
 		}, "duplicate completion binary"},
+		{"absolute bin path", func(m *Manifest) { m.Bin = []string{"/usr/bin/x"} }, "must be relative"},
+		{"bin path escaping the plugin", func(m *Manifest) { m.Bin = []string{"../x"} }, "stay inside"},
+		{"empty bin path", func(m *Manifest) { m.Bin = []string{" "} }, "empty path"},
+		{"bin base name with shell syntax", func(m *Manifest) { m.Bin = []string{"bin/a b"} }, "invalid name"},
+		{"duplicate bin base names", func(m *Manifest) {
+			m.Bin = []string{"./bin/x", "./other/x"}
+		}, "duplicate bin name"},
+		{"unknown shell", func(m *Manifest) { m.Shell = map[string]string{"csh": "a.csh"} }, "unknown shell"},
+		{"shell path escaping the plugin", func(m *Manifest) {
+			m.Shell = map[string]string{"zsh": "../evil.zsh"}
+		}, "stay inside"},
 	}
 	for _, tc := range cases {
 		m := base
@@ -590,5 +605,129 @@ func TestValidateAllowsAssetOnlyPlugin(t *testing.T) {
 	}
 	if _, ok := m.FindAction(""); ok {
 		t.Fatal("FindAction on an asset-only plugin should report no action")
+	}
+}
+
+// binManifest declares a bin entry (and a build step that creates it) so the
+// farm tests exercise the full link/re-link/uninstall reconciliation.
+const binManifest = `
+id = "acme.tool"
+version = "0.1.0"
+bin = ["./bin/tool"]
+
+[shell]
+zsh = "shell/tool.zsh"
+
+[[build]]
+command = ["sh", "-c", "mkdir -p bin && echo bin > bin/tool"]
+`
+
+// The bin farm across a linked plugin's life: link creates the symlink (aimed
+// at the stable <root>/<id> path, not the checkout), a manifest change drops
+// the stale name on re-link, and uninstall clears only what the plugin owns.
+func TestBinLinkLifecycle(t *testing.T) {
+	root := testRoot(t)
+	binDir, _ := BinDir()
+	checkout := writePlugin(t, binManifest)
+
+	if _, err := Link(checkout, nil); err != nil {
+		t.Fatalf("link: %v", err)
+	}
+	link := filepath.Join(binDir, "tool")
+	target, err := os.Readlink(link)
+	if err != nil {
+		t.Fatalf("bin link missing after link: %v", err)
+	}
+	// Stable path through the plugins root, so rebuilds and moved checkouts
+	// never invalidate the farm.
+	if want := filepath.Join(root, "acme.tool", "bin/tool"); target != want {
+		t.Fatalf("link target = %s, want %s", target, want)
+	}
+
+	// Entries the plugin does not own survive every reconciliation.
+	foreignLink := filepath.Join(binDir, "other")
+	if err := os.Symlink("/usr/bin/true", foreignLink); err != nil {
+		t.Fatal(err)
+	}
+	foreignFile := filepath.Join(binDir, "notalink")
+	if err := os.WriteFile(foreignFile, []byte("x"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// A re-link after the manifest renames the tool: the old name is ours and
+	// stale, so it goes; the new name appears.
+	renamed := strings.ReplaceAll(binManifest, `"./bin/tool"`, `"./bin/tool2"`)
+	renamed = strings.ReplaceAll(renamed, "bin/tool\"]", "bin/tool2\"]")
+	if err := os.WriteFile(filepath.Join(checkout, ManifestName), []byte(renamed), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Link(checkout, nil); err != nil {
+		t.Fatalf("re-link: %v", err)
+	}
+	if _, err := os.Lstat(link); !os.IsNotExist(err) {
+		t.Fatal("stale bin link should be removed on re-link")
+	}
+	if _, err := os.Readlink(filepath.Join(binDir, "tool2")); err != nil {
+		t.Fatalf("renamed bin link missing: %v", err)
+	}
+
+	if _, err := Uninstall("acme.tool"); err != nil {
+		t.Fatalf("uninstall: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(binDir, "tool2")); !os.IsNotExist(err) {
+		t.Fatal("uninstall should remove the plugin's bin link")
+	}
+	for _, p := range []string{foreignLink, foreignFile} {
+		if _, err := os.Lstat(p); err != nil {
+			t.Fatalf("uninstall touched foreign entry %s: %v", p, err)
+		}
+	}
+}
+
+// A name already taken by something the plugin does not own is left alone —
+// warned about, never overwritten.
+func TestBinLinkRespectsForeignEntry(t *testing.T) {
+	testRoot(t)
+	binDir, _ := BinDir()
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	squatter := filepath.Join(binDir, "tool")
+	if err := os.WriteFile(squatter, []byte("mine"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	var out strings.Builder
+	if _, err := Link(writePlugin(t, binManifest), &out); err != nil {
+		t.Fatalf("link: %v", err)
+	}
+	if data, _ := os.ReadFile(squatter); string(data) != "mine" {
+		t.Fatal("foreign entry was overwritten")
+	}
+	if !strings.Contains(out.String(), "not owned") {
+		t.Fatalf("expected a not-owned warning, got %q", out.String())
+	}
+}
+
+// RemoveBinLinks works from link targets alone: a plugin whose manifest has
+// been broken still cleans its links up on uninstall.
+func TestBinLinksRemovedForBrokenManifest(t *testing.T) {
+	root := testRoot(t)
+	binDir, _ := BinDir()
+	checkout := writePlugin(t, binManifest)
+	if _, err := Link(checkout, nil); err != nil {
+		t.Fatalf("link: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(checkout, ManifestName), []byte("not toml ["), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Uninstall("acme.tool"); err != nil {
+		t.Fatalf("uninstall: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(binDir, "tool")); !os.IsNotExist(err) {
+		t.Fatal("bin link should be removed even with a broken manifest")
+	}
+	if _, err := os.Lstat(filepath.Join(root, "acme.tool")); !os.IsNotExist(err) {
+		t.Fatal("plugin entry should be gone")
 	}
 }

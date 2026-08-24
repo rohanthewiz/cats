@@ -143,6 +143,7 @@ the manifest format and for writing your own.
 | Session + scrollback state | `~/.local/state/cats` (`$XDG_STATE_HOME/cats`) |
 | Auto-generated TLS cert | `~/.config/cats` |
 | Plugins | `~/.config/cats/plugins` |
+| Plugin binaries on PATH | `~/.cats/bin` (`$CATS_BIN_DIR`) — symlink farm; on PATH via `catctl shellinit` |
 | Worktrees | `~/.cats/worktrees` (configurable) |
 | `catapp` own settings | `~/Library/Application Support/cats/app.json` |
 | Default sockets | `/tmp/cats-cathost.sock`, `/tmp/cats-control.sock`, `/tmp/cats-hooks.sock` |

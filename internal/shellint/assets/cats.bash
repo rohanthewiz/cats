@@ -1,5 +1,5 @@
 # cats shell integration — OSC 133 semantic prompts + the command line.
-# managed by cats — CATS_INTEGRATION_ID=shell CATS_INTEGRATION_VERSION=1
+# managed by cats — CATS_INTEGRATION_ID=shell CATS_INTEGRATION_VERSION=2
 #
 # A terminal receives an undifferentiated byte stream: it cannot see where one
 # command ends and the next begins, because "the prompt" is just more output.
@@ -32,6 +32,14 @@
 # Nothing to do without an interactive shell — these bytes written into a pipe
 # would corrupt whatever is reading it.
 case "$-" in *i*) ;; *) return 0 ;; esac
+
+# Cats tool setup: the plugin bin dir on PATH, then whatever `catctl
+# shellinit` emits (the same PATH guard again, plus a source line per plugin
+# shell hook). The PATH line here is a bootstrap duplicate on purpose — catctl
+# itself may live only in ~/.cats/bin — and both sides guard against the entry
+# already being present, so evaluating twice adds nothing twice.
+case ":$PATH:" in *":$HOME/.cats/bin:"*) ;; *) export PATH="$HOME/.cats/bin:$PATH" ;; esac
+command -v catctl >/dev/null 2>&1 && eval "$(catctl shellinit bash 2>/dev/null)"
 
 __cats_osc() { printf '\033]%s\033\\' "$1"; }
 

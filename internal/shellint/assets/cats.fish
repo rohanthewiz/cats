@@ -1,10 +1,20 @@
 # cats shell integration — OSC 133 semantic prompts + the command line.
-# managed by cats — CATS_INTEGRATION_ID=shell CATS_INTEGRATION_VERSION=1
+# managed by cats — CATS_INTEGRATION_ID=shell CATS_INTEGRATION_VERSION=2
 #
 # See cats.bash for what the marks mean. fish has named events for all three
 # moments, so this is the shortest of the three.
 
 status is-interactive; or exit 0
+
+# Cats tool setup: the plugin bin dir on PATH, then whatever `catctl
+# shellinit` emits (the same PATH guard again, plus a source line per plugin
+# shell hook). The PATH line here is a bootstrap duplicate on purpose — catctl
+# itself may live only in ~/.cats/bin — and both sides guard against the entry
+# already being present, so evaluating twice adds nothing twice.
+if not contains -- "$HOME/.cats/bin" $PATH
+    set -gx PATH "$HOME/.cats/bin" $PATH
+end
+command -q catctl; and catctl shellinit fish 2>/dev/null | source
 
 function __cats_osc
     printf '\033]%s\033\\' $argv[1]

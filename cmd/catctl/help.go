@@ -95,6 +95,9 @@ func runHelp(args []string) int {
 	case "completion":
 		printCompletionHelp()
 		return 0
+	case "shellinit":
+		printShellinitHelp()
+		return 0
 	case "probe":
 		fmt.Fprintln(os.Stderr, "catctl probe [--url ws://...] [--script '...'] [--cols N] [--rows N]")
 		fmt.Fprintln(os.Stderr, "  headless browser-protocol WebSocket probe; op reference: cmd/catctl/probe.go")

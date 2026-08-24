@@ -91,6 +91,15 @@ title = "Open backlog"
 command = ["./bin/cats-todo"]
 ```
 
+Two optional fields put a plugin's pieces into the user's own shell:
+
+```toml
+bin = ["./bin/cats-todo"]           # exposed on PATH via ~/.cats/bin (see below)
+
+[shell]
+zsh = "shell/cats-todo.zsh"         # sourced at shell startup (see Shell hooks)
+```
+
 | Field | Notes |
 |-------|-------|
 | `id` | the directory name under the plugins root |
@@ -99,6 +108,8 @@ command = ["./bin/cats-todo"]
 | `[[build]]` | commands run in the plugin root at install/link time (see [Build step environment](#build-step-environment)) |
 | `[[actions]]` | launchable entrypoints; command paths are relative to the plugin root and resolved at launch |
 | `[[completions]]` | shell commands this plugin knows how to complete (see [Shell completion](#shell-completion)) |
+| `bin` | plugin-root-relative binaries to expose on the user's PATH (see [Binaries on PATH](#binaries-on-path)) |
+| `[shell]` | per-shell scripts to source at shell startup (see [Shell hooks](#shell-hooks)) |
 
 The shape matches herdr's `herdr-plugin.toml`, so a herdr plugin ports by renaming
 the file and swapping the id and command names. Herdr's `[[panes]]` table is
@@ -159,6 +170,73 @@ Because the plugin list is read when the script is generated, a plugin installed
 today is completable in the **next** shell you open — which is why the
 documented install is an `eval` at shell startup rather than a file written
 once. See the [CLI reference](../reference/cli.md#catctl-completion).
+
+## Binaries on PATH
+
+Actions never needed PATH — `catctl plugin run` anchors their argv to the
+plugin directory and launches an absolute path. But a tool the user types *by
+hand* does, and until `bin` nothing put a plugin's binary anywhere a shell
+would look. Declaring
+
+```toml
+bin = ["./bin/cats-todo"]
+```
+
+makes the host maintain a symlink in the cats bin directory (`~/.cats/bin`,
+override with `$CATS_BIN_DIR`):
+
+```
+~/.cats/bin/cats-todo -> ~/.config/cats/plugins/rohanthewiz.cats-todo/bin/cats-todo
+```
+
+One directory on PATH covers every plugin, and the links always target the
+*stable* path under the plugins root — for a dev-linked plugin the target goes
+through the `<root>/<id>` symlink rather than into the checkout, so ownership
+stays a prefix test on the link target, rebuilds never re-link, and a moved
+checkout heals with the next `catctl plugin link`.
+
+Links are reconciled on install, link, and update (unconditionally, even a
+no-op update — that is how a plugin installed before this feature existed gets
+its links), and removed on uninstall. An entry in `~/.cats/bin` the plugin does
+not own is warned about and left alone, never overwritten; no farm problem ever
+fails an otherwise-complete install.
+
+The directory reaches PATH in two independent ways: spawned panes get it from
+`internal/shellenv` (prepended whenever the directory exists), and the user's
+own terminals get it from the guarded prepend `catctl shellinit <shell>` emits
+— installed by `catctl integration install shell`. It leads the PATH in both,
+so a plugin-managed tool beats a stale hand-copied one in `~/bin`.
+
+## Shell hooks
+
+Some tools are not (only) programs but shell code: a function that `cd`s the
+parent shell, a keybinding, a `chpwd` hook. No spawned process can do those on
+the user's behalf — the code has to be *sourced* by their shell. A plugin
+declares such a script per shell:
+
+```toml
+[shell]
+zsh = "shell/cdx.zsh"
+```
+
+`catctl shellinit <shell>` reads every installed manifest at generation time
+and emits one guarded source line per declared snippet (plus the `~/.cats/bin`
+PATH prepend above). Because the documented install is an eval at shell
+startup — `catctl integration install shell` writes it for you — the snippet
+of a plugin installed today runs in the next terminal you open, and an
+uninstalled plugin's snippet simply stops being emitted. Nothing
+plugin-specific is ever written into an rc file, so uninstall needs no rc
+surgery — the same auto-heal property [shell completion](#shell-completion)
+relies on.
+
+Paths are validated to stay inside the plugin (no absolute paths, no `..`),
+and resolve against the real checkout for a dev-linked plugin, so editing the
+snippet takes effect on the next shell without re-linking.
+
+The worked example is [cdx](https://github.com/rohanthewiz/cdx): its binary
+prints a picked directory, and its `cdx()` zsh function captures that and
+`cd`s — the function is the product, and `[shell]` is how it reaches the
+user's zsh.
 
 ## Shipping themes
 

@@ -71,7 +71,12 @@ binaries:
 # on ':' keeps the source dir (./cmd/$(cmd)) decoupled from the installed name.
 # Every cmd named here must also be in BINS: this installs by copying bin/,
 # it does not compile.
-LOCAL_BIN := $(HOME)/bin
+# Overridable (?=) so `make local LOCAL_BIN=...` can target elsewhere. The
+# default stays ~/bin for now: ~/.cats/bin is the home of *plugin-managed*
+# binaries (the symlink farm internal/plugin/bin.go maintains, put on PATH by
+# `catctl shellinit`), and flipping cats's own binaries there would silently
+# lose to stale ~/bin copies sitting earlier in PATH until users migrate.
+LOCAL_BIN ?= $(HOME)/bin
 # cats-todo is deliberately absent: it lives in its own repo and is built by
 # the plugin host (`catctl plugin install rohanthewiz/cats-todo` runs the
 # manifest's build step), so the local install stays limited to the binaries

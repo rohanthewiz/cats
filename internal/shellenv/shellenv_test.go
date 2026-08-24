@@ -30,12 +30,54 @@ func TestBetween(t *testing.T) {
 	}
 }
 
+// pinCatsBin points the cats bin dir somewhere the test controls. Every Merge
+// assertion needs it: without the pin the result depends on whether the real
+// ~/.cats/bin happens to exist on the machine running the tests.
+func pinCatsBin(t *testing.T, dir string) {
+	t.Helper()
+	t.Setenv(CatsBinEnvVar, dir)
+}
+
 // The shell's PATH wins on order, but an inherited-only entry must not be lost.
 func TestMerge(t *testing.T) {
+	pinCatsBin(t, filepath.Join(t.TempDir(), "absent"))
 	got := Merge("/opt/go/bin:/usr/bin:/bin", "/usr/bin:/bin:/managed/only:")
 	want := "/opt/go/bin:/usr/bin:/bin:/managed/only"
 	if got != want {
 		t.Fatalf("Merge = %q, want %q", got, want)
+	}
+}
+
+// An existing cats bin dir leads the merged PATH; a missing one contributes
+// nothing — its existence is the feature switch.
+func TestMergeCatsBin(t *testing.T) {
+	bin := t.TempDir()
+	pinCatsBin(t, bin)
+	if got, want := Merge("/usr/bin:/bin", "/bin"), bin+":/usr/bin:/bin"; got != want {
+		t.Fatalf("Merge with cats bin = %q, want %q", got, want)
+	}
+	// Already listed by the login shell: the dedupe keeps one copy, in front.
+	if got, want := Merge("/usr/bin:"+bin, "/bin"), bin+":/usr/bin:/bin"; got != want {
+		t.Fatalf("Merge with cats bin already present = %q, want %q", got, want)
+	}
+	pinCatsBin(t, filepath.Join(bin, "absent"))
+	if got, want := Merge("/usr/bin:/bin", "/bin"), "/usr/bin:/bin"; got != want {
+		t.Fatalf("Merge with absent cats bin = %q, want %q", got, want)
+	}
+}
+
+// The one subtle coupling Lookup must not have: a machine where the login-shell
+// probe fails (login == "") still has to hand panes the cats bin dir, or plugin
+// binaries vanish exactly where PATH help is scarcest.
+func TestLookupInjectsCatsBinWithoutLoginPATH(t *testing.T) {
+	bin := t.TempDir()
+	pinCatsBin(t, bin)
+	// Lookup consults LoginPATH(), which is memoised per process and may hold
+	// the real login PATH — that is fine: the assertion is that the cats bin
+	// dir is in envPATH, whatever else the merge picked up.
+	_, envPATH := Lookup("cats-no-such-program-xyzzy")
+	if !strings.Contains(":"+envPATH+":", ":"+bin+":") {
+		t.Fatalf("envPATH %q does not contain cats bin %q", envPATH, bin)
 	}
 }
 

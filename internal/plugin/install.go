@@ -81,7 +81,10 @@ func Install(source, ref string, out io.Writer) (Installed, error) {
 	if err := os.Rename(tmp, dest); err != nil {
 		return Installed{}, err
 	}
-	return load(root, m.ID)
+	// Bin links come last, only once the rename has made the target path real:
+	// a link created against the temp dir would go stale the moment the rename
+	// lands.
+	return loadAndSyncBin(root, m.ID, out)
 }
 
 // Link registers a local checkout as a plugin without copying it: the plugins
@@ -119,7 +122,7 @@ func Link(dir string, out io.Writer) (Installed, error) {
 				if err := runBuild(abs, m.Build, out); err != nil {
 					return Installed{}, err
 				}
-				return load(root, m.ID)
+				return loadAndSyncBin(root, m.ID, out)
 			}
 		}
 		return Installed{}, occupiedErr(entry, m.ID)
@@ -131,7 +134,22 @@ func Link(dir string, out io.Writer) (Installed, error) {
 	if err := os.Symlink(abs, entry); err != nil {
 		return Installed{}, err
 	}
-	return load(root, m.ID)
+	return loadAndSyncBin(root, m.ID, out)
+}
+
+// loadAndSyncBin is Link's ending: load the entry, then reconcile its bin
+// links. The links target the <root>/<id> symlink rather than the checkout, so
+// a re-link (the dev rebuild loop) is a pure no-op here and a moved checkout
+// heals by re-linking. Farm problems warn rather than fail (see SyncBinLinks).
+func loadAndSyncBin(root, id string, out io.Writer) (Installed, error) {
+	inst, err := load(root, id)
+	if err != nil {
+		return inst, err
+	}
+	if err := SyncBinLinks(inst, out); err != nil && out != nil {
+		fmt.Fprintf(out, "warning: bin links: %v\n", err)
+	}
+	return inst, nil
 }
 
 // occupiedErr explains why an existing entry blocks Install/Link claiming its

@@ -112,6 +112,10 @@ func run() int {
 			return runComplete(os.Args[2:])
 		case "completion":
 			return runCompletion(os.Args[2:])
+		case "shellinit":
+			// Offline like completion, and evaluated from rc files: it must
+			// never trip over the global FlagSet or touch the socket.
+			return runShellinit(os.Args[2:])
 		}
 	}
 
@@ -386,6 +390,7 @@ Usage:
   catctl commands                            list the raw §7 method names
   catctl pair                                pair a phone: a scannable one-time code
   catctl completion <bash|zsh|fish>          shell completion script (see help completion)
+  catctl shellinit <bash|zsh|fish>           cats shell setup: PATH + plugin shell hooks
   catctl integration install|uninstall <target>   install/remove agent hooks (offline)
   catctl integration status [--outdated-only]     integration install states (offline)
   catctl plugin install|link|uninstall|list ...   plugin host (offline; catctl plugin help)
