@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Assemble a macOS .app bundle for cats. The bundle is unsigned (personal use);
-# on another Mac it needs a one-time right-click -> Open to clear Gatekeeper.
+# Assemble a macOS .app bundle for cats. The bundle is adhoc-signed (personal
+# use — no cert chain, so Gatekeeper on another Mac still needs a one-time
+# right-click -> Open).
 #
 # Two variants, selected by the first argument:
 #   self   — self-contained: catapp + catway + cathost + catctl. Runs fully
@@ -69,9 +70,19 @@ if [ -f "$ROOT/scripts/AppIcon.icns" ]; then
   ICON_KEY='  <key>CFBundleIconFile</key><string>AppIcon</string>'
 fi
 
-# Info.plist. Unsigned personal build: macOS is lenient about CFBundleVersion, so
-# the git-describe VERSION is fine for both keys. NSHighResolutionCapable gives a
-# crisp Retina window.
+# Info.plist. Adhoc-signed personal build: macOS is lenient about CFBundleVersion,
+# so the git-describe VERSION is fine for both keys. NSHighResolutionCapable gives
+# a crisp Retina window.
+#
+# NSMicrophoneUsageDescription is load-bearing, not boilerplate. TCC attributes a
+# privacy-guarded request from any process in a pane (a shell, an agent's voice
+# recorder) to its "responsible process" — this app — and renders the permission
+# prompt with the usage string from THIS bundle's Info.plist. With the key absent
+# macOS cannot show a prompt at all and silently denies: AVFoundation capture
+# then delivers all-zero audio frames, which presents as "voice input records
+# but transcribes to nothing" rather than any visible error. Ghostty.app ships
+# the same key (plus a dozen siblings — camera, calendar, …) for exactly this
+# reason; add those the same way if a pane workload ever needs them.
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -87,9 +98,22 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>NSHighResolutionCapable</key><true/>
   <key>LSMinimumSystemVersion</key><string>10.15</string>
   <key>LSApplicationCategoryType</key><string>public.app-category.developer-tools</string>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>A program running in a ${APP_NAME} terminal pane would like to use the microphone.</string>
 ${ICON_KEY}
 </dict>
 </plist>
 PLIST
+
+# Adhoc-sign the assembled bundle. The Go binaries are already linker-signed
+# (each individually valid), but the BUNDLE carries no signature, so its
+# identity is the main binary's default identifier "a.out" with Info.plist
+# unsealed — and "a.out" is what TCC would record a microphone grant against.
+# Signing the bundle derives the identifier from CFBundleIdentifier and seals
+# Info.plist, so privacy grants land on a name that means something. Adhoc has
+# no cert chain, so TCC pins the grant to this build's cdhash: a rebuild means
+# one re-prompt, which is the honest ceiling for a personal unsigned app.
+echo "  signing (adhoc)"
+codesign --force --sign - "$APP"
 
 echo "==> built $APP"
