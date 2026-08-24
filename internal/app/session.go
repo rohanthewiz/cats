@@ -369,8 +369,8 @@ func (s *Session) WorkspaceByID(id string) *workspace.Workspace {
 }
 
 // NewTabNeighborPane returns the pane a tab created right now would land next
-// to: the root pane of the active workspace's last tab, since CreateTab appends
-// to the right end of the tab bar. The runtime resolves that pane's live cwd so
+// to: the root pane of the active workspace's *active* tab, since CreateTab
+// inserts directly to its right. The runtime resolves that pane's live cwd so
 // the new tab opens where its left-hand neighbor is working (the dispatcher's
 // inheritedTabCwd). False when the workspace somehow holds no tabs.
 func (s *Session) NewTabNeighborPane() (layout.PaneID, bool) {
@@ -386,18 +386,23 @@ func (s *Session) NewTabNeighborPaneIn(wsID string) (layout.PaneID, bool) {
 	if ws == nil || len(ws.Tabs) == 0 {
 		return 0, false
 	}
-	return ws.Tabs[len(ws.Tabs)-1].RootPane, true
+	tab := ws.ActiveTab()
+	if tab == nil {
+		return 0, false
+	}
+	return tab.RootPane, true
 }
 
-// CreateTab appends a tab to the active workspace and switches to it. Returns
-// the new tab's public number.
+// CreateTab opens a tab beside the active workspace's current tab and switches
+// to it. Returns the new tab's public number.
 func (s *Session) CreateTab() (int, error) {
 	num, _, err := s.CreateTabIn("")
 	return num, err
 }
 
-// CreateTabIn appends a tab to the named workspace ("" = the active one) and
-// makes it that workspace's active tab. Returns the new tab's public number and
+// CreateTabIn opens a tab beside the current tab of the named workspace ("" =
+// the active one) and makes it that workspace's active tab. Returns the new
+// tab's public number and
 // its root pane. The tab spawns in the workspace's identity cwd (a worktree
 // workspace's checkout), falling back to the session cwd — the dispatcher layers
 // the neighbor tab's live cwd over that when it knows one.

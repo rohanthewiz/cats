@@ -741,10 +741,11 @@ func (d *Dispatcher) dispatch(name string, dec ParamDecoder, r Responder) {
 			r.Fail(err.Error())
 			return
 		}
-		// Resolve the left-hand neighbor before the create, while it is still the
-		// workspace's last tab. The host the tab will actually run on decides
-		// whether that neighbor's directory means anything: the param when one
-		// was given, else the workspace's own default.
+		// Resolve the left-hand neighbor before the create, while the workspace's
+		// active tab is still the tab the user is looking at — after the create,
+		// the new tab itself is active. The host the tab will actually run on
+		// decides whether that neighbor's directory means anything: the param
+		// when one was given, else the workspace's own default.
 		tabHost := p.Host
 		if tabHost == "" {
 			tabHost = ws.HostID
@@ -1470,8 +1471,8 @@ func (d *Dispatcher) dispatch(name string, dec ParamDecoder, r Responder) {
 }
 
 // inheritedTabCwd is where a new tab opens when its caller named no cwd: the
-// live working directory of the tab it lands beside — the workspace's last tab,
-// since tab.create appends to the right end of the bar. Opening a tab next to
+// live working directory of the tab it lands beside — the workspace's active
+// tab, since tab.create inserts directly to its right. Opening a tab next to
 // one you are working in means "another shell here", and the neighbor's cwd is
 // what the user sees as "here"; the workspace identity cwd it otherwise falls
 // back to is only the directory the workspace *started* in.
@@ -1483,7 +1484,7 @@ func (d *Dispatcher) dispatch(name string, dec ParamDecoder, r Responder) {
 // own default in place.
 //
 // wsID scopes the neighbor to the workspace the tab is actually going into ("" =
-// the active one). Inheriting from the viewport's last tab when the tab lands
+// the active one). Inheriting from the viewport's active tab when the tab lands
 // elsewhere is the one way this can go quietly wrong: the pane would open in a
 // directory belonging to a different project, which is precisely the mistake a
 // per-workspace plugin launch exists to avoid.

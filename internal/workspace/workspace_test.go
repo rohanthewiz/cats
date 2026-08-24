@@ -53,6 +53,10 @@ func mustAddTab(t *testing.T, ws *Workspace, name string) int {
 	if err != nil {
 		t.Fatalf("CreateTab: %v", err)
 	}
+	// Activate the new tab as Session.CreateTabInWith does: CreateTab inserts
+	// after the active tab, so without the switch, back-to-back creates would
+	// interleave instead of building the bar left to right as the app does.
+	ws.SwitchTab(idx)
 	if name != "" {
 		ws.Tabs[idx].SetCustomName(name)
 	}
@@ -128,6 +132,33 @@ func TestTabPublicNumbersAreStableAndNotReusedAfterClose(t *testing.T) {
 	fourthTab := mustAddTab(t, ws, "")
 	fourthRoot := ws.Tabs[fourthTab].RootPane
 	assertTabNumberForPane(t, ws, fourthRoot, 4)
+}
+
+func TestCreateTabInsertsBesideActiveTab(t *testing.T) {
+	ws := testWorkspace(t, "test")
+	mustAddTab(t, ws, "")
+	mustAddTab(t, ws, "")
+	// Bar is [1 2 3]; go back to the first tab and create from the middle of
+	// the bar — the new tab must land at index 1, not at the end.
+	ws.SwitchTab(0)
+
+	idx, err := ws.CreateTab("/cats-test/ws", SpawnSpec{Rows: 24, Cols: 80})
+	if err != nil {
+		t.Fatalf("CreateTab: %v", err)
+	}
+	if idx != 1 {
+		t.Fatalf("CreateTab index = %d, want 1 (beside the active tab)", idx)
+	}
+	var numbers []int
+	for _, tab := range ws.Tabs {
+		numbers = append(numbers, tab.Number)
+	}
+	want := []int{1, 4, 2, 3}
+	for i := range want {
+		if numbers[i] != want[i] {
+			t.Fatalf("tab numbers = %v, want %v", numbers, want)
+		}
+	}
 }
 
 func TestWorkspaceIdentityFollowsFirstTabRootPaneCwd(t *testing.T) {

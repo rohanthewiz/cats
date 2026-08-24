@@ -159,9 +159,13 @@ func (w *Workspace) SwitchTab(idx int) {
 	}
 }
 
-// CreateTab appends a new tab (next public tab number, root pane numbered
-// through the workspace counter) and returns its index. Mirroring Rust, the
-// tab number is consumed even when the spawn fails.
+// CreateTab inserts a new tab (next public tab number, root pane numbered
+// through the workspace counter) directly after the active tab and returns its
+// index. Inserting beside the active tab — rather than appending to the end of
+// the bar — keeps a tab opened from the middle of a long bar next to the work
+// it belongs to; the public number still comes from the monotonic counter, so
+// insertion position never renumbers existing tabs. Mirroring Rust, the tab
+// number is consumed even when the spawn fails.
 func (w *Workspace) CreateTab(cwd string, spec SpawnSpec) (int, error) {
 	number := w.nextPublicTabNumber
 	w.nextPublicTabNumber++
@@ -174,8 +178,13 @@ func (w *Workspace) CreateTab(cwd string, spec SpawnSpec) (int, error) {
 		return 0, err
 	}
 	w.registerNewPaneWithNumber(tab.RootPane, paneNumber)
-	w.Tabs = append(w.Tabs, tab)
-	return len(w.Tabs) - 1, nil
+	// Insertion point: right of the active tab. Clamped so an empty workspace
+	// (activeTab 0, no tabs) still lands the first tab at index 0. The active
+	// index itself needs no fix-up — the insertion is strictly after it, and
+	// the caller (Session.CreateTabInWith) switches to the new tab anyway.
+	idx := min(w.activeTab+1, len(w.Tabs))
+	w.Tabs = append(w.Tabs[:idx], append([]*Tab{tab}, w.Tabs[idx:]...)...)
+	return idx, nil
 }
 
 // CloseTab removes the tab at idx (never the last tab), unregistering its

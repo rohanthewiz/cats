@@ -1447,7 +1447,7 @@ func TestDispatchTabCreateSpawn(t *testing.T) {
 
 // A tab opened with no cwd of its own starts in its left-hand neighbor's
 // working directory — the tab it lands beside on the bar, which is the
-// workspace's last tab whatever the user is currently looking at.
+// workspace's active tab, since tab.create inserts directly to its right.
 func TestDispatchTabCreateInheritsCwd(t *testing.T) {
 	h := newCmdHarness(t)
 	h.b.paneMeta = map[uint32]PaneMeta{}
@@ -1469,8 +1469,9 @@ func TestDispatchTabCreateInheritsCwd(t *testing.T) {
 		t.Fatalf("inherited cwd = %q, want %q", ov.Cwd, "/tmp/one")
 	}
 
-	// The neighbor is the last tab, not the focused one: with the user back on
-	// tab 1, a third tab still lands beside tab 2 and inherits its cwd.
+	// The neighbor is the focused tab, not the last one: with the user back on
+	// tab 1, a third tab lands beside tab 1 and inherits its cwd — not the
+	// bar-end tab 2's.
 	tabCwd(1, "/tmp/two")
 	if err := h.s.FocusTab(1); err != nil {
 		t.Fatalf("focus tab 1: %v", err)
@@ -1478,8 +1479,13 @@ func TestDispatchTabCreateInheritsCwd(t *testing.T) {
 	r = h.resp()
 	h.d.Dispatch(CmdTabCreate, noParams(), r)
 	got = okData[TabCreateResult](t, r)
-	if ov := h.b.staged[got.Pane]; ov.Cwd != "/tmp/two" {
-		t.Fatalf("inherited cwd = %q, want the last tab's %q", ov.Cwd, "/tmp/two")
+	if ov := h.b.staged[got.Pane]; ov.Cwd != "/tmp/one" {
+		t.Fatalf("inherited cwd = %q, want the focused tab's %q", ov.Cwd, "/tmp/one")
+	}
+	// And it lands at index 1 — directly right of the focused tab, with the
+	// old tab 2 pushed to the end of the bar.
+	if root := h.s.ActiveWorkspace().Tabs[1].RootPane; uint32(root) != got.Pane {
+		t.Fatalf("new tab root at index 1 = %d, want pane %d", root, got.Pane)
 	}
 
 	// An explicit cwd beats the inherited one, and still carries the rest of the
