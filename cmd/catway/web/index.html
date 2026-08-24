@@ -769,9 +769,16 @@
      paths differ by one segment and the branch is the whole distinction. Capped
      rather than shrinkable: a generated worktree slug can run to 60 characters,
      and past ~24 it stops being an identifier you read and starts eating the
-     row. */
-  .pane .chrome .info .branch { color:var(--branch); max-width:24ch;
-    overflow:hidden; text-overflow:ellipsis; }
+     row.
+       Bold on top of the hue, at the same 600 the row gives its other emphasised
+     runs ("exited", the mode badge): colour alone separates the branch from its
+     neighbours, but weight is what makes it the field the eye lands on first
+     when it sweeps a wall of near-identical headers. It survives .pane.dead's
+     font-weight:400 for the same reason the hue does — this rule follows it and
+     wins the specificity tie — so a dead pane still says which branch died on.
+  */
+  .pane .chrome .info .branch { color:var(--branch); font-weight:600;
+    max-width:24ch; overflow:hidden; text-overflow:ellipsis; }
   /* A detached HEAD ("@a1b2c3d") is drawn as the warning it is: a commit made
      there belongs to no branch, and the header is the only place that says so. */
   .pane .chrome .info .branch.detached { color:var(--warn); }
