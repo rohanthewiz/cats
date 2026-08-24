@@ -4930,6 +4930,44 @@
     return ov;
   }
 
+  // focusField hands a freshly-mounted dialog its caret — and then checks that
+  // it kept it.
+  //
+  // One requestAnimationFrame is enough whenever the dialog is the first thing
+  // to open: by the time the frame runs, the overlay is mounted and laid out,
+  // so focus() lands. It is NOT enough when a dialog REPLACES another overlay
+  // in the same tick — openOverlay's closeModal() removes the old #overlay
+  // subtree, and the engine's "the focused element just left the document"
+  // reset is not guaranteed to have run by the time our frame does. Chrome
+  // clears it synchronously while the node is being removed and so never
+  // showed this; the mac app's WKWebView (window_darwin.m) can clear it out of
+  // band, landing AFTER our focus() and handing the document back to <body>.
+  // That hand-back is invisible: the pane underneath is a canvas, never a focus
+  // target, and it keeps drawing its own blinking cursor — so the dialog looks
+  // and behaves as though the terminal still owns the keyboard. "add plugin"
+  // (the plugins dialog's add… button) is the one dialog in the UI opened from
+  // inside another overlay, which is why it was the one that showed it.
+  //
+  // So: take the focus, then re-assert it one frame later if something took it
+  // away. Re-asserting is a no-op in the common case (we still hold it), and
+  // two frames is ~33ms — far too short for the user to have deliberately
+  // clicked elsewhere, so this can never fight a real intent.
+  //
+  // select re-selects the prefill on the first take only; a re-assert must not
+  // wipe a selection the user has since narrowed by hand.
+  function focusField(el, select) {
+    const take = () => {
+      if (document.activeElement === el) return;
+      el.focus();
+      // A <select> field (dialogFields' choice fields) has no select() method.
+      if (select && el.select) el.select();
+    };
+    requestAnimationFrame(() => {
+      take();
+      requestAnimationFrame(() => take());
+    });
+  }
+
   function mkModalBtn(label, cls, fn) {
     const b = document.createElement("button");
     b.textContent = label; if (cls) b.className = cls;
@@ -5255,8 +5293,10 @@
         });
       }
       ov.appendChild(m);
-      // select() is an <input> method; a choice field in slot 0 would throw.
-      requestAnimationFrame(() => { inputs[0].focus(); if (inputs[0].select) inputs[0].select(); });
+      // The prefill starts selected so the first keystroke replaces it; the
+      // select() guard lives in focusField, since a choice field in slot 0 is
+      // a <select> and has no such method.
+      focusField(inputs[0], true);
     });
   }
 
@@ -5291,7 +5331,7 @@
         else if (e.key === "Escape") { e.preventDefault(); closeModal(); }
       });
       ov.appendChild(m);
-      requestAnimationFrame(() => ok.focus());
+      focusField(ok);
     });
   }
 
@@ -5790,7 +5830,7 @@
         });
         ov.appendChild(m);
         // Selected prefill: the first keystroke replaces the generated slug.
-        requestAnimationFrame(() => { input.focus(); input.select(); });
+        focusField(input, true);
       });
     });
   }
@@ -5859,7 +5899,7 @@
           else if (e.key === "Escape") { e.preventDefault(); closeModal(); }
         });
         ov.appendChild(m);
-        requestAnimationFrame(() => inputEl.focus());
+        focusField(inputEl);
         render();
       });
     });
@@ -6310,7 +6350,7 @@
         } else if (e.key === "Escape") { e.preventDefault(); closeModal(); }
       });
       ov.appendChild(m);
-      requestAnimationFrame(() => inputEl.focus());
+      focusField(inputEl);
       render();
     });
 
