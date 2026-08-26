@@ -4439,6 +4439,29 @@
           e.preventDefault(); setFontSize(FONT_DEFAULT); return;
       }
     }
+    // ⌘← / ⌘→ — the macOS line-start / line-end convention — delivered to
+    // the pane as Home / End. The chord itself cannot be forwarded: on a
+    // legacy pane the encoder emits no bytes for a super chord (see
+    // CMD_TO_PANE below), so the pane would receive nothing — while
+    // Home/End is something every pane can act on: readline and zsh bind
+    // them to beginning/end-of-line out of the box, and full-screen apps
+    // read them as the motions they already are. The preventDefault
+    // matters as much as the translation: without it the browser spends
+    // ⌘←/⌘→ on history navigation, which tears down the WebSocket.
+    // Shift is excluded so ⌘⇧←/→ stay whatever the host means by them,
+    // rather than a phantom ⇧Home selection the pane never asked for.
+    if (!e.shiftKey && e.metaKey && !e.ctrlKey && !e.altKey &&
+        (e.code === "ArrowLeft" || e.code === "ArrowRight")) {
+      e.preventDefault();
+      if (e.type === "keydown") clearStaleSelections();
+      const code = e.code === "ArrowLeft" ? "Home" : "End";
+      // mods 0, not mods(e): the pane must see a bare Home/End, not
+      // super+Home (which a kitty-protocol app would treat as a different,
+      // unbound chord).
+      sendMsg({ t: "key", code, key: code, mods: 0,
+                kind: e.type === "keyup" ? "u" : (e.repeat ? "r" : "d") });
+      return;
+    }
     // ⌘C and ⌘Z/⌘⇧Z fall through to the pane below: apps speaking the kitty
     // keyboard protocol (editors like rd) receive super+c / super+z and run
     // their own copy/undo; for legacy panes the server's encoder emits
