@@ -1,0 +1,15 @@
+  /* ---- Toasts ---- */
+  #toasts { position:fixed; right:10px; top:38px; display:flex; flex-direction:column; gap:6px; z-index:6; }
+  .toast { background:var(--panel2); color:var(--fg-strong); border:1px solid var(--line); border-left:3px solid var(--accent);
+    padding:6px 10px; border-radius:5px; font-size:12px; max-width:340px; box-shadow:0 2px 8px rgba(0,0,0,.4);
+    opacity:0; transform:translateX(8px); transition:opacity .2s, transform .2s; }
+  .toast.show { opacity:1; transform:none; }
+  /* An actionable toast is taller and stays put, so it gets a little more room
+     than a four-second status line needs. */
+  .toast-actions { display:flex; flex-wrap:wrap; gap:6px; margin-top:7px; }
+  .toast-btn { background:var(--panel); color:var(--fg-strong); border:1px solid var(--line);
+    border-radius:4px; padding:3px 9px; font-size:11px; font-family:inherit; cursor:pointer; }
+  .toast-btn:hover:not(:disabled) { border-color:var(--accent); color:var(--accent); }
+  .toast-btn:disabled { opacity:.45; cursor:default; }
+  .toast-btn.toast-dismiss { margin-left:auto; border-style:dashed; }
+

@@ -1,0 +1,131 @@
+  /* ---- Main area ---- */
+  #main { display:grid; grid-template-rows:30px 1fr; min-width:0; min-height:0; }
+  /* Top chrome is one row: tabs scroll on the left, the status affordances sit
+     pinned at the right edge. The panes grid takes everything below it. */
+  #topbar { display:flex; align-items:stretch; min-width:0; background:var(--panel);
+    border-bottom:1px solid var(--line); }
+  #tabbar { display:flex; align-items:stretch; gap:2px; padding:0 6px;
+    flex:1 1 auto; min-width:0; overflow-x:auto; position:relative; }
+  #tabbar .tab { font-size:12px; color:var(--muted); padding:0 10px; display:flex; align-items:center; gap:6px;
+    border-bottom:2px solid transparent; white-space:nowrap; cursor:pointer; }
+  #tabbar .tab:hover { color:var(--fg-soft); }
+  /* Very short names ("1", "12") would otherwise render a sliver of a tab, so the
+     label carries a centered floor width. Longer names outgrow it and are unaffected. */
+  #tabbar .tab .tname { min-width:2em; text-align:center; }
+  #tabbar .tab.active { color:var(--fg-strong); border-bottom-color:var(--accent); }
+  /* 11px keeps the ✕ a step below the 12px label so it still reads as secondary,
+     but 10px was a speck. The target is grown independently of the glyph: stretching to the
+     row's full height and paying the horizontal padding back as negative margin
+     gives a click area of the whole 30px column without moving the tab's width or
+     the 6px gap ahead of it. */
+  #tabbar .tab .x { color:var(--muted); font-size:11px; align-self:stretch;
+    display:flex; align-items:center; padding:0 3px; margin:0 -3px; }
+  #tabbar .tab .x:hover { color:var(--err); }
+  #tabbar .tab .tmark { font-size:8px; }
+  #tabbar .tab.add { color:var(--muted); font-weight:600; padding:0 12px; }
+  #tabbar .tab.add:hover { color:var(--accent); }
+
+  #panes { position:relative; overflow:hidden; }
+  .pane { position:absolute; box-sizing:border-box; }
+  .pane.dragging { opacity:.5; }
+  .pane.droptarget { outline:2px solid var(--accent); outline-offset:-2px; }
+  /* A file dragged in from the desktop. Distinct from .droptarget (an in-app
+     pane swap) because it means something different — bytes are about to be
+     written to that pane's machine — so it gets a wash as well as an edge. */
+  .pane.filedrop { outline:2px dashed var(--accent); outline-offset:-2px; }
+  .pane.filedrop::after { content:""; position:absolute; inset:0; pointer-events:none;
+                          background:var(--accent); opacity:.10; }
+  /* Pane chrome = the per-pane header strip (restored; it left in the green-
+     theme facelift and its absence hurt more than the row it costs). Exactly
+     one terminal row tall (the server reserves chromeRows in each pane's inner
+     rect), so the icon buttons buy glyph size by giving up vertical padding:
+     17px symbols with line-height 1 and no top/bottom padding stay clear of
+     the strip's overflow:hidden clip at a ~19px row, while synthetic bold
+     thickens the hairline box-drawing symbols (⊟ ⊞ ⤢ ⬚ ⧉) that were the
+     hardest to read. */
+  .pane .chrome { position:absolute; left:0; top:0; right:0; overflow:hidden; display:flex;
+    align-items:center; gap:0; font-size:12px; color:var(--muted); background:var(--chrome);
+    padding:0 5px 0 9px; box-sizing:border-box; }
+  .pane.focused .chrome { color:var(--chrome-fg); background:var(--chrome-focus); }
+  /* The identity line reads left to right as one sentence about the pane —
+     pane id · title · path · branch · agent · state — and then hands the rest
+     of the row to the toolbar.
+       ┌────────────────────────────────────────────────────────┬───────────┐
+       │ w1:p3 · vim · ~/projs/go/cats · main · claude · working │  toolbar  │
+       └────────────────────────────────────────────────────────┴───────────┘
+     Laying it out as a flex row, rather than as one run of text ellipsized as a
+     whole, is what lets the row give up the *right* field when it runs out of
+     width: the title and path shrink and ellipsize, while the short fields —
+     each of which answers a question you would otherwise have to click into the
+     pane to ask — stay whole. Ellipsizing the line as a whole truncated from the
+     right, which dropped the agent and its state first. */
+  .pane .chrome .info { flex:1; min-width:0; display:flex; align-items:center;
+    overflow:hidden; white-space:nowrap; }
+  /* Fields hold their width by default; only the two free-text ones give way,
+     the title twice as readily as the path (a shell's title is usually the
+     command you can also see running, while the path may be the only thing
+     telling two panes apart). */
+  .pane .chrome .info > span { flex:none; }
+  .pane .chrome .info .ttl { flex:0 2 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; }
+  .pane .chrome .info .cwd { flex:0 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; }
+  /* The separator belongs to no field: it is emitted between two present ones,
+     so an absent field leaves no orphan dot behind. */
+  .pane .chrome .info .sep { padding:0 6px; opacity:.45; }
+  /* A pane whose child has exited keeps its header readable but stops competing
+     with the live ones: the identity text drops to --muted at normal weight,
+     leaving the red "exited (N)" as the only emphasised run in the row. The
+     per-span rules below follow this one so they win the specificity tie and
+     the handle keeps its accent. */
+  .pane.dead .chrome .info { color:var(--muted); font-weight:400; }
+  .pane .chrome .info .pub { color:var(--accent); }
+  /* The branch carries its own hue because it is the field a glance is looking
+     for when several panes sit in worktrees of the same repository — where the
+     paths differ by one segment and the branch is the whole distinction. Capped
+     rather than shrinkable: a generated worktree slug can run to 60 characters,
+     and past ~24 it stops being an identifier you read and starts eating the
+     row.
+       Bold on top of the hue, at the same 600 the row gives its other emphasised
+     runs ("exited", the mode badge): colour alone separates the branch from its
+     neighbours, but weight is what makes it the field the eye lands on first
+     when it sweeps a wall of near-identical headers. It survives .pane.dead's
+     font-weight:400 for the same reason the hue does — this rule follows it and
+     wins the specificity tie — so a dead pane still says which branch died on.
+  */
+  .pane .chrome .info .branch { color:var(--branch); font-weight:600;
+    max-width:24ch; overflow:hidden; text-overflow:ellipsis; }
+  /* A detached HEAD ("@a1b2c3d") is drawn as the warning it is: a commit made
+     there belongs to no branch, and the header is the only place that says so. */
+  .pane .chrome .info .branch.detached { color:var(--warn); }
+  /* The host badge: which machine this pane's terminal is actually running on.
+     Drawn only while the session spans more than one cathost (renderChrome asks
+     the roster first), because with one the answer is the same for every pane in
+     every workspace and would be a word of pure noise on every header. It sits
+     right after the handle — before the title and the path — because it is the
+     outermost coordinate of the pair "which box, then where on it", and because
+     a path only means something once you know whose filesystem it is on.
+     Muted, not hued: it qualifies the identity rather than competing with it,
+     and it goes red the moment its host drops, which is the one time a header
+     needs to explain why the pane stopped moving. */
+  .pane .chrome .info .host { color:var(--muted); max-width:16ch;
+    overflow:hidden; text-overflow:ellipsis; }
+  .pane .chrome .info .host.off { color:var(--err); }
+  .pane .chrome .info .agent { color:var(--warn); }
+  .pane .chrome .info .exited { color:var(--err); font-weight:600; }
+  /* Pane-scoped mode chips (copy mode, zoom) ride the header of the pane they
+     describe — the tab-row status area only keeps the app-global affordances. */
+  .pane .chrome .info .mode { color:var(--warn); font-weight:600; }
+  /* Copy mode's key hints are the one long run that is neither a name nor a
+     path: in a narrow pane it gives way from the right, since the bindings are
+     listed in decreasing order of how often they're needed. */
+  .pane .chrome .info .hint { flex:0 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; }
+  .pane .chrome .zoom { flex:none; color:var(--accent); cursor:pointer; padding:0 6px; }
+  .pane .chrome .ctl { display:flex; gap:1px; flex:none; }
+  .pane .chrome .ctl button { background:none; border:none; color:var(--muted); cursor:pointer;
+    font-size:17px; font-weight:600; line-height:1; padding:0 6px; border-radius:3px;
+    font-family:inherit; }
+  .pane .chrome .ctl button:hover { background:var(--hover); color:var(--fg-bright); }
+  .pane.focused .chrome .ctl button { color:var(--chrome-fg-dim); }
+  .pane .chrome .ctl button.close:hover { background:var(--err); color:var(--fg-bright); }
+  .pane canvas { position:absolute; display:block; }
+  .pane.focused canvas { outline:1px solid var(--accent-dim); outline-offset:-1px; }
+

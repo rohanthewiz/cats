@@ -9,7 +9,7 @@ pieces; only the machine boundaries move.
 ```mermaid
 flowchart TB
   subgraph front["Front end"]
-    BROWSER["browser page<br/>embedded index.html"]
+    BROWSER["browser page<br/>embedded, from cmd/catway/web"]
     WEBVIEW["catapp<br/>WebKit window + supervisor"]
   end
 
@@ -63,7 +63,7 @@ flowchart TB
 |---------|----------|
 | What the session looks like; what a command changes | `catway` — `internal/app` |
 | Pane geometry | `catway` — `internal/layout` |
-| Rendering the page, drawing cell grids, copy mode UI | front end — `cmd/catway/web/index.html` |
+| Rendering the page, drawing cell grids, copy mode UI | front end — `cmd/catway/web/js` |
 | Encoding a keystroke into VT bytes | `catway` — `internal/inputenc` |
 | PTY ownership, child processes, VT emulation, cell grids | `cathost` — `internal/orchestration` + `internal/terminal` |
 | Which agent is in a pane, and what it is doing | `cathost` detection + `catway` hook arbitration |

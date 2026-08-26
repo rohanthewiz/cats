@@ -61,9 +61,10 @@ Precedence for server settings is **flag > config file > default**. Run
 
 > **Note — the web UI is embedded**
 >
-> `cmd/catway/web/index.html` is compiled into the `catway` binary with
-> `//go:embed`. After editing it you must rebuild and restart `catway` — a
-> browser reload alone keeps serving the old page.
+> The page is built by the `cmd/catway/web` package and compiled into the
+> `catway` binary with `//go:embed`. After editing its components, `css/` or
+> `js/` you must rebuild and restart `catway` — a browser reload alone keeps
+> serving the old page.
 
 ## Run it as a Mac app
 

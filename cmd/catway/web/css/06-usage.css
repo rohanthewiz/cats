@@ -1,0 +1,128 @@
+  /* Usage rows stack a label line over a meter, so the row is two lines tall
+     rather than the one line every other sidebar row is. */
+  #usage-list li { display:block; padding:3px 8px 5px; cursor:default; }
+  #usage-list li:hover { background:none; }
+  #usage-list li.empty { color:var(--muted); font-style:italic; }
+  /* A heading over the rows it covers — one per provider, plus the host — in
+     the same register #pane-list's workspace headers use, and with the same job:
+     it names the group and folds it. Flex like .wsgrp so the summary and caret
+     can be pushed to the right edge; the padding stays its own — the rows'
+     3px/5px is tuned around a meter this has not got. */
+  #usage-list li.ugrp { color:var(--ws-heading); font-size:calc(11px * var(--sb-scale));
+    text-transform:uppercase; letter-spacing:.5px; font-weight:600; padding:2px 8px 1px;
+    display:flex; align-items:baseline; gap:6px; cursor:pointer; }
+  #usage-list li.ugrp.sep { border-top:1px solid var(--line); margin-top:5px; padding-top:7px; }
+  /* Overrides #usage-list li:hover's background:none — these rows ARE clickable,
+     so they take the same hover the pane group headers do. */
+  #usage-list li.ugrp:hover { background:var(--panel2); color:var(--fg-soft); }
+  /* Summary then caret, both pinned right, exactly as in #pane-list. */
+  #usage-list li.ugrp .gsum, #usage-list li.ugrp .car { margin-left:auto; }
+  #usage-list li.ugrp .gsum + .car { margin-left:0; }
+  /* The stand-in reading a folded group shows: the secondary half of the header,
+     so it drops the label's case, tracking and weight, and it takes the warning
+     colors its hidden meter would have taken. */
+  #usage-list li.ugrp .gsum { text-transform:none; letter-spacing:0; font-weight:400;
+    color:var(--muted); font-variant-numeric:tabular-nums; }
+  #usage-list li.ugrp.high .gsum { color:var(--warn); }
+  #usage-list li.ugrp.crit .gsum { color:var(--err); }
+  /* The time left in the quoted window, parenthesised after the reading. It keeps
+     the muted color through .high and .crit — the color in this header means "how
+     much is spent", and a clock that turned red would read as a second alarm for
+     something that is only the window doing what windows do. Sized like .ureset,
+     which is the same fact one line down when the group is unfolded. */
+  #usage-list li.ugrp .gsum .gleft { color:var(--muted);
+    font-size:calc(9px * var(--sb-scale)); opacity:.8; }
+  /* ...with one exception, a window near its rollover — half an hour out on the
+     5-hour, two on a week, each row carrying its own horizon (see usageSoonMs).
+     That is the one time the clock stops being background: whatever is left in
+     the window has to be spent, or planned around, before it rolls. Amber and
+     not red, and only ever amber — this axis is "how long", the .high/.crit
+     axis beside it is "how much", and two things shouting the same color would
+     make it impossible to tell which one is speaking. Specificity carries it
+     over the muted rule above and over .high/.crit, both of which paint .gsum
+     rather than this span. */
+  #usage-list li.ugrp .gsum .gleft.soon { color:var(--warn); opacity:1; }
+  #usage-list li.ugrp .car { font-size:calc(10px * var(--sb-scale)); }
+  #usage-list .urow { display:flex; align-items:baseline; gap:6px; }
+  /* Body weight and body color: with a genuinely bold heading now above them,
+     a row's label is no longer the most important thing in its line, and
+     lifting it to --fg-strong made every key read as emphasised. */
+  #usage-list .uname { color:var(--fg); }
+  /* The reading sits hard right against the window name, and is the one thing
+     in the row worth reading at a glance when the bar is only a hint. */
+  #usage-list .uval { margin-left:auto; color:var(--muted); font-variant-numeric:tabular-nums; }
+  #usage-list li.high .uval { color:var(--warn); }
+  #usage-list li.crit .uval { color:var(--err); }
+  #usage-list .ureset { color:var(--muted); font-size:calc(9px * var(--sb-scale)); opacity:.8; }
+  /* The unfolded half of the same warning: a countdown inside its row's horizon
+     lifts out of the muted register. It sits left of .uval, which carries
+     the spent-color, so a row can legitimately show an amber clock beside a
+     calm percentage — that pairing ("barely used, nearly over") is exactly the
+     one the color exists to catch. */
+  #usage-list .ureset.soon { color:var(--warn); opacity:1; }
+  #usage-list .umeter { margin-top:3px; height:4px; border-radius:2px; background:var(--panel2);
+                        overflow:hidden; }
+  #usage-list .umeter > i { display:block; height:100%; width:0; background:var(--accent);
+                            border-radius:2px; transition:width .4s ease; }
+  #usage-list li.high .umeter > i { background:var(--warn); }
+  #usage-list li.crit .umeter > i { background:var(--err); }
+  /* A local estimate has a token count but no allowance to measure it against,
+     so there is no bar to fill — the track is dropped rather than drawn empty,
+     which would read as "0% used". */
+  #usage-list li.unknown .umeter { display:none; }
+  /* The history strip under a row that has one (host CPU). Full width and
+     stretched by the SVG's own preserveAspectRatio, so nothing in the script has
+     to know the sidebar's width — see usageSpark. It takes the row's warning
+     colors exactly as the meter above it does, so a row that has gone red is red
+     in both of its halves rather than half-warning. */
+  #usage-list .uspark { display:block; width:100%; height:calc(20px * var(--sb-scale));
+                        margin-top:3px; }
+  #usage-list .uspark .sfill { fill:var(--accent); opacity:.16; }
+  #usage-list .uspark .sline { fill:none; stroke:var(--accent); opacity:.85; }
+  #usage-list li.high .uspark .sfill { fill:var(--warn); }
+  #usage-list li.high .uspark .sline { stroke:var(--warn); }
+  #usage-list li.crit .uspark .sfill { fill:var(--err); }
+  #usage-list li.crit .uspark .sline { stroke:var(--err); }
+  #usage-list .unote { color:var(--muted); font-size:calc(9px * var(--sb-scale));
+                       font-style:italic; padding:1px 8px 3px; }
+  /* How old the numbers below are, in the heading beside the control that
+     refreshes them. It rides .hctl's right edge but opts out of the heading's
+     uppercase and tracking: it is a reading, not a label. It also pins its own
+     size rather than inheriting the heading's — the title grew to lead the
+     section, and an age stamp that grew with it would compete with the label
+     it is meant to annotate. */
+  #sidebar h2 .hage { color:var(--muted); font-weight:400; text-transform:none;
+    letter-spacing:0; font-size:calc(10px * var(--sb-scale));
+    font-variant-numeric:tabular-nums; margin-right:3px; }
+  /* The stand-in a folded *section* shows, when the section had no group headers
+     to carry one (see renderWorkspaces). Same register as .hage for the same
+     reason — it is a reading, not a label — and the same right-edge berth just
+     inboard of the fold pair, which is where .gsum sits in the group headers this
+     is standing in for. It carries no box when empty, so the pointer only meets
+     it while there is something folded to unfold. */
+  #sidebar h2 .hcount { color:var(--muted); font-weight:400; text-transform:none;
+    letter-spacing:0; font-size:calc(10px * var(--sb-scale));
+    font-variant-numeric:tabular-nums; margin-right:5px; cursor:pointer;
+    white-space:nowrap; }
+  #sidebar h2 .hcount:hover { color:var(--fg-soft); }
+  /* The refresh control carries a drawn mark (see refreshMark), so it is sized
+     in pixels and centered on the heading's text rather than stretching to it. */
+  #usage-hctl { align-items:center; }
+  #usage-hctl .refresh { display:block; width:calc(12px * var(--sb-scale));
+    height:calc(12px * var(--sb-scale)); }
+  /* The fold pair now sits outboard of the refresh (far right of the heading), so
+     the drawn mark needs clearance it did not need when it was the last control:
+     .hctl's 1px gap is tuned for two glyph buttons touching, and a drawn arc
+     abutting a ⊞ reads as one smudged mark at 12px. */
+  #usage-hctl button.uref { margin-right:5px; }
+  /* The mark turns while a reading is in flight. The server acks the ask
+     immediately and pushes the numbers only when the read lands, so the spin is
+     the only thing saying the click was heard. */
+  #usage-hctl button.busy { color:var(--accent); }
+  #usage-hctl button.busy .refresh { animation:uspin .9s linear infinite; }
+  @keyframes uspin { to { transform:rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) {
+    #usage-list .umeter > i { transition:none; }
+    /* The color alone carries "busy" for anyone who asked not to be spun. */
+    #usage-hctl button.busy .refresh { animation:none; }
+  }

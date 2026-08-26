@@ -105,8 +105,8 @@ way to catch the other side — a command routed but never listed, invisible to
 
 ## What is deliberately *not* a protocol
 
-* **The web UI's internal structure.** `index.html` is embedded and versioned
-  with the binary, so there is no client/server skew to manage inside a build.
+* **The web UI's internal structure.** The page is embedded and versioned with
+  the binary, so there is no client/server skew to manage inside a build.
 * **The plugin manifest.** `cats-plugin.toml` never crosses a socket. The server
   reads it host-side and answers `plugin.list` with resolved argv. See
   [Plugins](../subsystems/plugins.md).

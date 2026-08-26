@@ -1,0 +1,30 @@
+  /* ---- Overlays: dialogs / palette / help (WS8) ---- */
+  #overlay { position:fixed; inset:0; background:rgba(0,0,0,.45); z-index:8;
+    display:flex; align-items:flex-start; justify-content:center; }
+  .modal { background:var(--panel2); border:1px solid var(--line); border-radius:8px; margin-top:12vh;
+    min-width:360px; max-width:640px; box-shadow:0 8px 30px rgba(0,0,0,.5); font-size:13px; }
+  .modal header { padding:10px 14px; font-weight:600; color:var(--fg-strong); border-bottom:1px solid var(--line); font-size:12px; }
+  .modal .body { padding:12px 14px; }
+  .modal .body p { margin:0 0 10px; color:var(--fg); line-height:1.45; }
+  /* A choice field is styled as its text sibling, so a dialog that mixes the two
+     (new workspace: name, start path, plugin) reads as one column of fields
+     rather than two controls that happen to be stacked. appearance:none drops
+     the platform chrome for the same reason; the ▾ is drawn back on by the rule
+     below, since a select with no affordance at all reads as a disabled input. */
+  .modal input[type=text], .modal select { width:100%; box-sizing:border-box; background:var(--bg); color:var(--fg);
+    border:1px solid var(--line); border-radius:5px; padding:6px 8px; font:inherit; outline:none; }
+  .modal input[type=text]:focus, .modal select:focus { border-color:var(--accent); }
+  .modal select { appearance:none; cursor:pointer; padding-right:24px;
+    background-image:linear-gradient(45deg,transparent 50%,var(--muted) 50%),linear-gradient(135deg,var(--muted) 50%,transparent 50%);
+    background-size:5px 5px,5px 5px; background-position:calc(100% - 13px) 52%,calc(100% - 8px) 52%;
+    background-repeat:no-repeat; }
+  .modal .field + .field { margin-top:10px; } /* multi-field dialogs (new workspace) */
+  .modal .field label { display:block; color:var(--muted); font-size:11px; margin-bottom:4px; }
+  .modal .hint { color:var(--muted); font-size:11px; margin-top:8px; }
+  .modal .btns { display:flex; gap:8px; justify-content:flex-end; padding:10px 14px; border-top:1px solid var(--line); }
+  .modal .btns button { background:var(--panel); color:var(--fg); border:1px solid var(--line); border-radius:5px;
+    padding:5px 12px; font:inherit; font-size:12px; cursor:pointer; }
+  .modal .btns button:hover { border-color:var(--accent); color:var(--fg-bright); }
+  .modal .btns button.primary { background:var(--accent); border-color:var(--accent); color:var(--accent-fg); font-weight:600; }
+  .modal .btns button.danger { background:var(--err); border-color:var(--err); color:var(--fg-bright); }
+

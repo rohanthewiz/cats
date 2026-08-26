@@ -159,9 +159,11 @@ CATS_PASSWORD=changeme bin/catway --addr :8421
 serves HTTPS. Flags beat the config file, which beats built-in defaults
 (`flag > config > default`); run `catway -h` for the full set.
 
-> **Note:** the web UI (`cmd/catway/web/index.html`) is embedded into the
-> catway binary at compile time (`//go:embed`) — after editing it, rebuild
-> and restart the catway; a browser reload alone keeps serving the old page.
+> **Note:** the web UI is embedded into the catway binary at compile time —
+> markup in the `cmd/catway/web` package's element components, styles in
+> `cmd/catway/web/css/`, front-end in `cmd/catway/web/js/`, all stitched into
+> one document by `web.Page()`. After editing any of them, rebuild and restart
+> the catway; a browser reload alone keeps serving the old page.
 
 ### CLI control & automation
 
@@ -434,8 +436,8 @@ user/plugin theme-file loaders (`load.go`). `renderPage` (`cmd/catway/page.go`)
 resolves `config.Theme` (name + overrides) against that registry and injects
 the **full** palette as a `:root{…}` block *after* the stylesheet, so the
 resolved theme always wins the cascade; the `:root` block in
-`cmd/catway/web/index.html` is only the fallback for an uninjected page and
-mirrors the `cats-green` built-in. When adding a color var: add it to the
+`cmd/catway/web/css/01-theme.css` is only the fallback for an uninjected page
+and mirrors the `cats-green` built-in. When adding a color var: add it to the
 derivation table (or required keys) in `internal/theme/theme.go`, give
 `cats-green` its hand-authored value, and reference `var(--...)` (with the
 same fallback value in `:root`) in the stylesheet. The canvas-side colors

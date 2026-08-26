@@ -55,7 +55,7 @@ deliberately tiny surface:
 
 | Route | Purpose |
 |-------|---------|
-| `GET /` | the single-page UI, rendered from `cmd/catway/web/index.html` |
+| `GET /` | the single-page UI, assembled by `cmd/catway/web`.`Page()` |
 | `GET /login` | the login form (only when `auth: password`) |
 | `POST /login` | check the secret, issue the `hsess` cookie |
 | `GET /ws` | the one WebSocket endpoint — the whole browser protocol |
@@ -65,8 +65,8 @@ That is all. No REST API, no asset pipeline, no CDN. The page is
 
 > **Note — rebuild after editing the UI**
 >
-> Because `index.html` is compiled in, editing it and reloading the browser
-> keeps serving the old page. Rebuild and restart `catway`.
+> Because the page's sources are compiled in, editing them and reloading the
+> browser keeps serving the old page. Rebuild and restart `catway`.
 
 Theme colours and keybindings are injected into the served page at render time,
 which is why `catctl reload` can apply a config edit with no restart: the

@@ -3,8 +3,8 @@ package theme
 import "maps"
 
 // The built-in palettes. cats-green is fully hand-authored so it reproduces the
-// pre-themes rendering byte-for-byte (its values are the ones index.html and
-// config.defaultColors historically carried); the rest author the keys where
+// pre-themes rendering byte-for-byte (its values are the ones the page's :root
+// block and config.defaultColors historically carried); the rest author the keys where
 // taste matters — surfaces, accent, state colors — and let Normalize derive the
 // long tail (washes, terminal defaults, strong/soft text) so each palette stays
 // readable at a glance.

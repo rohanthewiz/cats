@@ -1,0 +1,11 @@
+  /* ---- Help modal (WS8) ---- */
+  .modal.help { max-width:720px; width:680px; }
+  .help .body { max-height:60vh; overflow-y:auto; }
+  .helpcols { display:grid; grid-template-columns:1fr 1fr; gap:0 28px; }
+  .help h3 { font-size:11px; text-transform:uppercase; letter-spacing:.8px; color:var(--muted); margin:12px 0 6px; }
+  .help table { border-collapse:collapse; width:100%; }
+  .help td { padding:2px 0; font-size:12px; vertical-align:top; }
+  .help td:first-child { width:46%; color:var(--muted); }
+  .key { background:var(--bg); border:1px solid var(--line); border-radius:4px; padding:0 5px;
+    font-size:11px; display:inline-block; margin:1px 2px 1px 0; }
+

@@ -1,0 +1,44 @@
+  #ws-list { position:relative; }
+  #ws-list li.ws { cursor:pointer; }
+  #ws-list li.ws:hover { background:var(--panel2); }
+  /* The focused workspace takes the theme's accent rather than the white-ish
+     --fg-strong the active tab uses: the tab already has an accent underline to
+     mark it, but a list row has no such edge, so the color itself has to carry
+     the "you are here" signal — and every theme's accent is its saturated hue. */
+  #ws-list li.active { color:var(--accent); }
+  #ws-list li .sum { color:var(--muted); font-size:calc(10px * var(--sb-scale)); margin-left:auto; }
+  #ws-list li .sum span { margin-left:4px; }
+  /* The paw print a workspace row — or the Workspaces heading, for the global
+     backlog — wears while its cats-todo backlog has unfinished items in it,
+     with how many are left set as a superscript beside it — the paw says the
+     cat left something behind, the number says how much. The two are one mark,
+     so they share a wrapper and skip the row's 6px gap; the wrapper aligns its
+     children at the top, which is what puts the count up at the toes.
+     It rides the text baseline like the glyphs around it, and takes --todo so
+     it reads as a reminder rather than as another agent-state dot. */
+  .todo-mark { flex:0 0 auto; align-self:center; color:var(--todo);
+    display:inline-flex; align-items:flex-start; }
+  .todo-mark .todo { width:calc(14px * var(--sb-scale)); height:calc(14px * var(--sb-scale));
+    margin-left:-2px; }
+  .todo-mark .todo-n { font-size:calc(8px * var(--sb-scale)); line-height:1; font-weight:600;
+    margin-left:-1px; }
+  /* The global backlog's mark rides the Workspaces heading itself — the one
+     element that spans every workspace, which is exactly the mark's scope. It
+     opts back out of the heading's uppercase tracking: the superscript is a
+     count, not part of the label. */
+  #ws-global-todo { display:inline-flex; margin-left:7px; letter-spacing:0; }
+  /* A locked workspace — one no plugin or agent may be launched into — reads as
+     set aside: the row steps back, and a padlock next to the name says why it
+     did. The lock itself is exempt from the dimming, being the one thing in the
+     row that just became more true; it stays at --muted, the same gray the
+     chrome uses for "present, not the point". */
+  #ws-list li.ws.locked > :not(.lock-mark) { opacity:.5; }
+  /* No switch-on-click here, so the row drops the pointer — but not to
+     "not-allowed": the row still renames, reorders and opens its menu, and only
+     the one gesture is off. The plain arrow says "not a button", which is true. */
+  #ws-list li.ws.locked { cursor:default; }
+  #ws-list li .lock-mark { flex:0 0 auto; align-self:center; color:var(--muted);
+    display:inline-flex; margin-left:-1px; }
+  #ws-list li .lock { width:calc(12px * var(--sb-scale)); height:calc(12px * var(--sb-scale)); }
+  #ws-list li.add { color:var(--muted); font-style:italic; cursor:pointer; }
+  #ws-list li.add:hover { color:var(--accent); background:none; }

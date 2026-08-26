@@ -30,7 +30,7 @@ import (
 const DefaultName = "cats-green"
 
 // DefaultFont is the font stack used when neither the config nor the theme
-// sets one (the value index.html has always carried).
+// sets one (the value the page's stylesheet has always carried).
 const DefaultFont = `ui-monospace, "SF Mono", Menlo, Consolas, monospace`
 
 // Source values for Theme.Source. Plugin themes carry "plugin:<id>".

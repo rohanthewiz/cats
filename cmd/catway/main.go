@@ -52,7 +52,6 @@
 package main
 
 import (
-	"embed"
 	"errors"
 	"flag"
 	"fmt"
@@ -69,6 +68,7 @@ import (
 
 	"github.com/rohanthewiz/rweb"
 
+	"github.com/rohanthewiz/cats/cmd/catway/web"
 	"github.com/rohanthewiz/cats/internal/app"
 	"github.com/rohanthewiz/cats/internal/config"
 	"github.com/rohanthewiz/cats/internal/ctlproto"
@@ -80,9 +80,6 @@ import (
 	"github.com/rohanthewiz/cats/internal/push"
 	"github.com/rohanthewiz/cats/internal/startdir"
 )
-
-//go:embed web/index.html
-var webFS embed.FS
 
 func main() {
 	configPath := flag.String("config", "",
@@ -178,10 +175,11 @@ func main() {
 		log.Fatalf("catway: push.%v", err)
 	}
 
-	indexHTML, err := webFS.ReadFile("web/index.html")
-	if err != nil {
-		log.Fatalf("catway: read embedded page: %v", err)
-	}
+	// The base page: markup from the web package's element components, with its
+	// stylesheet and front-end stitched in from web/css and web/js. Built once —
+	// renderPage below layers the operator's config onto this, and re-renders
+	// from it on every later config change.
+	indexHTML := web.Page()
 
 	// The host roster: the configured hosts with "local" synthesized from
 	// server.cathost_socket (which the --socket flag may have overridden), so a

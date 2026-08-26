@@ -1,0 +1,28 @@
+  /* HOSTS: one row per cathost this catway attached to — a state dot, the
+     label, and how many panes live there. The whole section is hidden while
+     there is only one host (renderHosts sets [hidden]), so a session that never
+     configured a second machine sees exactly the sidebar it always had.
+     Rows are not clickable yet — attach/detach is a later phase — hence the
+     default cursor and the suppressed hover, matching #usage-list's rows. */
+  #host-list li { display:flex; align-items:baseline; gap:6px; cursor:default; }
+  #host-list li:hover { background:none; }
+  #host-list .hdot { font-size:calc(10px * var(--sb-scale)); }
+  #host-list li.up .hdot { color:var(--ok); }
+  #host-list li.down .hdot { color:var(--err); }
+  #host-list .hname { min-width:0; overflow:hidden; text-overflow:ellipsis; }
+  /* A host that is down keeps its row at full strength — it still owns panes,
+     and fading it would read as "not important" when it is the opposite. Only
+     the label steps back a little; the red dot and the reason carry the news. */
+  #host-list li.down .hname { opacity:.75; }
+  #host-list .hdef { color:var(--muted); font-size:calc(9px * var(--sb-scale)); }
+  #host-list .hmeta { margin-left:auto; flex:none; color:var(--muted);
+    font-size:calc(10px * var(--sb-scale)); font-variant-numeric:tabular-nums; }
+  #host-list li.down .hmeta { color:var(--err); }
+  /* Round-trip time to that cathost. It sits BEFORE the pane count (which keeps
+     margin-left:auto and so stays pinned to the right edge) because the pane
+     count is the stable number and latency is the moving one: a figure that
+     changes should not shift a figure that does not. Dimmer than .hmeta — it is
+     a diagnostic, read when something feels slow, not on every glance. */
+  #host-list .hlat { flex:none; margin-left:auto; color:var(--muted); opacity:.7;
+    font-size:calc(9px * var(--sb-scale)); font-variant-numeric:tabular-nums; }
+  #host-list .hlat + .hmeta { margin-left:0; }
