@@ -4078,6 +4078,34 @@
     ctx.fillRect(0, 0, p.canvas.width / dpr, p.canvas.height / dpr);
     ctx.setTransform(dpr * s, 0, 0, dpr * s, (p.ox || 0) * dpr, (p.oy || 0) * dpr);
     ctx.textBaseline = "top";
+    // The grid is drawn in two passes — every background first, then every
+    // glyph — because a glyph is not confined to the cell it is anchored in.
+    //
+    // A wide grapheme (an emoji, a CJK character) occupies two columns: the VT
+    // grid stores it in the first and leaves the second a blank *spacer*, and
+    // the canvas draws it at its natural advance, spilling across both. Painted
+    // cell by cell, that spacer's background rect lands after the glyph and
+    // erases its right half — which is what turned a 🍏 in a highlighted row
+    // into a green sliver, and only in a highlighted row, since a spacer at the
+    // default background paints nothing at all:
+    //
+    //   one pass:   [bg][🍏 →][bg over the right half]   ✗
+    //   two passes: [bg][bg][🍏 → drawn over both]       ✓
+    //
+    // Separating the passes fixes it without the grid having to know which
+    // cells are spacers, and it covers everything else that overflows a cell
+    // for the same reason — italics leaning past their box, a font's ligatures,
+    // box-drawing that overshoots by a hairline.
+    for (let y = 0; y < p.H; y++) {
+      for (let x = 0; x < p.W; x++) {
+        const c = p.cells[y * p.W + x];
+        if (!c) continue;
+        const m = c.m || 0;
+        let fg = c.f || defFg, bg = c.b || defBg;
+        if (m & M_REVERSED) { const t = fg; fg = bg; bg = t; }
+        if (bg !== defBg) { ctx.fillStyle = css(bg); ctx.fillRect(x * cellW, y * cellH, cellW + 0.5, cellH + 0.5); }
+      }
+    }
     for (let y = 0; y < p.H; y++) {
       for (let x = 0; x < p.W; x++) {
         const c = p.cells[y * p.W + x];
@@ -4086,7 +4114,6 @@
         let fg = c.f || defFg, bg = c.b || defBg;
         if (m & M_REVERSED) { const t = fg; fg = bg; bg = t; }
         const px = x * cellW, py = y * cellH;
-        if (bg !== defBg) { ctx.fillStyle = css(bg); ctx.fillRect(px, py, cellW + 0.5, cellH + 0.5); }
         const ch = c.s;
         if (ch && ch !== " " && !(m & M_HIDDEN)) {
           let font = "";

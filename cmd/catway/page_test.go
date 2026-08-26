@@ -177,3 +177,68 @@ func TestPageForwardsWorkspaceQueryInInit(t *testing.T) {
 		t.Fatal("the init message does not carry the window's workspace")
 	}
 }
+
+// A wide grapheme is drawn from the cell it is anchored in but spills into the
+// next one, which the VT grid leaves as a blank spacer carrying the same
+// background. Painted cell by cell, that spacer's background rect landed after
+// the glyph and erased its right half — a 🍏 in a highlighted list row rendered
+// as a green sliver, and only in a highlighted row, since a spacer at the
+// default background paints nothing at all.
+//
+// The fix is to paint every background first and every glyph second, so the
+// renderer never has to know which cells are spacers. Asserted on the source
+// because there is no headless canvas here, and the failure it guards is
+// someone folding the two loops back into one for the tidiness of it.
+func TestPagePaintsBackgroundsBeforeGlyphs(t *testing.T) {
+	src, err := os.ReadFile("web/index.html")
+	if err != nil {
+		t.Fatalf("read page: %v", err)
+	}
+	draw := drawFuncSource(t, string(src))
+
+	const gridLoop = "for (let y = 0; y < p.H; y++)"
+	first := strings.Index(draw, gridLoop)
+	if first < 0 {
+		t.Fatal("draw() no longer walks the grid")
+	}
+	second := strings.Index(draw[first+len(gridLoop):], gridLoop)
+	if second < 0 {
+		t.Fatal("draw() walks the grid once — backgrounds and glyphs share a pass, so a wide glyph's spacer will clip it")
+	}
+	second += first + len(gridLoop)
+
+	// The background rect belongs to the first pass and the glyph to the second.
+	bg := strings.Index(draw, "ctx.fillRect(x * cellW, y * cellH, cellW + 0.5, cellH + 0.5)")
+	if bg < 0 {
+		t.Fatal("no cell-background rect in draw()")
+	}
+	if bg > second {
+		t.Error("the cell background is painted in the glyph pass — a wide glyph's spacer will clip it")
+	}
+	if glyph := strings.Index(draw, "ctx.fillText("); glyph < second {
+		t.Error("a glyph is drawn in the background pass — later backgrounds will paint over it")
+	}
+}
+
+// drawFuncSource returns the body of the page's draw() function, brace-matched,
+// so the assertions above cannot be satisfied by an unrelated part of the page.
+func drawFuncSource(t *testing.T, page string) string {
+	t.Helper()
+	start := strings.Index(page, "function draw(p) {")
+	if start < 0 {
+		t.Fatal("draw() not found in the page")
+	}
+	depth := 0
+	for i := start + strings.Index(page[start:], "{"); i < len(page); i++ {
+		switch page[i] {
+		case '{':
+			depth++
+		case '}':
+			if depth--; depth == 0 {
+				return page[start : i+1]
+			}
+		}
+	}
+	t.Fatal("draw() is unbalanced")
+	return ""
+}
