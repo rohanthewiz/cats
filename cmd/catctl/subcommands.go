@@ -82,6 +82,8 @@ var subcommands = []subcommand{
 	{"focus-dir", app.CmdPaneFocusDirection, "focus-dir <left|right|up|down>", []argKind{argDirection}, "focus the neighbour in a direction", buildDir},
 	{"cycle", app.CmdPaneCycle, "cycle [prev]", []argKind{argCycleDir}, "focus the next pane (prev for previous)", buildCycle},
 	{"last", app.CmdPaneLast, "last", nil, "focus the previously focused pane", noParams},
+	{"back", app.CmdNavBack, "back", nil, "go back in the pane & workspace focus history (primary window)", noParams},
+	{"forward", app.CmdNavForward, "forward", nil, "go forward in the pane & workspace focus history (primary window)", noParams},
 	{"swap", app.CmdPaneSwap, "swap <left|right|up|down>", []argKind{argDirection}, "swap with the neighbour in a direction", buildDir},
 	{"zoom", app.CmdPaneZoom, "zoom [pane]", []argKind{argPane}, "toggle pane zoom (focused by default)", buildOptPane},
 	{"rename-pane", app.CmdPaneRename, "rename-pane <pane> <name...>", []argKind{argPane}, "rename a pane (empty name clears)", buildRenamePane},

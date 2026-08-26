@@ -325,6 +325,8 @@ channel, since a result with nowhere to go is not worth producing.
 | `pane.focus_direction` | `focus-dir <left\|right\|up\|down>` |
 | `pane.cycle` | `cycle [prev]` |
 | `pane.last` | `last` |
+| `nav.back` | `back` |
+| `nav.forward` | `forward` |
 | `pane.swap` | `swap <left\|right\|up\|down>` |
 | `pane.swap_with` | — (raw only) |
 | `pane.zoom` | `zoom [pane]` |
@@ -338,6 +340,17 @@ channel, since a result with nowhere to go is not worth producing.
 
 `send` stages text without submitting; `run` types it and presses Enter. Both map
 to `pane.send_input` — the difference is one flag.
+
+`nav.back` / `nav.forward` walk the **focus-location history**: every place
+focus lands — by click, tab or workspace switch, split, or a command — is an
+entry, and back/forward step through them, revealing the pane wherever it now
+lives (across tabs and workspaces). The history is per **window**, like the
+view itself: each browser window walks its own trail. A view-less caller
+(`catctl back`, a hook, a runbook step) walks the primary window's. Bursts of
+directional focus moves within one tab coalesce into a single entry; entries
+whose pane has since closed are dropped in passing; walking past either end is
+a silent no-op. The browser binds ⌘[ / ⌘] and the mouse's back/forward buttons
+to these.
 
 `pane.split` returns `{"pane": N}`: the id of the pane it created, which it also
 focuses. Take it rather than diffing `pane.list` around the call — that diff is

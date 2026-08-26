@@ -2580,6 +2580,9 @@ func (o *orch) registerConn(c *client, init *browserproto.Init) {
 		}
 	}
 	o.syncPrimaryActive()
+	// Seed the window's focus-location history: entry zero is "where the
+	// window opened", so the first jump elsewhere has somewhere to go back to.
+	o.noteNav(c, "")
 	o.syncDaemon() // the new grid may resize panes
 	o.refreshViewport()
 

@@ -1004,6 +1004,12 @@ func (d *Dispatcher) dispatch(name string, dec ParamDecoder, r Responder) {
 		}
 		r.OK(nil)
 
+	case CmdNavBack:
+		d.navigate(true, r)
+
+	case CmdNavForward:
+		d.navigate(false, r)
+
 	case CmdAgentFocus:
 		var p PaneParams
 		if err := dec.Decode(&p); err != nil {
@@ -1806,6 +1812,48 @@ func workspaceStartDir(path *string, sessionCwd string, mkdir, local bool) (stri
 		return startdir.Usable(), nil
 	}
 	return dir, nil
+}
+
+// navigate is nav.back / nav.forward: walk the issuing window's focus-location
+// history one live entry and reveal what it lands on. The restore is the
+// agent.focus recipe — RevealPaneView reconstitutes workspace + tab + focus
+// from the pane id alone, and SetViewWorkspace moves only the window that
+// asked — so "go back" reaches across tabs and workspaces for free.
+//
+// Every "nowhere to go" case is a silent OK, matching pane.last: a backend
+// with no history seam (test fakes, catgen), an empty or exhausted stack.
+// Failing would turn holding ⌘[ past the oldest entry into an error toast.
+func (d *Dispatcher) navigate(back bool, r Responder) {
+	var h *NavHistory
+	if nb, ok := d.backend.(navHistoryBackend); ok {
+		h = nb.NavHistory()
+	}
+	if h == nil {
+		r.OK(nil)
+		return
+	}
+	// An entry is restorable iff its pane still exists somewhere in the
+	// session; Step drops the ones that don't (their pane closed since the
+	// visit) so the walk glides over them.
+	valid := func(loc NavLocation) bool {
+		_, ws := d.session.workspaceIndexOf(loc.Pane)
+		return ws != nil
+	}
+	loc, ok := h.Step(back, valid)
+	if !ok {
+		r.OK(nil)
+		return
+	}
+	wsID, err := d.session.RevealPaneView(loc.Pane)
+	if err != nil {
+		// Step just validated the pane, so this is unreachable in practice;
+		// surfacing it beats silently desyncing the cursor if that changes.
+		r.Fail(err.Error())
+		return
+	}
+	d.backend.SetViewWorkspace(wsID)
+	d.backend.ApplyModel() // the viewport may have changed workspace and tab
+	r.OK(nil)
 }
 
 // decodeOptional decodes params whose fields are all optional: no params decodes

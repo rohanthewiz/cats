@@ -22,6 +22,10 @@ func (o *orch) handleCmd(c *client, m *browserproto.Cmd) {
 	// through plain NewDispatcher, which resolves to the primary view.
 	d := app.NewDispatcherFor(o.session, viewBackend{orch: o, c: c}, o.viewOf(c))
 	d.Dispatch(m.Name, app.JSONParamDecoder{Raw: m.Params}, browserResponder{o: o, c: c, id: m.ID})
+	// Whatever the command did to focus, record where this window is now — the
+	// generic half of cats-level navigation (see noteNav for why post-dispatch
+	// snapshot rather than instrumenting the focus commands one by one).
+	o.noteNav(c, m.Name)
 }
 
 // viewBackend is orch as seen from inside one window. It is the whole of the

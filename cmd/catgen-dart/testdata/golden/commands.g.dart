@@ -106,6 +106,10 @@ abstract final class CmdName {
 
   static const String agentFocus = 'agent.focus';
 
+  static const String navBack = 'nav.back';
+
+  static const String navForward = 'nav.forward';
+
   static const String serverReloadConfig = 'server.reload_config';
 
   static const String serverStop = 'server.stop';
@@ -3293,6 +3297,8 @@ const List<CommandSpec> kCommandSpecs = <CommandSpec>[
   CommandSpec('workspace.move', paramsRequired: true),
   CommandSpec('workspace.lock', paramsRequired: true),
   CommandSpec('agent.focus', paramsRequired: true),
+  CommandSpec('nav.back'),
+  CommandSpec('nav.forward'),
   CommandSpec('server.reload_config'),
   CommandSpec('server.stop'),
   CommandSpec('usage.refresh'),
@@ -3508,6 +3514,16 @@ mixin CatsCommands implements CatsCommandTransport {
   /// `agent.focus`
   Future<void> agentFocus(PaneParams params) async {
     await invoke(CmdName.agentFocus, params.toJson());
+  }
+
+  /// `nav.back`
+  Future<void> navBack() async {
+    await invoke(CmdName.navBack, null);
+  }
+
+  /// `nav.forward`
+  Future<void> navForward() async {
+    await invoke(CmdName.navForward, null);
   }
 
   /// `server.reload_config`

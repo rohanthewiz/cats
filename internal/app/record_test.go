@@ -35,6 +35,8 @@ var recordedParamClasses = map[string]map[string]string{
 	"pane.focus_direction": {"dir": ClassPlain},
 	"pane.cycle":           {"next": ClassPlain},
 	"pane.last":            {},
+	"nav.back":             {},
+	"nav.forward":          {},
 	"pane.swap":            {"dir": ClassPlain},
 	"pane.swap_with": {
 		"pane":   ClassPaneHandle,

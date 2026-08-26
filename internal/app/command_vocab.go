@@ -51,6 +51,12 @@ const (
 	CmdWorkspaceMove      = "workspace.move"
 	CmdWorkspaceLock      = "workspace.lock"
 	CmdAgentFocus         = "agent.focus"
+	// CmdNavBack / CmdNavForward walk the issuing window's focus-location
+	// history (nav.go): back to where focus was before, forward again. Temporal
+	// navigation, where pane.focus_direction is spatial and pane.last is a
+	// single-slot toggle.
+	CmdNavBack            = "nav.back"
+	CmdNavForward         = "nav.forward"
 	CmdServerReloadConfig = "server.reload_config"
 	CmdServerStop         = "server.stop"
 
@@ -342,8 +348,12 @@ var commandSpecs = []CommandSpec{
 	{Name: CmdWorkspaceMove, Params: MoveWorkspaceParams{}, ParamsRequired: true, Recorded: true},
 	{Name: CmdWorkspaceLock, Params: LockWorkspaceParams{}, ParamsRequired: true, Recorded: true},
 
-	// Global focus + server lifecycle.
+	// Global focus + server lifecycle. nav.back/forward are Recorded on the
+	// pane.last precedent: a relative motion over ephemeral focus state, whose
+	// replay means "do the same motion", not "land on the same pane".
 	{Name: CmdAgentFocus, Params: PaneParams{}, ParamsRequired: true, Recorded: true},
+	{Name: CmdNavBack, Recorded: true},
+	{Name: CmdNavForward, Recorded: true},
 	{Name: CmdServerReloadConfig, Recorded: true},
 	{Name: CmdServerStop},
 

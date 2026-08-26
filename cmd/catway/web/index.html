@@ -4412,6 +4412,18 @@
         ((e.metaKey && !e.ctrlKey) || (e.ctrlKey && e.altKey))) {
       e.preventDefault(); setSidebarHidden(!sidebarHidden()); return;
     }
+    // ⌘[ / ⌘] (mac) — Ctrl+Alt+[ / ] elsewhere: cats-level back/forward
+    // through this window's focus-location history (nav.back / nav.forward),
+    // reaching across panes, tabs and workspaces. The server owns the stack;
+    // the page only names the direction. Shift is excluded so ⌘⇧[ / ⌘⇧]
+    // (browser tab prev/next) stay with the browser.
+    if (e.type === "keydown" && !e.shiftKey &&
+        (e.code === "BracketLeft" || e.code === "BracketRight") &&
+        ((e.metaKey && !e.ctrlKey) || (e.ctrlKey && e.altKey))) {
+      e.preventDefault();
+      sendCmd(e.code === "BracketLeft" ? "nav.back" : "nav.forward", {});
+      return;
+    }
     const isV = e.key === "v" || e.key === "V";
     if (e.type === "keydown" && e.metaKey && !e.ctrlKey && isV) { e.preventDefault(); pasteText(); return; }
     // ⌘+ / ⌘- / ⌘0 size the terminal type instead of zooming the browser (page
@@ -4448,6 +4460,21 @@
   }
   window.addEventListener("keydown", onKey);
   window.addEventListener("keyup", onKey);
+
+  // The mouse's back/forward buttons (4/5, ev.button 3/4) mirror ⌘[ / ⌘]:
+  // cats-level navigation, wherever on the page they are pressed. Capture
+  // phase + preventDefault on mousedown is what stops the browser from
+  // driving its own history instead (which would tear down the WebSocket);
+  // the auxclick suppressor covers browsers that navigate on that event.
+  // The pane mouse path never sees these buttons (attachMouse drops >2).
+  window.addEventListener("mousedown", (ev) => {
+    if (ev.button !== 3 && ev.button !== 4) return;
+    ev.preventDefault(); ev.stopPropagation();
+    sendCmd(ev.button === 3 ? "nav.back" : "nav.forward", {});
+  }, true);
+  window.addEventListener("auxclick", (ev) => {
+    if (ev.button === 3 || ev.button === 4) ev.preventDefault();
+  }, true);
 
   // ---- Clipboard ----
   // The mac app binds catsClipWrite/catsClipRead (native pasteboard) into the
@@ -6406,6 +6433,7 @@
       left.appendChild(helpSection("global", [
         ["command palette", ["⌘K", "Ctrl+Alt+K"]],
         ["hide / show the sidebar", ["⌘B", "Ctrl+Alt+B"]],
+        ["back / forward (pane & workspace history)", ["⌘[", "⌘]", "Ctrl+Alt+[ / ]"]],
         ["paste", ["⌘V", "Ctrl+Shift+V*"]],
         ["bigger / smaller font", ["⌘+", "⌘-"]],
         ["reset font size", ["⌘0"]],
@@ -6434,6 +6462,7 @@
         ["reorder tabs / workspaces", ["drag"]],
         ["rename pane / tab / workspace", ["double-click its title"]],
         ["scrollback", ["wheel", "drag the scrollbar"]],
+        ["back / forward (pane & workspace history)", ["back / forward buttons"]],
         ["launcher menu", ["⚙ at the right of the tab row"]],
       ]));
       cols.appendChild(left);
@@ -6900,8 +6929,11 @@
   //     recorded with no extra protocol at all.
   //
   // replaceState, not pushState: switching workspaces inside a window is not a
-  // navigation, and filling the back button with them would make ⌘[ mean
-  // something unhelpful.
+  // browser navigation, and filling the browser's back button with them would
+  // tear down the WebSocket on every step back. ⌘[ / ⌘] mean something better
+  // instead: cats-level navigation over the focus-location history (see the
+  // nav.back/forward handler in onKey), which walks panes and workspaces
+  // without ever reloading the page.
   function syncWindowURL(msg) {
     let active = "";
     for (const w of msg.workspaces) if (w.active) active = w.id;

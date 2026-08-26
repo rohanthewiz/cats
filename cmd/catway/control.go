@@ -49,6 +49,9 @@ func (o *orch) controlDispatch(method string, params json.RawMessage, r app.Resp
 	}
 	o.post(func() {
 		app.NewDispatcher(o.session, o).Dispatch(method, app.JSONParamDecoder{Raw: params}, r)
+		// Record where the primary view's focus is now — a view-less caller
+		// acts on the primary view, so its history is the one to note (nav.go).
+		o.noteNav(nil, method)
 	})
 }
 

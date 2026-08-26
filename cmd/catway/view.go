@@ -55,6 +55,11 @@ type view struct {
 	// the change detection that used to be one field on the orch is one per
 	// view.
 	title string
+	// nav is this window's focus-location history (nav.back / nav.forward).
+	// Per-window for the same reason ws is: two windows on one session each
+	// have their own trail of places they have been, and walking one must not
+	// move the other. Lazily allocated by navHistoryFor; never persisted.
+	nav *app.NavHistory
 }
 
 // --- resolving a view ---------------------------------------------------------

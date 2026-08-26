@@ -288,6 +288,9 @@ func (o *orch) advanceRunbook(run *runbookRun) {
 		}}
 
 		app.NewDispatcher(o.session, o).Dispatch(step.Run, app.JSONParamDecoder{Raw: raw}, resp)
+		// A runbook step is a view-less caller: note the primary view's focus
+		// location, same as the control path (nav.go).
+		o.noteNav(nil, step.Run)
 		inFlight = false
 		if !inline {
 			return // still pending; the responder resumes the chain

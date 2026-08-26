@@ -37,6 +37,8 @@ const (
 	CmdWorkspaceRename    = app.CmdWorkspaceRename
 	CmdWorkspaceMove      = app.CmdWorkspaceMove
 	CmdAgentFocus         = app.CmdAgentFocus
+	CmdNavBack            = app.CmdNavBack
+	CmdNavForward         = app.CmdNavForward
 	CmdServerReloadConfig = app.CmdServerReloadConfig
 	CmdServerStop         = app.CmdServerStop
 	CmdWorktreeList       = app.CmdWorktreeList
