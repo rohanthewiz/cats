@@ -1,0 +1,22 @@
+  /* HISTORY: one row per recorded command — its exit marker, the command, and
+     how long it took. Rows ARE clickable (a click jumps the pane's viewport to
+     that command's output), which is why these get the hover treatment the
+     host rows deliberately do not. */
+  #hist-list li { display:flex; align-items:baseline; gap:6px; cursor:pointer; }
+  #hist-list .cdot { flex:none; font-size:calc(9px * var(--sb-scale)); color:var(--ok); }
+  #hist-list li.failed .cdot { color:var(--err); }
+  /* An unknown status is neither: the shell never said, and colouring it green
+     would claim a success nobody reported. */
+  #hist-list li.unknown .cdot { color:var(--muted); opacity:.6; }
+  #hist-list .ccmd { min-width:0; flex:1 1 auto; overflow:hidden; text-overflow:ellipsis;
+    white-space:nowrap; font-family:var(--mono, monospace); }
+  /* An agent's commands are marked, because "what did claude actually run" is
+     the question this section can answer and a shell history cannot. */
+  #hist-list .corigin { flex:none; color:var(--accent); opacity:.75;
+    font-size:calc(9px * var(--sb-scale)); }
+  #hist-list .cdur { flex:none; margin-left:auto; color:var(--muted);
+    font-size:calc(9px * var(--sb-scale)); font-variant-numeric:tabular-nums; }
+  /* A row whose block is gone — its output has scrolled out of the pane — still
+     lists (it is history), but says so by not offering a click. */
+  #hist-list li.gone { cursor:default; opacity:.6; }
+  #hist-list li.gone:hover { background:none; }

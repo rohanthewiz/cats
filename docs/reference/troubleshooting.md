@@ -28,8 +28,9 @@ spot a stale install.
 
 ## UI changes do not appear
 
-`cmd/catway/web/index.html` is compiled into the binary with `//go:embed`. A
-browser reload keeps serving the old page. Rebuild and restart `catway`.
+The page (`cmd/catway/web`: element components, `css/`, `js/`) is compiled into
+the binary with `//go:embed`. A browser reload keeps serving the old page.
+Rebuild and restart `catway`.
 
 Theme and keybinding edits are the exception: `catctl reload`.
 

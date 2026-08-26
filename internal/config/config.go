@@ -543,7 +543,7 @@ func (s Server) TTL() (time.Duration, error) {
 
 // defaultCopyMode is the copy-mode action → keys table. Its keys are the full
 // set of known copy-mode actions; Validate rejects any others. Keep in sync with
-// copyModeKey in index.html.
+// copyModeKey in cmd/catway/web/js/23-copymode.js.
 var defaultCopyMode = map[string][]string{
 	"move-left":  {"ArrowLeft", "h"},
 	"move-right": {"ArrowRight", "l"},

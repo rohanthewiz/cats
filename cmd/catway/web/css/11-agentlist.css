@@ -1,0 +1,50 @@
+  #agent-list li { gap:6px; }
+  /* The agent sitting in the focused pane, highlighted the same way its pane row
+     is — the two sections then read as one selection, not two. */
+  #agent-list li.focused { background:var(--chrome-focus); color:var(--fg-strong); }
+  #agent-list .aname { color:var(--fg-strong); margin-left:0; }
+  /* The tool name carries its identity hue; the model beside it stays neutral,
+     one step under the name. Both live inside .aname so the row's flex gap
+     still sees a single item — the pair reads as one field ("ced main"), and
+     splitting them for colour must not split them for layout.
+
+     Colour only, no bold: the row is 11px monospace, the focused row already
+     claims weight and a background, and the age can go bold when it turns
+     stale. A fourth emphasis channel here would be competing with three that
+     already mean something. */
+  #agent-list .amodel { color:var(--fg-soft); }
+  .ah1 { color:var(--agent-1); } .ah2 { color:var(--agent-2); }
+  .ah3 { color:var(--agent-3); } .ah4 { color:var(--agent-4); }
+  .ah5 { color:var(--agent-5); } .ah6 { color:var(--agent-6); }
+  #agent-list .ameta { color:var(--muted); font-size:calc(10px * var(--sb-scale)); margin-left:auto; }
+  /* Time since the last state change, dimmer than the state it precedes: the
+     state is the fact, the age only qualifies how stale that fact is. */
+  #agent-list .aage { opacity:.75; }
+  /* ...until the fact the age qualifies is itself the news. An agent's prompt
+     cache lives about an hour, so a settled state that has sat for 45 minutes is
+     one whose next turn is about to be re-read from scratch. Past that mark the
+     age stops being a footnote: full opacity, and the figure alone in bold — the
+     trailing "ago" is grammar, not a number, and bolding it only blurs which
+     part is the reading. The two settled states get different colors because the
+     user's move differs: idle is still warm and can be answered (caution), while
+     done-unseen already finished unattended (maroon — the loss, not the warning).
+     Both derive from theme colors so a light or high-contrast theme keeps them:
+     the maroon is the theme's red pulled down toward a dark oxblood, with a
+     literal fallback for engines without color-mix. */
+  #agent-list .aage.stale { opacity:1; }
+  #agent-list .aage.stale .anum { font-weight:700; }
+  #agent-list .aage.stale-idle { color:var(--warn); }
+  #agent-list .aage.stale-done { color:#b04a4a; }
+  #agent-list .aage.stale-done { color:color-mix(in srgb, var(--err) 65%, #6b0f10); }
+  /* An agent whose workspace is locked steps back the same way its workspace row
+     does, and by the same amount: the two sections then agree at a glance about
+     which work is set aside. Clicking it reveals nothing either — the row loses
+     the pointer for the same reason the workspace row does, since revealing a
+     pane *is* a workspace switch. */
+  #agent-list li.agent.wslocked { opacity:.5; cursor:default; }
+  /* Hovering restores it: whatever the row is dimmed for, the user is reading it
+     now, and the state text is the smallest type in the sidebar. */
+  #agent-list li.agent.wslocked:hover { opacity:1; }
+  #agent-list li.empty { color:var(--muted); font-style:italic; cursor:default; }
+  #agent-list li.empty:hover { background:none; }
+

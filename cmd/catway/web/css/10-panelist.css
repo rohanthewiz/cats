@@ -1,0 +1,81 @@
+
+  /* The same badge as the pane header's, on the workspace rows: a workspace's
+     host is where its NEW panes land, which is worth seeing beside its name once
+     the two can differ. Pinned before the agent rollup at the right edge. */
+  #ws-list li.ws .wshost { color:var(--muted); font-size:calc(10px * var(--sb-scale));
+    flex:none; margin-left:4px; }
+  /* "Also open in another window": the same muted weight as the host badge —
+     it reports, it does not warn. */
+  #ws-list li.ws .wswin { color:var(--muted); font-size:calc(10px * var(--sb-scale));
+    flex:none; margin-left:4px; }
+  #pane-list li, #agent-list li { cursor:pointer; }
+  #pane-list li:hover, #agent-list li:hover { background:var(--panel2); }
+  #pane-list li.focused { background:var(--chrome-focus); color:var(--fg-strong); }
+  /* The list spans every workspace now, so it carries its own scroll — otherwise
+     a session with a few tabs of panes pushes Agents off the sidebar. */
+  #pane-list { max-height:34vh; overflow-y:auto; }
+  /* Panes outside the current viewport (another tab or workspace): real, but
+     elsewhere — muted handle, and a click reveals rather than focuses. */
+  #pane-list li.off .pub { color:var(--muted); }
+  #pane-list li.off .ttl { opacity:.65; }
+  /* Each workspace's panes sit under their own header row, which doubles as the
+     collapse toggle. It replaces the plain hairline the list used to draw at the
+     boundary: the same visual break, but it now names the group and can fold it.
+     Groups after the first keep the hairline above them, on the header row rather
+     than on the first pane, so a focused pane never paints across the divider. */
+  /* Bold, so the header reads as a heading over its rows rather than as one more
+     muted row among them — at this size weight separates the two tiers better than
+     the colour alone did.
+     The Workspaces list above splits open from locked with the same kind of header
+     (see renderWorkspaces), so both lists share the style rather than each growing
+     its own copy: a fold header is a fold header wherever it appears. */
+  #pane-list li.wsgrp, #ws-list li.wsgrp { color:var(--ws-heading); font-size:calc(11px * var(--sb-scale)); text-transform:uppercase;
+    letter-spacing:.5px; cursor:pointer; font-weight:600; }
+  #pane-list li.wsgrp.sep, #ws-list li.wsgrp.sep { border-top:1px solid var(--line); margin-top:5px; padding-top:7px; }
+  #pane-list li.wsgrp:hover, #ws-list li.wsgrp:hover { background:var(--panel2); color:var(--fg-soft); }
+  /* The rollup sits ahead of the caret and the pair is pushed to the right edge. */
+  #pane-list li.wsgrp .gsum, #pane-list li.wsgrp .car,
+  #ws-list li.wsgrp .gsum, #ws-list li.wsgrp .car { margin-left:auto; }
+  #pane-list li.wsgrp .gsum + .car, #ws-list li.wsgrp .gsum + .car { margin-left:0; }
+  /* The count is the header's secondary half, so it stays at normal weight — only
+     the workspace name carries the bold. */
+  #pane-list li.wsgrp .gsum, #ws-list li.wsgrp .gsum { text-transform:none; letter-spacing:0; font-weight:400; }
+  /* The caret tracks its header's size — a step under it, as before, so the
+     fold marker stays subordinate to the name it folds. */
+  #pane-list li.wsgrp .car, #ws-list li.wsgrp .car { font-size:calc(10px * var(--sb-scale)); }
+  /* The workspace whose panes are the ones on screen, marked the way the
+     Workspaces list marks the same workspace: ● and the accent. The Panes
+     section pins it to the top regardless of what is running in it, so the mark
+     is what stops the top row reading as "busiest". */
+  #pane-list li.wsgrp.cur { color:var(--accent); }
+  /* The shelf the quiet workspaces fold into, at the foot of the list. Muted and
+     italic — the two marks this sidebar already uses for a row that is a
+     stand-in rather than a thing (#ws-list li.add, #agent-list li.empty) — so a
+     column of workspace names never reads as containing one called "more
+     workspaces". It borrows .wsgrp's caret and hairline because it folds like a
+     header, but drops the uppercase, the tracking and the weight that say "this
+     names a group": it names an absence, and the shouted form of a phrase that
+     long is the loudest thing in the section for the least reason. */
+  #pane-list li.wsgrp.more { color:var(--muted); font-style:italic;
+    text-transform:none; letter-spacing:0; font-weight:400; }
+  #pane-list li.wsgrp.more:hover { color:var(--fg-soft); }
+  /* Narrow sidebar: the label gives way first. The count and the caret are the
+     row's whole function — how much is hidden, and the way to see it — so they
+     hold their width and the phrase ellipses into whatever is left. */
+  #pane-list li.wsgrp.more > span:first-child { min-width:0; overflow:hidden; text-overflow:ellipsis; }
+  #pane-list li.wsgrp.more .gsum, #pane-list li.wsgrp.more .car { flex:0 0 auto; }
+  #pane-list .pub { color:var(--accent); }
+  #pane-list .ttl { color:var(--muted); overflow:hidden; text-overflow:ellipsis; }
+  #pane-list .ag, #agent-list .aname { margin-left:auto; }
+  .ag, .adot, .aname { font-size:calc(11px * var(--sb-scale)); }
+  .st-working { color:var(--warn); } .st-blocked { color:var(--err); }
+  .st-idle { color:var(--ok); } .st-unknown { color:var(--muted); }
+  .st-done { color:var(--done); } /* finished off-screen, not yet seen */
+  /* A working agent's dot breathes: the one state that is mid-change, so it is
+     the one marker that moves. Only the dots pulse — the agent-name text in a
+     pane row shares .st-working and would be hard to read blinking. */
+  .adot.st-working, .tmark.st-working, #ws-list .st-working { animation:dotpulse 1.5s ease-in-out infinite; }
+  @keyframes dotpulse { 0%,100% { opacity:1; } 50% { opacity:.3; } }
+  @media (prefers-reduced-motion:reduce) {
+    .adot.st-working, .tmark.st-working, #ws-list .st-working { animation:none; }
+  }

@@ -1,0 +1,71 @@
+  :root {
+    /* GoNotes-style dark green theme: warm gray-green surfaces, green accent.
+       --chrome/--chrome-focus paint the pane header strip and double as the
+       hover/selection surfaces (pane list, ctx menu, palette rows). */
+    --bg:#1f2420; --fg:#d6ddd6; --accent:#4db380; --panel:#242a25; --panel2:#2b322c;
+    /* --muted carries every secondary label (sidebar headings, status bar,
+       hints); kept near 7:1 on the panel surface so 10–12px labels stay legible. */
+    --line:#38403a; --muted:#9db0a2; --chrome:#2b322c; --chrome-focus:#3a4a3f;
+    /* Sidebar section titles pull out of --muted into a medium green so the
+       three groups read as dividers rather than as more secondary label text. */
+    --heading:#6cbf8d;
+    /* The workspace group headers inside PANES: a tier below --heading, in a
+       greenish brown so they read as group dividers without competing with the
+       green section titles. Themes that don't set it get plain --muted. */
+    --ws-heading:#a09a62;
+    /* The git branch in a pane header. Same warm tan as the workspace headers
+       (and derived from it for themes that author neither): it has to read as a
+       distinct field beside the green handle and the yellow agent without
+       adding a fourth hue to a 19px strip. */
+    --branch:#a09a62;
+    /* The todo reminder mark keeps the old warm yellow: it has to stay clear of
+       the green agent-state dots so it reads as a reminder, not as a state. */
+    --todo:#f0dfa0;
+    --ok:#6ac47a; --warn:#e0b64e; --err:#e57373; --done:#00ccf5;
+    /* Agent identity hues. AGENTS hands each tool name one of these six slots
+       (AGENT_HUE below), so claude and ced in the same list are told apart
+       without reading. Six fixed slots rather than a colour per agent: the
+       label space is open-ended, so agents share slots and the map decides who
+       collides. Kept clear of the state colours directly above — those mean
+       "working / blocked / finished" in the same row, one span over. */
+    --agent-1:#6cbf8d; --agent-2:#7fb3ff; --agent-3:#c99bf0;
+    --agent-4:#e6a0c4; --agent-5:#e0955e; --agent-6:#79cfc4;
+    /* Accent desaturated most of the way to gray: the focused pane's outline
+       sits right next to terminal text all day, so it reads as a gray-green
+       hairline just above --line rather than a green marker. */
+    --accent-dim:#3d4a43;
+    /* Text emphasis ladder (formerly hardcoded hexes, var-ified so light
+       themes can invert them): strong = active/selected labels, soft = hover
+       lift on secondary text, bright = the loudest hover state. */
+    --fg-strong:#e8e8e8; --fg-soft:#ddd; --fg-bright:#fff;
+    /* Focused pane-header text + its (dimmer) buttons. */
+    --chrome-fg:#e6efe7; --chrome-fg-dim:#cfe0d3;
+    /* Text on an accent-colored surface (primary buttons). */
+    --accent-fg:#0e1a13;
+    /* The link-error banner's own surface — red-tinted, unlike --err text. */
+    --err-bg:#2a1c1c; --err-fg:#ffd7d7;
+    /* Translucent washes. hover flashes icon buttons; the rest paint the
+       canvas overlays (drag selection, copy-mode cursor, scrollbar thumb),
+       read from JS via getComputedStyle so themes reach the canvas too. */
+    --hover:rgba(255,255,255,.16);
+    --sel-fill:rgba(88,204,140,0.30); --cm-cursor:rgba(122,220,170,0.95);
+    --scroll-thumb:rgba(122,220,170,0.6); --scroll-thumb-idle:rgba(255,255,255,0.25);
+    /* Terminal canvas defaults, used when a pane's frame doesn't name its own
+       colors. Split out from --bg/--fg so a theme can tint the chrome without
+       recoloring terminal content. */
+    --term-fg:#d6ddd6; --term-bg:#1f2420;
+    /* --sb-scale sizes the whole left column as one unit: the column width and
+       every type size inside it are expressed against it, so the sidebar grows
+       or shrinks without any of its parts drifting out of proportion. */
+    --sb-scale:1.15;
+    /* Sidebar column width. Anything else that has to clear the sidebar (the
+       banner) reads it from here so the two can't drift apart. */
+    --sidebar-w:calc(253px * var(--sb-scale));
+    /* Chat column width. 0 keeps the grid math identical to the pre-chat
+       layout when the panel is closed; body.chat-open widens it. */
+    --chat-w:0px;
+    /* Splitter column width. Its own variable because the folded sidebar widens
+       it (body.sb-hidden) to carry a visible reveal handle, and #banner has to
+       clear both tracks to sit flush against the terminals. */
+    --gutter-w:5px;
+  }

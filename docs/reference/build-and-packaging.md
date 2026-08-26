@@ -216,11 +216,13 @@ on.
 
 ## Editing the web UI
 
-`cmd/catway/web/index.html` is compiled into the binary with `//go:embed`.
+The page is assembled by the `cmd/catway/web` package — element components for
+the markup, `css/*.css` for the stylesheet, `js/*.js` for the front-end — and
+compiled into the binary with `//go:embed`.
 
 ```mermaid
 flowchart LR
-  E["edit index.html"]
+  E["edit a component,<br/>css/ or js/"]
   B["rebuild catway"]
   R["restart catway"]
   L["reload the browser"]

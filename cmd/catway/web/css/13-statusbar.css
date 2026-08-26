@@ -1,0 +1,21 @@
+  /* ---- Workspace toolbar ----
+     The app-global affordances — palette, plugins, and the ⚙ menu — pinned at
+     the right end of the tab row so the panes keep the full height below the
+     tabs. The pane-scoped indicators that used to share the row (ZOOM chip,
+     copy-mode bar) ride the header of the pane they describe instead: a global
+     bar naming one pane's mode read as the app's.
+
+     Every item is the same full-height hit target divided from its neighbour by
+     a hairline rule, so the row reads as a row of controls rather than one run
+     of small grey text. The gear keeps the far-right slot it has always had. */
+  #statusbar { flex:none; display:flex; align-items:stretch;
+    font-size:12px; color:var(--muted); border-left:1px solid var(--line); }
+  #statusbar .tbtn { display:flex; align-items:center; gap:6px; padding:0 12px;
+    cursor:pointer; white-space:nowrap; border-left:1px solid var(--line); }
+  #statusbar .tbtn:first-child { border-left:none; }
+  #statusbar .tbtn:hover { background:var(--hover); color:var(--fg-bright); }
+  /* The leading glyph of a labelled item (⌘K, the plugin mark) carries the
+     accent so the eye lands on it before reading the word beside it. */
+  #statusbar .tbtn .tmk { color:var(--accent); }
+  #statusbar .tbtn:hover .tmk { color:var(--fg-bright); }
+

@@ -1,0 +1,21 @@
+  /* ---- Plugins dialog ----
+     Reuses the palette list chrome, but rows are inert info lines whose
+     affordances are the per-row action buttons (run / update / uninstall) —
+     smaller than the footer .btns so a row stays one compact line. */
+  .modal.plugins { width:620px; } /* room for id + version + name before the three buttons */
+  .modal.plugins .row { cursor:default; }
+  /* The status tag only renders when there is a status (linked/broken), so it
+     hugs its text instead of reserving the palette's 52px kind slot — which,
+     for the common installed case, was 52px of nothing pushing the label into
+     truncation. */
+  .modal.plugins .row .kind { width:auto; }
+  /* The linked-checkout path. Shrinks before the label does (flex 0 1 auto with
+     min-width:0) so a deep path truncates instead of pushing the buttons off. */
+  .pal .row .sub { color:var(--muted); font-size:11px; flex:0 1 auto; min-width:0;
+    overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+  .pal .row .acts { margin-left:auto; display:flex; gap:4px; flex:none; }
+  .pal .row .acts button { background:var(--panel); color:var(--fg); border:1px solid var(--line);
+    border-radius:4px; padding:1px 8px; font:inherit; font-size:11px; cursor:pointer; }
+  .pal .row .acts button:hover { border-color:var(--accent); color:var(--fg-bright); }
+  .pal .row .acts button.danger:hover { border-color:var(--err); background:var(--err); }
+

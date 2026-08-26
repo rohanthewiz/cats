@@ -102,7 +102,7 @@ func themeStyle(t theme.Theme) string {
 func keybindingsScript(k config.Keybindings) string {
 	// json.Marshal escapes <, >, & (SetEscapeHTML default), so a value can't
 	// close the <script>. A marshal failure (impossible for a string map) drops
-	// the block, and index.html falls back to its built-in table.
+	// the block, and the front-end falls back to its built-in table.
 	data, err := json.Marshal(map[string]any{"copyMode": k.CopyMode})
 	if err != nil {
 		return ""

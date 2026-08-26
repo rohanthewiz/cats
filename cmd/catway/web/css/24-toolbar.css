@@ -1,0 +1,10 @@
+  /* ---- Toolbar item extras (WS8) ----
+     The gear is the one icon-only item, so it sizes its glyph up and drops the
+     label gap; its pending-update dot hangs off the glyph itself (the .g span)
+     rather than off the padded hit target, which would float it out in the
+     whitespace between the gear and the panel edge. */
+  #gear { font-size:16px; padding:0 11px; }
+  #gear .g { position:relative; display:inline-block; line-height:1; }
+  #gear.badge .g::after { content:""; position:absolute; top:-1px; right:-4px; width:6px; height:6px;
+    border-radius:50%; background:var(--accent); }
+

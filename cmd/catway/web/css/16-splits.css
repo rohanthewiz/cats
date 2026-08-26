@@ -1,0 +1,9 @@
+  /* ---- Split resize handles (WS8) ---- */
+  .split { position:absolute; z-index:4; }
+  .split.h { cursor:col-resize; }
+  .split.v { cursor:row-resize; }
+  .split::after { content:""; position:absolute; inset:0; margin:auto; background:transparent; transition:background .1s; }
+  .split.h::after { width:2px; }
+  .split.v::after { height:2px; }
+  .split:hover::after, .split.dragging::after { background:var(--accent); }
+

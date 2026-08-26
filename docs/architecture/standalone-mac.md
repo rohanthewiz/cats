@@ -22,7 +22,7 @@ flowchart TB
       THB["cathost (bundled)"]
       CTLB["catctl (bundled)"]
     end
-    WK["WKWebView<br/>renders the embedded index.html"]
+    WK["WKWebView<br/>renders the embedded page"]
     GW["catway process<br/>127.0.0.1:ephemeral · --auth none"]
     TH["cathost process<br/>-persistent"]
     SH["shells and agents"]

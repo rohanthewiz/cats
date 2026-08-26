@@ -1,0 +1,17 @@
+  body.chat-open { --chat-w:340px; }
+  html,body { margin:0; height:100%; background:var(--bg); color:var(--fg);
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; overflow:hidden; }
+  #app { position:fixed; inset:0; display:grid; grid-template-columns:var(--sidebar-w) var(--gutter-w) 1fr var(--chat-w); }
+  /* Each column is nailed to its child by hand rather than left to auto-placement.
+     Auto-placement fills tracks in DOM order from the grid items that exist, so a
+     child that goes display:none (body.sb-hidden #sidebar) does not leave a hole —
+     it drops out of the sequence and every later child slides one track left. That
+     put the splitter in the 0px sidebar track (nothing left to click to reveal) and
+     #main in the 5px gutter track (the terminals squeezed to a sliver), which is
+     unrecoverable without the keyboard. Explicit placement is immune: a hidden
+     child's track simply stays empty. */
+  #sidebar  { grid-column:1; }
+  #splitter { grid-column:2; }
+  #main     { grid-column:3; }
+  #chat     { grid-column:4; }
+

@@ -1,0 +1,18 @@
+  /* ---- Pane-list hover tooltip ----
+     The sidebar pane rows truncate title/agent to fit their narrow column, so
+     the full details are only reachable on hover. This styled popup mirrors the
+     ctxmenu look (panel2 surface, drop shadow) but lays its fields out as a
+     two-column label/value grid for scannability. It is a single reused element
+     (see #panetip in JS), positioned fixed and clamped into the viewport. */
+  #panetip { position:fixed; z-index:11; background:var(--panel2); border:1px solid var(--line);
+    border-radius:6px; padding:8px 10px; box-shadow:0 6px 24px rgba(0,0,0,.5); font-size:12px;
+    max-width:340px; pointer-events:none; display:none; }
+  #panetip.show { display:grid; grid-template-columns:auto 1fr; gap:3px 10px; align-items:baseline; }
+  #panetip .k { color:var(--muted); font-size:10px; text-transform:uppercase; letter-spacing:.5px; white-space:nowrap; }
+  #panetip .v { color:var(--fg); word-break:break-word; }
+  #panetip .v.pub { color:var(--accent); }
+  #panetip .v.mono { font-family:inherit; }
+  #panetip .v.exited { color:var(--err); }
+  #panetip .v.ok { color:var(--ok); }
+  #panetip .v.err { color:var(--err); }
+

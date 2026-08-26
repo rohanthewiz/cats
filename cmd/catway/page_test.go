@@ -2,10 +2,10 @@ package main
 
 import (
 	"encoding/json"
-	"os"
 	"strings"
 	"testing"
 
+	"github.com/rohanthewiz/cats/cmd/catway/web"
 	"github.com/rohanthewiz/cats/internal/buildinfo"
 	"github.com/rohanthewiz/cats/internal/config"
 )
@@ -152,11 +152,7 @@ func TestRenderPageNoHead(t *testing.T) {
 // the source because there is no headless browser here — and the failure it
 // guards is a rename of one field on one line.
 func TestPageForwardsWorkspaceQueryInInit(t *testing.T) {
-	src, err := os.ReadFile("web/index.html")
-	if err != nil {
-		t.Fatalf("read page: %v", err)
-	}
-	page := string(src)
+	page := string(web.Page())
 	for _, want := range []string{
 		`.get("ws")`,                // it reads the query parameter
 		`workspace: urlWorkspace()`, // …and sends it on the init message
@@ -190,11 +186,7 @@ func TestPageForwardsWorkspaceQueryInInit(t *testing.T) {
 // because there is no headless canvas here, and the failure it guards is
 // someone folding the two loops back into one for the tidiness of it.
 func TestPagePaintsBackgroundsBeforeGlyphs(t *testing.T) {
-	src, err := os.ReadFile("web/index.html")
-	if err != nil {
-		t.Fatalf("read page: %v", err)
-	}
-	draw := drawFuncSource(t, string(src))
+	draw := drawFuncSource(t, string(web.Page()))
 
 	const gridLoop = "for (let y = 0; y < p.H; y++)"
 	first := strings.Index(draw, gridLoop)

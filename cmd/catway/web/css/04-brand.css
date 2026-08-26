@@ -1,0 +1,130 @@
+  /* ---- Sidebar ---- */
+  #sidebar { background:var(--panel); border-right:1px solid var(--line);
+    display:flex; flex-direction:column; overflow-y:auto; min-height:0; }
+  #brand { font-size:calc(13px * var(--sb-scale)); font-weight:600; letter-spacing:.5px; color:var(--fg-strong);
+    padding:12px 14px; border-bottom:1px solid var(--line);
+    /* A line break is allowed either side of the inline mark, so a sidebar
+       dragged to its 150px floor (or a large --sb-scale) could otherwise drop
+       the cat onto its own line above the word. Held on one line, the build
+       badge is the thing that gives way, which is the right thing to lose. */
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+    /* Both halves of this are load-bearing on a short window, and the reason is
+       the line above: a flex item's automatic minimum size is only its content
+       height while overflow is `visible`. The `overflow:hidden` we need for the
+       ellipsis drops that floor to zero, so when the sidebar's sections overflow
+       a short viewport the brand is the one child that CAN give way — it gets
+       squeezed to a sliver and clips its own logo, instead of #sidebar's
+       overflow-y:auto scrolling. flex:0 0 auto puts the floor back explicitly,
+       which is what we wanted from `auto` anyway. Every other #sidebar child
+       leaves overflow visible, so they keep the automatic floor for free. */
+    flex:0 0 auto;
+    /* Anchor for the fold button below, plus the gutter it sits in. The right
+       pad is reserved rather than left to chance: the wordmark and its build
+       badge are a nowrap run that ellipsises, and without the reservation a
+       narrow column would run that text under the button instead of clipping
+       short of it. The two lengths are coupled — see #sb-fold. */
+    position:relative; padding-right:calc(10px + 18px * var(--sb-scale)); }
+  #brand small { color:var(--muted); font-weight:400; margin-left:6px; }
+  /* The fold button: the pointer's way to put the column away, paired with the
+     reveal handle that takes its place (body.sb-hidden #splitter::after). It is
+     the mirrored glyph of that handle — '‹' here, '›' there — so the pair reads
+     as one control that moves with the column rather than as two unrelated
+     buttons.
+
+     Absolutely positioned rather than laid out. #brand is a nowrap inline run
+     (mark, wordmark, build badge) and the note above it explains why that has
+     to stay inline; a flex row would have re-spaced the badge. Taking the
+     button out of flow leaves that run exactly as it was and costs the column
+     no height — it sits in the padding the rule above reserves for it.
+
+     No tab stop. The window-level keydown handler routes the keyboard to the
+     focused pane and preventDefaults nearly everything, so a focused button
+     could never be activated by Enter or Space — leaving it tab-focusable would
+     build a stop that swallows focus and does nothing. ⌘B is the keyboard path,
+     and the title says so. */
+  #sb-fold { position:absolute; top:50%; right:8px; transform:translateY(-50%);
+    width:calc(18px * var(--sb-scale)); height:calc(20px * var(--sb-scale));
+    display:flex; align-items:center; justify-content:center; padding:0;
+    background:none; border:1px solid transparent; border-radius:4px;
+    color:var(--muted); font-family:inherit; font-size:calc(14px * var(--sb-scale));
+    line-height:1; cursor:pointer; }
+  /* Lit the same way the reveal handle lights on hover, for the same reason:
+     the two are one control, so they answer the pointer identically. */
+  #sb-fold:hover { background:var(--accent-dim); border-color:var(--accent); color:var(--fg-bright); }
+  /* The mark sits inline and rides the text baseline rather than turning
+     #brand into a flex row: the build badge appended below is a sibling of the
+     wordmark, and a flex context would have re-spaced it. The nudge scales
+     with --sb-scale along with the box so the pairing holds at every zoom.
+     Accent-colored so the logo reads as mark + wordmark, not one run of text.
+
+     The box is 19 WIDE by 16 TALL, which is not the artwork's aspect — the
+     squash is deliberate, and the svg carries preserveAspectRatio="none" to
+     perform it (see the note on the tag). A wider-than-tall mark sits better
+     beside a single line of type than the square one did, and it buys back
+     ~6px of header height, since the mark is the tallest thing on that line
+     and therefore what sets the row's height.
+
+     The nudge is derived from the artwork's crop rather than guessed, and the
+     squash changes the derivation, so here it is in full. gen-trace crops the
+     viewBox with ~2 units of pad around the ink; measured against the compact
+     path that actually ships, the pad under the chin is 1.32 units of the
+     133.93-unit box (the simplification pulls the extreme point in a little,
+     which is why it is not a clean 2). With preserveAspectRatio="none" the
+     viewBox maps straight onto the box, so that pad lands as 1.32/133.93 x 16
+     = 0.16px under the chin — and the 3.6-unit stroke the tag adds spends 1.8
+     of those units growing the chin downward, which is 0.48 units MORE than
+     there was room for. The chin therefore ends up 0.48/133.93 x 16 = 0.06px
+     below the box rather than inside it, so the geometric nudge is +0.06px:
+     under a tenth of a pixel, and the wrong way round from the optical drop
+     below, which is why it is recorded and not applied. It is spelled out
+     rather than deleted because the number is derived, not absent — re-crop
+     the artwork, change the height, or change the stroke, and it has to be
+     re-derived. (Rasterised, the overhang measures 0.51 units rather than the
+     arithmetic's 0.48: the round cap on the chin's own segment ends adds the
+     difference.)
+
+     What ships is 1.5px *below* that zero, and the difference is optical, not
+     geometric. Sitting the chin exactly on the baseline aligns the mark with
+     where the letters end, but the wordmark is set in caps and figures whose
+     mass fills the whole cap height, while the mark's mass — the eyes and the
+     brow — clusters in its upper half. Matched at the baseline the mark reads
+     as riding high against that block of type. Dropping it a hair re-centers
+     the two masses against each other. The chin then hangs 1.5px under the
+     baseline, which is what overflow:visible above already permits.
+
+     The gap to the wordmark is 9px rather than the 6px it was. The mark is an
+     open outline, so its right edge is a thin curve with air behind it, and it
+     needs more clearance than a solid glyph would to keep from reading as a
+     letter of the word it precedes. Both lengths scale with --sb-scale, like
+     the box itself, so the pairing survives zoom.
+
+     overflow:visible is what makes both of those legal. 1.32 units of pad means
+     any stroke past ~2.6 units puts the chin outside the viewBox, and an
+     outermost svg clips to its viewport by default — the chin would flatten
+     silently. The stroke IS past that now, so this is load-bearing rather than
+     precautionary: without it the 3.6-unit weight would cut the bottom of the
+     chin off flat. Letting it paint outside costs nothing (the mark is inline
+     with 9px of margin and the row has 12px of padding), and it is also what
+     makes the optical nudge above free: the 1.5px the chin drops is overhang
+     the box no longer clips.
+
+     The lowest ink is the chin: mark 06 is a head with no ground line under it,
+     so the chin is what sits on the text baseline. (Mark 10, which this
+     replaced, ended in a cursor bar below the chin and aligned THAT instead —
+     if a mark with a bar ever comes back, align the bar, or it hangs below the
+     wordmark like a descender.) */
+  #brand .mark { width:calc(19px * var(--sb-scale)); height:calc(16px * var(--sb-scale));
+    vertical-align:calc(-1.5px * var(--sb-scale)); overflow:visible;
+    margin-right:calc(9px * var(--sb-scale)); color:var(--accent); }
+  /* Build badge: the short git hash this catway was built from (trailing '*' =
+     built from a modified tree). Its hover card carries the commit subject —
+     see initBuildBadge in JS. Mostly it answers "is this install stale?".
+
+     It is a build fingerprint, not a label anyone reads on purpose, so it sits
+     below the wordmark's weight: an explicit 9px (rather than <small>'s inherited
+     ~0.83em of the 13px brand) scaled with --sb-scale like every other sidebar
+     length, plus an opacity knock-down on top of --muted — the same recipe the
+     usage-list footnotes use. Hover restores full opacity along with the accent
+     so the thing you're about to read a tooltip from doesn't stay faded. */
+  #brand small.hash { cursor:help; font-size:calc(9px * var(--sb-scale)); opacity:.7; }
+  #brand small.hash:hover { color:var(--accent); opacity:1; }

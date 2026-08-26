@@ -1,0 +1,11 @@
+  /* ---- Update banner (WS8) ---- */
+  #banner { display:none; position:fixed; top:0; left:var(--sidebar-w); right:0; z-index:7; background:var(--chrome-focus);
+    color:var(--fg-strong); font-size:12px; padding:6px 12px; align-items:center; gap:10px;
+    border-bottom:1px solid var(--accent); }
+  #banner.show { display:flex; }
+  #banner .x { margin-left:auto; cursor:pointer; color:var(--muted); }
+  #banner .x:hover { color:var(--err); }
+  /* Link failures took over the banner when the status bar's conn label went
+     away — red border/text so a dropped socket still announces itself. */
+  #banner.linkerr { background:var(--err-bg); border-bottom-color:var(--err); color:var(--err-fg); }
+

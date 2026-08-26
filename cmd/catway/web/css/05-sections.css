@@ -1,0 +1,40 @@
+  #sidebar section { padding:10px 6px 8px; }
+  /* Splitter between Workspaces / Panes / Agents — the headings alone read as
+     one long list once a workspace has more than a couple of panes. */
+  #sidebar section + section { border-top:1px solid var(--line); }
+  /* The section headings sit at the top of the sidebar's three-tier scale:
+     section title (12px) > group subtitle (11px) > row (12px, but lower-case,
+     regular weight and un-tracked). A heading used to be set two steps *below*
+     its own rows, which inverted the hierarchy — the rows read as the loudest
+     thing in the section and the label above them as a footnote. Matching the
+     row's pixel size is enough to win it back: uppercase, 700 weight and the
+     tracking do the rest, so the title dominates without shouting. */
+  #sidebar h2 { font-size:calc(12px * var(--sb-scale)); text-transform:uppercase; letter-spacing:.8px; color:var(--heading);
+    font-weight:700; margin:0 0 6px; padding:0 8px; display:flex; align-items:baseline; }
+  /* Section-level controls, pinned to the heading's right edge. Muted until
+     hovered so the heading still reads as a label, not a toolbar. */
+  #sidebar h2 .hctl { margin-left:auto; display:flex; gap:1px; }
+  #sidebar h2 .hctl button { background:none; border:0; padding:0 3px; cursor:pointer;
+    font:inherit; font-size:calc(11px * var(--sb-scale)); line-height:1; color:var(--muted); }
+  #sidebar h2 .hctl button:hover { color:var(--accent); }
+  /* The section fold — the arrow outboard of everything else in the heading,
+     which hides the section's whole list rather than one group inside it. It
+     takes the same clearance the usage refresh does, and for the same reason:
+     glyph buttons at this size touching read as one smudged mark. */
+  #sidebar h2 .hctl button.secfold { margin-left:4px; }
+  /* Folded, a section is its title and that arrow and nothing else. No count, no
+     age stamp, no per-group fold pair, no backlog mark — a bar whose only job is
+     to say "this section is here, closed" has nothing to summarize, and a
+     summary there is a second thing to read on the way past it.
+     Two rules cover the lot because the title is the heading's only text node:
+     everything else in an h2 is an element, so :not() reaches all of it. */
+  #sidebar section.folded > ul { display:none; }
+  #sidebar section.folded h2 { margin-bottom:0; }
+  #sidebar section.folded h2 > :not(.hctl) { display:none; }
+  #sidebar section.folded h2 .hctl > :not(.secfold) { display:none; }
+  #sidebar ul { list-style:none; margin:0; padding:0; }
+  /* Rows sit one step under their section title and level with the group
+     subtitles — a subtitle separates itself by case, weight and colour rather
+     than by size, which keeps the whole sidebar inside a two-size scale. */
+  #sidebar li { font-size:calc(11px * var(--sb-scale)); padding:4px 8px; border-radius:4px; white-space:nowrap;
+    overflow:hidden; text-overflow:ellipsis; cursor:default; display:flex; align-items:baseline; gap:6px; }

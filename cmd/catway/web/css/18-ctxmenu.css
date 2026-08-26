@@ -1,0 +1,14 @@
+  /* ---- Context menu (WS8) ---- */
+  #ctxmenu { position:fixed; z-index:9; background:var(--panel2); border:1px solid var(--line); border-radius:6px;
+    min-width:190px; padding:4px; box-shadow:0 6px 24px rgba(0,0,0,.5); font-size:12px; }
+  #ctxmenu .item { padding:5px 10px; border-radius:4px; cursor:pointer; display:flex; gap:8px;
+    align-items:center; white-space:nowrap; }
+  #ctxmenu .item:hover { background:var(--chrome-focus); color:var(--fg-bright); }
+  #ctxmenu .item.danger:hover { background:var(--err); }
+  #ctxmenu .sep { height:1px; background:var(--line); margin:4px 6px; }
+  /* A row that opens a submenu (the host pickers, drawn only in a multi-host
+     session): the arrow is pushed to the right edge so the row still reads as
+     one label, and the child menu is an ordinary #ctxmenu positioned beside it. */
+  #ctxmenu .item.sub::after { content:"▸"; margin-left:auto; color:var(--muted); }
+  #ctxmenu .item.sub:hover::after { color:var(--fg-bright); }
+
