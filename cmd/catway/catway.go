@@ -67,6 +67,12 @@ type paneRuntime struct {
 	cols       uint16
 	rows       uint16
 	exited     *int
+	// exitedAt stamps when that exit was first observed — the reaper's clock
+	// (reap.go), zero while the pane is alive. Separate from `exited` because
+	// the two answer different questions: `exited` is "is this pane a corpse"
+	// (chrome, input refusal, capture skip), exitedAt is "how long has it been
+	// one", and only the latter is cleared when a respawn brings the pane back.
+	exitedAt time.Time
 	// --- hook-report ingestion (hooks.go), all loop-goroutine only ---
 	// agentAt stamps when the daemon's detection last reported (hook-vs-detection
 	// recency in effectiveAgent). hook is the live hook authority; agentSession
@@ -383,6 +389,12 @@ type orch struct {
 	// the loop starts.
 	cfg         config.Config
 	worktreeDir string
+	// reapAfter is how long an exited pane is kept before the sweep closes it
+	// (reap.go), from panes.reap_exited; 0 disables reaping entirely. Seeded
+	// with the built-in default by the constructor and overwritten by main from
+	// the config file — and again by server.reload_config, since a sweep
+	// parameter has nothing tying it to the process's lifetime.
+	reapAfter time.Duration
 	// --- session persistence (WS3), wired by main; zero values disable it ---
 	// sessionPath/historyPath are the state files ("" ⇒ persistence off). seeds
 	// and restoredCwds are loaded at startup and consumed by createPane for
@@ -616,6 +628,7 @@ func newOrchHostsWith(hosts []config.Host, cwd string, sess *app.Session) (*orch
 		resumePlans:    make(map[uint32][]string),
 		spawnPlans:     make(map[uint32]app.SpawnOverride),
 		capturedHist:   make(map[uint32]string),
+		reapAfter:      defaultExitedPaneTTL,
 		claudeProjects: claudeProjectsDir(),
 		modelRoots:     modelRootsFor(),
 		usageNudge:     make(chan struct{}, 1),
@@ -1221,6 +1234,23 @@ func (o *orch) createPane(rt *paneRuntime) {
 	}
 	o.hostOf(rt).send(cp)
 	rt.created = true
+	// The pane is alive again, so nothing may still be treating it as a corpse.
+	// This path is reached for a pane the daemon no longer holds — a cold
+	// restore, a host reconnect after a cathost restart, or a pane moved to
+	// another host — and every one of those ends with a fresh child on a fresh
+	// PTY. Left set, the stale exit state would refuse input to the shell that
+	// just started ("pane N has exited"), keep the pane out of the scrollback
+	// captures, hold the header red, and — since the reaper clocks off the same
+	// exit — eventually close a perfectly live pane.
+	//
+	// Windows already showing the pane are told, because a client REMEMBERS the
+	// exit: the chrome a late joiner gets omits pane_exited for a live pane, but
+	// nothing retracts one already delivered.
+	if rt.exited != nil {
+		rt.exited = nil
+		rt.exitedAt = time.Time{}
+		o.sendVisible(rt.id, browserproto.NewPaneRespawned(rt.id))
+	}
 }
 
 // paneCwd is the directory a pane's PTY spawns in: its owning workspace's
@@ -2058,10 +2088,11 @@ func (o *orch) PaneMeta(pane uint32) app.PaneMeta {
 // theme and copy-mode keybindings take effect on the next page load / browser
 // connection. Server settings (addr, sockets, auth, tls) are fixed for the
 // process's lifetime — they need a restart — so this deliberately re-applies
-// only the front-end half, plus the one server-side section that is no longer
+// only the front-end half, plus the two server-side settings that are no longer
 // restart-only: hosts:, which is diffed against the running roster exactly as
 // host.attach/host.detach diff it (a host added to the file is dialed, one
-// removed is detached and its panes re-homed). A missing config path or a
+// removed is detached and its panes re-homed), and panes.reap_exited, which is
+// nothing but a number the next sweep reads. A missing config path or a
 // parse/validate error leaves the current page in place and reports the failure
 // to the caller. Runs on the loop goroutine; the HTTP handler reads o.page
 // atomically.
@@ -2076,6 +2107,7 @@ func (o *orch) ReloadConfig() error {
 		return err
 	}
 	o.cfg = cfg // keep config.get / config.set working from the reloaded state
+	o.reapAfter = reapAfterFromConfig(cfg.Panes)
 	page := renderPage(o.baseHTML, cfg)
 	o.page.Store(&page)
 	o.broadcastTheme() // the theme lands live everywhere; keybindings still need a reload

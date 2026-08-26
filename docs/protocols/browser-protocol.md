@@ -55,6 +55,7 @@ server assumes a default 120×32 area.
 | `pane_agent` | agent identity + arbitrated state for a pane |
 | `pane_modes` | the pane's DEC mode state, so the UI knows whether a drag belongs to the program or to selection |
 | `pane_exited` | the pane's child exited |
+| `pane_respawned` | the pane has a live child again (a cathost restart or a host move re-spawned its PTY) — the retraction of a `pane_exited`, since a client remembers the exit and the chrome sent to a late joiner simply omits `pane_exited` for a live pane |
 
 A `Rect` on the wire is a compact `[x, y, w, h]` array of cell coordinates.
 

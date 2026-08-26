@@ -37,11 +37,13 @@ flowchart TD
   KIND{"which section?"}
   LIVE["theme · keybindings<br/>catctl reload — re-renders the served page"]
   HOSTS["hosts<br/>catctl reload — diffs the roster, dials/detaches"]
+  REAP["panes.reap_exited<br/>catctl reload — the next sweep reads it"]
   FIXED["server.* · persistence.*<br/>fixed for the process lifetime — restart catway"]
 
   EDIT --> KIND
   KIND -->|"appearance"| LIVE
   KIND -->|"machines"| HOSTS
+  KIND -->|"housekeeping"| REAP
   KIND -->|"wiring"| FIXED
 ```
 
@@ -263,6 +265,35 @@ persistence:
 | `resume_agents` | — | relaunch supported agent panes into their native conversations on a cold restore |
 
 See [Persistence](../subsystems/persistence.md).
+
+## `panes`
+
+```yaml
+panes:
+  reap_exited: "4h"        # "off" / "0" / "never" keeps exited panes forever
+```
+
+A pane whose child exits is **kept**: the chrome turns red, the last screen
+stays put, and the exit code lands on the header — the build output or stack
+trace that preceded the exit is usually why anyone is looking. `reap_exited` is
+how long that corpse is kept before a five-minute sweep closes it.
+
+| Key | Flag | Notes |
+|-----|------|-------|
+| `reap_exited` | — | Go duration; `""`, `"0"`, `"off"`, `"never"` disable reaping |
+
+Two things the sweep will not do, whatever this is set to:
+
+* **The session's last pane is never reaped** — an idle session cannot tidy
+  itself out of existence. The corpse still goes on the next sweep once a
+  second pane exists.
+* **A respawned pane is never reaped.** If the pane's PTY came back — a cathost
+  restart, or a move to another host — its clock is cleared and it is a live
+  pane again, chrome and all.
+
+Reaping a pane is an ordinary close from the model's point of view, so it emits
+`pane_removed` on the [control API](../protocols/control-api.md) like any other.
+Live-reloadable: `catctl reload` and the next sweep uses the new value.
 
 ## `push`
 

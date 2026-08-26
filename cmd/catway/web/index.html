@@ -4250,6 +4250,10 @@
         break;
       }
       case "pane_exited": { const p = pane(msg.pane); p.exited = msg.code; renderChrome(p); refreshPaneList(); break; }
+      // The inverse: the pane's PTY came back (cathost restart, host move), so
+      // the red header comes off. Needed because the exit is REMEMBERED here —
+      // a live pane's chrome simply omits pane_exited, which retracts nothing.
+      case "pane_respawned": { const p = pane(msg.pane); p.exited = null; renderChrome(p); refreshPaneList(); break; }
       case "agents": renderAgents(msg.items); break;
       case "hosts": renderHosts(msg.items); break;
       case "history": renderHistory(msg.entries || []); break;

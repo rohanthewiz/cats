@@ -60,6 +60,12 @@ abstract final class MsgType {
   static const String paneAgent = 'pane_agent';
   static const String paneModes = 'pane_modes';
   static const String paneExited = 'pane_exited';
+
+  /// MsgPaneRespawned is pane_exited's inverse: the pane's PTY came back
+  /// (cathost restart, or a move to another host), so the chrome a pane_exited
+  /// installed must come off. Added within protocol v1 — an old client ignores
+  /// it and shows the same stale red header it showed before this existed.
+  static const String paneRespawned = 'pane_respawned';
   static const String paneFrame = 'pane_frame';
   static const String paneDiff = 'pane_diff';
   static const String clipboard = 'clipboard';
@@ -1949,6 +1955,36 @@ class PaneRectInfo {
       };
 }
 
+/// PaneRespawned reports that a dead pane has a live child again — the inverse
+/// of PaneExited, and the only way a client learns to take the "exited (N)" off
+/// a header it already drew. There is no exit code to carry: the pane is alive.
+///
+/// It exists because a pane's death is remembered by the client, not re-derived:
+/// the chrome a late joiner gets simply omits pane_exited for a live pane, so an
+/// already-connected window needs telling.
+///
+/// Wire type: `pane_respawned`.
+class PaneRespawned {
+  const PaneRespawned({
+    required this.pane,
+  });
+
+  /// The `t` discriminator this class always carries. It is a property of
+  /// the type, not a field: a caller who could set it could set it wrong.
+  static const String type = 'pane_respawned';
+
+  final int pane;
+
+  factory PaneRespawned.fromJson(Map<String, Object?> j) => PaneRespawned(
+        pane: asInt(j['pane']),
+      );
+
+  Map<String, Object?> toJson() => {
+        't': type,
+        'pane': pane,
+      };
+}
+
 /// PaneTitle reports a pane's window title (OSC 0/2); "" clears.
 ///
 /// Wire type: `pane_title`.
@@ -2501,6 +2537,8 @@ Object? decodeDown(Map<String, Object?> j) {
       return PaneModes.fromJson(j);
     case PaneExited.type:
       return PaneExited.fromJson(j);
+    case PaneRespawned.type:
+      return PaneRespawned.fromJson(j);
     case PaneFrame.type:
       return PaneFrame.fromJson(j);
     case PaneDiff.type:

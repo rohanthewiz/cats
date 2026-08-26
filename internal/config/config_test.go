@@ -113,6 +113,9 @@ func TestValidateRejects(t *testing.T) {
 		"push bad priority":        "push:\n  priority:\n    attention: LOUD\n",
 		"push bad interval":        "push:\n  min_interval: \"soonish\"\n",
 		"push negative interval":   "push:\n  min_interval: \"-30s\"\n",
+
+		"panes bad reap":      "panes:\n  reap_exited: \"afternoonish\"\n",
+		"panes negative reap": "panes:\n  reap_exited: \"-4h\"\n",
 	}
 	for name, yaml := range cases {
 		if _, err := parse([]byte(yaml)); err == nil {
@@ -290,6 +293,37 @@ func TestParsePersistence(t *testing.T) {
 	}
 }
 
+// The exited-pane reaper's TTL: a duration by default, an off-switch by any of
+// the spellings someone reaching for one would actually type.
+func TestParsePanes(t *testing.T) {
+	got, err := parse(nil)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if d, err := got.Panes.ReapExitedAfter(); err != nil || d != 4*time.Hour {
+		t.Fatalf("default reap_exited = %v (%v), want 4h", d, err)
+	}
+
+	got, err = parse([]byte("panes:\n  reap_exited: \"30m\"\n"))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if d, _ := got.Panes.ReapExitedAfter(); d != 30*time.Minute {
+		t.Fatalf("reap_exited = %v, want 30m", d)
+	}
+
+	// Every off-switch spelling means the same thing: keep corpses forever.
+	for _, off := range []string{`""`, `"0"`, `"off"`, `"never"`, `"none"`, `"OFF"`} {
+		got, err = parse([]byte("panes:\n  reap_exited: " + off + "\n"))
+		if err != nil {
+			t.Fatalf("parse %s: %v", off, err)
+		}
+		if d, err := got.Panes.ReapExitedAfter(); err != nil || d != 0 {
+			t.Fatalf("reap_exited %s = %v (%v), want 0 (never)", off, d, err)
+		}
+	}
+}
+
 // The shipped example config must always parse against the current schema and
 // keep the defaults it documents.
 func TestExampleConfigParses(t *testing.T) {
@@ -306,6 +340,7 @@ func TestExampleConfigParses(t *testing.T) {
 	// DeepEqual covers all three sub-structs uniformly.
 	if !reflect.DeepEqual(got.Server, want.Server) ||
 		!reflect.DeepEqual(got.Persistence, want.Persistence) ||
+		!reflect.DeepEqual(got.Panes, want.Panes) ||
 		!reflect.DeepEqual(got.Worktrees, want.Worktrees) {
 		t.Fatalf("example config drifted from defaults:\n got %+v\nwant %+v",
 			got, want)

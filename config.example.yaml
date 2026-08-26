@@ -82,6 +82,18 @@ persistence:
   resume_agents: true                  # relaunch supported AI-agent panes into their
                                        # native conversation sessions on a cold restore
 
+# Panes: the one part of the pane lifecycle that acts without being asked.
+#
+# A pane whose child exits is KEPT — red chrome, last screen intact, exit code
+# on the header — because the build output or stack trace that preceded the exit
+# is usually why you are looking. This is how long that corpse is kept before
+# the sweep closes it. The session's last pane is never reaped whatever this
+# says. Live-reloadable with `catctl reload`.
+panes:
+  reap_exited: "4h"                    # Go duration. "off" (or "0"/"never")
+                                       # keeps exited panes forever, which is
+                                       # what cats did before the reaper.
+
 # Git worktrees (workspace > new worktree): where new checkouts are created.
 worktrees:
   directory: "~/.cats/worktrees"

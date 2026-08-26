@@ -179,6 +179,7 @@ flowchart TD
   HS["hook server"]
   HC["history capture ticker"]
   AM["agent-model ticker"]
+  RP["exited-pane reaper ticker"]
 
   WSR -->|"post(closure)"| Q
   DP -->|"post(closure)"| Q
@@ -186,6 +187,7 @@ flowchart TD
   HS -->|"post(closure)"| Q
   HC -->|"post(closure)"| Q
   AM -->|"post(closure)"| Q
+  RP -->|"post(closure)"| Q
   Q --> S
   Q --> RT
 ```
@@ -198,6 +200,36 @@ timeout, so a busy loop degrades into an error rather than a hang.
 `paneRuntime` holds the per-pane state that is *not* domain state: the input
 encoder, mode mirror, cached chrome for late joiners, desired grid size, exit
 status, and all the hook-arbitration bookkeeping. Also loop-only.
+
+## Reaping exited panes
+
+A pane whose child exits is kept, not closed: the chrome turns red, the last
+screen stays put, and the exit code lands on the header — the build output or
+stack trace that preceded the exit is usually why anyone is looking. Nothing
+used to take it away again except a hand-issued `pane.close`, so a long-lived
+session silted up with dead panes, each holding a slot in its tab's BSP tree, a
+`paneRuntime`, and a scrollback seed in `history.json`.
+
+A five-minute sweep (`cmd/catway/reap.go`) now closes any pane whose child
+exited more than `panes.reap_exited` ago — four hours by default, long enough
+that the pane is scenery rather than something still being read, and settable to
+`"off"` to keep the old keep-forever behaviour. The value is live-reloadable:
+the next sweep reads whatever `catctl reload` left on the orch.
+
+The clock starts on the `pane_exited` event (first one wins; a replayed
+duplicate does not reset it) and is cleared by `createPane` along with the rest
+of the pane's exit state, so a pane whose PTY was respawned under it — a cold
+restore, a host reconnect, or a move to another host — is never closed out from
+under its new shell. That clearing is also what stops a respawned pane from
+refusing input to the shell that just started, and it emits `pane_respawned` so
+a window that already drew the red header takes it back off.
+
+The sweep closes through `Session.ClosePaneIn`, which refuses the session's last
+pane, and it simply skips what it is refused: an idle session cannot reap itself
+down to nothing, and the corpse still goes on the next sweep once a second pane
+exists. A reap is an ordinary model mutation from there on — one `applyModel`
+for the whole sweep, so the layout broadcast, the `pane_removed` events, and the
+debounced save all happen exactly as they would for a hand-issued close.
 
 ## Snapshots
 

@@ -371,6 +371,22 @@ func NewPaneExited(pane uint32, code int) PaneExited {
 	return PaneExited{T: MsgPaneExited, Pane: pane, Code: code}
 }
 
+// PaneRespawned reports that a dead pane has a live child again — the inverse
+// of PaneExited, and the only way a client learns to take the "exited (N)" off
+// a header it already drew. There is no exit code to carry: the pane is alive.
+//
+// It exists because a pane's death is remembered by the client, not re-derived:
+// the chrome a late joiner gets simply omits pane_exited for a live pane, so an
+// already-connected window needs telling.
+type PaneRespawned struct {
+	T    Type   `json:"t"`
+	Pane uint32 `json:"pane"`
+}
+
+func NewPaneRespawned(pane uint32) PaneRespawned {
+	return PaneRespawned{T: MsgPaneRespawned, Pane: pane}
+}
+
 // --- Pane content (§4) ---------------------------------------------------------
 
 // Cursor is the viewport cursor. Shape is the DECSCUSR param.

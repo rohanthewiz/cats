@@ -1117,6 +1117,12 @@ func (d *daemon) dispatch(mt orchestration.MessageType, payload []byte) {
 				return
 			}
 			code := ev.ExitCode
+			if rt.exited == nil {
+				// First exit wins the timestamp. A duplicate pane_exited (a
+				// reconnect replaying it, say) must not push the reaper's
+				// four-hour clock back to zero.
+				rt.exitedAt = time.Now()
+			}
 			rt.exited = &code
 			o.sendVisible(ev.PaneID, browserproto.NewPaneExited(ev.PaneID, ev.ExitCode))
 			o.emitEvent(app.EventPaneExited, ev.PaneID, app.PaneExitedEvent{Pane: ev.PaneID, ExitCode: ev.ExitCode})

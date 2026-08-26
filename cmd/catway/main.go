@@ -205,6 +205,9 @@ func main() {
 	// that will own the checkout. Whoever runs git expands it (worktree.Do), and
 	// worktree.list reports back the value that machine resolved.
 	o.worktreeDir = cfg.Worktrees.Directory
+	// The exited-pane reaper's TTL (reap.go). Live-reloadable, so this is only
+	// the starting value — `catctl reload` re-reads it.
+	o.reapAfter = reapAfterFromConfig(cfg.Panes)
 	// Outbound push bridge: an agent that blocks while nobody is watching still
 	// reaches a phone. Deliberately independent of every client-facing path — it
 	// is an ordinary outbound POST, so it keeps working when no client is
@@ -316,6 +319,7 @@ func main() {
 	if o.historyPath != "" {
 		go o.runHistoryCapture() // periodic scrollback sweep for cold-restore seeds
 	}
+	go o.runExitedReaper() // periodic close of panes whose child exited long ago (a no-op when off)
 	go o.runAgentModels()  // periodic re-read of each agent pane's current model
 	go o.runPaneBranches() // periodic re-read of each pane's checked-out git branch
 	go o.runUsage()        // periodic re-read of the account's rate-limit windows

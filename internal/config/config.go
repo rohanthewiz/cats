@@ -45,6 +45,7 @@ type Config struct {
 	Server      Server      `yaml:"server"`
 	Hosts       []Host      `yaml:"hosts,omitempty"`
 	Persistence Persistence `yaml:"persistence"`
+	Panes       Panes       `yaml:"panes"`
 	Theme       Theme       `yaml:"theme"`
 	Keybindings Keybindings `yaml:"keybindings"`
 	Worktrees   Worktrees   `yaml:"worktrees"`
@@ -431,6 +432,44 @@ type Worktrees struct {
 	Directory string `yaml:"directory"`
 }
 
+// Panes configures the pane lifecycle — specifically the one part of it that
+// acts without being asked.
+//
+// A pane whose child exits is deliberately KEPT: the chrome turns red and the
+// last screen stays put, because the build output or stack trace that preceded
+// the exit is usually why anyone is looking. But nothing used to take it away
+// again either, so a session left running for days silted up with dead panes.
+// The reaper closes one once it is old enough to be scenery rather than
+// something still being read.
+type Panes struct {
+	// ReapExited is how long a pane is kept after its child exits, as a Go
+	// duration string. Empty, "0", "off" or "never" keeps corpses forever —
+	// the behaviour before the reaper existed, and the reason this is a
+	// duration rather than a bool: turning it off and setting it to a week are
+	// the same knob.
+	//
+	// The session's last pane is never reaped whatever this says; a terminal
+	// that tidies itself out of existence is not a tidy terminal.
+	ReapExited string `yaml:"reap_exited"`
+}
+
+// ReapExitedAfter parses ReapExited. 0 means "never reap", which is what the
+// off-switch spellings and an absent value resolve to.
+func (p Panes) ReapExitedAfter() (time.Duration, error) {
+	switch strings.ToLower(strings.TrimSpace(p.ReapExited)) {
+	case "", "0", "off", "never", "none":
+		return 0, nil
+	}
+	d, err := time.ParseDuration(p.ReapExited)
+	if err != nil {
+		return 0, fmt.Errorf("reap_exited %q: %w", p.ReapExited, err)
+	}
+	if d < 0 {
+		return 0, fmt.Errorf("reap_exited %q: must not be negative", p.ReapExited)
+	}
+	return d, nil
+}
+
 // Ledger configures the command history — one durable record per command a
 // shell ran in any pane, on any host.
 //
@@ -534,6 +573,10 @@ func Default() Config {
 			SessionTTL:    "24h",
 		},
 		Persistence: Persistence{Enabled: true, HistoryLines: 2000, ResumeAgents: true},
+		// Four hours is "since before lunch": long enough that a pane still
+		// worth reading is still there, short enough that a week-long session
+		// is not a graveyard.
+		Panes:       Panes{ReapExited: "4h"},
 		Theme:       Theme{Colors: map[string]string{}},
 		Keybindings: Keybindings{CopyMode: cloneKeyMap(defaultCopyMode)},
 		Worktrees:   Worktrees{Directory: "~/.cats/worktrees"},
@@ -655,6 +698,9 @@ func (c Config) Validate() error {
 	}
 	if c.Persistence.HistoryLines < 0 {
 		return fmt.Errorf("persistence.history_lines %d: must be >= 0", c.Persistence.HistoryLines)
+	}
+	if _, err := c.Panes.ReapExitedAfter(); err != nil {
+		return fmt.Errorf("panes.%w", err)
 	}
 	for action, keys := range c.Keybindings.CopyMode {
 		if _, ok := defaultCopyMode[action]; !ok {
