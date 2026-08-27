@@ -73,6 +73,7 @@ var subcommands = []subcommand{
 	{"panes", app.CmdPaneList, "panes", nil, "list all panes", noParams},
 	{"pane", app.CmdPaneGet, "pane [pane]", []argKind{argPane}, "describe one pane (focused by default)", buildOptPane},
 	{"hosts", app.CmdHostList, "hosts", nil, "list the cathosts panes can run on", noParams},
+	{"flags", app.CmdFlagList, "flags [kind]", []argKind{argFlagKind}, "list everything flagged, across every workspace", buildFlagList},
 	{"events", ctlproto.MethodEventsSubscribe, "events [pane]", []argKind{argPane}, "stream pane events until interrupted (Ctrl-C)", buildEvents},
 	{"clipboard", ctlproto.MethodClipboardRead, "clipboard", nil, "print the host system clipboard's text", noParams},
 
@@ -701,6 +702,26 @@ func buildUnflagPane(args []string) (json.RawMessage, error) {
 		return nil, err
 	}
 	return marshal(app.FlagPaneParams{Pane: pane, Kind: ""})
+}
+
+// buildFlagList: flags [kind] — the cross-workspace listing the marks exist for.
+//
+// Plural where `flag` is singular, the themes/theme and runbooks/runbook pair:
+// the listing and the action are different enough that one verb taking an
+// optional argument would make "did I just change something?" depend on argument
+// count.
+//
+// The kind is passed through unvalidated for the reason `flag` passes its own
+// through — flags.ParseKind on the server owns the vocabulary, so a typo here
+// gets the identical message it gets there rather than a second, drifting one.
+func buildFlagList(args []string) (json.RawMessage, error) {
+	if len(args) > 1 {
+		return nil, usageErr{"flags [kind]"}
+	}
+	if len(args) == 0 {
+		return nil, nil
+	}
+	return marshal(app.FlagListParams{Kind: args[0]})
 }
 
 // buildFlagWorkspace / buildUnflagWorkspace: flag-ws <id> <kind> [note...] /

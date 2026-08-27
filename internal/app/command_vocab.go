@@ -237,6 +237,14 @@ const (
 	CmdPaneList      = "pane.list"
 	CmdPaneGet       = "pane.get"
 	CmdHostList      = "host.list"
+	// CmdFlagList answers "what have I flagged" across the WHOLE session, which
+	// is the one question the per-scope lists cannot: a flag's value is that you
+	// can find it again from anywhere, and the marks it left are spread over
+	// every workspace's rows and every tab's panes. It is the flagged SUBSET of
+	// workspace.list and pane.list, in those lists' own order and with their own
+	// row shapes — a client that can render a workspace row or a pane row
+	// already knows how to render this, and there is no third row type to learn.
+	CmdFlagList = "flag.list"
 )
 
 // CommandSpec describes one §7 command as data: its name, the zero value of its
@@ -453,6 +461,7 @@ var commandSpecs = []CommandSpec{
 	// host.list is the one query the session cannot answer — the roster is the
 	// backend's — but it is a query all the same: no effects, no round trip.
 	{Name: CmdHostList, Result: HostListResult{}},
+	{Name: CmdFlagList, Params: FlagListParams{}, Result: FlagListResult{}},
 }
 
 // CommandSpecs returns the §7 command table, in a stable order. The returned
@@ -682,6 +691,36 @@ type FlagWorkspaceParams struct {
 	ID   string `json:"id,omitempty" cats:"handle=workspace"`
 	Kind string `json:"kind"`
 	Note string `json:"note,omitempty"`
+}
+
+// FlagListParams: flag.list. Kind narrows the listing to one kind ("" — the
+// usual call — lists every flag). It is validated with the same flags.ParseKind
+// the setters use, so `flag.list` with a typo is refused rather than answering
+// "nothing flagged", which is the one wrong answer a listing can give: it looks
+// exactly like a session with no flags in it.
+//
+// A custom glyph filters too — it is a kind like any other — which is what makes
+// `catctl flags 🍕` mean the same thing as `catctl flags followup`.
+type FlagListParams struct {
+	Kind string `json:"kind,omitempty"`
+}
+
+// FlagListResult is CmdResult.Data for flag.list: the flagged rows of
+// workspace.list and pane.list, filtered but otherwise untouched.
+//
+// Two lists rather than one merged one, and the same row structs rather than a
+// third: the fields a client wants beside the mark differ by scope (a workspace
+// has a tab count, a pane has an agent and a handle), so merging them would
+// produce a row that is half empty either way. Both are in the underlying
+// lists' order — the sidebar's own top-to-bottom order — not sorted by recency,
+// so a listing run twice in a row reads the same way and "did I clear that one"
+// is answered by a glance at the same position rather than a re-scan.
+//
+// Both slices are always present, empty rather than null, so a client can loop
+// over them without a nil check.
+type FlagListResult struct {
+	Workspaces []WorkspaceInfo `json:"workspaces"`
+	Panes      []PaneInfo      `json:"panes"`
 }
 
 // RenamePaneParams: pane.rename ("" clears the custom name).

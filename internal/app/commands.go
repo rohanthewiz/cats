@@ -1489,6 +1489,30 @@ func (d *Dispatcher) dispatch(name string, dec ParamDecoder, r Responder) {
 		info.PaneMeta = d.backend.PaneMeta(info.Pane)
 		r.OK(info)
 
+	case CmdFlagList:
+		var p FlagListParams
+		if err := decodeOptional(dec, &p); err != nil {
+			bad(err)
+			return
+		}
+		// Parsed rather than compared raw, so `flag.list` refuses a typo with the
+		// same message the setters do instead of quietly answering "nothing
+		// flagged" — the one wrong answer a listing can give, because it is
+		// indistinguishable from the truthful one.
+		kind, err := flags.ParseKind(p.Kind)
+		if err != nil {
+			bad(err)
+			return
+		}
+		res := d.session.ListFlaggedIn(d.ws(), kind)
+		// The same runtime merge pane.list does, and only for the flagged panes:
+		// a flag on an agent pane is worth nothing in a listing that cannot say
+		// which agent it is on.
+		for i := range res.Panes {
+			res.Panes[i].PaneMeta = d.backend.PaneMeta(res.Panes[i].Pane)
+		}
+		r.OK(res)
+
 	case CmdHostList:
 		r.OK(HostListResult{Hosts: d.backend.Hosts()})
 

@@ -191,6 +191,8 @@ abstract final class CmdName {
   static const String paneGet = 'pane.get';
 
   static const String hostList = 'host.list';
+
+  static const String flagList = 'flag.list';
 }
 
 /// A screen-buffer coordinate. On the wire it is the bare array
@@ -746,6 +748,63 @@ class FileStatResult {
         'mode': mode,
         'dir': dir,
         if (mtime != 0) 'mtime': mtime,
+      };
+}
+
+/// FlagListParams: flag.list. Kind narrows the listing to one kind ("" — the
+/// usual call — lists every flag). It is validated with the same flags.ParseKind
+/// the setters use, so `flag.list` with a typo is refused rather than answering
+/// "nothing flagged", which is the one wrong answer a listing can give: it looks
+/// exactly like a session with no flags in it.
+///
+/// A custom glyph filters too — it is a kind like any other — which is what makes
+/// `catctl flags 🍕` mean the same thing as `catctl flags followup`.
+class FlagListParams {
+  const FlagListParams({
+    this.kind = '',
+  });
+
+  final String kind;
+
+  factory FlagListParams.fromJson(Map<String, Object?> j) => FlagListParams(
+        kind: asString(j['kind']),
+      );
+
+  Map<String, Object?> toJson() => {
+        if (kind.isNotEmpty) 'kind': kind,
+      };
+}
+
+/// FlagListResult is CmdResult.Data for flag.list: the flagged rows of
+/// workspace.list and pane.list, filtered but otherwise untouched.
+///
+/// Two lists rather than one merged one, and the same row structs rather than a
+/// third: the fields a client wants beside the mark differ by scope (a workspace
+/// has a tab count, a pane has an agent and a handle), so merging them would
+/// produce a row that is half empty either way. Both are in the underlying
+/// lists' order — the sidebar's own top-to-bottom order — not sorted by recency,
+/// so a listing run twice in a row reads the same way and "did I clear that one"
+/// is answered by a glance at the same position rather than a re-scan.
+///
+/// Both slices are always present, empty rather than null, so a client can loop
+/// over them without a nil check.
+class FlagListResult {
+  const FlagListResult({
+    required this.workspaces,
+    required this.panes,
+  });
+
+  final List<WorkspaceEntry> workspaces;
+  final List<PaneInfo> panes;
+
+  factory FlagListResult.fromJson(Map<String, Object?> j) => FlagListResult(
+        workspaces: asList(j['workspaces'], (e) => WorkspaceEntry.fromJson(asObj(e))),
+        panes: asList(j['panes'], (e) => PaneInfo.fromJson(asObj(e))),
+      );
+
+  Map<String, Object?> toJson() => {
+        'workspaces': [for (final e in workspaces) e.toJson()],
+        'panes': [for (final e in panes) e.toJson()],
       };
 }
 
@@ -3463,6 +3522,7 @@ const List<CommandSpec> kCommandSpecs = <CommandSpec>[
   CommandSpec('pane.list'),
   CommandSpec('pane.get'),
   CommandSpec('host.list'),
+  CommandSpec('flag.list'),
 ];
 
 /// What a generated command method needs from the connection.
@@ -3874,4 +3934,10 @@ mixin CatsCommands implements CatsCommandTransport {
   /// `host.list`
   Future<HostListResult> hostList() async =>
       HostListResult.fromJson(asObj(await invoke(CmdName.hostList, null)));
+
+  /// `flag.list`
+  ///
+  /// Params are optional: absent means the zero value, which is a real call.
+  Future<FlagListResult> flagList([FlagListParams? params]) async =>
+      FlagListResult.fromJson(asObj(await invoke(CmdName.flagList, params?.toJson())));
 }

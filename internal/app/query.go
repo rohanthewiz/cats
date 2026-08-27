@@ -1,6 +1,7 @@
 package app
 
 import (
+	"github.com/rohanthewiz/cats/internal/flags"
 	"github.com/rohanthewiz/cats/internal/layout"
 	"github.com/rohanthewiz/cats/internal/workspace"
 )
@@ -108,6 +109,47 @@ func (s *Session) ListPanesIn(wsID string) []PaneInfo {
 			for _, id := range tab.Layout.PaneIDs() {
 				out = append(out, s.paneInfo(ws, id, id == focused, visible[id]))
 			}
+		}
+	}
+	return out
+}
+
+// ListFlagged is the flagged subset of ListWorkspaces and ListPanes
+// (flag.list), for the session-default view.
+func (s *Session) ListFlagged(kind flags.Kind) FlagListResult {
+	return s.ListFlaggedIn("", kind)
+}
+
+// ListFlaggedIn is ListFlagged answered for one view, so Active and Visible mean
+// what they mean everywhere else in this file.
+//
+// It filters the two full listings rather than walking the model again. That is
+// deliberate and costs one pass over rows that are cheap to build: the rows a
+// flag listing shows MUST be byte-identical to the ones `workspaces` and `panes`
+// show, or a client would have to reconcile two descriptions of the same pane.
+// Building them the one way there is only one way to get that.
+//
+// kind "" lists everything; anything else is an exact match on the stored kind,
+// which is why a custom glyph filters exactly like a named kind — the two halves
+// of the vocabulary are one string field (internal/flags).
+func (s *Session) ListFlaggedIn(wsID string, kind flags.Kind) FlagListResult {
+	match := func(f FlagInfo) bool {
+		if f.Flag == "" {
+			return false // unflagged: never in a flag listing
+		}
+		return kind == "" || f.Flag == string(kind)
+	}
+	// Non-nil empty slices: an empty listing is a normal answer, and a client
+	// looping over `res.panes` should not have to tell null from [].
+	out := FlagListResult{Workspaces: []WorkspaceInfo{}, Panes: []PaneInfo{}}
+	for _, w := range s.ListWorkspacesIn(wsID) {
+		if match(w.FlagInfo) {
+			out.Workspaces = append(out.Workspaces, w)
+		}
+	}
+	for _, p := range s.ListPanesIn(wsID) {
+		if match(p.FlagInfo) {
+			out.Panes = append(out.Panes, p)
 		}
 	}
 	return out

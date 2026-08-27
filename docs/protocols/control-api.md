@@ -490,6 +490,41 @@ all omitted when unflagged. The browser draws the mark in four places — the
 WORKSPACES, AGENTS and PANES sidebar rows, and the pane header, whose chip shows
 the note inline and opens the flag menu on a click.
 
+`flag.list` is the cross-cutting read those per-scope lists cannot give you: the
+flagged rows of `workspace.list` and `pane.list`, from every workspace and every
+tab, in one snapshot.
+
+```bash
+catctl flags                     # everything, workspaces first then panes
+catctl flags followup            # one kind (a glyph filters the same way)
+catctl --json flags              # the raw payload, for scripting
+```
+
+```json
+{"workspaces": [ … WorkspaceInfo rows … ], "panes": [ … PaneInfo rows … ]}
+```
+
+Params are `{"kind":"followup"}`, or none for every flag. The rows are the SAME
+rows the two list commands return — same fields, same order, and the flagged
+panes get the same `PaneMeta` merge — so a client that can draw a workspace row
+or a pane row already knows how to draw this and there is no third row type. Both
+arrays are always present, empty rather than null.
+
+An unknown `kind` is refused with the setters' own `flags.ParseKind` error rather
+than answered with an empty listing: "nothing matched" and "you misspelled it"
+look identical in a list, so the listing declines to blur them.
+
+`catctl flags` renders it as a table rather than JSON, because that verb exists
+for a glance. Its first column is the argument the mutating verbs take — `w1`
+for `flag-ws`/`unflag-ws`, the internal pane number for `flag`/`unflag` — so a
+row can be acted on without a second lookup:
+
+```
+w1  ⚠ problem    cats                 2h ago  flaky tests in here
+1   ⚑ follow-up  w1:p1 claude · idle  5m ago  waiting on the API review
+3   🍕           w2:p1                1d ago  lunch build
+```
+
 ### Queries (read-only, no effects)
 
 | Method | Ergonomic verb |
@@ -500,6 +535,7 @@ the note inline and opens the flag menu on a click.
 | `pane.list` | `panes` |
 | `pane.get` | `pane [pane]` |
 | `host.list` | `hosts` |
+| `flag.list` | `flags [kind]` |
 
 These are answered straight from the `Session` with no backend effects.
 `pane.list` / `pane.get` add one merge on top of it: each pane's runtime metadata
@@ -507,6 +543,9 @@ These are answered straight from the `Session` with no backend effects.
 comes from the backend's per-pane cache, so a client sees the same arbitrated
 agent identity and live title the browser chrome shows, for every pane in the
 session rather than only the ones on screen. Every field is omitted when empty.
+`flag.list` gets the same merge for the panes it returns — see
+[Flags](#flags) — because a flag pinned to an agent is worth little in a listing
+that cannot say which agent it is on.
 
 `host.list` is the exception that proves the rule: the cathost roster is a set of
 live connections, not domain state, so it is the backend that answers. Each entry

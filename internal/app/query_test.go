@@ -1,6 +1,7 @@
 package app
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -207,5 +208,95 @@ func TestDispatchPaneGet(t *testing.T) {
 	h.d.Dispatch(CmdPaneGet, params(t, OptPaneParams{Pane: &bogus}), r)
 	if !r.failCall || r.okCall {
 		t.Fatalf("unknown pane.get must fail, ok=%v fail=%v", r.okCall, r.failCall)
+	}
+}
+
+// flag.list is the flagged subset of workspace.list and pane.list, in those
+// lists' order, with every unflagged row dropped.
+func TestDispatchFlagList(t *testing.T) {
+	h := newCmdHarness(t)
+	h.d.Dispatch(CmdPaneSplit, params(t, SplitParams{Direction: SplitH}), h.resp())
+
+	// Flag the active workspace and exactly one of the two panes, so the result
+	// proves it FILTERS rather than merely echoing the two lists.
+	h.d.Dispatch(CmdWorkspaceFlag, params(t, FlagWorkspaceParams{Kind: "warn", Note: "flaky here"}), h.resp())
+	focused, _ := h.s.FocusedPane()
+	h.d.Dispatch(CmdPaneFlag, params(t, FlagPaneParams{Pane: uint32(focused), Kind: "followup", Note: "come back"}), h.resp())
+	*h.log = (*h.log)[:0]
+
+	r := h.resp()
+	h.d.Dispatch(CmdFlagList, noParams(), r)
+	got := okData[FlagListResult](t, r)
+	wantOnlyOK(t, *h.log)
+
+	if len(got.Workspaces) != 1 || got.Workspaces[0].Flag != "warn" || got.Workspaces[0].FlagNote != "flaky here" {
+		t.Fatalf("workspaces = %+v, want the one warn-flagged workspace", got.Workspaces)
+	}
+	if len(got.Panes) != 1 {
+		t.Fatalf("panes = %+v, want only the flagged one of two", got.Panes)
+	}
+	p := got.Panes[0]
+	if p.Pane != uint32(focused) || p.Flag != "followup" || p.FlagNote != "come back" {
+		t.Fatalf("pane row = %+v, want the followup flag on pane %d", p, focused)
+	}
+	if p.FlagAtMs == 0 {
+		t.Fatal("the row must carry when the flag was set")
+	}
+	// The rows are the SAME rows the per-scope lists produce: a client must not
+	// have to reconcile two descriptions of one pane.
+	if p.Handle == "" {
+		t.Fatal("a flagged pane row must carry its public handle, as pane.list does")
+	}
+
+	// A kind narrows it, and the narrowing applies to both scopes.
+	r = h.resp()
+	h.d.Dispatch(CmdFlagList, params(t, FlagListParams{Kind: "followup"}), r)
+	got = okData[FlagListResult](t, r)
+	if len(got.Workspaces) != 0 || len(got.Panes) != 1 {
+		t.Fatalf("filtered by followup = %d workspaces / %d panes, want 0/1",
+			len(got.Workspaces), len(got.Panes))
+	}
+	// Empty rather than null: a client loops over these without a nil check.
+	if got.Workspaces == nil || got.Panes == nil {
+		t.Fatal("both slices must be non-nil even when empty")
+	}
+}
+
+// An unknown kind is REFUSED rather than answered with an empty listing — the
+// one wrong answer a listing can give, because it is indistinguishable from the
+// truthful one.
+func TestDispatchFlagListRejectsUnknownKind(t *testing.T) {
+	h := newCmdHarness(t)
+	r := h.resp()
+
+	h.d.Dispatch(CmdFlagList, params(t, FlagListParams{Kind: "folloup"}), r)
+
+	if !r.failCall || !strings.Contains(r.errMsg, "unknown flag kind") {
+		t.Fatalf("fail=%v msg=%q, want a bad-params error naming the unknown kind", r.failCall, r.errMsg)
+	}
+	if len(*h.log) != 1 || (*h.log)[0] != "fail" {
+		t.Fatalf("a params failure must run no effects, log=%v", *h.log)
+	}
+}
+
+// A custom glyph filters exactly like a named kind: both halves of the
+// vocabulary are one string field, so the listing needs no second code path.
+func TestDispatchFlagListFiltersCustomGlyph(t *testing.T) {
+	h := newCmdHarness(t)
+	focused, _ := h.s.FocusedPane()
+	h.d.Dispatch(CmdPaneFlag, params(t, FlagPaneParams{Pane: uint32(focused), Kind: "🍕", Note: "lunch build"}), h.resp())
+
+	r := h.resp()
+	h.d.Dispatch(CmdFlagList, params(t, FlagListParams{Kind: "🍕"}), r)
+	got := okData[FlagListResult](t, r)
+	if len(got.Panes) != 1 || got.Panes[0].Flag != "🍕" {
+		t.Fatalf("panes = %+v, want the one 🍕-flagged pane", got.Panes)
+	}
+
+	// And a different glyph matches nothing, rather than matching every custom.
+	r = h.resp()
+	h.d.Dispatch(CmdFlagList, params(t, FlagListParams{Kind: "🌮"}), r)
+	if got := okData[FlagListResult](t, r); len(got.Panes) != 0 {
+		t.Fatalf("filtering on another glyph returned %+v", got.Panes)
 	}
 }

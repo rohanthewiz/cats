@@ -76,6 +76,11 @@ only ever sees positional args:
 
 	"stop": `Stops the cats server. The terminals themselves survive — they belong to
 cathost — so a restarted server reattaches to them.`,
+
+	// Generated from flags.Defs() rather than written out, so the six kinds and
+	// their meanings cannot drift from the vocabulary the server validates
+	// against (flaglist.go).
+	"flags": flagKindsHelp(),
 }
 
 // runHelp implements `catctl help [topic]`.
@@ -203,6 +208,8 @@ func argHints(sc subcommand) string {
 			what = "h|v"
 		case argCycleDir:
 			what = "next|prev"
+		case argFlagKind:
+			what = "the named flag kinds"
 		default:
 			continue
 		}

@@ -267,6 +267,12 @@ func run() int {
 		// text is reproduced byte for byte, with no added newline, because a
 		// clipboard that did not end in one did not end in one.
 		printClipboard(resp)
+	case method == app.CmdFlagList && resp.OK:
+		// The one query rendered as a table rather than as JSON: its reason for
+		// existing is a glance across every workspace, and pretty-printed JSON
+		// is not one. --json is matched above, so the scripting path is the raw
+		// payload exactly as with `panes`.
+		printFlagList(resp, params)
 	case method == app.CmdLedgerOutput && resp.OK:
 		// Same rule as the clipboard: the useful form of a command's output is
 		// the output. `catctl output 3 12 | grep FAIL` only works if what comes
