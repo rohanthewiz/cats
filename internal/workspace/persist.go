@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"maps"
 
+	"github.com/rohanthewiz/cats/internal/flags"
 	"github.com/rohanthewiz/cats/internal/layout"
 )
 
@@ -24,6 +25,10 @@ type PaneSnapshot struct {
 	// existed — so an old snapshot restores byte-identically and every pane in
 	// it lands on the default host.
 	HostID string `json:"host,omitempty"`
+	// Flag is the pane's user annotation, omitted when unflagged — which is
+	// almost every pane, so the snapshot of a session with no flags in it is
+	// byte-identical to one written before flags existed.
+	Flag *flags.Flag `json:"flag,omitempty"`
 }
 
 // TabSnapshot is a tab's durable state: identity, the layout tree with its
@@ -45,6 +50,7 @@ type Snapshot struct {
 	IdentityCwd    string                `json:"identity_cwd,omitempty"`
 	HostID         string                `json:"host,omitempty"`
 	Locked         bool                  `json:"locked,omitempty"`
+	Flag           *flags.Flag           `json:"flag,omitempty"`
 	ActiveTab      int                   `json:"active_tab"`
 	PaneNumbers    map[layout.PaneID]int `json:"pane_numbers"`
 	NextPaneNumber int                   `json:"next_pane_number"`
@@ -56,7 +62,10 @@ type Snapshot struct {
 func (t *Tab) Snapshot() TabSnapshot {
 	panes := make(map[layout.PaneID]PaneSnapshot, len(t.Panes))
 	for id, st := range t.Panes {
-		panes[id] = PaneSnapshot{CustomName: st.CustomName, Seen: st.Seen, HostID: st.HostID}
+		// Cloned rather than shared: the snapshot outlives this call — it is
+		// marshalled after the fact — and a flag edited in between must not
+		// rewrite what is being written out.
+		panes[id] = PaneSnapshot{CustomName: st.CustomName, Seen: st.Seen, HostID: st.HostID, Flag: st.Flag.Clone()}
 	}
 	return TabSnapshot{
 		Number:     t.Number,
@@ -82,6 +91,7 @@ func (w *Workspace) Snapshot() Snapshot {
 		IdentityCwd:    w.IdentityCwd,
 		HostID:         w.HostID,
 		Locked:         w.Locked,
+		Flag:           w.Flag.Clone(),
 		ActiveTab:      w.activeTab,
 		PaneNumbers:    numbers,
 		NextPaneNumber: w.nextPublicPaneNumber,
@@ -110,6 +120,7 @@ func Restore(s PaneSpawner, snap Snapshot) (*Workspace, error) {
 		IdentityCwd:       snap.IdentityCwd,
 		HostID:            snap.HostID,
 		Locked:            snap.Locked,
+		Flag:              snap.Flag.Clone(),
 		PublicPaneNumbers: make(map[layout.PaneID]int, len(snap.PaneNumbers)),
 		activeTab:         snap.ActiveTab,
 		spawner:           s,
@@ -186,7 +197,8 @@ func restoreTab(s PaneSpawner, wsnap Snapshot, snap TabSnapshot) (*Tab, error) {
 		if err != nil {
 			return nil, fmt.Errorf("tab %d: respawn pane %d: %w", snap.Number, id, err)
 		}
-		panes[id] = &PaneState{AttachedTerminalID: terminalID, Seen: ps.Seen, CustomName: ps.CustomName, HostID: ps.HostID}
+		panes[id] = &PaneState{AttachedTerminalID: terminalID, Seen: ps.Seen, CustomName: ps.CustomName,
+			HostID: ps.HostID, Flag: ps.Flag.Clone()}
 	}
 	return &Tab{
 		CustomName: snap.CustomName,

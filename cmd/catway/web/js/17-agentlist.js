@@ -46,6 +46,12 @@
         mo.textContent = " " + mdl; // the separator agentLabel used to join with
         name.appendChild(mo);
       }
+      // The user's flag rides between the identity and the state — after the
+      // name, because it qualifies *this* agent rather than announcing a new
+      // row, and before the state, because the state is the half that changes on
+      // its own while the flag is the half somebody chose.
+      const af = flagMark(flagOf(it));
+      if (af) name.appendChild(af);
       const meta = document.createElement("span"); meta.className = "ameta";
       const st = it.seen ? it.state : "done";
       meta.textContent = paneRef(it.pub, it.pane) + " · ";
@@ -82,6 +88,15 @@
           return;
         }
         sendCmd("agent.focus", { pane: it.pane });
+      });
+      // Right-click reaches the pane menu, which is where flagging lives. Not
+      // gated on the workspace lock, unlike the click above: the lock is about
+      // not *starting* things in a workspace, and pinning "come back to this"
+      // to an agent inside one is exactly the note a person set the workspace
+      // aside in order to write.
+      li.addEventListener("contextmenu", (e) => {
+        e.preventDefault();
+        openCtx(e.clientX, e.clientY, paneMenuItems(it.pane, false));
       });
       agentListEl.appendChild(li);
     }

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rohanthewiz/cats/internal/flags"
 	"github.com/rohanthewiz/cats/internal/layout"
 )
 
@@ -32,6 +33,12 @@ const (
 	CmdPaneSwapWith       = "pane.swap_with"
 	CmdPaneZoom           = "pane.zoom"
 	CmdPaneRename         = "pane.rename"
+	// CmdPaneFlag pins a persistent annotation to a pane — a glyph with a
+	// meaning plus an optional note (internal/flags). Its usual subject is the
+	// agent running in the pane, which is why the browser offers it from the
+	// AGENTS list; it is stored on the pane because that is the thing with an
+	// identity that outlives the process (see workspace.PaneState.Flag).
+	CmdPaneFlag           = "pane.flag"
 	CmdPaneResizeBorder   = "pane.resize_border"
 	CmdScroll             = "scroll"
 	CmdRead               = "read"
@@ -50,7 +57,10 @@ const (
 	CmdWorkspaceRename    = "workspace.rename"
 	CmdWorkspaceMove      = "workspace.move"
 	CmdWorkspaceLock      = "workspace.lock"
-	CmdAgentFocus         = "agent.focus"
+	// CmdWorkspaceFlag is CmdPaneFlag one level up: the same annotation pinned
+	// to a whole workspace.
+	CmdWorkspaceFlag = "workspace.flag"
+	CmdAgentFocus    = "agent.focus"
 	// CmdNavBack / CmdNavForward walk the issuing window's focus-location
 	// history (nav.go): back to where focus was before, forward again. Temporal
 	// navigation, where pane.focus_direction is spatial and pane.last is a
@@ -323,6 +333,7 @@ var commandSpecs = []CommandSpec{
 	{Name: CmdPaneSwapWith, Params: SwapWithParams{}, ParamsRequired: true, Recorded: true},
 	{Name: CmdPaneZoom, Params: OptPaneParams{}, Recorded: true},
 	{Name: CmdPaneRename, Params: RenamePaneParams{}, ParamsRequired: true, Recorded: true},
+	{Name: CmdPaneFlag, Params: FlagPaneParams{}, ParamsRequired: true, Recorded: true},
 	{Name: CmdPaneResizeBorder, Params: ResizeBorderParams{}, ParamsRequired: true, Recorded: true},
 	{Name: CmdScroll, Params: ScrollParams{}, ParamsRequired: true, Recorded: true},
 	{Name: CmdRead, Params: ReadParams{}, Result: ReadResult{}, ReplyRequired: true, ParamsRequired: true},
@@ -347,6 +358,7 @@ var commandSpecs = []CommandSpec{
 	{Name: CmdWorkspaceRename, Params: RenameWorkspaceParams{}, ParamsRequired: true, Recorded: true},
 	{Name: CmdWorkspaceMove, Params: MoveWorkspaceParams{}, ParamsRequired: true, Recorded: true},
 	{Name: CmdWorkspaceLock, Params: LockWorkspaceParams{}, ParamsRequired: true, Recorded: true},
+	{Name: CmdWorkspaceFlag, Params: FlagWorkspaceParams{}, ParamsRequired: true, Recorded: true},
 
 	// Global focus + server lifecycle. nav.back/forward are Recorded on the
 	// pane.last precedent: a relative motion over ephemeral focus state, whose
@@ -613,6 +625,63 @@ type SwapWithParams struct {
 // CycleParams: pane.cycle.
 type CycleParams struct {
 	Next bool `json:"next"`
+}
+
+// FlagInfo is a user flag as it appears on the wire: three flat fields,
+// embedded into every struct that can carry one (WorkspaceInfo, PaneInfo, and
+// their browserproto counterparts).
+//
+// Flat rather than a nested object, and embedded rather than repeated, for two
+// reasons. Flat keeps the shape identical to the `locked` / `host` fields
+// beside it, so a client reads one more optional scalar rather than learning a
+// sub-object; embedded means the documentation, the JSON keys and the
+// conversion live in exactly one place, and cmd/catgen-dart still flattens it
+// onto each class while offering the group back as a `flagInfo` getter.
+//
+// All three are omitempty, so an unflagged subject — which is nearly all of
+// them — costs nothing on the wire.
+type FlagInfo struct {
+	// Flag is the flag's kind: one of the named kinds ("followup", "star", …)
+	// or a literal glyph the user chose. Empty means unflagged. Clients render
+	// it through the same path either way — see internal/flags.
+	Flag string `json:"flag,omitempty"`
+	// FlagNote is the free text pinned alongside it; empty is normal.
+	FlagNote string `json:"flag_note,omitempty"`
+	// FlagAtMs is when the flag was last set, in Unix milliseconds. Absolute
+	// rather than an age, because a flag is not re-sent when nothing about it
+	// changed — a client that wants "flagged 3d ago" subtracts it from its own
+	// clock and re-renders on its own tick.
+	FlagAtMs int64 `json:"flag_at_ms,omitempty"`
+}
+
+// NewFlagInfo projects a model flag onto the wire; a nil flag yields the zero
+// FlagInfo, which is the unflagged encoding.
+func NewFlagInfo(f *flags.Flag) FlagInfo {
+	if f == nil {
+		return FlagInfo{}
+	}
+	return FlagInfo{Flag: string(f.Kind), FlagNote: f.Note, FlagAtMs: f.AtMs}
+}
+
+// FlagPaneParams: pane.flag. Kind "" clears the flag, the same way an empty
+// name clears a custom title — every clear in the vocabulary is spelled the
+// same. Kind is either a named kind or a single glyph; anything else is
+// refused rather than stored (flags.ParseKind).
+//
+// Note is only kept when a Kind is given: a note with no mark is invisible in
+// every surface that draws these.
+type FlagPaneParams struct {
+	Pane uint32 `json:"pane" cats:"handle=pane"`
+	Kind string `json:"kind"`
+	Note string `json:"note,omitempty"`
+}
+
+// FlagWorkspaceParams: workspace.flag. ID "" means the active workspace, the
+// same default workspace.lock and workspace.close take.
+type FlagWorkspaceParams struct {
+	ID   string `json:"id,omitempty" cats:"handle=workspace"`
+	Kind string `json:"kind"`
+	Note string `json:"note,omitempty"`
 }
 
 // RenamePaneParams: pane.rename ("" clears the custom name).
@@ -942,11 +1011,12 @@ type SessionInfoResult struct {
 
 // WorkspaceInfo describes one workspace for workspace.list.
 type WorkspaceInfo struct {
-	ID     string `json:"id"`   // stable public handle, e.g. "w1"
-	Name   string `json:"name"` // display name (custom or auto)
-	Active bool   `json:"active"`
-	Tabs   int    `json:"tabs"`             // tab count
-	Locked bool   `json:"locked,omitempty"` // closed to automation (workspace.lock)
+	ID       string `json:"id"`   // stable public handle, e.g. "w1"
+	Name     string `json:"name"` // display name (custom or auto)
+	Active   bool   `json:"active"`
+	Tabs     int    `json:"tabs"`             // tab count
+	Locked   bool   `json:"locked,omitempty"` // closed to automation (workspace.lock)
+	FlagInfo        // the user's annotation (workspace.flag); zero when unflagged
 	// Host is the cathost new panes in this workspace land on, as the MODEL
 	// records it: empty means "whatever the default host is", which is what a
 	// workspace created before hosts existed (or on the default) stores. It is a
@@ -993,6 +1063,10 @@ type PaneInfo struct {
 	Name    string `json:"name,omitempty"` // custom name; empty if auto-named
 	Focused bool   `json:"focused"`
 	Visible bool   `json:"visible"`
+	// FlagInfo is session state like Name is — the user set it and it is in the
+	// snapshot — so it rides here rather than in the runtime-supplied PaneMeta
+	// block below.
+	FlagInfo
 	PaneMeta
 }
 

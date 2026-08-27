@@ -4,6 +4,7 @@ import (
 	"os"
 	"strconv"
 
+	"github.com/rohanthewiz/cats/internal/flags"
 	"github.com/rohanthewiz/cats/internal/layout"
 )
 
@@ -25,6 +26,19 @@ type PaneState struct {
 	// *new* panes land, while an existing pane must come back on the machine
 	// its process is (or was) actually running on.
 	HostID string
+	// Flag is the user's persistent annotation on this pane — the same glyph +
+	// note a workspace carries (see internal/flags), pinned one level down.
+	// nil = unflagged.
+	//
+	// On the PANE rather than on the detected agent, even though the AGENTS
+	// sidebar is where most of these get set. An agent is not an addressable
+	// thing: it is a process the runtime recognised inside a pane, it comes and
+	// goes with a /clear or a crash, and it has no identity that survives a
+	// restart. The pane does — it is what the layout, the snapshot and every
+	// command already speak in — so flagging the pane is what makes "come back
+	// to this agent" still true after the agent has been restarted in place.
+	// It also means a plain shell can be flagged, which costs nothing extra.
+	Flag *flags.Flag
 }
 
 // NewPaneState returns a pane state attached to the given terminal, marked seen.
@@ -88,6 +102,18 @@ func (t *Tab) IsAutoNamed() bool {
 // SetCustomName pins the tab's display name.
 func (t *Tab) SetCustomName(name string) {
 	t.CustomName = name
+}
+
+// SetFlag pins (or clears, with nil) a pane's user flag, cloning it in for the
+// same reason Workspace.SetFlag does. Reports false when the pane is not in
+// this tab, so a caller scanning tabs can tell "done" from "not here".
+func (t *Tab) SetFlag(paneID layout.PaneID, f *flags.Flag) bool {
+	st, ok := t.Panes[paneID]
+	if !ok {
+		return false
+	}
+	st.Flag = f.Clone()
+	return true
 }
 
 // SplitFocused splits the focused pane 50/50 and spawns a terminal for the

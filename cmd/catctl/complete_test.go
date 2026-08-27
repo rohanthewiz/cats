@@ -183,6 +183,7 @@ func TestArgKindsMatchSynopsis(t *testing.T) {
 		argDetachHost:   {"id"},
 		argRunbook:      {"name"},
 		argRecordAction: {"start|stop|cancel|status"},
+		argFlagKind:     {"kind"},
 	}
 	for _, sc := range subcommands {
 		// Operands in the synopsis, in order: <x> and [x] alike.

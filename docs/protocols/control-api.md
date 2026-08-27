@@ -331,6 +331,7 @@ channel, since a result with nowhere to go is not worth producing.
 | `pane.swap_with` | — (raw only) |
 | `pane.zoom` | `zoom [pane]` |
 | `pane.rename` | `rename-pane <pane> <name...>` |
+| `pane.flag` | `flag <pane> <kind> [note...]` / `unflag <pane>` |
 | `pane.resize_border` | `resize <border> <ratio>` |
 | `pane.send_input` | `send <pane> <text...>` / `run <pane> [text...]` |
 | `pane.wait_for_output` | `wait <pane> <pattern> [timeout_secs]` |
@@ -394,6 +395,7 @@ catctl pane.split --params '{"direction":"v","command":["ced","main.go"]}'
 | `workspace.rename` | `rename-ws <id> <name...>` |
 | `workspace.move` | — |
 | `workspace.lock` | `lock-ws [id]` / `unlock-ws [id]` |
+| `workspace.flag` | `flag-ws <id> <kind> [note...]` / `unflag-ws [id]` |
 
 `tab.move_to_workspace` moves a tab, with its panes and their live terminals,
 into another workspace: `{"workspace":"w2","num":3}`. That is how a tab travels
@@ -437,6 +439,56 @@ id they act on the active workspace. The lock is durable (it survives a catway
 restart) and reported by `workspace.list` as `locked`, but it is a guardrail
 rather than a permission boundary — `workspace.lock` is itself an ordinary
 command, so anything holding the control API can lift it.
+
+### Flags
+
+`pane.flag` and `workspace.flag` pin the user's own annotation to a pane or a
+workspace: a glyph with a meaning, plus an optional note.
+
+```bash
+catctl flag 7 followup "waiting on the API review"
+catctl flag-ws w2 warn "flaky tests in here"
+catctl flag 7 🍕                 # a glyph of your own; the note explains it
+catctl unflag 7                  # kind "" clears, as an empty name clears a title
+```
+
+The wire shape is `{"pane":7,"kind":"followup","note":"…"}` (or `{"id":"w2",…}`,
+where an omitted id means the active workspace, the `workspace.lock` default).
+
+`kind` is **either** one of six named kinds or a single glyph you invent, and the
+two shapes are deliberately disjoint — a bare ASCII word must be a name we know,
+so a misspelled `folloup` is refused rather than silently becoming a flag that
+renders the word "folloup":
+
+| kind | glyph | means |
+|---|---|---|
+| `followup` | ⚑ | come back to this |
+| `question` | ? | waiting on an answer |
+| `star` | ★ | worth finding again |
+| `warn` | ⚠ | something is wrong here |
+| `done` | ✓ | handled — nothing left to do |
+| `note` | ✎ | just a note |
+
+A custom glyph is at most 8 code points (enough for a ZWJ emoji sequence) and may
+contain no whitespace or control characters. The note is sanitized rather than
+refused — it is prose someone typed — but it comes back single-line and capped at
+500 characters. A note with no kind is dropped: every surface draws the glyph, so
+an unmarked note would be a write nobody can see.
+
+Flags are **durable**: they are in the session snapshot and survive a catway
+restart, which is the whole point of pinning "come back to this" to something.
+
+A pane's flag is stored on the pane, not on the agent running in it, even though
+the browser's AGENTS list is where most of them get set. An agent has no identity
+that survives a `/clear` or a crash; the pane does, so a flag set on "this agent"
+is still there after the agent is restarted in place — and a plain shell can be
+flagged too.
+
+Every read carries them back: `pane.list` / `pane.get` and `workspace.list` grow
+`flag`, `flag_note` and `flag_at_ms` (Unix milliseconds, when it was last set),
+all omitted when unflagged. The browser draws the mark in four places — the
+WORKSPACES, AGENTS and PANES sidebar rows, and the pane header, whose chip shows
+the note inline and opens the flag menu on a click.
 
 ### Queries (read-only, no effects)
 

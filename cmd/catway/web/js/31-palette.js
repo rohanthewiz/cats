@@ -34,6 +34,11 @@
     if (f !== null) {
       items.push(
         { label: "rename pane…", fn: () => renamePane(f) },
+        // The palette has no submenus, so it offers the dialog rather than the
+        // one-click kinds the context menus carry — a keyboard route into
+        // flagging wants the note anyway, which is the half the menu makes you
+        // take a second step for.
+        { label: "flag focused pane…", fn: () => openFlagDialog(paneFlagTarget(f)) },
         { label: "copy mode", fn: () => enterCopyMode(f) },
         { label: "copy scrollback", fn: () => copyScrollback(f) },
       );
@@ -46,6 +51,7 @@
       items.push(
         { label: "rename workspace…", fn: () => renameWorkspace(aw) },
         { label: aw.locked ? "unlock workspace" : "lock workspace (no plugins or agents)", fn: () => toggleWorkspaceLock(aw) },
+        { label: "flag workspace…", fn: () => openFlagDialog(wsFlagTarget(aw)) },
         { label: "close workspace…", fn: () => confirmCloseWorkspace(aw) },
       );
     }

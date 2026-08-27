@@ -29,12 +29,26 @@ func BorderID(path []bool) string {
 // Re-exported here so the "r01" encode/decode pair stays discoverable together.
 var BorderPath = app.BorderPath
 
+// paneFlagInfo reads one pane's user flag off the workspace that owns it. A
+// pane the workspace does not know yields the zero value, which is the
+// unflagged encoding — the same answer as "no flag set", and the right one:
+// this is chrome, not a place to fail a layout over.
+func paneFlagInfo(ws *workspace.Workspace, id layout.PaneID) app.FlagInfo {
+	st, ok := ws.PaneStateFor(id)
+	if !ok {
+		return app.FlagInfo{}
+	}
+	return app.NewFlagInfo(st.Flag)
+}
+
 func rectOf(r layout.Rect) Rect {
 	return Rect{r.X, r.Y, r.Width, r.Height}
 }
 
 // PaneRectFrom translates one computed layout.PaneInfo; pub is the pane's
-// public handle (workspace.PublicPaneID).
+// public handle (workspace.PublicPaneID). The caller fills in the fields the
+// geometry does not know — the pane's host (resolved against the roster) and
+// its user flag.
 func PaneRectFrom(info layout.PaneInfo, pub string) PaneRectInfo {
 	p := PaneRectInfo{
 		Pane:    uint32(info.ID),
@@ -78,10 +92,11 @@ func BuildLayout(workspaces []*workspace.Workspace, active int, area layout.Rect
 	}
 	for i, ws := range workspaces {
 		msg.Workspaces = append(msg.Workspaces, WorkspaceInfo{
-			ID:     ws.ID,
-			Name:   ws.DisplayName(),
-			Active: i == active,
-			Locked: ws.Locked,
+			ID:       ws.ID,
+			Name:     ws.DisplayName(),
+			Active:   i == active,
+			Locked:   ws.Locked,
+			FlagInfo: app.NewFlagInfo(ws.Flag),
 		})
 	}
 	if active < 0 || active >= len(workspaces) {
@@ -104,17 +119,20 @@ func BuildLayout(workspaces []*workspace.Workspace, active int, area layout.Rect
 		focus := tab.Layout.Focused()
 		pub, _ := ws.PublicPaneID(focus)
 		msg.Panes = append(msg.Panes, PaneRectInfo{
-			Pane:    uint32(focus),
-			Pub:     pub,
-			Rect:    rectOf(area),
-			Inner:   rectOf(area),
-			Focused: true,
+			Pane:     uint32(focus),
+			Pub:      pub,
+			Rect:     rectOf(area),
+			Inner:    rectOf(area),
+			Focused:  true,
+			FlagInfo: paneFlagInfo(ws, focus),
 		})
 		return msg
 	}
 	for _, info := range tab.Layout.Panes(area) {
 		pub, _ := ws.PublicPaneID(info.ID)
-		msg.Panes = append(msg.Panes, PaneRectFrom(info, pub))
+		p := PaneRectFrom(info, pub)
+		p.FlagInfo = paneFlagInfo(ws, info.ID)
+		msg.Panes = append(msg.Panes, p)
 	}
 	for _, sb := range tab.Layout.Splits(area) {
 		msg.Borders = append(msg.Borders, BorderFrom(sb))

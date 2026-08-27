@@ -18,6 +18,7 @@ import (
 	"github.com/rohanthewiz/cats/internal/browserproto"
 	"github.com/rohanthewiz/cats/internal/config"
 	"github.com/rohanthewiz/cats/internal/ctlproto"
+	"github.com/rohanthewiz/cats/internal/flags"
 	"github.com/rohanthewiz/cats/internal/hostmeter"
 	"github.com/rohanthewiz/cats/internal/inputenc"
 	"github.com/rohanthewiz/cats/internal/layout"
@@ -1419,11 +1420,44 @@ func (o *orch) agentsMsg() browserproto.Agents {
 					Pane: rt.id, Pub: pub, Workspace: ws.ID, Tab: tab.Number,
 					Agent: agent, State: state, Model: rt.agentModel,
 					Seen: !rt.unseen, SinceMs: since,
+					// The flag is the user's, not the runtime's, so it comes off
+					// the session's pane state rather than off rt. The tab is
+					// already in hand here, which makes it a map hit rather than
+					// the cross-workspace scan Session.PaneFlag would do.
+					FlagInfo: app.NewFlagInfo(paneFlag(tab, id)),
 				})
 			}
 		}
 	}
 	return browserproto.NewAgents(items)
+}
+
+// paneFlag reads one pane's user flag out of the tab that holds it, nil when the
+// tab does not know the pane (which a pane taken from the tab's own layout never
+// is — the guard is there so a future caller cannot turn a stale id into a
+// panic).
+func paneFlag(tab *workspace.Tab, id layout.PaneID) *flags.Flag {
+	if st := tab.Panes[id]; st != nil {
+		return st.Flag
+	}
+	return nil
+}
+
+// BroadcastFlags rebroadcasts the two messages a user flag is drawn from and
+// arms the save (app.Backend).
+//
+// Both, because a flag lands in three lists that read from two sources: the
+// layout carries the workspace rows and the active tab's pane headers, and the
+// agents rollup carries the global AGENTS list. The sidebar's PANES rows are the
+// third, and they need nothing here — the browser re-queries pane.list whenever
+// a layout arrives.
+//
+// Deliberately not ApplyModel: nothing structural changed, so there are no PTYs
+// to reconcile, no viewport to recompute, and no frames to resend.
+func (o *orch) BroadcastFlags() {
+	o.broadcastLayouts()
+	o.broadcast(o.agentsMsg())
+	o.saveSoon()
 }
 
 // --- daemon round-trips: read + capture (loop goroutine only) ----------------

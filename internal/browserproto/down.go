@@ -148,6 +148,10 @@ type WorkspaceInfo struct {
 	// the empty "means the default" form the model stores). The sidebar shows it
 	// only while more than one host exists — see the hosts message.
 	Host string `json:"host,omitempty"`
+	// FlagInfo is the user's annotation on this workspace (workspace.flag): a
+	// glyph with a meaning plus an optional note, drawn beside the name. Zero
+	// when unflagged, which is the usual case.
+	app.FlagInfo
 }
 
 // TabInfo is one tab of the active workspace.
@@ -172,6 +176,12 @@ type PaneRectInfo struct {
 	// a badge only while the session has more than one host — with one, the
 	// answer is the same for every pane and says nothing.
 	Host string `json:"host,omitempty"`
+	// FlagInfo is the user's annotation on this pane (pane.flag), drawn as a
+	// chip in the pane header. It rides the layout because the header is
+	// redrawn from it; the sidebar's copies of the same fact come from the
+	// agents rollup and pane.list, each of which reaches panes this message
+	// does not (it carries the active tab only).
+	app.FlagInfo
 }
 
 // BorderInfo is one draggable split boundary (layout.SplitBorder shape). ID is
@@ -219,6 +229,12 @@ type AgentItem struct {
 	// -1 when the state has never been published (age unknown) — 0 is a real
 	// value, since the rollup ships in the same breath as the change.
 	SinceMs int64 `json:"since_ms"`
+	// FlagInfo is the user's annotation on the pane this agent is running in
+	// (pane.flag). Carried here as well as on the layout because this rollup is
+	// the only message that spans every workspace: the AGENTS list is where a
+	// "come back to this one" is most often set, and most of its rows are panes
+	// the layout never mentions.
+	app.FlagInfo
 }
 
 func NewAgents(items []AgentItem) Agents { return Agents{T: MsgAgents, Items: items} }

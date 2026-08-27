@@ -38,6 +38,14 @@
     const items = [["Pane", paneRef(row.pub, row.pane), "pub"]];
     items.push(["Title", row.title]);
     items.push(["Dir", row.cwd, "mono"]);
+    // The hover card is the one surface with room for the note in full — every
+    // other place it appears is a tooltip on a 12px glyph — so it gets its own
+    // row rather than being folded into the flag's label.
+    if (row.flag) {
+      items.push(["Flag", flagGlyph(row.flag) + " " + flagLabel(row.flag)
+        + (row.flag.at ? " · " + fmtAge(Date.now() - row.flag.at) : "")]);
+      items.push(["Note", row.flag.note]);
+    }
     if (row.agent) items.push(["Agent", row.agent + " · " + (row.state || "unknown")]);
     // The LLM the agent is running under — with the reasoning effort it last ran
     // at appended, when the transcript named one — read from that transcript

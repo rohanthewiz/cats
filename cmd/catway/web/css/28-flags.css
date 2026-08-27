@@ -1,0 +1,51 @@
+  /* ---- User flags (workspace.flag / pane.flag) ----
+     One mark, four places: WORKSPACES rows, AGENTS rows, PANES rows and the
+     pane header. The sidebar wears the bare glyph (the note rides the tooltip,
+     where there is room for it); the header wears glyph + note inline, because
+     that is the pane you are actually looking at.
+
+     Text rather than SVG, unlike the padlock and the paw print beside it — a
+     custom glyph is a character the user typed, and there is no SVG to draw for
+     it, so a text mark is the one shape both halves of the vocabulary share. */
+  .flag-mark { flex:0 0 auto; align-self:center; line-height:1;
+    font-size:calc(12px * var(--sb-scale)); cursor:default; }
+  /* A hair of extra weight: at 12px the difference between ⚑ and ⚠ is a few
+     pixels of stroke, and these are meant to be legible at a glance from across
+     a column of rows. */
+  .flag-mark { font-weight:700; }
+
+  /* The named kinds. An unknown kind — a glyph the user invented — falls to
+     fk-custom, which takes plain foreground rather than borrowing some named
+     kind's meaning-by-colour. */
+  .fk-followup { color:var(--flag-followup); }
+  .fk-question { color:var(--flag-question); }
+  .fk-star     { color:var(--flag-star); }
+  .fk-warn     { color:var(--flag-warn); }
+  .fk-done     { color:var(--flag-done); }
+  .fk-note     { color:var(--flag-note); }
+  .fk-custom   { color:var(--flag-custom); font-weight:400; }
+
+  /* The pane header's chip. It carries the note inline, so unlike the sidebar's
+     marks it needs a ceiling: min-width:0 plus the ellipsis lets it give up
+     width to the fields after it (the .info rules already make the row a flex
+     line whose members shrink), and 22em keeps a long note from pushing the cwd
+     and the branch off the strip on a wide pane.
+
+     Clickable — it opens the same flag menu the toolbar's ⚑ does — so it takes
+     the pointer and lifts slightly on hover, the way the ZOOM chip in the same
+     row does. */
+  .pane .chrome .info .pflag { min-width:0; max-width:22em; overflow:hidden;
+    text-overflow:ellipsis; white-space:nowrap; cursor:pointer; font-weight:600; }
+  .pane .chrome .info .pflag:hover { filter:brightness(1.25); }
+
+  /* The toolbar button. It is always present, flagged or not, so it sits at the
+     muted weight of its neighbours until hovered — an always-on red flag in
+     every pane header would be a session-wide alarm rather than a control. */
+  .pane .chrome .ctl button.flagbtn:hover { color:var(--flag-followup); }
+
+  /* A context-menu row's leading glyph (buildCtx's `icon`). Fixed width so the
+     labels line up down the menu whether the glyph is a wide ⚑ or a narrow ? —
+     a ragged left edge is what makes a six-row vocabulary read as six unrelated
+     rows. It takes the kind's own colour, which is half of what the mark means. */
+  #ctxmenu .item .ctxicon { display:inline-block; width:1.2em; margin-right:6px;
+    text-align:center; font-weight:700; }

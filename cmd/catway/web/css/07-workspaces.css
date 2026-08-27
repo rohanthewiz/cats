@@ -32,7 +32,10 @@
      did. The lock itself is exempt from the dimming, being the one thing in the
      row that just became more true; it stays at --muted, the same gray the
      chrome uses for "present, not the point". */
-  #ws-list li.ws.locked > :not(.lock-mark) { opacity:.5; }
+  /* The flag is exempt alongside the lock, and for the same reason: setting a
+     workspace aside does not make the "come back to this" the user pinned to it
+     any less true — if anything it is the row's whole remaining point. */
+  #ws-list li.ws.locked > :not(.lock-mark):not(.flag-mark) { opacity:.5; }
   /* No switch-on-click here, so the row drops the pointer — but not to
      "not-allowed": the row still renames, reorders and opens its menu, and only
      the one gesture is off. The plain arrow says "not a button", which is true. */

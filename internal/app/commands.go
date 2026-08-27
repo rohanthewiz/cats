@@ -7,7 +7,9 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/rohanthewiz/cats/internal/flags"
 	"github.com/rohanthewiz/cats/internal/layout"
 	"github.com/rohanthewiz/cats/internal/startdir"
 	"github.com/rohanthewiz/cats/internal/workspace"
@@ -52,6 +54,14 @@ type Backend interface {
 	// BroadcastPaneTitle pushes a pane's effective title to observers if the pane
 	// is currently on screen (else it rides the chrome resend when next visible).
 	BroadcastPaneTitle(pane uint32)
+	// BroadcastFlags rebroadcasts the chrome that draws user flags after one has
+	// been set or cleared, and arms the save — flags are durable session state.
+	//
+	// Its own method rather than BroadcastLayout because a flag shows up in one
+	// place the layout does not reach: the AGENTS rollup, which is global (every
+	// workspace) and therefore its own message. Nothing structural changed, so
+	// unlike ApplyModel this reconciles no PTYs and moves no viewport.
+	BroadcastFlags()
 
 	// ScrollPane passes a scrollback delta straight to the pane's PTY; it errors
 	// if the pane is unknown.
@@ -517,6 +527,30 @@ func (d *Dispatcher) dispatch(name string, dec ParamDecoder, r Responder) {
 		// Push the new effective title if the pane is on screen; otherwise it
 		// rides the chrome resend when the pane next becomes visible.
 		d.backend.BroadcastPaneTitle(p.Pane)
+		r.OK(nil)
+
+	case CmdPaneFlag:
+		var p FlagPaneParams
+		if err := dec.Decode(&p); err != nil {
+			bad(err)
+			return
+		}
+		// The clock is read here rather than in the Session so the domain model
+		// stays free of one: the dispatcher is where every other "and now" in
+		// this file lives, and a test constructs flags directly.
+		f, err := flags.New(p.Kind, p.Note, time.Now().UnixMilli())
+		if err != nil {
+			bad(err) // a bad kind is malformed params, not a failed effect
+			return
+		}
+		changed, err := d.session.SetPaneFlag(layout.PaneID(p.Pane), f)
+		if err != nil {
+			r.Fail(err.Error())
+			return
+		}
+		if changed {
+			d.backend.BroadcastFlags()
+		}
 		r.OK(nil)
 
 	case CmdPaneSplit:
@@ -1001,6 +1035,31 @@ func (d *Dispatcher) dispatch(name string, dec ParamDecoder, r Responder) {
 			// Durable state the sidebar draws; the pane set is untouched, so
 			// this is the rename/move path (which also arms the save).
 			d.backend.BroadcastLayout()
+		}
+		r.OK(nil)
+
+	case CmdWorkspaceFlag:
+		var p FlagWorkspaceParams
+		if err := dec.Decode(&p); err != nil {
+			bad(err)
+			return
+		}
+		f, err := flags.New(p.Kind, p.Note, time.Now().UnixMilli())
+		if err != nil {
+			bad(err)
+			return
+		}
+		target := p.ID
+		if target == "" {
+			target = d.viewWorkspaceID() // the workspace.lock default
+		}
+		changed, err := d.session.SetWorkspaceFlag(target, f)
+		if err != nil {
+			r.Fail(err.Error())
+			return
+		}
+		if changed {
+			d.backend.BroadcastFlags()
 		}
 		r.OK(nil)
 

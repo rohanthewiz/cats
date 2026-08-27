@@ -4,12 +4,14 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/rohanthewiz/cats/internal/flags"
 	"github.com/rohanthewiz/cats/internal/layout"
 )
 
 // buildWorkspace makes a workspace with two tabs — tab 1 split twice with a
-// custom ratio, tab 2 single-pane — plus custom names, an automation lock, zoom
-// off, and a closed pane so the numbering counter is ahead of the live numbers.
+// custom ratio, tab 2 single-pane — plus custom names, an automation lock, a
+// user flag on the workspace and another on a pane, zoom off, and a closed pane
+// so the numbering counter is ahead of the live numbers.
 func buildWorkspace(t *testing.T) *Workspace {
 	t.Helper()
 	ws, err := New(recordingSpawner(), "/tmp/wsroot", SpawnSpec{})
@@ -30,6 +32,11 @@ func buildWorkspace(t *testing.T) *Workspace {
 	}
 	ws.SetCustomName("myws")
 	ws.SetLocked(true)
+	ws.SetFlag(&flags.Flag{Kind: flags.KindFollowup, Note: "waiting on the API review", AtMs: 1_700_000_000_000})
+	// One flag on a pane too, and on a NAMED kind's neighbour — a custom glyph —
+	// so the round trip covers both halves of the vocabulary. The root pane of
+	// tab 1 is the one that survives every close above.
+	ws.Tabs[0].SetFlag(ws.Tabs[0].RootPane, &flags.Flag{Kind: "🍕", Note: "lunch build", AtMs: 1_700_000_001_000})
 	ws.Tabs[0].SetCustomName("build")
 	return ws
 }
@@ -69,6 +76,15 @@ func TestWorkspaceSnapshotRoundTrip(t *testing.T) {
 	// the one moment nobody is watching for it.
 	if !restored.Locked {
 		t.Fatal("locked workspace restored unlocked")
+	}
+	// Flags are durable for the same reason the lock is, and more so: the whole
+	// point of "come back to this" is that it is still there tomorrow.
+	if got := restored.Flag; got == nil || *got != *ws.Flag {
+		t.Fatalf("workspace flag: got %+v want %+v", got, ws.Flag)
+	}
+	if got := restored.Tabs[0].Panes[restored.Tabs[0].RootPane].Flag; got == nil ||
+		got.Kind != "🍕" || got.Note != "lunch build" {
+		t.Fatalf("pane flag: got %+v", got)
 	}
 	if restored.ActiveTabIndex() != ws.ActiveTabIndex() {
 		t.Fatalf("active tab: got %d want %d", restored.ActiveTabIndex(), ws.ActiveTabIndex())

@@ -68,6 +68,8 @@ abstract final class CmdName {
 
   static const String paneRename = 'pane.rename';
 
+  static const String paneFlag = 'pane.flag';
+
   static const String paneResizeBorder = 'pane.resize_border';
 
   static const String scroll = 'scroll';
@@ -103,6 +105,8 @@ abstract final class CmdName {
   static const String workspaceMove = 'workspace.move';
 
   static const String workspaceLock = 'workspace.lock';
+
+  static const String workspaceFlag = 'workspace.flag';
 
   static const String agentFocus = 'agent.focus';
 
@@ -745,6 +749,63 @@ class FileStatResult {
       };
 }
 
+/// FlagPaneParams: pane.flag. Kind "" clears the flag, the same way an empty
+/// name clears a custom title — every clear in the vocabulary is spelled the
+/// same. Kind is either a named kind or a single glyph; anything else is
+/// refused rather than stored (flags.ParseKind).
+///
+/// Note is only kept when a Kind is given: a note with no mark is invisible in
+/// every surface that draws these.
+class FlagPaneParams {
+  const FlagPaneParams({
+    required this.pane,
+    required this.kind,
+    this.note = '',
+  });
+
+  final int pane;
+  final String kind;
+  final String note;
+
+  factory FlagPaneParams.fromJson(Map<String, Object?> j) => FlagPaneParams(
+        pane: asInt(j['pane']),
+        kind: asString(j['kind']),
+        note: asString(j['note']),
+      );
+
+  Map<String, Object?> toJson() => {
+        'pane': pane,
+        'kind': kind,
+        if (note.isNotEmpty) 'note': note,
+      };
+}
+
+/// FlagWorkspaceParams: workspace.flag. ID "" means the active workspace, the
+/// same default workspace.lock and workspace.close take.
+class FlagWorkspaceParams {
+  const FlagWorkspaceParams({
+    this.id = '',
+    required this.kind,
+    this.note = '',
+  });
+
+  final String id;
+  final String kind;
+  final String note;
+
+  factory FlagWorkspaceParams.fromJson(Map<String, Object?> j) => FlagWorkspaceParams(
+        id: asString(j['id']),
+        kind: asString(j['kind']),
+        note: asString(j['note']),
+      );
+
+  Map<String, Object?> toJson() => {
+        if (id.isNotEmpty) 'id': id,
+        'kind': kind,
+        if (note.isNotEmpty) 'note': note,
+      };
+}
+
 /// HostAttachParams: host.attach — one cathost, in the same shape config.yaml's
 /// hosts: entries use (config.Host), because the command's other half is writing
 /// exactly that entry to the file. A client that can describe a host in the
@@ -1346,6 +1407,9 @@ class PaneInfo {
     this.name = '',
     required this.focused,
     required this.visible,
+    this.flag = '',
+    this.flagNote = '',
+    this.flagAtMs = 0,
     this.agent = '',
     this.agentState = '',
     this.agentModel = '',
@@ -1361,6 +1425,20 @@ class PaneInfo {
   final String name;
   final bool focused;
   final bool visible;
+
+  /// Flag is the flag's kind: one of the named kinds ("followup", "star", …)
+  /// or a literal glyph the user chose. Empty means unflagged. Clients render
+  /// it through the same path either way — see internal/flags.
+  final String flag;
+
+  /// FlagNote is the free text pinned alongside it; empty is normal.
+  final String flagNote;
+
+  /// FlagAtMs is when the flag was last set, in Unix milliseconds. Absolute
+  /// rather than an age, because a flag is not re-sent when nothing about it
+  /// changed — a client that wants "flagged 3d ago" subtracts it from its own
+  /// clock and re-renders on its own tick.
+  final int flagAtMs;
 
   /// detected agent label ("claude", "codex", …)
   final String agent;
@@ -1385,6 +1463,14 @@ class PaneInfo {
   /// machine is actually holding the PTY.
   final String host;
 
+  /// The embedded `FlagInfo` block, regrouped. Go's embedding flattens these
+  /// onto the wire; this hands them back as the unit they were declared as.
+  FlagInfo get flagInfo => FlagInfo(
+        flag: flag,
+        flagNote: flagNote,
+        flagAtMs: flagAtMs,
+      );
+
   /// The embedded `PaneMeta` block, regrouped. Go's embedding flattens these
   /// onto the wire; this hands them back as the unit they were declared as.
   PaneMeta get paneMeta => PaneMeta(
@@ -1402,6 +1488,9 @@ class PaneInfo {
         name: asString(j['name']),
         focused: asBool(j['focused']),
         visible: asBool(j['visible']),
+        flag: asString(j['flag']),
+        flagNote: asString(j['flag_note']),
+        flagAtMs: asInt(j['flag_at_ms']),
         agent: asString(j['agent']),
         agentState: asString(j['agent_state']),
         agentModel: asString(j['agent_model']),
@@ -1416,6 +1505,9 @@ class PaneInfo {
         if (name.isNotEmpty) 'name': name,
         'focused': focused,
         'visible': visible,
+        if (flag.isNotEmpty) 'flag': flag,
+        if (flagNote.isNotEmpty) 'flag_note': flagNote,
+        if (flagAtMs != 0) 'flag_at_ms': flagAtMs,
         if (agent.isNotEmpty) 'agent': agent,
         if (agentState.isNotEmpty) 'agent_state': agentState,
         if (agentModel.isNotEmpty) 'agent_model': agentModel,
@@ -2948,6 +3040,9 @@ class WorkspaceEntry {
     required this.active,
     required this.tabs,
     this.locked = false,
+    this.flag = '',
+    this.flagNote = '',
+    this.flagAtMs = 0,
     this.host = '',
   });
 
@@ -2964,6 +3059,20 @@ class WorkspaceEntry {
   /// closed to automation (workspace.lock)
   final bool locked;
 
+  /// Flag is the flag's kind: one of the named kinds ("followup", "star", …)
+  /// or a literal glyph the user chose. Empty means unflagged. Clients render
+  /// it through the same path either way — see internal/flags.
+  final String flag;
+
+  /// FlagNote is the free text pinned alongside it; empty is normal.
+  final String flagNote;
+
+  /// FlagAtMs is when the flag was last set, in Unix milliseconds. Absolute
+  /// rather than an age, because a flag is not re-sent when nothing about it
+  /// changed — a client that wants "flagged 3d ago" subtracts it from its own
+  /// clock and re-renders on its own tick.
+  final int flagAtMs;
+
   /// Host is the cathost new panes in this workspace land on, as the MODEL
   /// records it: empty means "whatever the default host is", which is what a
   /// workspace created before hosts existed (or on the default) stores. It is a
@@ -2972,12 +3081,23 @@ class WorkspaceEntry {
   /// the workspace ever named a machine.
   final String host;
 
+  /// The embedded `FlagInfo` block, regrouped. Go's embedding flattens these
+  /// onto the wire; this hands them back as the unit they were declared as.
+  FlagInfo get flagInfo => FlagInfo(
+        flag: flag,
+        flagNote: flagNote,
+        flagAtMs: flagAtMs,
+      );
+
   factory WorkspaceEntry.fromJson(Map<String, Object?> j) => WorkspaceEntry(
         id: asString(j['id']),
         name: asString(j['name']),
         active: asBool(j['active']),
         tabs: asInt(j['tabs']),
         locked: asBool(j['locked']),
+        flag: asString(j['flag']),
+        flagNote: asString(j['flag_note']),
+        flagAtMs: asInt(j['flag_at_ms']),
         host: asString(j['host']),
       );
 
@@ -2987,6 +3107,9 @@ class WorkspaceEntry {
         'active': active,
         'tabs': tabs,
         if (locked) 'locked': locked,
+        if (flag.isNotEmpty) 'flag': flag,
+        if (flagNote.isNotEmpty) 'flag_note': flagNote,
+        if (flagAtMs != 0) 'flag_at_ms': flagAtMs,
         if (host.isNotEmpty) 'host': host,
       };
 }
@@ -3278,6 +3401,7 @@ const List<CommandSpec> kCommandSpecs = <CommandSpec>[
   CommandSpec('pane.swap_with', paramsRequired: true),
   CommandSpec('pane.zoom'),
   CommandSpec('pane.rename', paramsRequired: true),
+  CommandSpec('pane.flag', paramsRequired: true),
   CommandSpec('pane.resize_border', paramsRequired: true),
   CommandSpec('scroll', paramsRequired: true),
   CommandSpec('read', paramsRequired: true, replyRequired: true),
@@ -3296,6 +3420,7 @@ const List<CommandSpec> kCommandSpecs = <CommandSpec>[
   CommandSpec('workspace.rename', paramsRequired: true),
   CommandSpec('workspace.move', paramsRequired: true),
   CommandSpec('workspace.lock', paramsRequired: true),
+  CommandSpec('workspace.flag', paramsRequired: true),
   CommandSpec('agent.focus', paramsRequired: true),
   CommandSpec('nav.back'),
   CommandSpec('nav.forward'),
@@ -3410,6 +3535,11 @@ mixin CatsCommands implements CatsCommandTransport {
     await invoke(CmdName.paneRename, params.toJson());
   }
 
+  /// `pane.flag`
+  Future<void> paneFlag(FlagPaneParams params) async {
+    await invoke(CmdName.paneFlag, params.toJson());
+  }
+
   /// `pane.resize_border`
   Future<void> paneResizeBorder(ResizeBorderParams params) async {
     await invoke(CmdName.paneResizeBorder, params.toJson());
@@ -3509,6 +3639,11 @@ mixin CatsCommands implements CatsCommandTransport {
   /// `workspace.lock`
   Future<void> workspaceLock(LockWorkspaceParams params) async {
     await invoke(CmdName.workspaceLock, params.toJson());
+  }
+
+  /// `workspace.flag`
+  Future<void> workspaceFlag(FlagWorkspaceParams params) async {
+    await invoke(CmdName.workspaceFlag, params.toJson());
   }
 
   /// `agent.focus`

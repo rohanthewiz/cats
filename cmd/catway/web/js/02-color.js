@@ -23,6 +23,13 @@
     ctl.appendChild(mkBtn("⬚", "copy mode (keyboard select)", "", () => enterCopyMode(id)));
     ctl.appendChild(mkBtn("⧉", "copy scrollback to clipboard", "", () => copyScrollback(id)));
     ctl.appendChild(mkBtn("✎", "rename pane", "", () => renamePane(id)));
+    // The flag button is always here, flagged or not: the chip in the identity
+    // line only exists once a flag has been set, so without a permanent
+    // affordance the header would offer no way to set the first one. It opens
+    // the same menu the chip and the context menus do — one vocabulary, one
+    // place it is spelled out.
+    ctl.appendChild(mkBtn("⚑", "flag this pane", "flagbtn", (e) =>
+      openCtx(e.clientX, e.clientY, flagMenuItems(paneFlagTarget(id)))));
     ctl.appendChild(mkBtn("✕", "close pane", "close", () => sendCmd("pane.close", { pane: id })));
     chrome.appendChild(info); chrome.appendChild(ctl);
     const canvas = document.createElement("canvas");
@@ -51,11 +58,14 @@
     return p;
   }
 
+  // fn receives the click event, which the handlers that open a menu need in
+  // order to place it under the pointer. Every other caller ignores the extra
+  // argument, so this costs them nothing.
   function mkBtn(label, title, cls, fn) {
     const b = document.createElement("button");
     b.textContent = label; b.title = title; if (cls) b.className = cls;
     b.addEventListener("mousedown", (e) => e.stopPropagation());
-    b.addEventListener("click", (e) => { e.stopPropagation(); e.preventDefault(); fn(); });
+    b.addEventListener("click", (e) => { e.stopPropagation(); e.preventDefault(); fn(e); });
     return b;
   }
 

@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/rohanthewiz/cats/internal/flags"
 	"github.com/rohanthewiz/cats/internal/layout"
 	"github.com/rohanthewiz/cats/internal/workspace"
 )
@@ -254,6 +255,35 @@ func (s *Session) RenamePane(id layout.PaneID, name string) error {
 		return nil
 	}
 	return fmt.Errorf("unknown pane %d", id)
+}
+
+// SetPaneFlag pins (or clears, with nil) a pane's user flag. The pane may live
+// in any workspace/tab — a flag is most often set from the global AGENTS list,
+// which spans the whole session.
+//
+// Reports whether the flag actually changed, so a re-set of the identical flag
+// can skip the broadcast and the save the way SetWorkspaceLock does. Note that
+// "identical" includes the timestamp (flags.Flag.Equal), so re-flagging with the
+// same kind and note IS a change: it is a deliberate "still true, as of now",
+// and the timestamp is the only record of it.
+func (s *Session) SetPaneFlag(id layout.PaneID, f *flags.Flag) (bool, error) {
+	st := s.paneState(id)
+	if st == nil {
+		return false, fmt.Errorf("unknown pane %d", id)
+	}
+	if st.Flag.Equal(f) {
+		return false, nil
+	}
+	st.Flag = f.Clone()
+	return true, nil
+}
+
+// PaneFlag returns a pane's user flag (nil when unflagged or unknown).
+func (s *Session) PaneFlag(id layout.PaneID) *flags.Flag {
+	if st := s.paneState(id); st != nil {
+		return st.Flag
+	}
+	return nil
 }
 
 // PaneCustomName returns a pane's custom title and whether the pane exists.
@@ -570,6 +600,25 @@ func (s *Session) SetWorkspaceLock(id string, locked bool) (bool, error) {
 		return false, nil
 	}
 	s.workspaces[i].SetLocked(locked)
+	return true, nil
+}
+
+// SetWorkspaceFlag pins (or clears, with nil) a workspace's user flag ("" = the
+// active workspace, the default workspace.close and workspace.lock both take).
+// Reports whether the flag actually changed — see SetPaneFlag for what
+// "changed" includes.
+func (s *Session) SetWorkspaceFlag(id string, f *flags.Flag) (bool, error) {
+	i := s.active
+	if id != "" {
+		var ok bool
+		if i, ok = s.workspaceIndexByID(id); !ok {
+			return false, fmt.Errorf("unknown workspace %s", id)
+		}
+	}
+	if s.workspaces[i].Flag.Equal(f) {
+		return false, nil
+	}
+	s.workspaces[i].SetFlag(f)
 	return true, nil
 }
 

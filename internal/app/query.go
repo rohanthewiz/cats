@@ -51,6 +51,8 @@ func (s *Session) ListWorkspacesIn(wsID string) []WorkspaceInfo {
 			Tabs:   len(ws.Tabs),
 			Locked: ws.Locked,
 			Host:   ws.HostID, // as stored: "" = whatever the default host is
+
+			FlagInfo: NewFlagInfo(ws.Flag),
 		})
 	}
 	return out
@@ -144,6 +146,14 @@ func (s *Session) paneInfo(ws *workspace.Workspace, id layout.PaneID, focused, v
 	}
 	if name, ok := s.PaneCustomName(id); ok {
 		info.Name = name
+	}
+	// Read off the workspace's own pane state rather than through the session's
+	// cross-workspace lookup: the caller already has the owning workspace in
+	// hand, so re-scanning every tab of every workspace per row would make
+	// pane.list quadratic in the session's size for a field that is usually
+	// absent.
+	if st, ok := ws.PaneStateFor(id); ok {
+		info.FlagInfo = NewFlagInfo(st.Flag)
 	}
 	return info
 }

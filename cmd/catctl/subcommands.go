@@ -51,6 +51,7 @@ const (
 	argDetachHost                  // detachable cathost ids, from host.list
 	argRunbook                     // runbook names, from runbook.list
 	argRecordAction                // the four verbs runbook.record takes
+	argFlagKind                    // the named flag kinds, from internal/flags
 )
 
 // usageErr reports malformed subcommand arguments; its message is the verb's
@@ -87,6 +88,8 @@ var subcommands = []subcommand{
 	{"swap", app.CmdPaneSwap, "swap <left|right|up|down>", []argKind{argDirection}, "swap with the neighbour in a direction", buildDir},
 	{"zoom", app.CmdPaneZoom, "zoom [pane]", []argKind{argPane}, "toggle pane zoom (focused by default)", buildOptPane},
 	{"rename-pane", app.CmdPaneRename, "rename-pane <pane> <name...>", []argKind{argPane}, "rename a pane (empty name clears)", buildRenamePane},
+	{"flag", app.CmdPaneFlag, "flag <pane> <kind> [note...]", []argKind{argPane, argFlagKind}, "pin a flag (and an optional note) to a pane", buildFlagPane},
+	{"unflag", app.CmdPaneFlag, "unflag <pane>", []argKind{argPane}, "clear a pane's flag", buildUnflagPane},
 	{"resize", app.CmdPaneResizeBorder, "resize <border> <ratio>", nil, "set a split border's ratio", buildResize},
 	{"scroll", app.CmdScroll, "scroll <pane> <delta>", []argKind{argPane}, "scroll a pane by delta lines (negative = up)", buildScroll},
 	{"capture", app.CmdCapture, "capture <pane> [lines]", []argKind{argPane}, "capture a pane's text (whole buffer, or last N lines)", buildCapture},
@@ -108,6 +111,8 @@ var subcommands = []subcommand{
 	{"rename-ws", app.CmdWorkspaceRename, "rename-ws <id> <name...>", []argKind{argWorkspace}, "rename a workspace (empty name clears)", buildRenameWorkspace},
 	{"lock-ws", app.CmdWorkspaceLock, "lock-ws [id]", []argKind{argWorkspace}, "close a workspace to plugins and agents (active by default)", buildLockWorkspace},
 	{"unlock-ws", app.CmdWorkspaceLock, "unlock-ws [id]", []argKind{argWorkspace}, "reopen a locked workspace (active by default)", buildUnlockWorkspace},
+	{"flag-ws", app.CmdWorkspaceFlag, "flag-ws <id> <kind> [note...]", []argKind{argWorkspace, argFlagKind}, "pin a flag (and an optional note) to a workspace", buildFlagWorkspace},
+	{"unflag-ws", app.CmdWorkspaceFlag, "unflag-ws [id]", []argKind{argWorkspace}, "clear a workspace's flag (active by default)", buildUnflagWorkspace},
 
 	// Host commands. They edit the roster of the RUNNING catway and its config
 	// file together, so neither needs a restart. Only the two positional
@@ -664,6 +669,64 @@ func buildRenameWorkspace(args []string) (json.RawMessage, error) {
 		return nil, usageErr{"rename-ws <id> <name...>"}
 	}
 	return marshal(app.RenameWorkspaceParams{ID: args[0], Name: strings.Join(args[1:], " ")})
+}
+
+// buildFlagPane / buildUnflagPane: flag <pane> <kind> [note...] / unflag <pane>.
+//
+// Two verbs over one command, the lock-ws/unlock-ws pattern: clearing is
+// `kind: ""` on the wire, and `catctl flag 7 ""` is not what anyone would go
+// looking for. The kind is validated server-side (flags.ParseKind) rather than
+// here, so the CLI and the browser get the identical error text and the
+// vocabulary lives in exactly one place.
+//
+// The note is the variadic tail for the same reason a name is in rename-pane:
+// it is prose, and quoting it should be optional.
+func buildFlagPane(args []string) (json.RawMessage, error) {
+	if len(args) < 2 {
+		return nil, usageErr{"flag <pane> <kind> [note...]"}
+	}
+	pane, err := parsePane(args[0])
+	if err != nil {
+		return nil, err
+	}
+	return marshal(app.FlagPaneParams{Pane: pane, Kind: args[1], Note: strings.Join(args[2:], " ")})
+}
+
+func buildUnflagPane(args []string) (json.RawMessage, error) {
+	if len(args) != 1 {
+		return nil, usageErr{"unflag <pane>"}
+	}
+	pane, err := parsePane(args[0])
+	if err != nil {
+		return nil, err
+	}
+	return marshal(app.FlagPaneParams{Pane: pane, Kind: ""})
+}
+
+// buildFlagWorkspace / buildUnflagWorkspace: flag-ws <id> <kind> [note...] /
+// unflag-ws [id].
+//
+// The id is required on the setter and optional on the clearer, which looks
+// asymmetric and is the only spelling that stays unambiguous: with both
+// optional, `flag-ws followup` and `flag-ws w2` are the same shape and mean
+// different things. Clearing has one argument and no such collision, so it
+// keeps the `unlock-ws [id]` default of "the active workspace".
+func buildFlagWorkspace(args []string) (json.RawMessage, error) {
+	if len(args) < 2 {
+		return nil, usageErr{"flag-ws <id> <kind> [note...]"}
+	}
+	return marshal(app.FlagWorkspaceParams{ID: args[0], Kind: args[1], Note: strings.Join(args[2:], " ")})
+}
+
+func buildUnflagWorkspace(args []string) (json.RawMessage, error) {
+	if len(args) > 1 {
+		return nil, usageErr{"unflag-ws [id]"}
+	}
+	p := app.FlagWorkspaceParams{Kind: ""}
+	if len(args) == 1 {
+		p.ID = args[0]
+	}
+	return marshal(p)
 }
 
 // buildLockWorkspace / buildUnlockWorkspace: lock-ws [id] / unlock-ws [id]. Two

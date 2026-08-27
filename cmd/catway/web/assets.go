@@ -79,6 +79,7 @@ var cssFiles = []string{
 	"25-dragdrop.css",   // drop bars and the grabbing cursor
 	"26-settings.css",   // settings modal + worktree dialogs
 	"27-picker.css",     // the inline directory picker
+	"28-flags.css",      // user flags: the sidebar mark, the pane-header chip
 }
 
 // jsFiles is the front-end, in evaluation order. Order matters twice: `const`

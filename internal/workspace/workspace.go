@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/rohanthewiz/cats/internal/flags"
 	"github.com/rohanthewiz/cats/internal/layout"
 )
 
@@ -45,6 +46,15 @@ type Workspace struct {
 	// from the control API. Working in it by hand is untouched — the point is
 	// to keep plugins and agents out of a workspace, not to freeze it.
 	Locked bool
+	// Flag is the user's persistent annotation on this workspace — a glyph with
+	// a meaning, plus an optional note (see internal/flags). nil = unflagged.
+	//
+	// Durable, like the lock and the custom name, and for the same reason: the
+	// whole point of pinning "come back to this" to a workspace is that it is
+	// still there tomorrow, and a reminder that clears itself on the next
+	// restart is a reminder that lapses at the one moment nobody is watching
+	// for it.
+	Flag *flags.Flag
 	// CachedGitBranch / CachedGitAheadBehind are plain optionals fed by the
 	// deferred GitProvider seam (WS1 Stage 4); nil until wired.
 	CachedGitBranch      *string
@@ -456,6 +466,13 @@ func (w *Workspace) SetCustomName(name string) {
 // SetLocked opens or closes the workspace to automation (see Locked).
 func (w *Workspace) SetLocked(locked bool) {
 	w.Locked = locked
+}
+
+// SetFlag pins (or clears, with nil) the workspace's user flag. The flag is
+// stored by value through Clone so the caller's struct cannot be mutated out
+// from under the model afterwards.
+func (w *Workspace) SetFlag(f *flags.Flag) {
+	w.Flag = f.Clone()
 }
 
 // ResolvedIdentityCwd returns the workspace identity directory.

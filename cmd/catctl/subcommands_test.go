@@ -111,6 +111,34 @@ func TestBuildRename(t *testing.T) {
 		app.RenameWorkspaceParams{ID: "w1", Name: "front end"})
 }
 
+// flag / unflag and their -ws pair. The note is the variadic tail, so quoting it
+// is optional; the kind is passed through unvalidated, because flags.ParseKind
+// on the server is what refuses a typo — one vocabulary, one error message,
+// identical for the CLI and the browser.
+func TestBuildFlag(t *testing.T) {
+	buildOK(t, "flag", []string{"2", "followup", "waiting", "on", "review"},
+		app.FlagPaneParams{Pane: 2, Kind: "followup", Note: "waiting on review"})
+	buildOK(t, "flag", []string{"2", "star"}, app.FlagPaneParams{Pane: 2, Kind: "star"})
+	// A glyph is just another kind here; only the server knows the difference.
+	buildOK(t, "flag", []string{"2", "🍕", "lunch"}, app.FlagPaneParams{Pane: 2, Kind: "🍕", Note: "lunch"})
+	buildErr(t, "flag", []string{"2"})         // a kind is required
+	buildErr(t, "flag", []string{"x", "star"}) // and the pane must parse
+
+	buildOK(t, "unflag", []string{"2"}, app.FlagPaneParams{Pane: 2})
+	buildErr(t, "unflag", nil)
+	buildErr(t, "unflag", []string{"2", "3"})
+
+	buildOK(t, "flag-ws", []string{"w1", "warn", "flaky", "tests"},
+		app.FlagWorkspaceParams{ID: "w1", Kind: "warn", Note: "flaky tests"})
+	buildErr(t, "flag-ws", []string{"w1"}) // the id does NOT stand in for the kind
+
+	// Clearing defaults to the active workspace, the unlock-ws shape: one
+	// argument, so there is no id/kind collision to disambiguate.
+	buildOK(t, "unflag-ws", nil, app.FlagWorkspaceParams{})
+	buildOK(t, "unflag-ws", []string{"w2"}, app.FlagWorkspaceParams{ID: "w2"})
+	buildErr(t, "unflag-ws", []string{"w2", "extra"})
+}
+
 // new-ws names the workspace when asked and stays a bare no-params command
 // otherwise (the shape a key binding sends).
 func TestBuildNewWorkspace(t *testing.T) {

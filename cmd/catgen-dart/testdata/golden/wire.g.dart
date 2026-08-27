@@ -216,6 +216,9 @@ class AgentItem {
     this.model = '',
     required this.seen,
     required this.sinceMs,
+    this.flag = '',
+    this.flagNote = '',
+    this.flagAtMs = 0,
   });
 
   final int pane;
@@ -243,6 +246,28 @@ class AgentItem {
   /// value, since the rollup ships in the same breath as the change.
   final int sinceMs;
 
+  /// Flag is the flag's kind: one of the named kinds ("followup", "star", …)
+  /// or a literal glyph the user chose. Empty means unflagged. Clients render
+  /// it through the same path either way — see internal/flags.
+  final String flag;
+
+  /// FlagNote is the free text pinned alongside it; empty is normal.
+  final String flagNote;
+
+  /// FlagAtMs is when the flag was last set, in Unix milliseconds. Absolute
+  /// rather than an age, because a flag is not re-sent when nothing about it
+  /// changed — a client that wants "flagged 3d ago" subtracts it from its own
+  /// clock and re-renders on its own tick.
+  final int flagAtMs;
+
+  /// The embedded `FlagInfo` block, regrouped. Go's embedding flattens these
+  /// onto the wire; this hands them back as the unit they were declared as.
+  FlagInfo get flagInfo => FlagInfo(
+        flag: flag,
+        flagNote: flagNote,
+        flagAtMs: flagAtMs,
+      );
+
   factory AgentItem.fromJson(Map<String, Object?> j) => AgentItem(
         pane: asInt(j['pane']),
         pub: asString(j['pub']),
@@ -253,6 +278,9 @@ class AgentItem {
         model: asString(j['model']),
         seen: asBool(j['seen']),
         sinceMs: asInt(j['since_ms']),
+        flag: asString(j['flag']),
+        flagNote: asString(j['flag_note']),
+        flagAtMs: asInt(j['flag_at_ms']),
       );
 
   Map<String, Object?> toJson() => {
@@ -265,6 +293,9 @@ class AgentItem {
         if (model.isNotEmpty) 'model': model,
         'seen': seen,
         'since_ms': sinceMs,
+        if (flag.isNotEmpty) 'flag': flag,
+        if (flagNote.isNotEmpty) 'flag_note': flagNote,
+        if (flagAtMs != 0) 'flag_at_ms': flagAtMs,
       };
 }
 
@@ -1001,6 +1032,53 @@ class ErrorMsg {
         't': type,
         'msg': msg,
         if (pane != 0) 'pane': pane,
+      };
+}
+
+/// FlagInfo is a user flag as it appears on the wire: three flat fields,
+/// embedded into every struct that can carry one (WorkspaceInfo, PaneInfo, and
+/// their browserproto counterparts).
+///
+/// Flat rather than a nested object, and embedded rather than repeated, for two
+/// reasons. Flat keeps the shape identical to the `locked` / `host` fields
+/// beside it, so a client reads one more optional scalar rather than learning a
+/// sub-object; embedded means the documentation, the JSON keys and the
+/// conversion live in exactly one place, and cmd/catgen-dart still flattens it
+/// onto each class while offering the group back as a `flagInfo` getter.
+///
+/// All three are omitempty, so an unflagged subject — which is nearly all of
+/// them — costs nothing on the wire.
+class FlagInfo {
+  const FlagInfo({
+    this.flag = '',
+    this.flagNote = '',
+    this.flagAtMs = 0,
+  });
+
+  /// Flag is the flag's kind: one of the named kinds ("followup", "star", …)
+  /// or a literal glyph the user chose. Empty means unflagged. Clients render
+  /// it through the same path either way — see internal/flags.
+  final String flag;
+
+  /// FlagNote is the free text pinned alongside it; empty is normal.
+  final String flagNote;
+
+  /// FlagAtMs is when the flag was last set, in Unix milliseconds. Absolute
+  /// rather than an age, because a flag is not re-sent when nothing about it
+  /// changed — a client that wants "flagged 3d ago" subtracts it from its own
+  /// clock and re-renders on its own tick.
+  final int flagAtMs;
+
+  factory FlagInfo.fromJson(Map<String, Object?> j) => FlagInfo(
+        flag: asString(j['flag']),
+        flagNote: asString(j['flag_note']),
+        flagAtMs: asInt(j['flag_at_ms']),
+      );
+
+  Map<String, Object?> toJson() => {
+        if (flag.isNotEmpty) 'flag': flag,
+        if (flagNote.isNotEmpty) 'flag_note': flagNote,
+        if (flagAtMs != 0) 'flag_at_ms': flagAtMs,
       };
 }
 
@@ -1916,6 +1994,9 @@ class PaneRectInfo {
     this.scrollbar,
     required this.focused,
     this.host = '',
+    this.flag = '',
+    this.flagNote = '',
+    this.flagAtMs = 0,
   });
 
   final int pane;
@@ -1934,6 +2015,28 @@ class PaneRectInfo {
   /// answer is the same for every pane and says nothing.
   final String host;
 
+  /// Flag is the flag's kind: one of the named kinds ("followup", "star", …)
+  /// or a literal glyph the user chose. Empty means unflagged. Clients render
+  /// it through the same path either way — see internal/flags.
+  final String flag;
+
+  /// FlagNote is the free text pinned alongside it; empty is normal.
+  final String flagNote;
+
+  /// FlagAtMs is when the flag was last set, in Unix milliseconds. Absolute
+  /// rather than an age, because a flag is not re-sent when nothing about it
+  /// changed — a client that wants "flagged 3d ago" subtracts it from its own
+  /// clock and re-renders on its own tick.
+  final int flagAtMs;
+
+  /// The embedded `FlagInfo` block, regrouped. Go's embedding flattens these
+  /// onto the wire; this hands them back as the unit they were declared as.
+  FlagInfo get flagInfo => FlagInfo(
+        flag: flag,
+        flagNote: flagNote,
+        flagAtMs: flagAtMs,
+      );
+
   factory PaneRectInfo.fromJson(Map<String, Object?> j) => PaneRectInfo(
         pane: asInt(j['pane']),
         pub: asString(j['pub']),
@@ -1942,6 +2045,9 @@ class PaneRectInfo {
         scrollbar: j['scrollbar'] == null ? null : Rect.fromJson(j['scrollbar']),
         focused: asBool(j['focused']),
         host: asString(j['host']),
+        flag: asString(j['flag']),
+        flagNote: asString(j['flag_note']),
+        flagAtMs: asInt(j['flag_at_ms']),
       );
 
   Map<String, Object?> toJson() => {
@@ -1952,6 +2058,9 @@ class PaneRectInfo {
         if (scrollbar != null) 'scrollbar': scrollbar?.toJson(),
         'focused': focused,
         if (host.isNotEmpty) 'host': host,
+        if (flag.isNotEmpty) 'flag': flag,
+        if (flagNote.isNotEmpty) 'flag_note': flagNote,
+        if (flagAtMs != 0) 'flag_at_ms': flagAtMs,
       };
 }
 
@@ -2474,6 +2583,9 @@ class WorkspaceInfo {
     this.agentSummary = '',
     this.locked = false,
     this.host = '',
+    this.flag = '',
+    this.flagNote = '',
+    this.flagAtMs = 0,
   });
 
   /// stable public id, e.g. "w1"
@@ -2491,6 +2603,28 @@ class WorkspaceInfo {
   /// only while more than one host exists — see the hosts message.
   final String host;
 
+  /// Flag is the flag's kind: one of the named kinds ("followup", "star", …)
+  /// or a literal glyph the user chose. Empty means unflagged. Clients render
+  /// it through the same path either way — see internal/flags.
+  final String flag;
+
+  /// FlagNote is the free text pinned alongside it; empty is normal.
+  final String flagNote;
+
+  /// FlagAtMs is when the flag was last set, in Unix milliseconds. Absolute
+  /// rather than an age, because a flag is not re-sent when nothing about it
+  /// changed — a client that wants "flagged 3d ago" subtracts it from its own
+  /// clock and re-renders on its own tick.
+  final int flagAtMs;
+
+  /// The embedded `FlagInfo` block, regrouped. Go's embedding flattens these
+  /// onto the wire; this hands them back as the unit they were declared as.
+  FlagInfo get flagInfo => FlagInfo(
+        flag: flag,
+        flagNote: flagNote,
+        flagAtMs: flagAtMs,
+      );
+
   factory WorkspaceInfo.fromJson(Map<String, Object?> j) => WorkspaceInfo(
         id: asString(j['id']),
         name: asString(j['name']),
@@ -2498,6 +2632,9 @@ class WorkspaceInfo {
         agentSummary: asString(j['agent_summary']),
         locked: asBool(j['locked']),
         host: asString(j['host']),
+        flag: asString(j['flag']),
+        flagNote: asString(j['flag_note']),
+        flagAtMs: asInt(j['flag_at_ms']),
       );
 
   Map<String, Object?> toJson() => {
@@ -2507,6 +2644,9 @@ class WorkspaceInfo {
         if (agentSummary.isNotEmpty) 'agent_summary': agentSummary,
         if (locked) 'locked': locked,
         if (host.isNotEmpty) 'host': host,
+        if (flag.isNotEmpty) 'flag': flag,
+        if (flagNote.isNotEmpty) 'flag_note': flagNote,
+        if (flagAtMs != 0) 'flag_at_ms': flagAtMs,
       };
 }
 

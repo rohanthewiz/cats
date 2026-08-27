@@ -21,6 +21,20 @@
     /* The todo reminder mark keeps the old warm yellow: it has to stay clear of
        the green agent-state dots so it reads as a reminder, not as a state. */
     --todo:#f0dfa0;
+    /* User flags (workspace.flag / pane.flag). Six named kinds, six colours, so
+       the mark is legible as a *meaning* at 12px without reading its tooltip.
+       Three of them are var()s onto tokens that already mean the same thing —
+       a red-for-attention, an amber-for-waiting, a green-for-settled — so a
+       theme that never heard of flags still gets a coherent set; the other
+       three are their own hues because nothing existing carried "important",
+       "something is wrong" or "a mark I invented" without colliding with an
+       agent-state dot one span over. Each is its own token, so a theme that
+       wants to can tune them individually. */
+    --flag-followup:var(--err); --flag-question:var(--warn); --flag-star:#f2c14e;
+    --flag-warn:#e0955e; --flag-done:var(--ok); --flag-note:var(--muted);
+    /* A glyph the user invented has no meaning this palette knows, so it takes
+       plain foreground rather than borrowing a named kind's colour. */
+    --flag-custom:var(--fg-soft);
     --ok:#6ac47a; --warn:#e0b64e; --err:#e57373; --done:#00ccf5;
     /* Agent identity hues. AGENTS hands each tool name one of these six slots
        (AGENT_HUE below), so claude and ced in the same list are told apart

@@ -5,6 +5,12 @@
   // per host and bury the ordinary actions. A submenu is a second menu element
   // built by the same function, so nesting costs nothing and every item type
   // (separators, danger rows) works at any depth.
+  //
+  // An item may also carry {icon: {text, cls}}: a leading glyph in its own span,
+  // so it can take a colour the label does not. The flag menu is what wants it —
+  // the colour is half of what a flag mark means, and a menu that teaches only
+  // the shape leaves the reader to learn the palette from the sidebar by
+  // induction. Everything else omits it and renders exactly as before.
   function openCtx(x, y, items) {
     closeCtx();
     ctxEl = buildCtx(x, y, items);
@@ -25,7 +31,13 @@
       }
       const el = document.createElement("div");
       el.className = "item" + (it.danger ? " danger" : "") + (it.sub ? " sub" : "");
-      el.textContent = it.label;
+      if (it.icon) {
+        const ic = document.createElement("span");
+        ic.className = "ctxicon " + (it.icon.cls || "");
+        ic.textContent = it.icon.text;
+        el.appendChild(ic);
+      }
+      el.appendChild(document.createTextNode(it.label));
       if (it.sub) {
         // Hover opens it (and closes any sibling's), which is what a pointer
         // expects; click does the same so a tap reaches it too. The child is
@@ -85,6 +97,7 @@
       { label: "copy scrollback", fn: () => copyScrollback(id) },
       "-",
       { label: "rename pane…", fn: () => renamePane(id) },
+      { label: flagRowLabel(paneFlagFor(id)), sub: flagMenuItems(paneFlagTarget(id)) },
       { label: "close pane", danger: true, fn: () => sendCmd("pane.close", { pane: id }) },
     );
     return items;
@@ -111,6 +124,13 @@
     return items;
   }
 
+  // flagRowLabel names the submenu by what it will do: "flag…" when there is
+  // nothing there yet, and the flag itself once there is, so the menu reports the
+  // current state without a second row to say so.
+  function flagRowLabel(f) {
+    return f ? "flag: " + flagGlyph(f) + " " + flagLabel(f) + "…" : "flag…";
+  }
+
   // otherWorkspaces is every workspace except the one this window is showing —
   // the destinations a tab can be moved to.
   function otherWorkspaces() {
@@ -129,6 +149,71 @@
       fn: () => fn(h.id),
     }));
   }
+  // ---- Flags: one menu, three subjects ----
+  //
+  // A flag target is everything the menu needs to act without knowing whether it
+  // is looking at a workspace or a pane: which command to send, the params that
+  // address the subject, a name for the toasts, and whatever flag is on it now
+  // (so "edit note…" starts from the current note rather than blank). Building
+  // it at the call site rather than passing a bare id is what lets the sidebar,
+  // the pane header, the pane toolbar and the palette all share one menu.
+  function paneFlagTarget(id) {
+    return { cmd: "pane.flag", params: { pane: id }, label: paneRefFor(id), flag: paneFlagFor(id) };
+  }
+  function wsFlagTarget(w) {
+    return { cmd: "workspace.flag", params: { id: w.id }, label: w.name || w.id, flag: flagOf(w) };
+  }
+
+  // paneFlagFor finds a pane's current flag wherever this window happens to know
+  // it. Three sources, most-live first: the layout (pushed the moment the flag
+  // changes, but only for the active tab), then the agents rollup (global, but
+  // only agent panes), then the pane.list snapshot (global, one round trip
+  // behind). A pane in another workspace running no agent is exactly why the
+  // third one is here.
+  function paneFlagFor(id) {
+    const p = panes.get(id);
+    if (p && p.info) { const f = flagOf(p.info); if (f) return f; }
+    const a = agentItems.find((x) => x.pane === id);
+    if (a) { const f = flagOf(a); if (f) return f; }
+    const pi = paneInv.find((x) => x.pane === id);
+    return pi ? flagOf(pi) : null;
+  }
+
+  // paneRefFor names a pane for a toast, from whichever list knows its handle —
+  // the same fallback chain, since a pane the layout does not carry still has a
+  // handle in the rollup or the inventory.
+  function paneRefFor(id) {
+    const p = panes.get(id);
+    if (p && p.pub) return paneRef(p.pub, id);
+    const a = agentItems.find((x) => x.pane === id);
+    if (a) return paneRef(a.pub, id);
+    const pi = paneInv.find((x) => x.pane === id);
+    return paneRef(pi && pi.handle, id);
+  }
+
+  // flagMenuItems is the whole flag vocabulary as a menu: one row per named
+  // kind, then the dialog that covers a note and a custom glyph, then the two
+  // rows that only make sense once something is flagged.
+  //
+  // Picking a kind is one click and keeps whatever note is already there — the
+  // common motion is "mark this, I'll come back", and making that cost a dialog
+  // would mean it doesn't get used. The note has its own row for when it is the
+  // point.
+  function flagMenuItems(target) {
+    const cur = target.flag;
+    const items = FLAG_DEFS.map((d) => ({
+      icon: { text: d.glyph, cls: "fk-" + d.kind },
+      label: d.label + (cur && cur.kind === d.kind ? "  (current)" : ""),
+      fn: () => sendFlag(target, d.kind, cur ? cur.note : ""),
+    }));
+    items.push("-", { label: "flag with a note…", fn: () => openFlagDialog(target) });
+    if (cur) {
+      items.push({ label: "edit note…", fn: () => editFlagNote(target) });
+      items.push({ label: "clear flag", fn: () => sendFlag(target, "", "") });
+    }
+    return items;
+  }
+
   function wsMenuItems(w) {
     return [
       { label: "new workspace…", fn: newWorkspace },
@@ -139,6 +224,7 @@
       { label: "open in new window", fn: () => openWindow(w.id) },
       { label: "rename workspace…", fn: () => renameWorkspace(w) },
       { label: w.locked ? "unlock workspace" : "lock workspace", fn: () => toggleWorkspaceLock(w) },
+      { label: flagRowLabel(flagOf(w)), sub: flagMenuItems(wsFlagTarget(w)) },
       "-",
       { label: "new worktree…", fn: openNewWorktreeDialog },
       { label: "open worktree…", fn: openWorktreeOpenDialog },

@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/rohanthewiz/cats/internal/flags"
 )
 
 // The one invariant the split introduces: the ordered lists in assets.go and
@@ -167,4 +169,59 @@ func between(t *testing.T, s, open, close string) string {
 		t.Fatalf("no %s in the page", close)
 	}
 	return rest[:j]
+}
+
+// The flag vocabulary is written down twice — once in Go (internal/flags, which
+// validates every workspace.flag / pane.flag) and once in JavaScript
+// (FLAG_DEFS in js/07-workspaces.js, which draws the menu and the marks). The
+// duplication is deliberate: the browser has to render a menu of kinds before
+// any flag exists, and fetching six compile-time constants over the wire would
+// be a message for nothing.
+//
+// What is not acceptable is the two lists drifting. A kind added in Go and not
+// in the browser is a flag a script can set and the sidebar draws with no
+// colour and no name; one added only in the browser is a menu row the server
+// refuses. So the JS is parsed here and compared field by field.
+func TestWebFlagVocabularyMatchesGo(t *testing.T) {
+	src, err := fs.ReadFile(jsFS, "js/07-workspaces.js")
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	block := regexp.MustCompile(`(?s)const FLAG_DEFS = \[(.*?)\n  \];`).FindSubmatch(src)
+	if block == nil {
+		t.Fatal("FLAG_DEFS not found in js/07-workspaces.js — if it moved, move this test's parse with it")
+	}
+	entry := regexp.MustCompile(`\{ kind: "([^"]*)", glyph: "([^"]*)", label: "([^"]*)", meaning: "([^"]*)" \}`)
+	var got []string
+	for _, m := range entry.FindAllStringSubmatch(string(block[1]), -1) {
+		got = append(got, strings.Join(m[1:], "|"))
+	}
+	var want []string
+	for _, d := range flags.Defs() {
+		want = append(want, strings.Join([]string{string(d.Kind), d.Glyph, d.Label, d.Meaning}, "|"))
+	}
+	// Order matters as well as content: FLAG_DEFS is the menu, and the Go table
+	// documents its order as "the ones that ask for attention first".
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("FLAG_DEFS and internal/flags disagree\n  js: %v\n  go: %v", got, want)
+	}
+}
+
+// Every named kind needs a colour rule, or a flag the server happily accepts
+// draws in whatever the surrounding row was using — which reads as "no flag"
+// exactly as often as it reads as the wrong one.
+func TestEveryFlagKindHasAColour(t *testing.T) {
+	css, err := fs.ReadFile(cssFS, "css/28-flags.css")
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	for _, d := range flags.Defs() {
+		if !strings.Contains(string(css), ".fk-"+string(d.Kind)+" ") {
+			t.Errorf("css/28-flags.css has no rule for .fk-%s", d.Kind)
+		}
+	}
+	// And the fallback for a glyph the user invented, which no named rule covers.
+	if !strings.Contains(string(css), ".fk-custom ") {
+		t.Error("css/28-flags.css has no .fk-custom rule")
+	}
 }

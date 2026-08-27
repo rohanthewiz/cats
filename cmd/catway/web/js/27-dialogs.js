@@ -225,6 +225,87 @@
       toast((w.name || w.id) + (locked ? " locked — no plugins or agents" : " unlocked"));
     });
   }
+  // ---- Flags (workspace.flag / pane.flag) ----
+  //
+  // One sender for both commands: a target names the command and the params that
+  // address its subject (see paneFlagTarget / wsFlagTarget), so nothing below
+  // has to know whether it is flagging a workspace or a pane.
+  //
+  // No confirm on any path, clearing included — nothing is destroyed, the mark
+  // appears or vanishes from four lists at once, and the toast says which just
+  // happened. A flag is something you set in passing; making it cost a dialog
+  // would mean it doesn't get set.
+  function sendFlag(target, kind, note) {
+    sendCmdAwait(target.cmd, { ...target.params, kind, note: note || "" }, (res) => {
+      if (!res.ok) { toast("flag: " + (res.error || "unknown")); return; }
+      if (!kind) { toast(target.label + " unflagged"); return; }
+      // The glyph goes in the toast, not just the name: it is what the user is
+      // about to go looking for in the sidebar, so the toast doubles as "this is
+      // the mark you just made".
+      const f = { kind, note };
+      toast(target.label + " flagged " + flagGlyph(f) + " " + flagLabel(f) + (note ? " — " + note : ""));
+    });
+  }
+
+  // editFlagNote changes the note without touching the kind — the second half of
+  // the one-click flagging in the menu. Only reachable on a flagged subject, so
+  // target.flag is always there.
+  function editFlagNote(target) {
+    const cur = target.flag;
+    dialogInput({
+      title: "note for " + flagGlyph(cur) + " " + flagLabel(cur) + " on " + target.label,
+      value: cur.note,
+      hint: "enter saves · empty clears the note but keeps the flag · esc cancels",
+      onSubmit: (note) => sendFlag(target, cur.kind, note),
+    });
+  }
+
+  // openFlagDialog is the full form: pick a kind (or invent a glyph) and write a
+  // note in one go.
+  //
+  // The glyph field only exists for the "custom glyph" choice, and is hidden
+  // otherwise rather than being a permanent third row that means nothing five
+  // times out of six. onChange fires once on open, so the field starts in the
+  // right state — a dialog opened on a subject that already wears a custom glyph
+  // shows it.
+  // A sentinel no real kind can collide with: it has a space in it, and the
+  // server refuses any kind containing whitespace (flags.ParseKind), so this can
+  // never be mistaken for a value worth sending.
+  const FLAG_CUSTOM = "custom glyph";
+  function openFlagDialog(target) {
+    const cur = target.flag;
+    const named = cur && FLAG_BY_KIND.has(cur.kind);
+    const choices = FLAG_DEFS.map((d) => ({ value: d.kind, label: d.glyph + "  " + d.label + " — " + d.meaning }));
+    choices.push({ value: FLAG_CUSTOM, label: "custom glyph…" });
+    dialogFields({
+      title: "flag " + target.label,
+      submitLabel: "flag",
+      hint: "enter saves · esc cancels · clear the flag from the row's menu",
+      fields: [
+        {
+          label: "flag", choices,
+          value: cur ? (named ? cur.kind : FLAG_CUSTOM) : FLAG_DEFS[0].kind,
+          onChange: (v, rows) => {
+            // rows[1] is the glyph field; its .field wrapper is what carries the
+            // label, so hiding the wrapper hides the whole row.
+            const wrap = rows[1].input.parentElement;
+            wrap.style.display = v === FLAG_CUSTOM ? "" : "none";
+          },
+        },
+        { label: "glyph", value: cur && !named ? cur.kind : "", placeholder: "any single character, e.g. 🍕" },
+        { label: "note", value: cur ? cur.note : "", placeholder: "optional — what you want to remember" },
+      ],
+      onSubmit: (kind, glyph, note) => {
+        // The server validates the glyph (flags.ParseKind) rather than this
+        // dialog, so the CLI and the browser refuse exactly the same things with
+        // exactly the same words. All that happens here is the substitution.
+        const k = kind === FLAG_CUSTOM ? glyph.trim() : kind;
+        if (!k) { toast("flag: no glyph given"); return; }
+        sendFlag(target, k, note);
+      },
+    });
+  }
+
   function confirmCloseWorkspace(w) {
     dialogConfirm({
       title: "close workspace",

@@ -47,6 +47,11 @@ var recordedParamClasses = map[string]map[string]string{
 		"name": ClassPlain,
 		"pane": ClassPaneHandle,
 	},
+	"pane.flag": {
+		"kind": ClassPlain,
+		"note": ClassPlain,
+		"pane": ClassPaneHandle,
+	},
 	"pane.resize_border": {
 		"border": ClassPlain,
 		"ratio":  ClassPlain,
@@ -114,6 +119,11 @@ var recordedParamClasses = map[string]map[string]string{
 	"workspace.lock": {
 		"id":     ClassWorkspaceHandle,
 		"locked": ClassPlain,
+	},
+	"workspace.flag": {
+		"id":   ClassWorkspaceHandle,
+		"kind": ClassPlain,
+		"note": ClassPlain,
 	},
 	"agent.focus":          {"pane": ClassPaneHandle},
 	"server.reload_config": {},

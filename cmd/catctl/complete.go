@@ -45,6 +45,7 @@ import (
 
 	"github.com/rohanthewiz/cats/internal/app"
 	"github.com/rohanthewiz/cats/internal/ctlproto"
+	"github.com/rohanthewiz/cats/internal/flags"
 	"github.com/rohanthewiz/cats/internal/integration"
 	"github.com/rohanthewiz/cats/internal/plugin"
 )
@@ -442,6 +443,19 @@ func argCandidates(kind argKind, words []string) []candidate {
 		return []candidate{{"h", "split horizontally (side by side)"}, {"v", "split vertically (stacked)"}}
 	case argCycleDir:
 		return []candidate{{"next", "the next pane"}, {"prev", "the previous pane"}}
+	case argFlagKind:
+		// Static, because the vocabulary is compiled in: the named kinds are a
+		// Go table, not something the server could tell us that it does not
+		// already know. Each candidate carries its meaning, which is the half a
+		// bare word like "warn" does not convey.
+		//
+		// A custom glyph is deliberately not offered — there is nothing to
+		// complete about a character the user is about to invent.
+		out := make([]candidate, 0, len(flags.Defs()))
+		for _, d := range flags.Defs() {
+			out = append(out, candidate{string(d.Kind), d.Glyph + "  " + d.Meaning})
+		}
+		return out
 	case argRecordAction:
 		return []candidate{
 			{app.RecordStart, "start recording what you do"},

@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/rohanthewiz/cats/internal/layout"
 )
@@ -112,6 +113,7 @@ func (b *fakeBackend) Area() layout.Rect           { return b.area }
 func (b *fakeBackend) ApplyModel()                 { b.rec("applyModel") }
 func (b *fakeBackend) BroadcastLayout()            { b.rec("broadcastLayout") }
 func (b *fakeBackend) BroadcastPaneTitle(p uint32) { b.rec("title"); b.lastTitle = p }
+func (b *fakeBackend) BroadcastFlags()             { b.rec("broadcastFlags") }
 func (b *fakeBackend) PaneExists(uint32) bool      { return b.paneExists }
 func (b *fakeBackend) DaemonConnected() bool       { return b.daemonUp }
 
@@ -2536,4 +2538,197 @@ func TestDispatchFilePutDefaultsToComplete(t *testing.T) {
 	if h.b.lastFilePutP.Overwrite {
 		t.Error("a put with no Overwrite flag was allowed to clobber")
 	}
+}
+
+// pane.flag and workspace.flag pin the user's own annotation — a glyph with a
+// meaning plus an optional note — to a pane or a workspace. Both are durable
+// session state that four different lists draw, so both route through
+// BroadcastFlags rather than the layout: the AGENTS rollup is a message of its
+// own, and it is the one list that reaches a pane in another workspace.
+func TestDispatchPaneFlag(t *testing.T) {
+	// paneFlag reads a pane's flag back the way a client would — through
+	// pane.list, not off the model — so the projection is covered too.
+	paneFlag := func(t *testing.T, h cmdHarness, pane uint32) FlagInfo {
+		t.Helper()
+		for _, p := range okDataFor[PaneListResult](t, h, CmdPaneList).Panes {
+			if p.Pane == pane {
+				return p.FlagInfo
+			}
+		}
+		t.Fatalf("pane %d not in pane.list", pane)
+		return FlagInfo{}
+	}
+
+	t.Run("sets, re-reads and clears", func(t *testing.T) {
+		h := newCmdHarness(t)
+		pane, _ := h.s.FocusedPane()
+		id := uint32(pane)
+		r := h.resp()
+
+		h.d.Dispatch(CmdPaneFlag, params(t, FlagPaneParams{
+			Pane: id, Kind: "followup", Note: "waiting on the API review"}), r)
+
+		if !r.okCall || r.failCall {
+			t.Fatalf("pane.flag: ok=%v fail=%v (%q)", r.okCall, r.failCall, r.errMsg)
+		}
+		if lg := *h.log; len(lg) != 2 || lg[0] != "broadcastFlags" || lg[1] != "ok" {
+			t.Fatalf("pane.flag effects = %v, want [broadcastFlags ok]", lg)
+		}
+		got := paneFlag(t, h, id)
+		if got.Flag != "followup" || got.FlagNote != "waiting on the API review" {
+			t.Fatalf("pane.list flag = %+v", got)
+		}
+		// The timestamp is stamped by the dispatcher, so it must be present and
+		// plausible — a flag with no "when" cannot answer "is this still true?".
+		if got.FlagAtMs <= 0 || got.FlagAtMs > time.Now().UnixMilli()+1000 {
+			t.Fatalf("flag_at_ms = %d, want a recent Unix-ms stamp", got.FlagAtMs)
+		}
+
+		// An empty kind clears it, the way an empty name clears a custom title.
+		*h.log = nil
+		r = h.resp()
+		h.d.Dispatch(CmdPaneFlag, params(t, FlagPaneParams{Pane: id}), r)
+		if !r.okCall {
+			t.Fatalf("clear: fail=%v (%q)", r.failCall, r.errMsg)
+		}
+		if got := paneFlag(t, h, id); got != (FlagInfo{}) {
+			t.Fatalf("after clear, flag = %+v", got)
+		}
+		// Clearing an already-unflagged pane is a no-op and skips the broadcast.
+		*h.log = nil
+		r = h.resp()
+		h.d.Dispatch(CmdPaneFlag, params(t, FlagPaneParams{Pane: id}), r)
+		if lg := *h.log; len(lg) != 1 || lg[0] != "ok" {
+			t.Fatalf("no-op clear effects = %v, want [ok]", lg)
+		}
+	})
+
+	t.Run("a custom glyph is stored verbatim", func(t *testing.T) {
+		h := newCmdHarness(t)
+		pane, _ := h.s.FocusedPane()
+		r := h.resp()
+
+		h.d.Dispatch(CmdPaneFlag, params(t, FlagPaneParams{Pane: uint32(pane), Kind: "🍕"}), r)
+
+		if !r.okCall {
+			t.Fatalf("custom glyph: fail=%v (%q)", r.failCall, r.errMsg)
+		}
+		if got := paneFlag(t, h, uint32(pane)).Flag; got != "🍕" {
+			t.Fatalf("custom glyph stored as %q", got)
+		}
+	})
+
+	t.Run("an unknown kind is refused", func(t *testing.T) {
+		h := newCmdHarness(t)
+		pane, _ := h.s.FocusedPane()
+		r := h.resp()
+
+		h.d.Dispatch(CmdPaneFlag, params(t, FlagPaneParams{Pane: uint32(pane), Kind: "folloup"}), r)
+
+		// Refused before any effect: a typo must not leave the sidebar drawing
+		// the word "folloup" where a mark should be.
+		if !r.failCall || !strings.Contains(r.errMsg, "unknown flag kind") {
+			t.Fatalf("bad kind: fail=%v msg=%q", r.failCall, r.errMsg)
+		}
+		if lg := *h.log; len(lg) != 1 || lg[0] != "fail" {
+			t.Fatalf("bad kind effects = %v, want [fail]", lg)
+		}
+	})
+
+	t.Run("an unknown pane fails", func(t *testing.T) {
+		h := newCmdHarness(t)
+		r := h.resp()
+
+		h.d.Dispatch(CmdPaneFlag, params(t, FlagPaneParams{Pane: 9999, Kind: "star"}), r)
+
+		if !r.failCall || !strings.Contains(r.errMsg, "unknown pane") {
+			t.Fatalf("unknown pane: fail=%v msg=%q", r.failCall, r.errMsg)
+		}
+	})
+}
+
+func TestDispatchWorkspaceFlag(t *testing.T) {
+	// wsFlag reads the active workspace's flag back through workspace.list.
+	wsFlag := func(t *testing.T, h cmdHarness) FlagInfo {
+		t.Helper()
+		for _, ws := range okDataFor[WorkspaceListResult](t, h, CmdWorkspaceList).Workspaces {
+			if ws.Active {
+				return ws.FlagInfo
+			}
+		}
+		t.Fatal("no active workspace in workspace.list")
+		return FlagInfo{}
+	}
+
+	t.Run("sets and clears", func(t *testing.T) {
+		h := newCmdHarness(t)
+		id := h.s.ActiveWorkspace().ID
+		r := h.resp()
+
+		h.d.Dispatch(CmdWorkspaceFlag, params(t, FlagWorkspaceParams{
+			ID: id, Kind: "warn", Note: "flaky tests here"}), r)
+
+		if !r.okCall || r.failCall {
+			t.Fatalf("workspace.flag: ok=%v fail=%v (%q)", r.okCall, r.failCall, r.errMsg)
+		}
+		if lg := *h.log; len(lg) != 2 || lg[0] != "broadcastFlags" || lg[1] != "ok" {
+			t.Fatalf("workspace.flag effects = %v, want [broadcastFlags ok]", lg)
+		}
+		if got := wsFlag(t, h); got.Flag != "warn" || got.FlagNote != "flaky tests here" {
+			t.Fatalf("workspace.list flag = %+v", got)
+		}
+
+		r = h.resp()
+		h.d.Dispatch(CmdWorkspaceFlag, params(t, FlagWorkspaceParams{ID: id}), r)
+		if !r.okCall {
+			t.Fatalf("clear: fail=%v (%q)", r.failCall, r.errMsg)
+		}
+		if got := wsFlag(t, h); got != (FlagInfo{}) {
+			t.Fatalf("after clear, flag = %+v", got)
+		}
+	})
+
+	t.Run("no id flags the active workspace", func(t *testing.T) {
+		h := newCmdHarness(t)
+		r := h.resp()
+
+		h.d.Dispatch(CmdWorkspaceFlag, params(t, FlagWorkspaceParams{Kind: "star"}), r)
+
+		if !r.okCall || wsFlag(t, h).Flag != "star" {
+			t.Fatalf("bare flag: ok=%v flag=%+v (%q)", r.okCall, wsFlag(t, h), r.errMsg)
+		}
+	})
+
+	t.Run("unknown workspace fails", func(t *testing.T) {
+		h := newCmdHarness(t)
+		r := h.resp()
+
+		h.d.Dispatch(CmdWorkspaceFlag, params(t, FlagWorkspaceParams{ID: "w404", Kind: "star"}), r)
+
+		if !r.failCall || !strings.Contains(r.errMsg, "unknown workspace") {
+			t.Fatalf("unknown workspace: fail=%v msg=%q", r.failCall, r.errMsg)
+		}
+	})
+
+	t.Run("a note is normalized, and a note with no kind is dropped", func(t *testing.T) {
+		h := newCmdHarness(t)
+		r := h.resp()
+
+		h.d.Dispatch(CmdWorkspaceFlag, params(t, FlagWorkspaceParams{
+			Kind: "note", Note: "  two\r\nlines  "}), r)
+		if got := wsFlag(t, h).FlagNote; got != "two lines" {
+			t.Fatalf("note = %q, want %q", got, "two lines")
+		}
+
+		// A note with no kind has nothing to hang from: every surface draws the
+		// glyph, so an unmarked note would be a write nobody can see.
+		r = h.resp()
+		h.d.Dispatch(CmdWorkspaceFlag, params(t, FlagWorkspaceParams{Note: "orphan"}), r)
+		if !r.okCall {
+			t.Fatalf("clear-with-note: fail=%v (%q)", r.failCall, r.errMsg)
+		}
+		if got := wsFlag(t, h); got != (FlagInfo{}) {
+			t.Fatalf("note with no kind stored: %+v", got)
+		}
+	})
 }

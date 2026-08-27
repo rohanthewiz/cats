@@ -165,6 +165,74 @@
     return wrap;
   }
 
+  // ---- User flags (workspace.flag / pane.flag) ----
+  //
+  // A flag is a glyph with a meaning plus an optional note, pinned by the user
+  // to a workspace or a pane so it can be found again tomorrow. It shows up in
+  // four lists — WORKSPACES rows, AGENTS rows, PANES rows and the pane header —
+  // all of which come through the two functions below, so the mark looks and
+  // reads the same wherever it is drawn.
+  //
+  // FLAG_DEFS mirrors internal/flags. It is duplicated rather than fetched
+  // because the browser needs the glyph and the label to *draw a menu* before
+  // any flag exists, and a vocabulary round trip for six compile-time constants
+  // would be a message for nothing. TestWebFlagVocabularyMatchesGo (web_test.go)
+  // fails the build if the two lists ever drift.
+  //
+  // The kind field carries either one of these names or a literal glyph the
+  // user typed, and both render through flagGlyph — a named kind resolves to
+  // its glyph, and anything else already is one. That single path is the whole
+  // reason the server keeps the two shapes in one string.
+  const FLAG_DEFS = [
+    { kind: "followup", glyph: "⚑", label: "follow-up", meaning: "come back to this" },
+    { kind: "question", glyph: "?", label: "question", meaning: "waiting on an answer" },
+    { kind: "star", glyph: "★", label: "important", meaning: "worth finding again" },
+    { kind: "warn", glyph: "⚠", label: "problem", meaning: "something is wrong here" },
+    { kind: "done", glyph: "✓", label: "done", meaning: "handled — nothing left to do" },
+    { kind: "note", glyph: "✎", label: "note", meaning: "just a note" },
+  ];
+  const FLAG_BY_KIND = new Map(FLAG_DEFS.map((d) => [d.kind, d]));
+
+  // flagOf normalizes the three flat wire fields into one object, from whichever
+  // row carries them — a layout workspace, a layout pane, an agents rollup item
+  // or a pane.list row all spell them the same way. null = unflagged.
+  function flagOf(o) {
+    if (!o || !o.flag) return null;
+    return { kind: o.flag, note: o.flag_note || "", at: o.flag_at_ms || 0 };
+  }
+  function flagDef(f) { return f ? FLAG_BY_KIND.get(f.kind) || null : null; }
+  function flagGlyph(f) { const d = flagDef(f); return d ? d.glyph : f.kind; }
+  function flagLabel(f) { const d = flagDef(f); return d ? d.label : f.kind; }
+
+  // flagTitle is the tooltip: what the mark means, then the note, then when it
+  // was set. The note leads over the age because the note is the half the glyph
+  // could not carry — the age is context for "is this still true?".
+  function flagTitle(f) {
+    let s = flagGlyph(f);
+    const lbl = flagLabel(f);
+    if (lbl !== s) s += " " + lbl;
+    if (f.note) s += " — " + f.note;
+    if (f.at) s += " · flagged " + fmtAge(Date.now() - f.at);
+    return s;
+  }
+
+  // flagMark is the mark itself: the glyph in the kind's colour, carrying the
+  // note in its tooltip. Text rather than an SVG (where the lock and the paw
+  // print are drawn) for the reason the vocabulary is one field — a custom glyph
+  // has no SVG to draw, so a text mark is the only shape both halves can share.
+  //
+  // The class carries the kind so the CSS can colour it; an unknown kind gets
+  // fk-custom, which takes the default ink rather than borrowing some named
+  // kind's meaning-by-colour.
+  function flagMark(f) {
+    if (!f) return null;
+    const s = document.createElement("span");
+    s.className = "flag-mark " + (FLAG_BY_KIND.has(f.kind) ? "fk-" + f.kind : "fk-custom");
+    s.textContent = flagGlyph(f);
+    s.title = flagTitle(f);
+    return s;
+  }
+
   // lockMark: the padlock a workspace wears while it is closed to plugins and
   // agents (workspace.lock). Two strokes — the shackle above, the body below —
   // which is all a padlock is at 12px; the body is filled so the mark still
@@ -297,7 +365,12 @@
         const name = document.createElement("span");
         name.textContent = (w.active ? "● " : "○ ") + w.name;
         li.appendChild(name);
-        // The lock rides closest to the name, ahead of the todo mark: it qualifies
+        // The flag rides closest of all, ahead even of the lock: it is the one
+        // mark in the row the user put there by hand, and its whole job is to
+        // catch their own eye first.
+        const wf = flagMark(flagOf(w));
+        if (wf) li.appendChild(wf);
+        // The lock rides next to it, ahead of the todo mark: it qualifies
         // the workspace itself — what may be started in it — where the todo mark
         // reports on the project inside.
         if (w.locked) li.appendChild(lockMark());

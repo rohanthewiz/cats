@@ -29,6 +29,31 @@
       return add(cls, text);
     };
     seg("pub", paneRef(p.pub, p.id));
+    // The user's flag, immediately after the handle and before anything the
+    // terminal reports. It is the one field in this row nobody but the user put
+    // there, and it is the reason they are looking at this pane rather than
+    // another. It survives copy mode as well, for the same reason: a "come back
+    // to this" that vanishes while you are selecting the thing you came back for
+    // is a reminder that hides exactly when it is being acted on.
+    //
+    // Unlike the sidebar's marks this one carries the note inline — the header
+    // has the width, and this is the pane you are actually looking at, so the
+    // note is worth reading without a hover. The CSS truncates it.
+    const pflag = flagOf(p.info);
+    if (pflag) {
+      const fs = seg("pflag " + (FLAG_BY_KIND.has(pflag.kind) ? "fk-" + pflag.kind : "fk-custom"),
+        flagGlyph(pflag) + (pflag.note ? " " + pflag.note : ""));
+      if (fs) {
+        fs.title = flagTitle(pflag) + " — click to change or clear";
+        // stopPropagation on the mousedown so the header's own press handler
+        // (focus + swap drag) does not start a drag out from under the menu.
+        fs.addEventListener("mousedown", (e) => e.stopPropagation());
+        fs.addEventListener("click", (e) => {
+          e.stopPropagation();
+          openCtx(e.clientX, e.clientY, flagMenuItems(paneFlagTarget(p.id)));
+        });
+      }
+    }
     if (p.cm) {
       seg("mode", "COPY");
       seg("hint", "hjkl/arrows move · v select · r rect · y copy · Esc exit");

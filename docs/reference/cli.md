@@ -166,6 +166,8 @@ catctl last                     # the previously focused pane
 catctl swap <left|right|up|down>
 catctl zoom [pane]
 catctl rename-pane <pane> <name...>
+catctl flag <pane> <kind> [note...]
+catctl unflag <pane>
 catctl resize <border> <ratio>
 catctl scroll <pane> <delta>    # negative = up
 catctl capture <pane> [lines]
@@ -183,6 +185,8 @@ catctl close-tab [num]          catctl rename-tab <num> <name...>
 catctl ws <id>                  catctl new-ws [name...]
 catctl close-ws [id]            catctl rename-ws <id> <name...>
 catctl lock-ws [id]             catctl unlock-ws [id]
+catctl flag-ws <id> <kind> [note...]
+catctl unflag-ws [id]
 ```
 
 `lock-ws` sets a workspace aside for hand work: no launching a plugin or an agent
@@ -196,6 +200,35 @@ group. Neither dimmed row takes a click: the workspace row will not switch to it
 and an agent row inside it will not reveal its pane — revealing a pane *is* a
 switch, so the two refusals are the same one. Every deliberate route in still
 works: the row's context menu, the command palette, and the keyboard.
+
+`flag` pins a persistent, annotated mark to a pane or a workspace — the thing
+you set so you can find it again tomorrow:
+
+```bash
+catctl flag 7 followup "waiting on the API review"
+catctl flag-ws w2 warn "flaky tests in here"
+catctl flag 7 🍕 "lunch build"      # or a glyph of your own
+catctl unflag 7
+```
+
+The kind is one of six names — `followup` ⚑, `question` ?, `star` ★, `warn` ⚠,
+`done` ✓, `note` ✎ — or any single glyph you invent. The two shapes are kept
+apart on purpose: a bare word has to be a name we know, so a mistyped `folloup`
+is refused instead of quietly becoming a flag that reads "folloup". The note is
+optional and gets folded to one line.
+
+Flags are durable — they are in the session snapshot and come back after a
+restart — and the sidebar draws them in the WORKSPACES, AGENTS and PANES rows
+plus the pane header, whose chip shows the note inline. `catctl panes` and
+`catctl workspaces` report them as `flag` / `flag_note` / `flag_at_ms`.
+
+A pane's flag lives on the pane, not on the agent inside it, so it is still
+there after the agent is restarted in place — and a plain shell can wear one too.
+
+`flag-ws` wants its id spelled out where `unflag-ws` defaults to the active
+workspace: with both optional, `flag-ws followup` and `flag-ws w2` would be the
+same shape meaning different things. Clearing takes one argument and has no such
+collision.
 
 Command history — one record per command, across every pane and host:
 

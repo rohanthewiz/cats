@@ -46,6 +46,11 @@
       }
       const a = byPane.get(pi.pane);
       if (a) { row.agent = a.agent; row.state = markerState(a); }
+      // The flag is session state, so both sources carry it and either will do.
+      // The layout wins where it has an answer: it is pushed the moment the flag
+      // changes, while the snapshot arrives on the pane.list that push triggers —
+      // a round trip later.
+      row.flag = flagOf(pr) || flagOf(pi);
 
       const wsID = row.pub.split(":")[0];
       if (!groups.length || groups[groups.length - 1].ws !== wsID) groups.push({ ws: wsID, rows: [] });
@@ -196,6 +201,11 @@
     // gutter for a mark only one row ever carries indents the whole list.
     const pub = document.createElement("span"); pub.className = "pub"; pub.textContent = paneRef(row.pub, row.pane);
     li.appendChild(pub);
+    // The flag sits right after the handle, ahead of the title: it is the mark
+    // the eye is scanning this list for, and the title is the part that gets
+    // truncated when the column is narrow.
+    const pf = flagMark(row.flag);
+    if (pf) li.appendChild(pf);
     if (row.title) { const t = document.createElement("span"); t.className = "ttl"; t.textContent = row.title; li.appendChild(t); }
     if (row.agent) {
       const ag = document.createElement("span"); ag.className = "ag " + stClass(row.state); ag.textContent = agentLabel(row.agent, row.model);
