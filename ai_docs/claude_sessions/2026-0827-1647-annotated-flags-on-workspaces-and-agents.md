@@ -5,12 +5,19 @@
 - **Branch:** main
 - **Repo:** `cats`
 - **Landed as:** `534bc11` — *flags: a persistent annotated mark on a workspace or a pane*
+- **Then:** `64f6be2` — *flags: flag.list and `catctl flags` — every mark in one listing*
 
 ## Request
 
 > Allow me to add a persistent annotated flag to a workspace or listed agent.
 > Think of flag as some icon with meaning, like a red follow-up flag to which I
 > can add a note
+
+and, after the session was reloaded:
+
+> Do the catctl flags verb
+
+— which is the first of the known limits below, and closes it.
 
 ## The two scoping questions
 
@@ -207,6 +214,110 @@ parses `FLAG_DEFS` and compares it field by field *and in order*, and
 `TestEveryFlagKindHasAColour` checks `28-flags.css` has an `.fk-*` rule per kind
 plus the `.fk-custom` fallback.
 
+## What shipped in the follow-on (`64f6be2`)
+
+The first known limit below said the marks were drawn in four lists but never
+collected. `catctl flags` collects them.
+
+### 8. The choice that shaped it: a server command, not two client calls
+
+The obvious cheap route was to have `catctl` call `workspace.list` and
+`pane.list` and merge. Rejected, for reasons that all point the same way:
+
+- Every ergonomic verb in `catctl` is **one** request. A verb that is a loop has
+  to own its runner the way `cp` and `probe` do — which then means its own entry
+  in `families`, its own completion case, its own help page, and its own
+  invented `--json` shape, because the global `--json` prints *a* response and
+  there would be two.
+- As a table verb backed by one method, all four of those come **free**:
+  `argFlagKind` completion already existed, `printVerbHelp` already renders the
+  page, and `--json` is the raw payload exactly as with `panes`.
+- Two round trips are two snapshots. Flags change rarely, so the race is small
+  — but it is a race that produces a listing describing a state that never
+  existed, and there was no reason to buy one.
+- `flags.Def.Meaning` was already documented as being "for tooltips and
+  `catctl flags`". The verb was anticipated; a §7 query is the shape the rest of
+  the vocabulary is in.
+
+The counter-argument — "don't add wire surface" — is the one this repo keeps
+making, and it does not apply. That rule was about *serving six compile-time
+constants*; this serves **data**, which is what a §7 read query is for. The
+browser will not call it (it already holds the whole model, which is how the
+AGENTS rollup is built), but `catgen-dart` reflects it onto the phone for free.
+
+### 9. `flag.list` (`internal/app/`)
+
+```go
+type FlagListParams struct{ Kind string }                 // "" = every flag
+type FlagListResult struct {
+    Workspaces []WorkspaceInfo
+    Panes      []PaneInfo
+}
+```
+
+The **flagged subset** of `workspace.list` and `pane.list`: the same row structs,
+in those lists' own order, with the same `PaneMeta` merge applied to the panes it
+returns. Three decisions worth naming:
+
+- **Two lists, not one merged one, and no third row type.** The fields worth
+  showing beside the mark differ by scope — a workspace has a tab count, a pane
+  has a handle and an agent — so a merged row is half empty either way. Reusing
+  the existing rows means a client that can draw a workspace row already knows
+  how to draw this.
+- **`ListFlaggedIn` filters the two full listings rather than walking the model
+  again.** That costs one pass over rows that are cheap to build, and buys the
+  guarantee that a pane described here is described *identically* in `panes`.
+  Two builders would be two descriptions to reconcile.
+- **An unknown kind is refused, not answered with an empty list.** "Nothing
+  matched" and "you misspelled it" render the same way, and that is the one
+  wrong answer a listing can give — it looks exactly like a session with nothing
+  flagged. `flags.ParseKind` in the dispatcher, so the error is byte-identical
+  to the setters'. A custom glyph filters like any other kind, because both
+  halves of the vocabulary are one string field.
+
+Both slices are non-nil when empty, so a client loops without a nil check.
+
+### 10. `catctl flags [kind]`
+
+```
+w1  ⚠ problem    cats                 2h ago  flaky tests in here
+1   ⚑ follow-up  w1:p1 claude · idle  5m ago  waiting on the API review
+3   🍕           w2:p1                1d ago  lunch build
+```
+
+The one query rendered as a **table** instead of pretty JSON — a glance across
+every workspace is the entire reason the verb exists, and JSON is not one.
+`--json` still prints the raw payload, so the scripting path is unchanged and the
+renderer is free to drop fields.
+
+The first column is deliberately **not the same shape on both kinds of row**: it
+is the argument the mutating verbs take — `w1` for `flag-ws`/`unflag-ws`, the
+internal pane number for `flag`/`unflag` (`parsePane` takes the number, not the
+handle). So a row can be acted on without a second lookup, and the two shapes
+tell you which verb — the distinction the verb pair already makes. The handle
+moves into the "where" column, where it sits beside the most specific thing known
+about the pane: a custom name, else the agent and its state, else the live title.
+
+Smaller calls:
+
+- **Plural verb for the listing** (`flags` vs `flag`), the `themes`/`theme` and
+  `runbooks`/`runbook` pair — one verb taking an optional argument would make
+  "did I just change something?" depend on argument count.
+- **`catctl help flags` generates its kind table from `flags.Defs()`.** That is
+  what `Def.Meaning` was reserved for, and a second copy of the vocabulary in a
+  help string is a copy that goes stale silently.
+- **`dispWidth` is a documented three-case estimate**, not a full
+  East-Asian-width table: joiners and variation selectors are zero (so a ZWJ
+  emoji sequence measures as one glyph, not several), emoji and CJK are two,
+  everything else is one. A dependency was not worth buying — the only thing
+  riding on it is whether one row sits a column off, and every named kind's
+  glyph (⚑ ? ★ ⚠ ✓ ✎) measures one.
+- **An empty listing goes to stderr and exits 0**, naming the filter when there
+  was one (`nothing flagged "done"`). Nothing is flagged is not an error, and
+  stdout stays clean for `catctl flags | grep`.
+- `argFlagKind` gained an `argHints` entry, so `catctl help flag` now says its
+  second argument completes.
+
 ## Verification
 
 Full stack, not just the suite. A throwaway `cathost` + `catway` on
@@ -264,12 +375,51 @@ touched a network.
 `make check` (fmt-check, vet, build, test, vet-ghostty, race-ghostty) clean.
 `node --check` on the concatenated front end clean.
 
+### The follow-on's own run
+
+Same shape, a fresh throwaway pair on `127.0.0.1:8499` (`/tmp/ctsv-fl-*.sock`,
+its own `--state-dir`), so the MacApp was again never touched. Two notes for the
+next person standing one up: `catway` **exits** if `--config` names a file that
+does not exist — the log line reads like a warning and is not — and `cathost`
+needs `-control-socket -` / `-hook-socket -` to keep it from opening relays.
+
+| command | result |
+|---|---|
+| `flags` (nothing set) | `catctl: nothing flagged` on **stderr**, exit 0, stdout empty |
+| `flags` (2 workspaces, 3 panes, 5 flags) | all five rows, workspaces first, columns aligned |
+| `flags followup` | the two follow-ups only, across both workspaces |
+| `flags 🍕` | the one custom-glyph row |
+| `flags done` | `catctl: nothing flagged "done"`, exit 0 |
+| `flags folloup` | `error: bad params: unknown flag kind "folloup" (one of: …)`, exit 1 |
+| `--json flags followup` | the raw payload, panes carrying `cwd`/`host` — the `PaneMeta` merge |
+| `__complete flags ''` | the six kinds with their meanings |
+| `catctl help` | the verb listed in the table |
+
+The agent column was exercised the way the first half was: a stand-in `claude`
+(a `sleep`) on `PATH`, run in a flagged pane, after which the row read
+`1  ⚑ follow-up  w1:p1 claude · idle  23s ago  waiting on the API review` —
+which also put a non-zero age on screen.
+
+New tests: three dispatcher tests in `internal/app/query_test.go` (filtering,
+the unknown-kind refusal, custom-glyph filtering) and six in
+`cmd/catctl/flaglist_test.go` (`flagMark`, `paneWhere`, `humanAge` including the
+backwards-clock case, `dispWidth` across all six glyphs, `nothingFlagged`, the
+builder). `make check` clean; the catgen-dart golden regenerated and
+`TestEveryCommandReachesDart` satisfied.
+
 ## Known limits (stated, not hidden)
 
-- **There is no "show me everything flagged" view yet.** The mark is drawn in
-  four lists and the data is on every `pane.list` / `workspace.list` row, so a
-  cross-session listing is a query away — but nothing renders one today, and
-  `catctl` has no `flags` verb. That is the obvious next increment.
+- ~~**There is no "show me everything flagged" view yet.**~~ Closed by
+  `64f6be2` for the CLI: `flag.list` + `catctl flags`. **The browser still has
+  no flagged view** — the marks are drawn in place in four lists, and nothing
+  collects them. It would not call `flag.list` either; the front end already
+  holds the whole model, which is how the AGENTS rollup is built, so it is a
+  rendering job rather than a protocol one.
+- **The listing is not sorted by recency.** Both halves come back in the
+  underlying lists' order — the sidebar's own top-to-bottom order — so a listing
+  run twice reads the same way and "did I clear that one" is answered by a
+  glance at the same position. A `--recent` would be a small addition if the
+  ordering ever turns out to be the wrong default.
 - **The note is single-line and capped at 500 characters.** It is drawn in a
   sidebar tooltip and a pane header; a paragraph has nowhere to go.
 - **The vocabulary is duplicated in Go and JS.** Guarded by a test, not by
@@ -280,12 +430,13 @@ touched a network.
 
 ## Open at the end of the session
 
-- **Push + cats-mobile.** The Dart golden in this repo is regenerated and
-  committed, but `../cats-mobile` pins a `CATS_REV`, so its `tool/regen.sh` run
-  is a separate step once this is on the remote.
+- **cats-mobile.** The Dart golden in this repo is regenerated and committed —
+  now including `flag.list` — but `../cats-mobile` pins a `CATS_REV`, so its
+  `tool/regen.sh` run is still a separate step, and it now has two commits to
+  catch up on rather than one.
 - **`cats-todo.zip`** sits untracked at the repo root and predates this work. It
-  was deliberately left out of both commits — a stray 443 KB archive is not part
-  of this change.
+  was deliberately left out of all three commits — a stray 443 KB archive is not
+  part of this change.
 
 ## Notes for next time
 
@@ -304,3 +455,16 @@ touched a network.
   only way to test this front end honestly. Chrome plus node's global
   `WebSocket` is the whole dependency list. Remember the closure: no globals, so
   drive it with real events.
+- Adding a §7 command is cheaper than it looks, and the tripwires are all
+  automatic: a `commandSpecs` entry (name + params + result), a `Dispatch` case,
+  and `go run ./cmd/catgen-dart -out cmd/catgen-dart/testdata/golden`.
+  `TestEveryCommandReachesDart` fails until the golden is regenerated, and
+  `record_test.go`'s hand-maintained `recordedParamClasses` only bites commands
+  marked `Recorded: true` — a read-only query needs nothing there.
+- An ergonomic `catctl` verb backed by ONE method gets completion, its help page
+  and `--json` for nothing. A verb that needs two round trips does not, and pays
+  for all three by hand (see `cp`). That asymmetry is worth weighing *before*
+  deciding where a new listing is computed.
+- Rendering a payload as something other than JSON is a `case` in `run()`'s
+  output switch beside `clipboard.read` and `ledger.output` — and it must sit
+  *after* the `*rawJSON` case, or `--json` stops working.
