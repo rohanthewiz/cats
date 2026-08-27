@@ -4,6 +4,7 @@
 - **Date:** 2026-08-27
 - **Branch:** main
 - **Repo:** `cats`
+- **Landed as:** `534bc11` — *flags: a persistent annotated mark on a workspace or a pane*
 
 ## Request
 
@@ -276,6 +277,15 @@ touched a network.
 - **cats-mobile is not regenerated.** The Dart golden in this repo is up to
   date, but `../cats-mobile` pins a `CATS_REV`; per the usual flow that is
   `tool/regen.sh` after this lands and is pushed.
+
+## Open at the end of the session
+
+- **Push + cats-mobile.** The Dart golden in this repo is regenerated and
+  committed, but `../cats-mobile` pins a `CATS_REV`, so its `tool/regen.sh` run
+  is a separate step once this is on the remote.
+- **`cats-todo.zip`** sits untracked at the repo root and predates this work. It
+  was deliberately left out of both commits — a stray 443 KB archive is not part
+  of this change.
 
 ## Notes for next time
 
