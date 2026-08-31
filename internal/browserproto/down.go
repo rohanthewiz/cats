@@ -719,6 +719,72 @@ func NewRecord(recording bool, steps int, startedAt, note string) Record {
 	return Record{T: MsgRecord, Recording: recording, Steps: steps, StartedAt: startedAt, Note: note}
 }
 
+// RunbookRuns is every runbook run currently in flight, whatever started it —
+// a browser click here, a click in another window, `catctl runbook deploy`, a
+// plugin, or an `on:` clause firing by itself.
+//
+// A BROADCAST, for the reason Record is one: a run is SESSION state. There is
+// one accounting of runs in flight (cmd/catway/runbooktrigger.go), every start
+// goes through it and every finish releases it, so a window that learned about
+// runs only from the commands it issued itself shows a session that is quieter
+// than the real one. That is the worse direction to be wrong in: the runs a
+// window did not start are exactly the ones the user has no other way to know
+// about — a trigger firing is the session acting while nobody is looking at it.
+//
+// The WHOLE SET rather than start/stop deltas, for two reasons. A set is
+// idempotent, so a window that reconnects converges on the next message instead
+// of carrying whatever marks it had when the socket dropped; and a dropped or
+// coalesced delta would leave a row lit for a run that ended, which is the one
+// failure a progress mark must not have.
+//
+// Deliberately NOT a control-API event (internal/app/events.go), and this is
+// the load-bearing half of the design. Events feed runbook triggers
+// (fireRunbookTriggers), so an event per run start would hand a runbook an
+// event that starting a runbook produces — a runbook triggering on it would
+// trigger on itself. The browser message has no such reach: it marks a row and
+// stops. `runbook_finished` already exists on the event side for automation
+// that wants the outcome, and it is emitted once per run, at the end.
+//
+// Per RUN and not per STEP for the same reason one phase earlier: a step-level
+// message would be a stream at the rate a runbook dispatches commands, and the
+// row has one bit to show.
+type RunbookRuns struct {
+	T    Type         `json:"t"`
+	Runs []RunbookRun `json:"runs"`
+}
+
+// RunbookRun is one run in flight.
+type RunbookRun struct {
+	// Name is the runbook's declared name, which is also the key the run is
+	// accounted under — one run per runbook at a time — and therefore the only
+	// thing a row has to match itself against.
+	Name string `json:"name"`
+	// Source is "control" (somebody asked: a browser, catctl, a plugin) or
+	// "trigger" (an `on:` clause fired), the same two words RunbookFinishedEvent
+	// carries. Trigger is the event name that started it, "" when a human did.
+	//
+	// They are on the wire because "it is running" and "it started ITSELF" are
+	// different facts to a reader watching panes appear that they did not ask
+	// for, and the second is the one that sends them looking at the file.
+	Source  string `json:"source,omitempty"`
+	Trigger string `json:"trigger,omitempty"`
+	// StartedAt is RFC3339: when the run took its concurrency slot. For a
+	// triggered run that is when the trigger fired, a loop turn before the first
+	// step (see startReservedRunbooks) — close enough that no reader can tell,
+	// and honest about what the session actually committed to.
+	StartedAt string `json:"started_at,omitempty"`
+}
+
+// NewRunbookRuns builds the message. A nil slice is normalised to an empty one:
+// the "nothing is running" message is the one that RETRACTS marks, so it is
+// sent as often as any other and should not be the odd shape on the wire.
+func NewRunbookRuns(runs []RunbookRun) RunbookRuns {
+	if runs == nil {
+		runs = []RunbookRun{}
+	}
+	return RunbookRuns{T: MsgRunbookRuns, Runs: runs}
+}
+
 // CmdResult is the reply to a Cmd, always sent when the command carried an id.
 // Data is command-specific (e.g. ReadResult for "read").
 type CmdResult struct {

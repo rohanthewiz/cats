@@ -2688,6 +2688,11 @@ func (o *orch) registerConn(c *client, init *browserproto.Init) {
 	// say" would leave the indicator lit over a recording that has since been
 	// stopped from somewhere else.
 	o.send(c, o.recordMsg())
+	// The runs in flight, always, for the same reason and with the same failure
+	// if it were skipped: a window reconnecting into a session that is running
+	// `deploy` has no other way to learn it, and one reconnecting across the END
+	// of a run would keep a row marked for a run that finished while it was away.
+	o.send(c, o.runbookRunsMsg())
 	if o.chat != nil {
 		// The whole chat model in one message — a client joining
 		// mid-conversation (or mid-permission-prompt) starts converged.

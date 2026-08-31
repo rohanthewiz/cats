@@ -10,7 +10,7 @@
   /* The leading mark is the affordance, not a status: ▸ is "this runs", which
      is the one thing about a runbook row a reader has to know before clicking
      it. Its two other states are the exceptions — ✕ for a file that would not
-     parse, ● for a run this window is waiting on. */
+     parse, ● for a run in flight, whoever started it. */
   #rb-list .rdot { flex:none; font-size:calc(9px * var(--sb-scale)); color:var(--accent); }
   #rb-list .rname { min-width:0; flex:1 1 auto; overflow:hidden; text-overflow:ellipsis;
     white-space:nowrap; }
@@ -31,10 +31,13 @@
      it keeps its click, because the click that fixes it is "open it". The name
      goes red rather than dimmed: this is the row that wants attention. */
   #rb-list li.broken .rdot, #rb-list li.broken .rname { color:var(--err); }
-  /* A run this window started and is still waiting on. runbook.run answers when
-     the LAST step finishes, so this can sit for the whole of a long run, which
-     is exactly why it is worth painting at all. Same pulse the pane list's
-     working dot uses — one blinking mark means one thing across the column. */
+  /* A run in flight — this window's, another window's, a `catctl runbook`, or
+     an `on:` trigger that fired by itself (the server broadcasts the set; see
+     browserproto.RunbookRuns). runbook.run answers when the LAST step finishes,
+     so this can sit for the whole of a long run, which is exactly why it is
+     worth painting at all. Same pulse the pane list's working dot uses — one
+     blinking mark means one thing across the column, and it means the same
+     thing here: the session is doing something, not necessarily for you. */
   #rb-list li.running .rdot { animation:dotpulse 1.4s ease-in-out infinite; }
   #rb-list li.running .rname { color:var(--fg-strong); }
   @media (prefers-reduced-motion:reduce) {

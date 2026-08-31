@@ -1000,13 +1000,28 @@ in the editor rather than offering a run. The `⚡` goes amber when
 `trigger_status` says the triggers are not armed, which is the one place that
 state is visible at all.
 
-The section is a **query**, not a broadcast: a runbook is a file, an editor can
+The **files** are a query, not a broadcast: a runbook is a file, an editor can
 rewrite one without the session knowing, and `runbook.list` re-scans the
-directory per call. So it re-reads on connect, when a recording ends (the one
-moment the UI itself writes a runbook), when a run this window started finishes,
-and on the heading's `⟳` for everything else. A run started somewhere else —
-`catctl`, a plugin, a trigger — therefore does not light up a row; see the note
-on `broadcastRecord` for why this vocabulary does not push per-step state.
+directory per call. So the listing is re-read on connect, when a recording ends
+(the one moment the UI itself writes a runbook), when any run finishes, and on
+the heading's `⟳` for everything else.
+
+The **runs** are pushed. A run is session state, not a file: there is one
+accounting of runs in flight, every start goes through it and every finish
+releases it, so the server broadcasts the whole set on both edges
+(`runbook_runs`, and once in the connect burst). A row therefore marks itself
+for a run started in another window, by `catctl runbook deploy`, by a plugin, or
+by an `on:` clause firing with nobody watching — which is the case a query could
+never have caught, since nothing on disk changes while a runbook runs. The
+tooltip names the origin, and a trigger's own event name with it.
+
+Whole set rather than start/stop deltas, so a reconnecting window converges
+instead of keeping a mark lit for a run that ended while it was away. Per run
+rather than per step, and a browser message rather than a control-API event, for
+the reason `broadcastRecord` documents one phase earlier: events feed
+`fireRunbookTriggers`, so an event per run start would hand a runbook an event
+that starting a runbook produces. Automation that wants the outcome already has
+`runbook_finished`, once per run, at the end.
 
 #### References
 

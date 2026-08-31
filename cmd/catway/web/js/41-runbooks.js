@@ -15,8 +15,17 @@
   //
   //   connect          a reconnecting window has been away and cannot know
   //   recording ended  the one moment this UI itself creates a runbook
-  //   run finished     the files are unchanged, but trigger_status is not
+  //   a run finished   the files are unchanged, but trigger_status is not
   //   the ⟳ button     an edit in $EDITOR, a file dropped in by hand, a delete
+  //
+  // The FILES are a query; the RUNS are pushed. Those are two different facts
+  // and only the first one lives on disk: a run is session state, held in one
+  // accounting of runs in flight that every start goes through, so the server
+  // broadcasts the whole set on every start and every finish (runbook_runs).
+  // That is what makes a row light up for a run this window did not start —
+  // another window, `catctl runbook deploy`, a plugin, or an `on:` clause
+  // firing by itself, which is the case that matters most because it is the
+  // session acting while nobody asked it to.
   //
   // Hidden until there is something in it, like Hosts and History: an install
   // that never recorded a macro sees exactly the sidebar it always had, and the
@@ -30,10 +39,56 @@
 
   let runbookItems = [];              // the last runbook.list, newest wins
   let runbookDir = "";                // the directory it was read from
-  // The runs THIS window is waiting on, by name. A set rather than a flag
-  // because nothing stops two different runbooks overlapping, and a run keyed
-  // by name is the only thing a row can match itself against.
-  const runbookRunning = new Set();
+  // Every run in flight in the SESSION, name → {source, trigger, started_at},
+  // replaced wholesale by each runbook_runs broadcast. Keyed by name because
+  // the server allows one run per runbook at a time, which makes the name the
+  // only thing a row has to match itself against.
+  let runbookRuns = new Map();
+  // The names THIS window has asked to run and not yet been answered about.
+  //
+  // Two things, neither of which the broadcast can do on its own. It covers the
+  // round trip between the click and the server's first message, so a row marks
+  // itself immediately and a second click cannot start a second run that the
+  // server would only refuse. And it is how a row knows the run in flight is
+  // OURS — the broadcast reports a run, not a requester, and it should not: the
+  // server has no business tracking which socket asked for what, and this side
+  // already knows.
+  const runbookPending = new Set();
+
+  // applyRunbookRuns takes one runbook_runs broadcast.
+  //
+  // The message is the WHOLE set, so this replaces rather than patches: a
+  // message that went missing, or two that were coalesced, converge on the next
+  // one instead of leaving a row marked for a run that ended. That is the same
+  // property the connect burst relies on to un-mark a window that was away
+  // across the end of a run.
+  function applyRunbookRuns(msg) {
+    const prev = runbookRuns;
+    runbookRuns = new Map();
+    for (const r of (msg.runs || [])) if (r && r.name) runbookRuns.set(r.name, r);
+    // A run that ENDED is the edge the listing cares about. The files are
+    // unchanged, but trigger_status is not: "a run is in flight" is one of the
+    // things it reports, so the ⚡ marks were amber for the duration and have to
+    // come back — and now that this fires for runs started anywhere, they come
+    // back after a trigger's own run too, which is the case where nobody was
+    // watching to press ⟳.
+    //
+    // Only the falling edge. Refreshing when a run STARTS would ask the server
+    // to re-read the directory at the exact moment it is busiest, to learn
+    // something this message just said.
+    let ended = false;
+    for (const name of prev.keys()) if (!runbookRuns.has(name)) { ended = true; break; }
+    renderRunbooks();
+    if (ended) refreshRunbooks(false);
+  }
+
+  // runbookRunOf is the run in flight for one runbook, or null. `local` is
+  // this window's own claim on it, which is not on the wire — see runbookPending.
+  function runbookRunOf(name) {
+    const local = runbookPending.has(name);
+    const run = runbookRuns.get(name) || (local ? { source: "control" } : null);
+    return run ? { ...run, local } : null;
+  }
 
   let rbBtnEl = null;
   (function initRunbookHeadingCtl() {
@@ -91,7 +146,8 @@
     rbListEl.innerHTML = "";
     for (const rb of runbookItems) {
       const broken = !!rb.error;
-      const running = runbookRunning.has(rb.name);
+      const run = runbookRunOf(rb.name);   // null unless something is running it
+      const running = !!run;
       const triggered = !broken && !!(rb.triggers && rb.triggers.length);
 
       const li = document.createElement("li");
@@ -124,7 +180,7 @@
         li.appendChild(s);
       }
 
-      li.title = runbookTitle(rb, broken, running);
+      li.title = runbookTitle(rb, broken, run);
       // A broken file's click OPENS it, because that is the only useful verb
       // for a row whose whole content is an error message.
       li.addEventListener("click", () => {
@@ -141,7 +197,7 @@
   // runbookTitle is everything an 11px row cannot hold: what the runbook is
   // for, what it will ask for, and — the one fact nothing else in the UI
   // reports — why its triggers are not currently armed.
-  function runbookTitle(rb, broken, running) {
+  function runbookTitle(rb, broken, run) {
     if (broken) {
       return rb.name + "\n" + rb.path + "\n" + runbookError(rb) +
         "\nclick to open it in the editor";
@@ -154,8 +210,27 @@
       lines.push("runs itself on: " + rb.triggers.join(", ") +
         (rb.trigger_status ? "\ntriggers not armed: " + rb.trigger_status : ""));
     }
-    lines.push(running ? "running…" : "click to run · right-click for more");
+    lines.push(run ? "running… " + runOrigin(run) : "click to run · right-click for more");
     return lines.join("\n");
+  }
+
+  // runOrigin says WHO started the run, which is the whole point of hearing
+  // about runs this window did not start. "running…" alone answers a question
+  // the user does not have — they can see the dot — and leaves the one they do:
+  // panes are appearing and nobody in this window asked for them.
+  //
+  // The trigger's event name is named where there is one, because it is the
+  // word to grep the YAML for.
+  function runOrigin(run) {
+    if (run.local) return "started here";
+    if (run.source === "trigger") {
+      return "started by its " + (run.trigger ? run.trigger + " trigger" : "own trigger");
+    }
+    // Not this window and not a trigger: another window, catctl, or a plugin.
+    // They are one case on purpose — the session cannot tell them apart, and
+    // inventing a distinction it does not have would be worse than the honest
+    // "somebody else".
+    return "started outside this window";
   }
 
   function stepCount(n) { return n + (n === 1 ? " step" : " steps"); }
@@ -184,11 +259,14 @@
   // this is what it is, and it runs N steps against this session — so a user
   // meets one gate either way.
   function startRunbookRun(rb) {
-    // A second click on a row already running would start a genuine second run;
-    // the server allows it (the concurrency slot is per name and this window
-    // holds it) only in the sense that it refuses it, and a refusal toast is a
-    // worse answer than not asking.
-    if (runbookRunning.has(rb.name)) { toast(rb.name + " is already running"); return; }
+    // A click on a row already running is refused here rather than sent: the
+    // server's concurrency slot is per runbook name, so the second run would
+    // come back "already in flight", and a refusal toast is a worse answer than
+    // not asking. Now that the mark covers runs started anywhere, so does this —
+    // clicking a row a trigger is running says so instead of firing a doomed
+    // command.
+    const cur = runbookRunOf(rb.name);
+    if (cur) { toast(rb.name + " is already running, " + runOrigin(cur)); return; }
     if (!rb.vars || !rb.vars.length) {
       dialogConfirm({
         title: "run runbook",
@@ -227,24 +305,22 @@
   // reason the mark is worth painting: a runbook that waits on a build can sit
   // there for minutes.
   //
-  // Runs started anywhere ELSE — catctl, a plugin, an `on:` trigger, another
-  // window — are not marked, because the session broadcasts no runbook state.
-  // That gap is deliberate and it is the same one the recorder documents
-  // (broadcastRecord, cmd/catway/record.go): closing it means a new
-  // down-message, and a per-step one would feed emitEvent → fireRunbookTriggers
-  // and give a runbook an event to trigger on that its own steps produce. The
-  // ⚡ mark and the refresh button cover the part that matters — whether the
-  // triggers are armed — without inventing that loop.
+  // The mark itself comes from the server (runbook_runs), including for this
+  // very run: the broadcast is sent when the run takes its concurrency slot,
+  // which happens inside the dispatch of the command below, so it reaches this
+  // window before the reply does. The local pending entry exists only to cover
+  // the round trip and to remember that the run in flight is ours.
+  //
+  // Nothing here refreshes the listing. The run's END arrives as a broadcast
+  // like everybody else's, and applyRunbookRuns refreshes on that edge — for
+  // every run, not just the ones with a callback attached. Refreshing here too
+  // would be a second read of the same directory for the same reason.
   function runRunbook(rb, vars) {
-    runbookRunning.add(rb.name);
+    runbookPending.add(rb.name);
     renderRunbooks();
     sendCmdAwait("runbook.run", { name: rb.name, vars }, (res) => {
-      runbookRunning.delete(rb.name);
+      runbookPending.delete(rb.name);
       renderRunbooks();
-      // The listing is stale by the end of a run whether or not the files
-      // changed: a run in flight is one of the things trigger_status reports,
-      // so the ⚡ marks were amber for the duration and have to come back.
-      refreshRunbooks(false);
       if (!res.ok) { toast(rb.name + ": " + (res.error || "run failed")); return; }
       const steps = (res.data || {}).steps || [];
       if (!(res.data || {}).failed) {

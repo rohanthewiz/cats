@@ -61,6 +61,11 @@ const (
 	// protocol v1: an old client ignores the type and simply never draws the
 	// indicator, which is exactly the UI it had before this existed.
 	MsgRecord Type = "record"
+	// MsgRunbookRuns is the set of runbook runs in flight (runbook.run and the
+	// `on:` triggers). Added within protocol v1: an old client ignores the type
+	// and marks only the runs it started itself, which is the UI it had before
+	// this existed.
+	MsgRunbookRuns Type = "runbook_runs"
 	// Chat surface (the ACP side panel). Added within protocol v1: an old
 	// client ignores unknown types, and a new client learns the server serves
 	// chat from CapChat rather than by probing.
@@ -200,6 +205,8 @@ func DecodeDown(data []byte) (any, error) {
 		return decodeAs[History](data)
 	case MsgRecord:
 		return decodeAs[Record](data)
+	case MsgRunbookRuns:
+		return decodeAs[RunbookRuns](data)
 	case MsgChatState:
 		return decodeAs[ChatState](data)
 	case MsgChatSnapshot:

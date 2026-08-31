@@ -85,6 +85,12 @@ abstract final class MsgType {
   /// indicator, which is exactly the UI it had before this existed.
   static const String record = 'record';
 
+  /// MsgRunbookRuns is the set of runbook runs in flight (runbook.run and the
+  /// `on:` triggers). Added within protocol v1: an old client ignores the type
+  /// and marks only the runs it started itself, which is the UI it had before
+  /// this existed.
+  static const String runbookRuns = 'runbook_runs';
+
   /// Chat surface (the ACP side panel). Added within protocol v1: an old
   /// client ignores unknown types, and a new client learns the server serves
   /// chat from CapChat rather than by probing.
@@ -2278,6 +2284,103 @@ class Resize {
       };
 }
 
+/// RunbookRun is one run in flight.
+class RunbookRun {
+  const RunbookRun({
+    required this.name,
+    this.source = '',
+    this.trigger = '',
+    this.startedAt = '',
+  });
+
+  /// Name is the runbook's declared name, which is also the key the run is
+  /// accounted under — one run per runbook at a time — and therefore the only
+  /// thing a row has to match itself against.
+  final String name;
+
+  /// Source is "control" (somebody asked: a browser, catctl, a plugin) or
+  /// "trigger" (an `on:` clause fired), the same two words RunbookFinishedEvent
+  /// carries. Trigger is the event name that started it, "" when a human did.
+  ///
+  /// They are on the wire because "it is running" and "it started ITSELF" are
+  /// different facts to a reader watching panes appear that they did not ask
+  /// for, and the second is the one that sends them looking at the file.
+  final String source;
+  final String trigger;
+
+  /// StartedAt is RFC3339: when the run took its concurrency slot. For a
+  /// triggered run that is when the trigger fired, a loop turn before the first
+  /// step (see startReservedRunbooks) — close enough that no reader can tell,
+  /// and honest about what the session actually committed to.
+  final String startedAt;
+
+  factory RunbookRun.fromJson(Map<String, Object?> j) => RunbookRun(
+        name: asString(j['name']),
+        source: asString(j['source']),
+        trigger: asString(j['trigger']),
+        startedAt: asString(j['started_at']),
+      );
+
+  Map<String, Object?> toJson() => {
+        'name': name,
+        if (source.isNotEmpty) 'source': source,
+        if (trigger.isNotEmpty) 'trigger': trigger,
+        if (startedAt.isNotEmpty) 'started_at': startedAt,
+      };
+}
+
+/// RunbookRuns is every runbook run currently in flight, whatever started it —
+/// a browser click here, a click in another window, `catctl runbook deploy`, a
+/// plugin, or an `on:` clause firing by itself.
+///
+/// A BROADCAST, for the reason Record is one: a run is SESSION state. There is
+/// one accounting of runs in flight (cmd/catway/runbooktrigger.go), every start
+/// goes through it and every finish releases it, so a window that learned about
+/// runs only from the commands it issued itself shows a session that is quieter
+/// than the real one. That is the worse direction to be wrong in: the runs a
+/// window did not start are exactly the ones the user has no other way to know
+/// about — a trigger firing is the session acting while nobody is looking at it.
+///
+/// The WHOLE SET rather than start/stop deltas, for two reasons. A set is
+/// idempotent, so a window that reconnects converges on the next message instead
+/// of carrying whatever marks it had when the socket dropped; and a dropped or
+/// coalesced delta would leave a row lit for a run that ended, which is the one
+/// failure a progress mark must not have.
+///
+/// Deliberately NOT a control-API event (internal/app/events.go), and this is
+/// the load-bearing half of the design. Events feed runbook triggers
+/// (fireRunbookTriggers), so an event per run start would hand a runbook an
+/// event that starting a runbook produces — a runbook triggering on it would
+/// trigger on itself. The browser message has no such reach: it marks a row and
+/// stops. `runbook_finished` already exists on the event side for automation
+/// that wants the outcome, and it is emitted once per run, at the end.
+///
+/// Per RUN and not per STEP for the same reason one phase earlier: a step-level
+/// message would be a stream at the rate a runbook dispatches commands, and the
+/// row has one bit to show.
+///
+/// Wire type: `runbook_runs`.
+class RunbookRuns {
+  const RunbookRuns({
+    required this.runs,
+  });
+
+  /// The `t` discriminator this class always carries. It is a property of
+  /// the type, not a field: a caller who could set it could set it wrong.
+  static const String type = 'runbook_runs';
+
+  final List<RunbookRun> runs;
+
+  factory RunbookRuns.fromJson(Map<String, Object?> j) => RunbookRuns(
+        runs: asList(j['runs'], (e) => RunbookRun.fromJson(asObj(e))),
+      );
+
+  Map<String, Object?> toJson() => {
+        't': type,
+        'runs': [for (final e in runs) e.toJson()],
+      };
+}
+
 /// Scroll is the pane's scrollback position (β ScrollInfo): Off lines up from
 /// the live bottom, Max history lines available, Rows visible.
 class Scroll {
@@ -2775,6 +2878,8 @@ Object? decodeDown(Map<String, Object?> j) {
       return History.fromJson(j);
     case RecordMsg.type:
       return RecordMsg.fromJson(j);
+    case RunbookRuns.type:
+      return RunbookRuns.fromJson(j);
     case ChatState.type:
       return ChatState.fromJson(j);
     case ChatSnapshot.type:

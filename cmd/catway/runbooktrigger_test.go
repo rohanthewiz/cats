@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/rohanthewiz/cats/internal/app"
+	"github.com/rohanthewiz/cats/internal/browserproto"
 	"github.com/rohanthewiz/cats/internal/layout"
 )
 
@@ -302,7 +303,7 @@ func TestFinishReleasesTheSlotBeforeEmitting(t *testing.T) {
 	o, dir := newTriggerOrch(t)
 	writeRunbook(t, dir, "t.yaml", "steps:\n  - run: pane.last\n")
 	run(t, o, app.RunbookRunParams{Name: "t"}).result(t)
-	if o.runbooks.inFlight != 0 || o.runbooks.running["t"] {
+	if _, held := o.runbooks.running["t"]; o.runbooks.inFlight != 0 || held {
 		t.Fatalf("inFlight = %d running = %v after the run ended", o.runbooks.inFlight, o.runbooks.running)
 	}
 }
@@ -388,4 +389,142 @@ steps:
 			t.Errorf("r%d recorded %d starts, want 1", i, got)
 		}
 	}
+}
+
+// --- what the browser is told ----------------------------------------------------
+
+// runbookRunsSeen drains a connection and returns every runbook_runs message it
+// was sent, in order.
+//
+// The SEQUENCE is what these tests are about rather than any single message: a
+// run is two broadcasts, one at each edge, and the second is the one that takes
+// the mark back off. A run that announced its start and not its finish would
+// leave every window in the session marking a runbook that is not running, with
+// nothing anywhere reporting an error.
+func runbookRunsSeen(t *testing.T, c *client) []*browserproto.RunbookRuns {
+	t.Helper()
+	var out []*browserproto.RunbookRuns
+	for {
+		select {
+		case b := <-c.out:
+			msg, err := browserproto.DecodeDown(b)
+			if err != nil {
+				t.Fatalf("decode down: %v", err)
+			}
+			if r, ok := msg.(*browserproto.RunbookRuns); ok {
+				out = append(out, r)
+			}
+		default:
+			return out
+		}
+	}
+}
+
+// A window hears about a run it did not start. The run below goes through the
+// dispatcher, which is the path `catctl runbook`, a plugin and a second browser
+// window all take — so this is every "somewhere else" at once.
+//
+// The connect burst is asserted with NOTHING running, on purpose and for the
+// reason the recorder's equivalent is: a window that reconnects was never
+// reloaded and is still drawing whatever it last saw, so "nothing to say" is
+// exactly the case where a mark would stay lit over a run that has since ended.
+func TestRunbookRunsReachEveryWindow(t *testing.T) {
+	o, dir := newTriggerOrch(t)
+	writeRunbook(t, dir, "deploy.yaml", "name: deploy\nsteps:\n  - run: pane.last\n")
+
+	c := newConn(o, false, browserproto.Init{Cols: 80, Rows: 24, CellWPx: 8, CellHPx: 16})
+	if burst := runbookRunsSeen(t, c); len(burst) != 1 || len(burst[0].Runs) != 0 {
+		t.Fatalf("connect burst sent %d runbook_runs messages (%+v), want exactly one holding no runs",
+			len(burst), burst)
+	}
+	drain(c)
+
+	run(t, o, app.RunbookRunParams{Name: "deploy"}).result(t)
+
+	msgs := runbookRunsSeen(t, c)
+	if len(msgs) != 2 {
+		t.Fatalf("one run sent %d runbook_runs messages, want 2 — one per edge", len(msgs))
+	}
+	got := msgs[0].Runs
+	if len(got) != 1 || got[0].Name != "deploy" || got[0].Source != runbookSourceControl ||
+		got[0].Trigger != "" || got[0].StartedAt == "" {
+		t.Errorf("the start message carried %+v, want deploy from control, no trigger, with a start time", got)
+	}
+	if len(msgs[1].Runs) != 0 {
+		t.Errorf("the finish message carried %+v, want an empty set", msgs[1].Runs)
+	}
+}
+
+// The case a query could never have caught: a runbook that started ITSELF. The
+// files on disk do not change while it runs, so nothing about a re-read of the
+// directory would have revealed it — which is the whole argument for pushing
+// runs rather than polling for them.
+//
+// The trigger's event name travels with it because it is the word to grep the
+// runbook for when the answer to "why is this running?" is not obvious.
+func TestTriggeredRunIsBroadcastWithItsTrigger(t *testing.T) {
+	o, dir := newTriggerOrch(t)
+	pane := uint32(o.session.AllPaneIDs()[0])
+	writeRunbook(t, dir, "t.yaml", `
+name: t
+on: pane_agent
+steps:
+  - run: pane.rename
+    params: {pane: "{{ event.pane }}", name: touched}
+`)
+	c := newConn(o, false, browserproto.Init{Cols: 80, Rows: 24, CellWPx: 8, CellHPx: 16})
+	drain(c)
+
+	fire(o, app.EventPaneAgent, app.PaneAgentEvent{Pane: pane, Agent: "claude", State: "blocked"})
+
+	msgs := runbookRunsSeen(t, c)
+	if len(msgs) < 2 {
+		t.Fatalf("a triggered run sent %d runbook_runs messages, want at least the two edges", len(msgs))
+	}
+	got := msgs[0].Runs
+	if len(got) != 1 || got[0].Name != "t" || got[0].Source != runbookSourceTrigger ||
+		got[0].Trigger != app.EventPaneAgent {
+		t.Errorf("the start message carried %+v, want t from a pane_agent trigger", got)
+	}
+	if last := msgs[len(msgs)-1]; len(last.Runs) != 0 {
+		t.Errorf("the last message carried %+v, want an empty set once the run ended", last.Runs)
+	}
+}
+
+// A window that connects MID-run starts converged rather than blank. This is
+// the reconnect case — the socket dropped during a long run and came back
+// before it finished — and it is why the burst carries the set at all.
+//
+// The slots are taken directly because the runs that matter here are the slow
+// ones, and every runbook these tests can write finishes inside the call that
+// starts it. The listing's order is asserted with them: map iteration is not
+// sorted, and two identical sets that serialise differently would be two
+// different messages on the wire.
+func TestConnectBurstCarriesRunsInFlight(t *testing.T) {
+	o, _ := newTriggerOrch(t)
+	for _, name := range []string{"zeta", "alpha"} {
+		if msg := o.claimRunbookSlot(name); msg != "" {
+			t.Fatalf("claiming %s: %s", name, msg)
+		}
+	}
+
+	c := newConn(o, false, browserproto.Init{Cols: 80, Rows: 24, CellWPx: 8, CellHPx: 16})
+	burst := runbookRunsSeen(t, c)
+	if len(burst) != 1 {
+		t.Fatalf("connect burst sent %d runbook_runs messages, want exactly one", len(burst))
+	}
+	got := burst[0].Runs
+	if len(got) != 2 || got[0].Name != "alpha" || got[1].Name != "zeta" {
+		t.Fatalf("the burst carried %+v, want both runs, sorted by name", got)
+	}
+
+	// And the release retracts them one at a time, so a window watching two runs
+	// does not lose both marks when the first one ends.
+	drain(c)
+	o.releaseRunbookSlot("alpha")
+	msgs := runbookRunsSeen(t, c)
+	if len(msgs) != 1 || len(msgs[0].Runs) != 1 || msgs[0].Runs[0].Name != "zeta" {
+		t.Fatalf("after one release the window was told %+v, want zeta alone still running", msgs)
+	}
+	o.releaseRunbookSlot("zeta")
 }

@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/rohanthewiz/cats/internal/browserproto"
 	"github.com/rohanthewiz/cats/internal/runbook"
 )
 
@@ -92,8 +93,14 @@ type runbookTriggers struct {
 	events map[string]bool
 
 	// --- per-runbook accounting, keyed by runbook name ---
-	// running marks a runbook with a run in flight, whatever started it.
-	running map[string]bool
+	// running holds the runbooks with a run in flight, whatever started it, and
+	// what is known about that run. A struct rather than a bool because this map
+	// is the ONLY record of what the session is running: the run objects
+	// themselves are private to the executor's chain, and every client that
+	// wants to draw "deploy is running right now" is asking this map. Keeping
+	// the origin beside the fact avoids a second map that could disagree with
+	// it about which runs exist.
+	running map[string]runbookRunInfo
 	// lastFired is when each CLAUSE last fired, keyed by name and clause index,
 	// for min_interval. Per clause rather than per runbook because two clauses
 	// on one runbook are two different questions, and a `pane_cwd` throttle must
@@ -110,6 +117,15 @@ type runbookTriggers struct {
 	// loop has not started yet. Their slots are held from the moment the trigger
 	// fired, so the accounting cannot be raced by the drain.
 	reserved []reservedRun
+}
+
+// runbookRunInfo is what the session knows about one run in flight from the
+// outside: who started it and when. Not the run itself — that is runbookRun in
+// runbook.go, which the executor owns and nothing else may see.
+type runbookRunInfo struct {
+	source  string // runbookSourceControl | runbookSourceTrigger
+	trigger string // the event name, "" for a manual run
+	started time.Time
 }
 
 // reservedRun is one trigger firing that has passed every check and is waiting
@@ -173,7 +189,7 @@ func (o *orch) triggerBlocked(rb *runbook.Runbook, clause int, t *runbook.Trigge
 		delete(rt.suspended, rb.Name)
 		delete(rt.starts, rb.Name) // a served suspension starts the window over
 	}
-	if rt.running[rb.Name] {
+	if _, ok := rt.running[rb.Name]; ok {
 		return "a run of it is already in flight"
 	}
 	if t.MinInterval > 0 {
@@ -200,13 +216,12 @@ func (o *orch) triggerBlocked(rb *runbook.Runbook, clause int, t *runbook.Trigge
 // one loop turn would both see zero runs in flight.
 func (o *orch) reserveRunbook(rb *runbook.Runbook, clause int, event string, payload map[string]any, now time.Time) {
 	rt := &o.runbooks
-	if rt.running == nil {
-		rt.running = map[string]bool{}
-		rt.lastFired = map[string]time.Time{}
-		rt.starts = map[string][]time.Time{}
-		rt.suspended = map[string]time.Time{}
-	}
-	rt.running[rb.Name] = true
+	o.initRunbookAccounting()
+	// A triggered run is marked from the moment its slot is taken, which is a
+	// loop turn before its first step. That is deliberate: the session has
+	// already committed to running it and refused every other start of it, so a
+	// window told anything else would be told something that is not true.
+	rt.running[rb.Name] = runbookRunInfo{source: runbookSourceTrigger, trigger: event, started: now}
 	rt.inFlight++
 	rt.lastFired[clauseKey(rb.Name, clause)] = now
 	rt.starts[rb.Name] = append(trimStarts(rt.starts[rb.Name], now), now)
@@ -219,6 +234,7 @@ func (o *orch) reserveRunbook(rb *runbook.Runbook, clause int, event string, pay
 			rb.Name, maxTriggerStarts, triggerRateWindow, now.Add(triggerSuspension).Format(time.TimeOnly))
 	}
 	rt.reserved = append(rt.reserved, reservedRun{book: rb, event: event, payload: payload})
+	o.broadcastRunbookRuns()
 }
 
 // startReservedRunbooks starts everything a trigger reserved during the loop
@@ -356,18 +372,29 @@ func dirPrint(dir string) string {
 
 // --- slot accounting -------------------------------------------------------------
 
+// initRunbookAccounting allocates the per-runbook maps on first use. Lazily,
+// because a session that never runs a runbook should carry none of them, and in
+// one place because the two callers that take a slot — the manual path and the
+// trigger path — are the two halves of one accounting and a map allocated in
+// only one of them would nil-panic in the other.
+func (o *orch) initRunbookAccounting() {
+	rt := &o.runbooks
+	if rt.running != nil {
+		return
+	}
+	rt.running = map[string]runbookRunInfo{}
+	rt.lastFired = map[string]time.Time{}
+	rt.starts = map[string][]time.Time{}
+	rt.suspended = map[string]time.Time{}
+}
+
 // claimRunbookSlot reserves the concurrency slot for a MANUAL run, reporting why
 // it could not. The trigger path reserves its own slot in reserveRunbook, so
 // this is the other half of the same accounting rather than a second policy.
 func (o *orch) claimRunbookSlot(name string) string {
 	rt := &o.runbooks
-	if rt.running == nil {
-		rt.running = map[string]bool{}
-		rt.lastFired = map[string]time.Time{}
-		rt.starts = map[string][]time.Time{}
-		rt.suspended = map[string]time.Time{}
-	}
-	if rt.running[name] {
+	o.initRunbookAccounting()
+	if _, ok := rt.running[name]; ok {
 		// Refused rather than queued, and refused for a manual caller too: two
 		// runs of one runbook interleaving their side effects is not something
 		// anybody asks for on purpose, and the caller waiting on a queued run
@@ -379,8 +406,9 @@ func (o *orch) claimRunbookSlot(name string) string {
 		return "the session already has " + strconv.Itoa(rt.inFlight) +
 			" runbook runs in flight, which is the limit"
 	}
-	rt.running[name] = true
+	rt.running[name] = runbookRunInfo{source: runbookSourceControl, started: time.Now()}
 	rt.inFlight++
+	o.broadcastRunbookRuns()
 	return ""
 }
 
@@ -388,7 +416,7 @@ func (o *orch) claimRunbookSlot(name string) string {
 // Called exactly once per started run, from finishRunbook.
 func (o *orch) releaseRunbookSlot(name string) {
 	rt := &o.runbooks
-	if !rt.running[name] {
+	if _, held := rt.running[name]; !held {
 		// Unreachable: every start claims and every finish releases once. Guarded
 		// because a double release would drift inFlight negative and silently
 		// raise the concurrency cap.
@@ -399,6 +427,7 @@ func (o *orch) releaseRunbookSlot(name string) {
 	if rt.inFlight > 0 {
 		rt.inFlight--
 	}
+	o.broadcastRunbookRuns()
 }
 
 // runbookTriggerStatus describes a runbook's autorun state for runbook.list:
@@ -415,8 +444,48 @@ func (o *orch) runbookTriggerStatus(rb *runbook.Runbook) string {
 		return "suspended until " + until.Format(time.TimeOnly) +
 			" after starting " + strconv.Itoa(maxTriggerStarts) + " times in " + triggerRateWindow.String()
 	}
-	if rt.running[rb.Name] {
+	if _, ok := rt.running[rb.Name]; ok {
 		return "a run is in flight"
 	}
 	return ""
 }
+
+// --- what the browser is told --------------------------------------------------
+
+// runbookRunsMsg is the set of runs in flight as the browser sees it. An empty
+// set is an ordinary message rather than no message at all, for the reason
+// recordMsg's idle case is one: the client has marks to turn OFF, and both the
+// connect burst and the last release have to be able to say so.
+func (o *orch) runbookRunsMsg() browserproto.RunbookRuns {
+	rt := &o.runbooks
+	runs := make([]browserproto.RunbookRun, 0, len(rt.running))
+	for name, info := range rt.running {
+		runs = append(runs, browserproto.RunbookRun{
+			Name:      name,
+			Source:    info.source,
+			Trigger:   info.trigger,
+			StartedAt: info.started.UTC().Format(time.RFC3339),
+		})
+	}
+	// Sorted because map iteration is not. Two identical sets that serialise
+	// differently would be two different messages on the wire, which turns a
+	// listing a client could compare against its last one into one it cannot.
+	sort.Slice(runs, func(i, j int) bool { return runs[i].Name < runs[j].Name })
+	return browserproto.NewRunbookRuns(runs)
+}
+
+// broadcastRunbookRuns pushes that set to every connected window.
+//
+// Called from the three places the accounting changes — claimRunbookSlot,
+// reserveRunbook and releaseRunbookSlot — rather than from the executor,
+// because those three are the complete set of transitions BY CONSTRUCTION: a
+// run that did not take a slot does not exist, and a slot that is never
+// released wedges the runbook at "already in flight" whether or not anybody is
+// watching. Announcing where the truth changes is the same rule
+// macroRecorder.changed follows, and for the same reason: an announcement
+// hung off the caller instead would be one `catctl` path away from being
+// forgotten.
+//
+// See browserproto.RunbookRuns for why this is a browser broadcast and
+// deliberately not a control-API event.
+func (o *orch) broadcastRunbookRuns() { o.broadcast(o.runbookRunsMsg()) }

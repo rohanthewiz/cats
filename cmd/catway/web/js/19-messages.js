@@ -68,6 +68,12 @@
       // pushes it on every transition, on every captured step, and once in the
       // connect burst, so the indicator is right no matter who armed it.
       case "record": applyRecord(msg); break;
+      // …and so is a runbook run. The server pushes the whole set of runs in
+      // flight on every start and every finish, so a row marks itself for a run
+      // started by another window, by catctl, or by an `on:` trigger firing
+      // with nobody watching — which is the case a query could never have
+      // caught, since the file on disk does not change while it runs.
+      case "runbook_runs": applyRunbookRuns(msg); break;
       case "usage": renderUsage(msg); break;
       case "clipboard": // OSC 52 write from a pane app — no user activation
         try { clipWrite(b64decode(msg.data)).catch(() => {}); } catch (e) {}
