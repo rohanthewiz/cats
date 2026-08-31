@@ -14,6 +14,9 @@
   function openCtx(x, y, items) {
     closeCtx();
     ctxEl = buildCtx(x, y, items);
+    // Only the root menu dims what is under it; buildCtx recurses for submenus
+    // and must not, or opening one would re-dim an already-dimmed dialog.
+    setCtxDim(true);
   }
 
   // buildCtx mounts one menu and returns it. Its child submenu, when one is

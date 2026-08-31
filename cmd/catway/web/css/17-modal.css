@@ -1,6 +1,16 @@
   /* ---- Overlays: dialogs / palette / help (WS8) ---- */
   #overlay { position:fixed; inset:0; background:rgba(0,0,0,.45); z-index:8;
     display:flex; align-items:flex-start; justify-content:center; }
+  /* A context menu opened from inside a dialog (the plugins list's run buttons,
+     where a multi-action plugin asks WHICH action) floats above a surface in the
+     same --panel2 the menu is drawn in. Dimming the dialog while the menu is up
+     is exactly the move the backdrop already makes for the app behind it, one
+     step further down the stack: the menu becomes the only lit layer, so the
+     question is impossible to miss. The class is set by openCtx and cleared by
+     closeCtx (25-modal.js / 28-ctxmenu.js); the transition is short enough to
+     read as the menu appearing rather than as the dialog animating. */
+  #overlay .modal { transition:filter .12s ease; }
+  #overlay.ctx-dim .modal { filter:brightness(.68); }
   .modal { background:var(--panel2); border:1px solid var(--line); border-radius:8px; margin-top:12vh;
     min-width:360px; max-width:640px; box-shadow:0 8px 30px rgba(0,0,0,.5); font-size:13px; }
   .modal header { padding:10px 14px; font-weight:600; color:var(--fg-strong); border-bottom:1px solid var(--line); font-size:12px; }

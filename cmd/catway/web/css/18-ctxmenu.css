@@ -1,6 +1,20 @@
   /* ---- Context menu (WS8) ---- */
-  #ctxmenu { position:fixed; z-index:9; background:var(--panel2); border:1px solid var(--line); border-radius:6px;
-    min-width:190px; padding:4px; box-shadow:0 6px 24px rgba(0,0,0,.5); font-size:12px; }
+  /* The menu has to read as a floating layer on two very different grounds: the
+     terminal canvas (--bg), and — when it is opened from inside a dialog, which
+     the plugins list's run buttons do — a .modal painted in the SAME --panel2
+     the menu itself uses. On that second ground the old 1px --line border and a
+     dark-on-dark shadow left the menu all but invisible: same surface, same
+     radius, one hairline between them.
+
+     Tinting the menu's surface would fix it only by colliding with
+     --chrome-focus one tier up (the row hover), so the separation is carried by
+     the EDGE instead: an accent-tinted border with a hard dark ring immediately
+     outside it. That light/dark pair is what the eye reads as a raised edge, and
+     it works on the light themes too, where a plain shadow does almost nothing.
+     #overlay.ctx-dim (17-modal.css) does the other half of the job by dimming
+     the dialog underneath for as long as the menu is up. */
+  #ctxmenu { position:fixed; z-index:9; background:var(--panel2); border:1px solid var(--accent-dim); border-radius:6px;
+    min-width:190px; padding:4px; box-shadow:0 0 0 1px rgba(0,0,0,.45), 0 10px 28px rgba(0,0,0,.6); font-size:12px; }
   #ctxmenu .item { padding:5px 10px; border-radius:4px; cursor:pointer; display:flex; gap:8px;
     align-items:center; white-space:nowrap; }
   #ctxmenu .item:hover { background:var(--chrome-focus); color:var(--fg-bright); }

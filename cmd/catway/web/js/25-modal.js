@@ -17,7 +17,14 @@
   // Menus form a chain (a menu's open submenu hangs off _sub), so closing means
   // walking it: a submenu is a sibling in the DOM, not a descendant, and would
   // otherwise be orphaned on screen when its parent goes.
-  function closeCtx() { if (ctxEl) { closeCtxChain(ctxEl); ctxEl = null; } }
+  function closeCtx() { if (ctxEl) { closeCtxChain(ctxEl); ctxEl = null; } setCtxDim(false); }
+  // setCtxDim marks the open overlay as "a menu is answering a question on top
+  // of me", which dims it (17-modal.css). It lives here rather than in openCtx
+  // because modalEl is the state that decides whether there is anything to dim:
+  // a right-click on the canvas has no overlay and this is a no-op.
+  function setCtxDim(on) {
+    if (modalEl) modalEl.classList.toggle("ctx-dim", on);
+  }
   function closeCtxChain(m) { if (m._sub) closeCtxChain(m._sub); m.remove(); }
   function ctxChainHas(m, node) {
     for (; m; m = m._sub) if (m.contains(node)) return true;
