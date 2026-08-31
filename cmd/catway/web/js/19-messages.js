@@ -8,6 +8,11 @@
           // The chip only exists when the server serves chat — without the
           // cap, chat.send would vanish into an unknown-command error.
           chatBtnEl.style.display = (msg.caps || []).includes("chat") ? "" : "none";
+          // Runbooks are files on the server's disk with no change stream, so
+          // the section has to ask. A fresh connection is one of the few
+          // moments this window can be sure it does not know: it may have been
+          // away for hours, and a reconnect re-runs this.
+          refreshRunbooks(false);
         }
         break;
       case "layout": applyLayout(msg); break;

@@ -27,7 +27,7 @@
   let recState = { recording: false, steps: 0, startedAt: "", note: "" };
 
   function applyRecord(msg) {
-    const prevNote = recState.note;
+    const prevNote = recState.note, wasRecording = recState.recording;
     recState = {
       recording: !!msg.recording,
       steps: msg.steps || 0,
@@ -40,6 +40,17 @@
     // so toasting unconditionally would put a toast on screen for every command
     // run for the rest of the recording.
     if (recState.note && recState.note !== prevNote) toast("recording: " + recState.note);
+    // A recording that ended is the one moment this UI itself writes a runbook,
+    // so the RUNBOOKS section re-reads the directory on that edge.
+    //
+    // On the edge in EVERY window, rather than in stopRecording's own success
+    // callback, because the recorder is session state and the window that saves
+    // it is very often not the only one open — and a `catctl record stop` has
+    // no callback here at all. A cancel takes the same path and finds nothing
+    // new, which costs one readdir on a transition that happens a handful of
+    // times a day; telling the two apart would mean putting the outcome on the
+    // wire for no other reason.
+    if (wasRecording && !recState.recording) refreshRunbooks(false);
   }
 
   function renderRecord() {

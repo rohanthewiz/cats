@@ -23,6 +23,21 @@
     return !h || !!h.connected;
   }
 
+  // localHostId names the host that is catway's OWN machine — the one whose
+  // disk the server's own paths are on (the config directory, and so the
+  // runbooks under it). It is not derivable from the address kind: a unix
+  // address can be an ssh -L forward to another box, which is exactly how the
+  // first remote host is reached, so the roster carries the flag explicitly.
+  //
+  // "" when the roster has not landed yet, which leaves a caller's `host` param
+  // off and falls back to the anchor pane's machine — right in the single-host
+  // session that is the only case where the roster can still be missing when
+  // somebody clicks something.
+  function localHostId() {
+    const h = hostItems.find((x) => x.local);
+    return h ? h.id : "";
+  }
+
   // The heading carries one button of its own: attach. Detach is per-row (a
   // right-click on the host it would remove), because it is the destructive
   // half and the row is the only place that says what it holds.

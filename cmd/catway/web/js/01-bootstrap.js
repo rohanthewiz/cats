@@ -18,6 +18,8 @@
   const usageListEl = document.getElementById("usage-list");
   const hostSecEl = document.getElementById("sec-hosts");
   const hostListEl = document.getElementById("host-list");
+  const rbSecEl = document.getElementById("sec-runbooks");
+  const rbListEl = document.getElementById("rb-list");
   const histSecEl = document.getElementById("sec-history");
   const histListEl = document.getElementById("hist-list");
   const tabbarEl = document.getElementById("tabbar");

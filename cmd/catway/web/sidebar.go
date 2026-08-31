@@ -2,7 +2,7 @@ package web
 
 import "github.com/rohanthewiz/element"
 
-// Sidebar is the left column: the wordmark, then the six sections the
+// Sidebar is the left column: the wordmark, then the seven sections the
 // front-end fills in.
 //
 // Section order is the session's coordinate system, outermost first. Usage
@@ -11,6 +11,13 @@ import "github.com/rohanthewiz/element"
 // workspaces, which hold tabs, which hold panes, and the sidebar reads down
 // that chain. History is last because it is the only section that looks
 // BACKWARD — every other one describes the session as it is now.
+//
+// Runbooks breaks that chain, which is why it sits at the bottom of it rather
+// than inside it. Every section above it is a reading OF the session; a runbook
+// is a file on disk that does something TO one. So the column reads down
+// through the session's own structure (machine → workspace → tab → pane →
+// agent) and then leaves it for the two sections that are about acting: what
+// can be run, and then what already was.
 //
 // Every section carries an id so its heading's fold arrow has something to hang
 // the .folded class on (initSectionFold in js/), and every heading carries an
@@ -48,6 +55,12 @@ func (Sidebar) Render(b *element.Builder) (x any) {
 		section(b, "sec-panes", "Panes", "pane-hctl", "pane-list", false),
 		nl(b, 2),
 		section(b, "sec-agents", "Agents", "agent-hctl", "agent-list", false, "none"),
+		nl(b, 2),
+		// Runbooks is hidden until the directory has something in it, like Hosts
+		// and History: an install that has never recorded a macro sees exactly
+		// the sidebar it always had, and the section appears by itself the first
+		// time a recording is saved.
+		section(b, "sec-runbooks", "Runbooks", "rb-hctl", "rb-list", true),
 		nl(b, 2),
 		// History is hidden until the command ledger has something in it, so a
 		// session whose shells have no OSC 133 integration installed sees

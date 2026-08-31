@@ -96,6 +96,7 @@ func TestMarkupCarriesTheIdsTheFrontEndResolves(t *testing.T) {
 		"sec-workspaces", "ws-hctl", "ws-list", "ws-count", "ws-global-todo",
 		"sec-panes", "pane-hctl", "pane-list",
 		"sec-agents", "agent-hctl", "agent-list",
+		"sec-runbooks", "rb-hctl", "rb-list",
 		"sec-history", "hist-hctl", "hist-list",
 		"statusbar", "palhint", "pluginsbtn", "chatbtn", "recbtn", "gear",
 		"chat", "chat-head", "chat-title", "chat-status", "chat-log",
@@ -111,9 +112,10 @@ func TestMarkupCarriesTheIdsTheFrontEndResolves(t *testing.T) {
 	// at a time because element writes attributes in map order, so nothing may
 	// assume id comes before hidden.
 	for _, c := range []struct{ tag, id, boolAttr string }{
-		{"section", "sec-hosts", "hidden"},   // stays hidden while the session has one host
-		{"section", "sec-history", "hidden"}, // stays hidden until the ledger has rows
-		{"button", "chat-stop", "disabled"},  // nothing to cancel until a turn is in flight
+		{"section", "sec-hosts", "hidden"},    // stays hidden while the session has one host
+		{"section", "sec-runbooks", "hidden"}, // stays hidden until the directory has files
+		{"section", "sec-history", "hidden"},  // stays hidden until the ledger has rows
+		{"button", "chat-stop", "disabled"},   // nothing to cancel until a turn is in flight
 	} {
 		if !hasBoolAttr(page, c.tag, c.id, c.boolAttr) {
 			t.Errorf("<%s id=%q> lost its %s attribute", c.tag, c.id, c.boolAttr)

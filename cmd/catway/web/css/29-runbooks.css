@@ -1,0 +1,57 @@
+  /* RUNBOOKS: one row per file in ~/.config/cats/runbooks — a leading mark that
+     says what a click will do, the name, a bolt for the ones that run
+     themselves, and the step count. The whole section is hidden while the
+     directory is empty (renderRunbooks sets [hidden]), so an install that never
+     recorded a macro sees exactly the sidebar it always had.
+
+     Rows are clickable, so they take the hover treatment History's do and the
+     Hosts rows deliberately do not. */
+  #rb-list li { display:flex; align-items:baseline; gap:6px; cursor:pointer; }
+  /* The leading mark is the affordance, not a status: ▸ is "this runs", which
+     is the one thing about a runbook row a reader has to know before clicking
+     it. Its two other states are the exceptions — ✕ for a file that would not
+     parse, ● for a run this window is waiting on. */
+  #rb-list .rdot { flex:none; font-size:calc(9px * var(--sb-scale)); color:var(--accent); }
+  #rb-list .rname { min-width:0; flex:1 1 auto; overflow:hidden; text-overflow:ellipsis;
+    white-space:nowrap; }
+  /* A runbook with an `on:` clause runs itself, which is the one property of a
+     row that changes what the session does when nobody is looking. Accent while
+     the triggers are armed. */
+  #rb-list .rtrig { flex:none; color:var(--accent); opacity:.8;
+    font-size:calc(9px * var(--sb-scale)); }
+  /* …and amber when they are not. trigger_status is set for a runbook that is
+     suspended after a runaway, already running, or switched off in the config —
+     all of it invisible daemon state, and all of it the answer to "why did my
+     runbook stop firing?". The row cannot hold the reason; the title does. */
+  #rb-list li.trig-off .rtrig { color:var(--warn); opacity:1; }
+  #rb-list .rsteps { flex:none; margin-left:auto; color:var(--muted);
+    font-size:calc(9px * var(--sb-scale)); font-variant-numeric:tabular-nums; }
+  /* A file that would not parse. It is listed rather than skipped — a runbook
+     missing from the list looks exactly like one that was never written — and
+     it keeps its click, because the click that fixes it is "open it". The name
+     goes red rather than dimmed: this is the row that wants attention. */
+  #rb-list li.broken .rdot, #rb-list li.broken .rname { color:var(--err); }
+  /* A run this window started and is still waiting on. runbook.run answers when
+     the LAST step finishes, so this can sit for the whole of a long run, which
+     is exactly why it is worth painting at all. Same pulse the pane list's
+     working dot uses — one blinking mark means one thing across the column. */
+  #rb-list li.running .rdot { animation:dotpulse 1.4s ease-in-out infinite; }
+  #rb-list li.running .rname { color:var(--fg-strong); }
+  @media (prefers-reduced-motion:reduce) {
+    #rb-list li.running .rdot { animation:none; }
+  }
+  /* The heading's re-read button, borrowing the Usage refresh's drawn mark and
+     spin so the two "ask the server again" controls in this column behave
+     identically. The sizing rules have to be repeated rather than shared
+     because .refresh is scoped per heading in 06-usage.css — a bare `.refresh`
+     selector would be the one rule in the sidebar that reaches across sections,
+     which is worth avoiding for four lines. */
+  #rb-hctl { align-items:center; }
+  #rb-hctl .refresh { display:block; width:calc(12px * var(--sb-scale));
+    height:calc(12px * var(--sb-scale)); }
+  #rb-hctl button.uref { margin-right:5px; }
+  #rb-hctl button.busy { color:var(--accent); }
+  #rb-hctl button.busy .refresh { animation:uspin .9s linear infinite; }
+  @media (prefers-reduced-motion:reduce) {
+    #rb-hctl button.busy .refresh { animation:none; }
+  }

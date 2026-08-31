@@ -985,6 +985,29 @@ The one command a step may not be is `runbook.run`. Everything else is bounded b
 what the table offers; a runbook running a runbook is not bounded at all, and the
 recursion would surface as a wedged loop rather than as a mistake in a file.
 
+**From the browser**, the same two commands are the sidebar's **RUNBOOKS**
+section, below AGENTS. One row per file: `▸` and the name, `⚡` for a runbook
+with an `on:` clause, and the step count. A click runs it — through a dialog
+first, which asks for the declared vars where there are any and otherwise names
+the runbook and its step count, because unlike every other clickable row in that
+column this one splits panes and types into shells with no undo. Right-click
+adds *open in editor* (`pane.open_file`, on the local host — the runbooks are on
+catway's own disk, not the focused pane's), *copy path*, and the `catctl`
+spelling.
+
+Files that failed to parse list too, in red, carrying the load error and opening
+in the editor rather than offering a run. The `⚡` goes amber when
+`trigger_status` says the triggers are not armed, which is the one place that
+state is visible at all.
+
+The section is a **query**, not a broadcast: a runbook is a file, an editor can
+rewrite one without the session knowing, and `runbook.list` re-scans the
+directory per call. So it re-reads on connect, when a recording ends (the one
+moment the UI itself writes a runbook), when a run this window started finishes,
+and on the heading's `⟳` for everything else. A run started somewhere else —
+`catctl`, a plugin, a trigger — therefore does not light up a row; see the note
+on `broadcastRecord` for why this vocabulary does not push per-step state.
+
 #### References
 
 A step with an `id` binds its **result** under that name for later steps.

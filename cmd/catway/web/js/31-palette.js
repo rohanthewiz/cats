@@ -39,6 +39,16 @@
       { label: "stop server…", fn: confirmStopServer },
     ];
     if (recState.recording) items.push({ label: "cancel recording…", fn: confirmCancelRecording });
+    // One entry per runbook, from the listing the sidebar already fetched — no
+    // round trip, and nothing offered that the section is not also showing.
+    // Broken files are left out for the same reason "start recording" is hidden
+    // while one is running: the palette must not list something it knows the
+    // server will refuse. They are still visible in the section, where the row
+    // carries the parse error that makes them actionable.
+    for (const rb of runbookItems) {
+      if (rb.error) continue;
+      items.push({ label: "run runbook: " + rb.name + "…", fn: () => startRunbookRun(rb) });
+    }
     if (f !== null) {
       items.push(
         { label: "rename pane…", fn: () => renamePane(f) },
