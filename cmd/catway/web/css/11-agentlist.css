@@ -48,3 +48,14 @@
   #agent-list li.empty { color:var(--muted); font-style:italic; cursor:default; }
   #agent-list li.empty:hover { background:none; }
 
+  /* The idle dot, pulled a step off full green. In AGENTS every settled agent
+     shows one, so a column of saturated dots was the brightest thing in the
+     section while saying the least — idle is the resting state, not news.
+     Mixed toward --muted rather than dimmed with opacity so the dot keeps its
+     weight against the panel and only loses chroma; both ends are theme tokens,
+     so a light or high-contrast theme lands somewhere sensible too. The literal
+     is the same mix precomputed against the dark theme, for engines without
+     color-mix. Scoped to #agent-list: the pane rows and the workspace rollup
+     show one dot among others, where the full green still earns its place. */
+  #agent-list .adot.st-idle { color:#79be86; }
+  #agent-list .adot.st-idle { color:color-mix(in srgb, var(--ok) 70%, var(--muted)); }
