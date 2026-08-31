@@ -8,3 +8,35 @@
   #gear.badge .g::after { content:""; position:absolute; top:-1px; right:-4px; width:6px; height:6px;
     border-radius:50%; background:var(--accent); }
 
+
+  /* ---- The macro recorder's indicator ----
+     Idle it is an ordinary toolbar item wearing a hollow mark, so a session
+     that never records pays no visual attention to it at all. Armed, the mark
+     fills, turns red and breathes, and the whole button takes a tinted ground —
+     the tint is what makes it readable at the edge of vision, which a 6px dot
+     alone is not.
+
+     The pulse is on the GLYPH rather than the button: a background animating
+     under a row of otherwise-still controls reads as a fault, while a blinking
+     record dot is the one animation every recorder in the world already uses.
+     It is also the only moving thing in the chrome, which is the point — it is
+     a mode, and a mode has to be visible without being looked for. */
+  #recbtn.on { background:color-mix(in srgb, var(--err) 14%, transparent); color:var(--fg-bright); }
+  #recbtn.on .tmk, #recbtn.on:hover .tmk { color:var(--err); }
+  #recbtn.on .g { animation:recpulse 1.6s ease-in-out infinite; }
+  /* The count sits apart from the word in the dimmer weight the sidebar's own
+     counts use: "rec 12" has to read as one label with a number in it, not as
+     two controls that happen to touch. */
+  #recbtn .n { color:var(--muted); font-variant-numeric:tabular-nums; }
+  /* Idle, the count span is empty — and an empty flex item still claims the
+     row's 6px gap, which reads as a stray space after the word. */
+  #recbtn .n:empty { display:none; }
+  #recbtn.on .n { color:var(--fg-bright); }
+  /* Nothing captured yet is worth saying out loud rather than showing as a bare
+     0 — it is the state the user most needs to notice, because it usually means
+     the thing they are doing is not going through the command vocabulary. */
+  #recbtn.on.empty .n { color:var(--warn); }
+  @keyframes recpulse { 0%,100% { opacity:1; } 50% { opacity:.25; } }
+  /* Reduced-motion readers get the state without the blink: the fill, the tint
+     and the count all still say it. */
+  @media (prefers-reduced-motion:reduce) { #recbtn.on .g { animation:none; } }

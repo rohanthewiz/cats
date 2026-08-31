@@ -24,6 +24,7 @@
   const toastsEl = document.getElementById("toasts");
   const palHintEl = document.getElementById("palhint");
   const pluginsBtnEl = document.getElementById("pluginsbtn");
+  const recBtnEl = document.getElementById("recbtn");
   const gearEl = document.getElementById("gear");
   const bannerEl = document.getElementById("banner");
   const splitterEl = document.getElementById("splitter");

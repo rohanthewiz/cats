@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/rohanthewiz/cats/internal/app"
+	"github.com/rohanthewiz/cats/internal/browserproto"
 	"github.com/rohanthewiz/cats/internal/runbook"
 )
 
@@ -79,6 +80,38 @@ type macroRecorder struct {
 	anchorPane      uint32
 	anchorWorkspace string
 	startedAt       time.Time
+	// notify is "the recorder's visible state just changed" — orch wires it to
+	// broadcastRecord when it builds the recorder, and it is the ONLY thing on
+	// this struct that is not part of the recording itself. That distinction is
+	// what reset exists to protect.
+	//
+	// A callback rather than a back-pointer to orch because the recorder's job
+	// is to hold steps, not to know what a browser is: this way the only thing
+	// it can do to the outside world is say that something changed.
+	notify func()
+}
+
+// reset returns the recorder to a known state, keeping the notifier.
+//
+// Every place that starts, cancels or finishes a recording goes through here
+// rather than assigning through the pointer directly. Assigning a fresh literal
+// is the natural way to write "throw this recording away" and it is also how
+// the notifier would silently be dropped — after which the indicator in every
+// browser would freeze at whatever it last showed, with nothing failing.
+func (m *macroRecorder) reset(next macroRecorder) {
+	next.notify = m.notify
+	*m = next
+}
+
+// changed announces the recorder's state, if anybody wired a notifier in. It is
+// called on every transition and on every captured step, so the step counter a
+// client draws ticks up while the recording runs — the difference between "I
+// armed it" and "it is capturing what I am doing", which is the one question a
+// recorder cannot answer by sitting there looking armed.
+func (m *macroRecorder) changed() {
+	if m.notify != nil {
+		m.notify()
+	}
 }
 
 // Recorder gives the dispatcher this session's recorder. It is allocated on
@@ -86,7 +119,7 @@ type macroRecorder struct {
 // never records carries nothing.
 func (o *orch) Recorder() app.Recorder {
 	if o.macro == nil {
-		o.macro = &macroRecorder{}
+		o.macro = &macroRecorder{notify: o.broadcastRecord}
 	}
 	return o.macro
 }
@@ -97,12 +130,22 @@ func (m *macroRecorder) Begin(cmd string) int64 {
 	if m == nil || !m.on {
 		return 0
 	}
+	// The ceilings announce themselves the first time they are reached, and
+	// only then: `full` is already set on every later command, so the guard
+	// keeps a recording that runs on past its limit from broadcasting the same
+	// note once per command for the rest of its life.
 	if len(m.steps) >= maxRecordedSteps {
-		m.full = fmt.Sprintf("the recording reached its %d-step ceiling and stopped capturing", maxRecordedSteps)
+		if m.full == "" {
+			m.full = fmt.Sprintf("the recording reached its %d-step ceiling and stopped capturing", maxRecordedSteps)
+			m.changed()
+		}
 		return 0
 	}
 	if m.bytes >= maxRecordedBytes {
-		m.full = fmt.Sprintf("the recording reached its %d MiB ceiling and stopped capturing", maxRecordedBytes>>20)
+		if m.full == "" {
+			m.full = fmt.Sprintf("the recording reached its %d MiB ceiling and stopped capturing", maxRecordedBytes>>20)
+			m.changed()
+		}
 		return 0
 	}
 	m.seq++
@@ -142,6 +185,10 @@ func (m *macroRecorder) Commit(seq int64, params json.RawMessage, result any) {
 	}
 	st.done = true
 	m.bytes += len(params)
+	// The count a client draws is doneCount, so this — not Begin — is the
+	// moment it moves. Announcing from Begin would show a step that a Fail is
+	// about to take away again.
+	m.changed()
 }
 
 // Abort releases the slot of a command that failed. A macro is a replay of what
@@ -207,11 +254,12 @@ func (o *orch) RunbookRecord(r app.Responder, p app.RunbookRecordParams) {
 				m.doneCount(), m.startedAt.Format(time.Kitchen)))
 			return
 		}
-		*m = macroRecorder{on: true, startedAt: time.Now()}
+		m.reset(macroRecorder{on: true, startedAt: time.Now()})
 		if id, ok := o.session.FocusedPane(); ok {
 			m.anchorPane = uint32(id)
 		}
 		m.anchorWorkspace = o.session.Info().ActiveWorkspace
+		m.changed()
 		r.OK(m.status(app.RecordStart))
 
 	case app.RecordStatus:
@@ -222,7 +270,8 @@ func (o *orch) RunbookRecord(r app.Responder, p app.RunbookRecordParams) {
 			r.Fail("nothing is being recorded")
 			return
 		}
-		*m = macroRecorder{}
+		m.reset(macroRecorder{})
+		m.changed()
 		r.OK(m.status(app.RecordCancel))
 
 	case app.RecordStop:
@@ -274,10 +323,43 @@ func (o *orch) stopRecording(r app.Responder, m *macroRecorder, p app.RunbookRec
 	res := m.status(app.RecordStop)
 	res.Name = p.Name
 	res.Path = path
-	*m = macroRecorder{}
+	m.reset(macroRecorder{})
+	m.changed()
 	res.Recording = false
 	r.OK(res)
 }
+
+// recordMsg is the recorder's state as the browser sees it. A nil or unarmed
+// recorder is an ordinary "not recording" message rather than no message at
+// all: the client has an indicator to turn OFF, and the connect burst has to be
+// able to say so.
+func (o *orch) recordMsg() browserproto.Record {
+	m, _ := o.Recorder().(*macroRecorder)
+	if m == nil || !m.on {
+		return browserproto.NewRecord(false, 0, "", "")
+	}
+	return browserproto.NewRecord(true, m.doneCount(), m.startedAt.UTC().Format(time.RFC3339), m.full)
+}
+
+// broadcastRecord pushes the recorder's state to every connected window.
+//
+// This is deliberately NOT a control-API event (internal/app/events.go). Two
+// reasons, and the second is the load-bearing one:
+//
+//   - It does not need to be one to be correct. Every way the recorder can
+//     change state runs through RunbookRecord on this goroutine — a browser
+//     click, `catctl record start`, a plugin, a command relayed from another
+//     host — so a broadcast from the handler already reaches every window no
+//     matter who armed it. An event would be a second path to the same fact.
+//   - Events feed runbook triggers (fireRunbookTriggers), and the step counter
+//     ticks once per captured command. A trigger on a per-step event would run
+//     a runbook whose own steps are recorded — recording is why the steps are
+//     being counted — which is a loop with a recording at the bottom of it. The
+//     browser message has no such reach: it lights an indicator and stops.
+//
+// If an automation client ever needs the recorder's state, runbook.record with
+// action "status" answers exactly this question and always has.
+func (o *orch) broadcastRecord() { o.broadcast(o.recordMsg()) }
 
 // status describes the recorder from the outside.
 func (m *macroRecorder) status(action string) app.RunbookRecordResult {

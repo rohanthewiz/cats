@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/rohanthewiz/cats/internal/app"
+	"github.com/rohanthewiz/cats/internal/browserproto"
 	"github.com/rohanthewiz/cats/internal/layout"
 )
 
@@ -347,5 +348,128 @@ steps:
 	s := recordResult(t, record(t, o, app.RunbookRecordParams{Action: app.RecordStatus}))
 	if len(s.Commands) != 1 || s.Commands[0] != app.CmdPaneRename {
 		t.Fatalf("captured %v, want the step and not the run", s.Commands)
+	}
+}
+
+// The recorder announces itself. Every window's indicator is driven by this one
+// hook, so both halves of it are asserted here: that each transition and each
+// captured step fires it, and that reset does not quietly drop the notifier —
+// the failure mode that would freeze the indicator in every connected browser
+// with nothing anywhere reporting an error.
+func TestRecordAnnouncesEveryChange(t *testing.T) {
+	o, _ := newRunbookOrch(t)
+	pane := uint32(o.session.AllPaneIDs()[0])
+
+	m, ok := o.Recorder().(*macroRecorder)
+	if !ok {
+		t.Fatalf("recorder is %T, want *macroRecorder", o.Recorder())
+	}
+	// Stand a counter on the notifier orch wired in. It is installed BEFORE the
+	// first start, so every reset on the way through has a chance to lose it.
+	fired := 0
+	m.notify = func() { fired++ }
+
+	if msg := o.recordMsg(); msg.Recording || msg.Steps != 0 {
+		t.Fatalf("idle recordMsg = %+v, want a not-recording message", msg)
+	}
+
+	recordResult(t, record(t, o, app.RunbookRecordParams{Action: app.RecordStart}))
+	if fired != 1 {
+		t.Fatalf("start fired the notifier %d times, want 1 (reset dropped it?)", fired)
+	}
+	if msg := o.recordMsg(); !msg.Recording || msg.Steps != 0 || msg.StartedAt == "" {
+		t.Fatalf("armed recordMsg = %+v, want recording, no steps, and a start time", msg)
+	}
+
+	dispatch(t, o, app.CmdPaneRename, app.RenamePaneParams{Pane: pane, Name: "build"})
+	if fired != 2 {
+		t.Errorf("a captured command fired the notifier %d times total, want 2", fired)
+	}
+	if msg := o.recordMsg(); msg.Steps != 1 {
+		t.Errorf("recordMsg.Steps = %d after one captured command, want 1", msg.Steps)
+	}
+
+	// A query is captured by nothing, so it must move nothing — including the
+	// indicator. A recorder that blinked on every pane.list would report the
+	// UI's own polling as work the user did.
+	dispatch(t, o, app.CmdPaneList, nil)
+	if fired != 2 {
+		t.Errorf("a query fired the notifier (%d total), want it left alone at 2", fired)
+	}
+
+	recordResult(t, record(t, o, app.RunbookRecordParams{Action: app.RecordStop, Name: "tidy"}))
+	if fired != 3 {
+		t.Errorf("stop fired the notifier %d times total, want 3", fired)
+	}
+	if msg := o.recordMsg(); msg.Recording || msg.Steps != 0 || msg.StartedAt != "" {
+		t.Errorf("recordMsg after stop = %+v, want the idle message", msg)
+	}
+
+	// Cancel resets through the same path stop does, and has its own call site.
+	recordResult(t, record(t, o, app.RunbookRecordParams{Action: app.RecordStart}))
+	recordResult(t, record(t, o, app.RunbookRecordParams{Action: app.RecordCancel}))
+	if fired != 5 {
+		t.Errorf("start+cancel fired the notifier %d times total, want 5", fired)
+	}
+	if msg := o.recordMsg(); msg.Recording {
+		t.Errorf("recordMsg after cancel = %+v, want the idle message", msg)
+	}
+}
+
+// recvRecord pulls the first record message off a connection's queue.
+func recvRecord(t *testing.T, c *client) *browserproto.Record {
+	t.Helper()
+	for {
+		select {
+		case b := <-c.out:
+			msg, err := browserproto.DecodeDown(b)
+			if err != nil {
+				t.Fatalf("decode down: %v", err)
+			}
+			if r, ok := msg.(*browserproto.Record); ok {
+				return r
+			}
+		default:
+			t.Fatal("no record message queued")
+			return nil
+		}
+	}
+}
+
+// A window learns the recorder's state on connect and on every change after —
+// the two halves that let a toolbar indicator be right without polling.
+//
+// The connect half is asserted with the recorder IDLE on purpose. A window that
+// reconnects mid-session was never reloaded and is still drawing whatever it
+// last saw, so "nothing to say" is not a state the server may stay silent in:
+// it is exactly the case where the indicator would stay lit over a recording
+// that has since been stopped from another window or from catctl.
+func TestRecordReachesEveryWindow(t *testing.T) {
+	o, _ := newRunbookOrch(t)
+	pane := uint32(o.session.AllPaneIDs()[0])
+
+	c := newConn(o, false, browserproto.Init{Cols: 80, Rows: 24, CellWPx: 8, CellHPx: 16})
+	if msg := recvRecord(t, c); msg.Recording {
+		t.Errorf("connect burst said recording=%v, want the idle state", msg.Recording)
+	}
+	drain(c)
+
+	// Armed from somewhere that is not this window — the dispatcher is the same
+	// path catctl and a plugin take.
+	recordResult(t, record(t, o, app.RunbookRecordParams{Action: app.RecordStart}))
+	if msg := recvRecord(t, c); !msg.Recording || msg.Steps != 0 {
+		t.Errorf("after start the window was told %+v, want recording with no steps", msg)
+	}
+	drain(c)
+
+	dispatch(t, o, app.CmdPaneRename, app.RenamePaneParams{Pane: pane, Name: "build"})
+	if msg := recvRecord(t, c); !msg.Recording || msg.Steps != 1 {
+		t.Errorf("after one captured command the window was told %+v, want steps=1", msg)
+	}
+	drain(c)
+
+	recordResult(t, record(t, o, app.RunbookRecordParams{Action: app.RecordCancel}))
+	if msg := recvRecord(t, c); msg.Recording {
+		t.Errorf("after cancel the window was told %+v, want the idle state", msg)
 	}
 }

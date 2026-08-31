@@ -80,6 +80,11 @@ abstract final class MsgType {
   static const String cmdResult = 'cmd_result';
   static const String history = 'history';
 
+  /// MsgRecord is the macro recorder's state (runbook.record). Added within
+  /// protocol v1: an old client ignores the type and simply never draws the
+  /// indicator, which is exactly the UI it had before this existed.
+  static const String record = 'record';
+
   /// Chat surface (the ACP side panel). Added within protocol v1: an old
   /// client ignores unknown types, and a new client learns the server serves
   /// chat from CapChat rather than by probing.
@@ -2180,6 +2185,69 @@ class Raw {
       };
 }
 
+/// Record is the macro recorder's state (runbook.record): whether a recording is
+/// armed, and how much it has captured.
+///
+/// It is a BROADCAST rather than each client's answer to its own status query,
+/// because the recorder is one piece of SESSION state. There is a single
+/// recording at a time and it can be armed or stopped from anywhere the command
+/// vocabulary reaches — this browser, a second window, `catctl record start`, a
+/// plugin, a relayed command from another host. A client that learned the state
+/// only from the commands it issued itself would show the wrong thing the moment
+/// anybody else touched it, and no polling interval makes that reliably right.
+/// Sent on every transition and once in the connect burst, so a window that
+/// reconnects across a stop converges instead of keeping a stale indicator lit.
+///
+/// Steps counts the commands captured SO FAR — completed ones only, the same
+/// number runbook.record status reports. It is on the wire because "armed" and
+/// "armed and actually capturing something" are the two states a recorder can be
+/// in that look identical from outside, and telling them apart before the
+/// recording is stopped is the whole reason status exists.
+///
+/// Wire type: `record`.
+class RecordMsg {
+  const RecordMsg({
+    required this.recording,
+    required this.steps,
+    this.startedAt = '',
+    this.note = '',
+  });
+
+  /// The `t` discriminator this class always carries. It is a property of
+  /// the type, not a field: a caller who could set it could set it wrong.
+  static const String type = 'record';
+
+  final bool recording;
+  final int steps;
+
+  /// StartedAt is RFC3339 and "" when idle. The client shows it as the "since"
+  /// in the recorder's menu; formatting is left to the client because it is the
+  /// side that knows the reader's locale and time zone.
+  final String startedAt;
+
+  /// Note is the recorder's non-error condition — it hit its in-memory ceiling
+  /// and stopped capturing. Carried for the same reason RunbookRecordResult
+  /// carries it: the command that overflowed the recording was run for its own
+  /// sake and must not be failed, so the only way the user finds out is by
+  /// being told.
+  final String note;
+
+  factory RecordMsg.fromJson(Map<String, Object?> j) => RecordMsg(
+        recording: asBool(j['recording']),
+        steps: asInt(j['steps']),
+        startedAt: asString(j['started_at']),
+        note: asString(j['note']),
+      );
+
+  Map<String, Object?> toJson() => {
+        't': type,
+        'recording': recording,
+        'steps': steps,
+        if (startedAt.isNotEmpty) 'started_at': startedAt,
+        if (note.isNotEmpty) 'note': note,
+      };
+}
+
 /// Resize reports the browser window's new grid; the server relayouts (a new
 /// Layout follows) and resizes panes over β.
 ///
@@ -2705,6 +2773,8 @@ Object? decodeDown(Map<String, Object?> j) {
       return CmdResult.fromJson(j);
     case History.type:
       return History.fromJson(j);
+    case RecordMsg.type:
+      return RecordMsg.fromJson(j);
     case ChatState.type:
       return ChatState.fromJson(j);
     case ChatSnapshot.type:

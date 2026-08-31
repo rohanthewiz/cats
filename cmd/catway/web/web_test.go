@@ -97,7 +97,7 @@ func TestMarkupCarriesTheIdsTheFrontEndResolves(t *testing.T) {
 		"sec-panes", "pane-hctl", "pane-list",
 		"sec-agents", "agent-hctl", "agent-list",
 		"sec-history", "hist-hctl", "hist-list",
-		"statusbar", "palhint", "pluginsbtn", "chatbtn", "gear",
+		"statusbar", "palhint", "pluginsbtn", "chatbtn", "recbtn", "gear",
 		"chat", "chat-head", "chat-title", "chat-status", "chat-log",
 		"chat-compose", "chat-input", "chat-ctl", "chat-stop", "chat-clear",
 		"banner", "toasts",

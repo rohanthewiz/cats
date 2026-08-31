@@ -75,7 +75,7 @@ var cssFiles = []string{
 	"21-plugins.css",    // plugins dialog (borrows .pal's rows)
 	"22-help.css",       // keybindings help
 	"23-banner.css",     // the top banner (update ready / link errors)
-	"24-toolbar.css",    // gear glyph and its update badge
+	"24-toolbar.css",    // gear glyph and its update badge; the recorder indicator
 	"25-dragdrop.css",   // drop bars and the grabbing cursor
 	"26-settings.css",   // settings modal + worktree dialogs
 	"27-picker.css",     // the inline directory picker
@@ -128,7 +128,8 @@ var jsFiles = []string{
 	"37-session.js",    // the WebSocket connection, resize, window focus
 	"38-sidebar.js",    // sidebar width, folding, the reveal handle
 	"39-chat.js",       // the ACP chat side panel
-	"40-boot.js",       // toolbar wiring, then the three calls that start the app
+	"40-record.js",     // the macro recorder's toolbar indicator and its dialogs
+	"41-boot.js",       // toolbar wiring, then the three calls that start the app
 }
 
 // stylesheet and script are assembled once, at package init: the page is

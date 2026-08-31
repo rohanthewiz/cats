@@ -1211,6 +1211,14 @@ catctl record stop deploy overwrite  # …replacing one that is already there
 catctl record cancel                 # throw it away
 ```
 
+**From the browser**, the same four verbs are the toolbar's **● rec** item, left
+of the gear. Idle it is a hollow mark; armed it fills, pulses, and carries the
+captured-step count, so a recording somebody walked away from is visible rather
+than merely running. Clicking it while armed offers *stop and save…* (which asks
+for the name, and offers to replace on a collision) and *cancel recording…*. Its
+state is a broadcast, so arming from `catctl` lights the indicator in every open
+window and vice versa.
+
 **Armed, not always on.** Nothing is captured until somebody asks, and the
 recording lives in memory until it is given a name. The alternative — a durable
 journal every command lands in, sliced by time afterwards — is strictly more

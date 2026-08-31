@@ -81,9 +81,10 @@ func newRegistry(src *source) *registry {
 // Nothing here is cosmetic. `ensure` fails the generator on any unlisted clash,
 // so this table can only ever shrink by deleting a Go type, never by neglect.
 var dartNameOverrides = map[string]string{
-	"github.com/rohanthewiz/cats/internal/browserproto.Error": "ErrorMsg",
-	"github.com/rohanthewiz/cats/internal/app.WorkspaceInfo":  "WorkspaceEntry",
-	"github.com/rohanthewiz/cats/internal/app.TabInfo":        "TabEntry",
+	"github.com/rohanthewiz/cats/internal/browserproto.Error":  "ErrorMsg",
+	"github.com/rohanthewiz/cats/internal/browserproto.Record": "RecordMsg",
+	"github.com/rohanthewiz/cats/internal/app.WorkspaceInfo":   "WorkspaceEntry",
+	"github.com/rohanthewiz/cats/internal/app.TabInfo":         "TabEntry",
 }
 
 // dartDeprecated marks a class deprecated on the Dart side only. Resize is the

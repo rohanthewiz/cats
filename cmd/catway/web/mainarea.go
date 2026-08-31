@@ -40,7 +40,15 @@ func (Main) Render(b *element.Builder) (x any) {
 // Plugins earns a top-level slot rather than a place in the gear menu because
 // installing and running plugins is routine work, not a settings excursion. The
 // gear is the launcher menu (settings / keybinds / reload config / update /
-// stop server) and is wired in js/40-boot.js.
+// stop server) and is wired in js/41-boot.js.
+//
+// The macro recorder earns one for a different reason: it is a MODE. Arming it
+// from a menu would work, but nothing in a menu can show that the session is
+// currently being recorded, and a recorder somebody forgot about is the failure
+// this whole surface exists to prevent (see runbook.record's own note: an
+// armed recording that captured nothing is indistinguishable from one that is
+// working). So the slot is not really a button, it is an indicator that also
+// takes clicks — hence the live step count in its label.
 //
 // The spans are deliberately whitespace-free inside: .tbtn is a flex row whose
 // gap does the spacing, so a stray space would only ever add to it.
@@ -54,6 +62,25 @@ func (StatusBar) Render(b *element.Builder) (x any) {
 		tbtn(b, "pluginsbtn", "plugins — install, run, update", "⧉", "plugins"),
 		nl(b, 4),
 		tbtn(b, "chatbtn", "chat — AI agent side panel", "✦", "chat"),
+		nl(b, 4),
+		// The recorder starts idle and stays out of the way: the glyph is the
+		// hollow mark, the word is "rec", and js/40-record.js swaps in the
+		// filled dot and the captured-step count while a recording is armed.
+		// Like the gear, its glyph is wrapped in a .g so the armed pulse has a
+		// box the size of the GLYPH to sit in rather than the padded button.
+		b.SpanClass("tbtn", "id", "recbtn", "title", "record a macro (runbook.record)").R(
+			b.SpanClass("tmk").R(
+				b.SpanClass("g").T("◦"),
+			),
+			b.T("rec"),
+			// The captured-step count, filled in by the front-end and empty
+			// whenever nothing is being recorded. It is a span the server
+			// renders rather than one the client creates, so the idle button
+			// and the armed one are the same DOM shape and the count cannot
+			// land in the wrong place; .tbtn's flex gap would otherwise show
+			// as a trailing space, which is what #recbtn .n:empty is for.
+			b.SpanClass("n").R(),
+		),
 		nl(b, 4),
 		// The gear is the odd one out: no word, and its glyph is wrapped in a
 		// .g so the update badge (#gear.badge .g::after) has something

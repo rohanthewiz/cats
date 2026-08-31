@@ -59,6 +59,10 @@
       case "agents": renderAgents(msg.items); break;
       case "hosts": renderHosts(msg.items); break;
       case "history": renderHistory(msg.entries || []); break;
+      // The macro recorder is session state, not this window's: the server
+      // pushes it on every transition, on every captured step, and once in the
+      // connect burst, so the indicator is right no matter who armed it.
+      case "record": applyRecord(msg); break;
       case "usage": renderUsage(msg); break;
       case "clipboard": // OSC 52 write from a pane app — no user activation
         try { clipWrite(b64decode(msg.data)).catch(() => {}); } catch (e) {}

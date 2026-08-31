@@ -2682,6 +2682,12 @@ func (o *orch) registerConn(c *client, init *browserproto.Init) {
 	if m, ok := o.usageMsg(); ok {
 		o.send(c, m)
 	}
+	// The macro recorder, always — including the idle case. This window may be
+	// a RECONNECT of one that was showing an armed indicator when the socket
+	// dropped, and the page it is drawing was never reloaded, so "nothing to
+	// say" would leave the indicator lit over a recording that has since been
+	// stopped from somewhere else.
+	o.send(c, o.recordMsg())
 	if o.chat != nil {
 		// The whole chat model in one message — a client joining
 		// mid-conversation (or mid-permission-prompt) starts converged.

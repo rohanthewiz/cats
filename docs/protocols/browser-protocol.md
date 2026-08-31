@@ -88,6 +88,7 @@ for when the server picks which.
 | `update_ready` | a newer build is available |
 | `theme` | the full resolved UI palette (+ font), pushed on any theme change so every client restyles live |
 | `cmd_result` | the reply to a `cmd`, correlated by the client-chosen `id` |
+| `record` | the macro recorder's state (`runbook.record`): `recording`, the `steps` captured so far, `started_at`, and the `note` it carries when it hits its in-memory ceiling. Pushed on every transition, on every captured step, and once on client init — including when idle, since a client that reconnects across a stop has an indicator to turn **off**. It is a broadcast rather than a reply because there is one recorder per session and four ways to reach it (this window, another window, `catctl record start`, a plugin or a relayed command), so a client that tracked only its own commands would be wrong the moment it was not the only one clicking |
 
 ## Up — front end to server
 

@@ -25,12 +25,20 @@
       { label: "new worktree", fn: openNewWorktreeDialog },
       { label: "open worktree", fn: openWorktreeOpenDialog },
       { label: "plugins", fn: openPluginsDialog },
+      // The keyboard route into the recorder. Only the verb that applies is
+      // offered: "start recording" while one is already running would fail on
+      // the server (the recorder is one at a time), and a palette that lists
+      // commands it knows will be refused is a palette you stop trusting.
+      recState.recording
+        ? { label: "stop recording…", fn: openStopRecordingDialog }
+        : { label: "start recording (macro)", fn: startRecording },
       { label: sidebarHidden() ? "show sidebar" : "hide sidebar", fn: () => setSidebarHidden(!sidebarHidden()) },
       { label: "settings", fn: openSettings },
       { label: "reload config", fn: () => sendCmd("server.reload_config", {}) },
       { label: "keyboard shortcuts", fn: openHelp },
       { label: "stop server…", fn: confirmStopServer },
     ];
+    if (recState.recording) items.push({ label: "cancel recording…", fn: confirmCancelRecording });
     if (f !== null) {
       items.push(
         { label: "rename pane…", fn: () => renamePane(f) },

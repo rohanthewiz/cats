@@ -681,6 +681,44 @@ func NewUpdateReady(version, command string) UpdateReady {
 	return UpdateReady{T: MsgUpdateReady, Version: version, Command: command}
 }
 
+// Record is the macro recorder's state (runbook.record): whether a recording is
+// armed, and how much it has captured.
+//
+// It is a BROADCAST rather than each client's answer to its own status query,
+// because the recorder is one piece of SESSION state. There is a single
+// recording at a time and it can be armed or stopped from anywhere the command
+// vocabulary reaches — this browser, a second window, `catctl record start`, a
+// plugin, a relayed command from another host. A client that learned the state
+// only from the commands it issued itself would show the wrong thing the moment
+// anybody else touched it, and no polling interval makes that reliably right.
+// Sent on every transition and once in the connect burst, so a window that
+// reconnects across a stop converges instead of keeping a stale indicator lit.
+//
+// Steps counts the commands captured SO FAR — completed ones only, the same
+// number runbook.record status reports. It is on the wire because "armed" and
+// "armed and actually capturing something" are the two states a recorder can be
+// in that look identical from outside, and telling them apart before the
+// recording is stopped is the whole reason status exists.
+type Record struct {
+	T         Type `json:"t"`
+	Recording bool `json:"recording"`
+	Steps     int  `json:"steps"`
+	// StartedAt is RFC3339 and "" when idle. The client shows it as the "since"
+	// in the recorder's menu; formatting is left to the client because it is the
+	// side that knows the reader's locale and time zone.
+	StartedAt string `json:"started_at,omitempty"`
+	// Note is the recorder's non-error condition — it hit its in-memory ceiling
+	// and stopped capturing. Carried for the same reason RunbookRecordResult
+	// carries it: the command that overflowed the recording was run for its own
+	// sake and must not be failed, so the only way the user finds out is by
+	// being told.
+	Note string `json:"note,omitempty"`
+}
+
+func NewRecord(recording bool, steps int, startedAt, note string) Record {
+	return Record{T: MsgRecord, Recording: recording, Steps: steps, StartedAt: startedAt, Note: note}
+}
+
 // CmdResult is the reply to a Cmd, always sent when the command carried an id.
 // Data is command-specific (e.g. ReadResult for "read").
 type CmdResult struct {
