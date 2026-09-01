@@ -303,6 +303,22 @@
     return String(total);
   }
 
+  // runbookRunNote is "a run is in flight, and here is where it has got to" in
+  // as few characters as a one-line surface can spare — the palette's meta
+  // column, where the plain step total sits when nothing is running.
+  //
+  // Built on runbookCount so the position and its denominator are worked out in
+  // ONE place: the row and the palette entry must never disagree about how far
+  // along the same run is, and the "which total" rule (the run's own beats the
+  // listing's, so an edit mid-run cannot produce "4/3") is that function's.
+  //
+  // A run that has taken its slot and not yet reached step 1 gets the bare word
+  // for the same reason the row shows a plain total there: "running 5" would
+  // read as a position, and the position is not known yet.
+  function runbookRunNote(rb, run) {
+    return run && run.step ? "running " + runbookCount(rb, run) : "running";
+  }
+
   // runbookError drops the leading file path a load error carries. Parse
   // prefixes every message with the file it came from ("<path>: step 1: …")
   // because a CLI listing has no other way to say which file it means — but a

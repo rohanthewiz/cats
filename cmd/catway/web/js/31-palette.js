@@ -54,7 +54,8 @@
       //   sub    the first step — always visible, and what tells "deploy" from
       //          "deploy-staging" when the names have stopped doing it.
       //   meta   the total, which is what makes the sub readable as ONE of N
-      //          rather than as the whole runbook.
+      //          rather than as the whole runbook — and, while a run is in
+      //          flight, the position within that total instead.
       //   title  the outline entire, for the mouse. Enter reaches the same list
       //          in the gate, so this is the hover shortcut, not the only route.
       //
@@ -62,6 +63,41 @@
       // and the entry is exactly the one it was before this existed — the same
       // fallback runbookOutline takes in the dialogs.
       const lead = runbookLead(rb);
+      // A runbook that is ALREADY RUNNING has no run left in it. The server's
+      // concurrency slot is per runbook name, so a second start comes back
+      // "already in flight" — startRunbookRun knows this and refuses the click
+      // before it is sent, which from the palette means an entry whose Enter is
+      // a toast saying no. That is the exact mistake "start recording" avoids
+      // twenty lines up, and the fix is the same one: offer the verb that
+      // applies. While a run is in flight that verb is PREVIEW — which is also
+      // what somebody watching panes appear by themselves actually wants, since
+      // the question is no longer "shall I run this" but "what is it doing".
+      const run = runbookRunOf(rb.name);
+      if (run) {
+        // No outline means no preview either — runbookHasPreview is the one
+        // place that is decided, so this cannot promise what the menu would not
+        // build — and a running runbook has no third verb to fall back on. The
+        // entry therefore drops out for the duration, exactly as "start
+        // recording" does while the recorder is busy. Reachable only from a
+        // server too old to send the field, and the sidebar row still shows the
+        // run either way, with its dot, its position and its tooltip.
+        if (!runbookHasPreview(rb, false)) continue;
+        items.push({
+          label: "preview runbook: " + rb.name + "…",
+          // Step ONE, not the step the run is on. run.step indexes the file
+          // this run started from, while the outline came from the last
+          // listing, so a file edited mid-run makes the two disagree — and a
+          // wrong step line shown as fact is worse than a right one that is
+          // merely not the current one. The sub's job here is to say WHICH
+          // runbook this is; where it has got to is the meta's job, and the
+          // meta reads the run's own numbers.
+          sub: lead,
+          meta: runbookRunNote(rb, run),
+          title: runbookOutlineText(rb),
+          fn: () => previewRunbook(rb),
+        });
+        continue;
+      }
       items.push({
         label: "run runbook: " + rb.name + "…",
         sub: lead,

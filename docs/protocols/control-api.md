@@ -1020,6 +1020,20 @@ query that finds a runbook by something it *does* has the reason on screen. An
 entry from a server that sends no `outline` is exactly the entry it was before —
 the name alone, no step line, no count.
 
+While a runbook is **running**, its entry changes verb. The concurrency slot is
+per name, so a second start would come back *already in flight* and the browser
+refuses it before sending — which from a palette means an Enter that answers
+with a toast. The entry becomes `preview runbook: …` instead, pointed at the
+same notice the right-click menu offers, with the position where the total
+usually sits (`running 2/5`, off the run's own numbers, so a file edited mid-run
+cannot produce `4/3`). The step line stays step *one*: `outline` came from the
+last listing and `step` indexes the file the run started from, so on an edited
+file the two disagree, and a wrong step shown as fact is worse than a right one
+that is merely not the current one. A running runbook whose listing carries no
+`outline` has no verb left at all and drops out of the palette for the duration,
+as *start recording* does while the recorder is busy; the sidebar row still
+shows the run.
+
 Files that failed to parse list too, in red, carrying the load error and opening
 in the editor rather than offering a run. The `⚡` goes amber when
 `trigger_status` says the triggers are not armed, which is the one place that
