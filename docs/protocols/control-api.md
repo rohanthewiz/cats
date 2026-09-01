@@ -1005,7 +1005,9 @@ running one, where the click is refused before any gate opens — plus *open in
 editor* (`pane.open_file`, on the local host — the runbooks are on catway's own
 disk, not the focused pane's), *copy path*, and the `catctl` spelling. A listing
 without an `outline` (an older server) offers no preview entry rather than an
-empty one.
+empty one. The row's tooltip names that entry wherever it exists — *right-click
+to preview the steps*, and on a running row, where there is no click left, that
+hint is the whole of what it offers.
 
 Files that failed to parse list too, in red, carrying the load error and opening
 in the editor rather than offering a run. The `⚡` goes amber when

@@ -237,10 +237,32 @@
       // the follow-up question.
       lines.push(run.step ? "running step " + run.step + " of " + (run.steps || rb.steps) : "running…");
       lines.push(runOrigin(run));
+      // A running row has no click left — startRunbookRun refuses it before any
+      // dialog opens — so the hint it gets is the one verb that still works,
+      // and it is the verb somebody watching panes appear actually wants:
+      // what is coming next.
+      if (runbookHasPreview(rb, broken)) lines.push("right-click to preview the steps");
     } else {
-      lines.push("click to run · right-click for more");
+      // The menu holds four verbs and the tooltip names one, because a
+      // first-time reader is not asking what else is in there — they are asking
+      // whether the click is the only way in, and whether they can look before
+      // they leap. Naming "preview" answers both; "for more" answered neither.
+      // Without an outline (a server too old to send one) there is no preview
+      // to point at, so the older, vaguer line stands.
+      lines.push(runbookHasPreview(rb, broken)
+        ? "click to run · right-click to preview the steps"
+        : "click to run · right-click for more");
     }
     return lines.join("\n");
+  }
+
+  // runbookHasPreview is the ONE place the preview's availability is decided,
+  // so the tooltip cannot promise a menu entry the menu does not build. Both
+  // conditions matter: a broken file has no steps to show (its menu is about the
+  // error), and an absent or empty outline means the listing came from a server
+  // that does not send one.
+  function runbookHasPreview(rb, broken) {
+    return !broken && !!(rb.outline && rb.outline.length);
   }
 
   // runOrigin says WHO started the run, which is the whole point of hearing
@@ -458,12 +480,11 @@
   function runbookMenuItems(rb, broken) {
     const items = [];
     if (!broken) items.push({ label: "run…", fn: () => startRunbookRun(rb) });
-    // Gated on the outline being THERE, not merely on the file having parsed: a
-    // server too old to send the field would otherwise offer a preview that
-    // opens on a step count and no steps, which is worse than no entry. It sits
-    // beside "open in editor" because the two are the same verb at two
-    // magnifications — a glance at what it does, or the file that says why.
-    if (!broken && rb.outline && rb.outline.length) {
+    // Gated by runbookHasPreview (the row's tooltip asks the same function, so
+    // the two cannot disagree about whether this entry exists). It sits beside
+    // "open in editor" because the two are the same verb at two magnifications —
+    // a glance at what it does, or the file that says why.
+    if (runbookHasPreview(rb, broken)) {
       items.push({ label: "preview steps", fn: () => previewRunbook(rb) });
     }
     items.push({ label: "open in editor", fn: () => openRunbookFile(rb) });
