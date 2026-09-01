@@ -367,8 +367,32 @@
     dialogFields({ ...opts, fields: [{ value: opts.value }] });
   }
 
+  // dialogNotice: a dialog with nothing to agree to — a title, a message, and
+  // whatever dialogLines was given, dismissed by its one button, by Enter or by
+  // Esc. It is dialogConfirm with the choice taken out rather than a second
+  // modal, because everything that makes the two look alike (the header, the
+  // body, the lines, the keys) is worth having identical: a preview and the
+  // gate it previews are the same panel showing the same list, and a reader
+  // should recognise the second from the first.
+  //
+  // onClose is optional and usually absent. A notice that has to run something
+  // when it closes is a confirm wearing a disguise; this exists for the case
+  // where closing is genuinely the only outcome.
+  function dialogNotice(opts) {
+    dialogConfirm({
+      ...opts,
+      confirmLabel: opts.closeLabel || "close",
+      noCancel: true,
+      onConfirm: opts.onClose || (() => {}),
+    });
+  }
+
   // dialogConfirm: an explicit yes/no gate for destructive commands. Enter
   // confirms (the confirm button holds focus), Esc cancels.
+  //
+  // opts.noCancel drops the cancel button (see dialogNotice). Both keys still
+  // close the dialog and Esc still reaches closeModal directly, so the one
+  // button is a convenience rather than the only way out.
   function dialogConfirm(opts) {
     openOverlay((ov) => {
       const m = document.createElement("div"); m.className = "modal";
@@ -383,7 +407,7 @@
       m.appendChild(body);
       const go = () => { closeModal(); opts.onConfirm(); };
       const btns = document.createElement("div"); btns.className = "btns";
-      btns.appendChild(mkModalBtn("cancel", "", closeModal));
+      if (!opts.noCancel) btns.appendChild(mkModalBtn("cancel", "", closeModal));
       const ok = mkModalBtn(opts.confirmLabel || "confirm", opts.danger ? "danger" : "primary", go);
       btns.appendChild(ok);
       m.appendChild(btns);

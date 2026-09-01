@@ -999,9 +999,13 @@ every run must not be able to carry one — and capped in number, with the dialo
 naming how many it is not showing. Values keep their `{{ ... }}` references
 unresolved, which is the point in the vars dialog: you can see where what you
 are about to type ends up. Right-click
-adds *open in editor* (`pane.open_file`, on the local host — the runbooks are on
-catway's own disk, not the focused pane's), *copy path*, and the `catctl`
-spelling.
+adds *preview steps* — the same outline in a dialog with nothing to agree to,
+for reading a runbook you are not about to run and for the row that is already
+running one, where the click is refused before any gate opens — plus *open in
+editor* (`pane.open_file`, on the local host — the runbooks are on catway's own
+disk, not the focused pane's), *copy path*, and the `catctl` spelling. A listing
+without an `outline` (an older server) offers no preview entry rather than an
+empty one.
 
 Files that failed to parse list too, in red, carrying the load error and opening
 in the editor rather than offering a run. The `⚡` goes amber when

@@ -318,6 +318,42 @@
     };
   }
 
+  // previewRunbook shows the outline with nothing attached to it.
+  //
+  // The gate already lists the steps, so this exists for the case the gate
+  // cannot serve: reading a runbook you are not about to run. Getting there
+  // through the run dialog means opening a panel that says "run N steps against
+  // this session" and then pressing cancel — which works, and asks the user to
+  // decline something they never proposed. It also does not work at all for a
+  // row that is currently running, where the click is refused before any dialog
+  // opens; that is precisely the moment somebody wants to see what the steps
+  // are.
+  //
+  // Deliberately a notice and not a confirm with a "run" button. A preview that
+  // can start the thing it is previewing is the gate again, and the gate is one
+  // right-click away — while the vars case would need the OTHER dialog, so the
+  // button would sometimes commit and sometimes open a second panel showing the
+  // same list.
+  //
+  // The header names the runbook rather than saying "preview": the list below
+  // is self-evidently a preview, and the name is what the reader opened this to
+  // be sure about.
+  function previewRunbook(rb) {
+    const run = runbookRunOf(rb.name);
+    const bits = [stepCount(rb.steps)];
+    if (rb.vars && rb.vars.length) bits.push("vars: " + rb.vars.join(", "));
+    // Only while something is running it. The row's dot and count already say
+    // so, but a preview opened FROM a running row is being read against what is
+    // happening on screen, and the numbering below lines up with the position
+    // the row is showing.
+    if (run) bits.push(run.step ? "running step " + run.step : "running");
+    dialogNotice({
+      title: rb.name,
+      message: (rb.description ? rb.description + " — " : "") + bits.join(" · "),
+      ...runbookOutline(rb),
+    });
+  }
+
   // startRunbookRun is the gate between a click and a sequence of side effects
   // on a live desktop.
   //
@@ -422,6 +458,14 @@
   function runbookMenuItems(rb, broken) {
     const items = [];
     if (!broken) items.push({ label: "run…", fn: () => startRunbookRun(rb) });
+    // Gated on the outline being THERE, not merely on the file having parsed: a
+    // server too old to send the field would otherwise offer a preview that
+    // opens on a step count and no steps, which is worse than no entry. It sits
+    // beside "open in editor" because the two are the same verb at two
+    // magnifications — a glance at what it does, or the file that says why.
+    if (!broken && rb.outline && rb.outline.length) {
+      items.push({ label: "preview steps", fn: () => previewRunbook(rb) });
+    }
     items.push({ label: "open in editor", fn: () => openRunbookFile(rb) });
     items.push({ label: "copy path", fn: () => clipWrite(rb.path) });
     // A runbook worth running from the sidebar is usually one worth putting in
