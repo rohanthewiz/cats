@@ -690,6 +690,11 @@ func (o *orch) run() {
 		// nested inside the subscriber fan-out that started them. See
 		// startReservedRunbooks.
 		o.startReservedRunbooks()
+		// …and after them, because a run that just started here has already
+		// advanced its step cursor. Progress is the one part of a run's state
+		// that is coalesced to the turn rather than sent on the spot — see
+		// flushRunbookRuns.
+		o.flushRunbookRuns()
 	}
 }
 

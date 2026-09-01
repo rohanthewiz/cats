@@ -156,7 +156,7 @@ func (o *orch) RunbookRun(r app.Responder, p app.RunbookRunParams) {
 			return
 		}
 	}
-	if msg := o.claimRunbookSlot(rb.Name); msg != "" {
+	if msg := o.claimRunbookSlot(rb.Name, len(rb.Steps)); msg != "" {
 		r.Fail(msg)
 		return
 	}
@@ -228,6 +228,17 @@ func (o *orch) advanceRunbook(run *runbookRun) {
 			o.finishRunbook(run)
 			return
 		}
+
+		// Where the run has got to, for the clients drawing it. Noted at the top
+		// of the iteration rather than when a step finishes, so the number names
+		// the step that is CURRENTLY executing — which is the one a reader needs
+		// when a run sits still for a minute, since that is the step doing the
+		// sitting. It is also the numbering RunbookStepResult.Index uses, so a
+		// failure reported as "step 4" names the step the row was showing.
+		//
+		// This only sets a flag; see noteRunbookStep for why a run whose steps
+		// all resolve inline must not broadcast forty times in one loop turn.
+		o.noteRunbookStep(run.rb.Name, run.i+1)
 
 		step := run.rb.Steps[run.i]
 		params, err := runbook.Resolve(step.Params, run.binds)

@@ -111,6 +111,10 @@ type runbookTriggers struct {
 	// suspended is when each suspended runbook's triggers come back.
 	suspended map[string]time.Time
 
+	// dirty is "some run's step cursor moved during this loop turn". See
+	// flushRunbookRuns for why progress is coalesced and the edges are not.
+	dirty bool
+
 	// inFlight counts runs against maxRunbookRunsInFlight.
 	inFlight int
 	// reserved are runs a fired trigger has already accounted for and that the
@@ -126,6 +130,14 @@ type runbookRunInfo struct {
 	source  string // runbookSourceControl | runbookSourceTrigger
 	trigger string // the event name, "" for a manual run
 	started time.Time
+	// step is the 1-based index of the step being executed, 0 before the run
+	// reaches its first one; total is how many the document has. Written by
+	// noteRunbookStep as the executor advances, and read only by the message
+	// builder — the executor keeps its own cursor (runbookRun.i) and this is a
+	// copy of it for the outside world, not a second source of truth. Nothing
+	// about the run's behaviour reads these.
+	step  int
+	total int
 }
 
 // reservedRun is one trigger firing that has passed every check and is waiting
@@ -221,7 +233,8 @@ func (o *orch) reserveRunbook(rb *runbook.Runbook, clause int, event string, pay
 	// loop turn before its first step. That is deliberate: the session has
 	// already committed to running it and refused every other start of it, so a
 	// window told anything else would be told something that is not true.
-	rt.running[rb.Name] = runbookRunInfo{source: runbookSourceTrigger, trigger: event, started: now}
+	rt.running[rb.Name] = runbookRunInfo{source: runbookSourceTrigger, trigger: event, started: now,
+		total: len(rb.Steps)}
 	rt.inFlight++
 	rt.lastFired[clauseKey(rb.Name, clause)] = now
 	rt.starts[rb.Name] = append(trimStarts(rt.starts[rb.Name], now), now)
@@ -391,7 +404,7 @@ func (o *orch) initRunbookAccounting() {
 // claimRunbookSlot reserves the concurrency slot for a MANUAL run, reporting why
 // it could not. The trigger path reserves its own slot in reserveRunbook, so
 // this is the other half of the same accounting rather than a second policy.
-func (o *orch) claimRunbookSlot(name string) string {
+func (o *orch) claimRunbookSlot(name string, total int) string {
 	rt := &o.runbooks
 	o.initRunbookAccounting()
 	if _, ok := rt.running[name]; ok {
@@ -406,7 +419,7 @@ func (o *orch) claimRunbookSlot(name string) string {
 		return "the session already has " + strconv.Itoa(rt.inFlight) +
 			" runbook runs in flight, which is the limit"
 	}
-	rt.running[name] = runbookRunInfo{source: runbookSourceControl, started: time.Now()}
+	rt.running[name] = runbookRunInfo{source: runbookSourceControl, started: time.Now(), total: total}
 	rt.inFlight++
 	o.broadcastRunbookRuns()
 	return ""
@@ -465,6 +478,8 @@ func (o *orch) runbookRunsMsg() browserproto.RunbookRuns {
 			Source:    info.source,
 			Trigger:   info.trigger,
 			StartedAt: info.started.UTC().Format(time.RFC3339),
+			Step:      info.step,
+			Steps:     info.total,
 		})
 	}
 	// Sorted because map iteration is not. Two identical sets that serialise
@@ -488,4 +503,51 @@ func (o *orch) runbookRunsMsg() browserproto.RunbookRuns {
 //
 // See browserproto.RunbookRuns for why this is a browser broadcast and
 // deliberately not a control-API event.
-func (o *orch) broadcastRunbookRuns() { o.broadcast(o.runbookRunsMsg()) }
+func (o *orch) broadcastRunbookRuns() {
+	// Any broadcast, for any reason, is the whole set — so it answers whatever
+	// the dirty flag was going to ask for. Clearing it here is what stops a run
+	// that finished inside one loop turn from being followed by a redundant
+	// flush of the position it no longer has.
+	o.runbooks.dirty = false
+	o.broadcast(o.runbookRunsMsg())
+}
+
+// noteRunbookStep records how far a run has got. It does not broadcast.
+//
+// The executor calls this once per step, and a run of inline commands executes
+// every one of its steps inside a single turn of the orchestrator loop — so
+// broadcasting here would send a burst of messages describing positions that
+// existed for microseconds and were never drawn. The flag defers that to
+// flushRunbookRuns, which the loop calls once per turn.
+//
+// A name with no slot is ignored rather than logged: the only way to reach that
+// is a step resolving after finishRunbook already released the run, which the
+// double-answer guard in advanceRunbook drops on its own.
+func (o *orch) noteRunbookStep(name string, step int) {
+	rt := &o.runbooks
+	info, ok := rt.running[name]
+	if !ok || info.step == step {
+		return
+	}
+	info.step = step
+	rt.running[name] = info
+	rt.dirty = true
+}
+
+// flushRunbookRuns sends the coalesced progress, if any moved. Called from the
+// loop between closures, the same place and for the same reason flushClients is
+// called there: it is the one point where no broadcast is in progress, and a
+// closure that advanced a run through forty steps sends one message rather than
+// forty.
+//
+// Progress is coalesced and the EDGES are not, which is the whole shape of this:
+// a run starting and a run ending are transitions, there are exactly two of them
+// per run, and a window that learns about them a loop turn late would flash a
+// mark on and off for a run that had already ended. Progress is a number that is
+// only ever read as "the latest one", so the only position worth sending is the
+// one still true when the turn ends.
+func (o *orch) flushRunbookRuns() {
+	if o.runbooks.dirty {
+		o.broadcastRunbookRuns()
+	}
+}

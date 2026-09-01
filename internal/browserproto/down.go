@@ -745,9 +745,15 @@ func NewRecord(recording bool, steps int, startedAt, note string) Record {
 // stops. `runbook_finished` already exists on the event side for automation
 // that wants the outcome, and it is emitted once per run, at the end.
 //
-// Per RUN and not per STEP for the same reason one phase earlier: a step-level
-// message would be a stream at the rate a runbook dispatches commands, and the
-// row has one bit to show.
+// It carries per-step progress, but it is NOT a per-step message. A runbook
+// dispatches its steps as fast as the commands resolve, and a run of inline
+// ones executes all of them inside a single turn of the orchestrator loop — so
+// a broadcast per step would be a burst of messages describing positions that
+// existed for microseconds and were never drawn. Progress is instead marked
+// dirty and flushed once per loop turn (flushRunbookRuns), which collapses that
+// burst to one message carrying the position that actually lasted. The edges —
+// a run starting, a run ending — still send immediately, because those are
+// transitions rather than progress and there are only ever two of them.
 type RunbookRuns struct {
 	T    Type         `json:"t"`
 	Runs []RunbookRun `json:"runs"`
@@ -773,6 +779,21 @@ type RunbookRun struct {
 	// step (see startReservedRunbooks) — close enough that no reader can tell,
 	// and honest about what the session actually committed to.
 	StartedAt string `json:"started_at,omitempty"`
+	// Step is the 1-based index of the step being executed — the same numbering
+	// RunbookStepResult.Index uses, so "step 4 failed" in a result names the
+	// step a row was showing. Steps is how many the document has.
+	//
+	// Step is 0 for a run that has taken its slot and not yet reached its first
+	// step, which is a real state a triggered run passes through: the slot is
+	// taken when the trigger fires and the steps start on the next loop turn.
+	//
+	// This is what separates "the session is running something" from "the
+	// session is running something and it is getting somewhere" — the same
+	// distinction Record.Steps exists for, and it matters more here, because a
+	// runbook step can legitimately block for minutes on a build and a mark that
+	// only blinks cannot tell that apart from a wedge.
+	Step  int `json:"step,omitempty"`
+	Steps int `json:"steps,omitempty"`
 }
 
 // NewRunbookRuns builds the message. A nil slice is normalised to an empty one:

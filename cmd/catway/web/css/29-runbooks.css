@@ -40,8 +40,33 @@
      thing here: the session is doing something, not necessarily for you. */
   #rb-list li.running .rdot { animation:dotpulse 1.4s ease-in-out infinite; }
   #rb-list li.running .rname { color:var(--fg-strong); }
+  /* The step count column turns into the run's POSITION in it — "3/7" where the
+     total was — and goes accent while it is moving, because a number that
+     changes on its own has to look like it belongs to the thing that is
+     changing. */
+  #rb-list .rsteps.prog { color:var(--accent); }
+  /* …and a hairline under the row for the same number, read without reading.
+     The distinction it draws is the one a blinking dot cannot: a runbook step
+     may legitimately sit on a build for minutes, and "running" and "running and
+     getting somewhere" look identical until something advances. Width comes
+     from --rbprog, which renderRunbooks sets on the row; the 0 default is what
+     keeps the bar invisible on a run that has not reached its first step and on
+     every row that is not running at all.
+
+     Drawn as the row's own ::after rather than an element, because a full-width
+     bar inside a flex row would have to be excluded from the layout it is not
+     part of. */
+  #rb-list li.running { position:relative; --rbprog:0; }
+  #rb-list li.running::after {
+    content:""; position:absolute; left:0; bottom:0; height:1px;
+    width:var(--rbprog); background:var(--accent); opacity:.55;
+    transition:width .18s linear;
+  }
   @media (prefers-reduced-motion:reduce) {
     #rb-list li.running .rdot { animation:none; }
+    /* The bar stays — it is information, not decoration — but it stops sliding
+       and simply appears at its new width. */
+    #rb-list li.running::after { transition:none; }
   }
   /* The heading's re-read button, borrowing the Usage refresh's drawn mark and
      spin so the two "ask the server again" controls in this column behave

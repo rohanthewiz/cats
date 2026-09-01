@@ -27,6 +27,11 @@
   // firing by itself, which is the case that matters most because it is the
   // session acting while nobody asked it to.
   //
+  // Each run carries its position, which the row shows where the step count
+  // normally sits ("3/7") and as a hairline under it. A step can legitimately
+  // sit on a build for minutes, so a mark that only blinks cannot tell a long
+  // step from a wedged one; a number that moves can.
+  //
   // Hidden until there is something in it, like Hosts and History: an install
   // that never recorded a macro sees exactly the sidebar it always had, and the
   // section appears by itself the first time a recording is saved.
@@ -174,10 +179,26 @@
       // No count on a broken file: it never parsed, so there is no step count
       // to report and a 0 there would read as "an empty runbook", which is a
       // different and valid thing.
-      if (!broken && rb.steps) {
+      //
+      // While a run is in flight the same column carries its POSITION — "3/7"
+      // where the total was. The column rather than a new one because the number
+      // there has always answered "how big is this?", and during a run the
+      // honest answer to that is "this big, and here is where it has got to".
+      // Two numbers side by side would make the row a readout.
+      if (!broken && (rb.steps || (run && run.steps))) {
         const s = document.createElement("span");
-        s.className = "rsteps"; s.textContent = String(rb.steps);
+        s.className = "rsteps";
+        s.textContent = runbookCount(rb, run);
+        if (run && run.step) s.classList.add("prog");
         li.appendChild(s);
+      }
+      // The progress bar reads the fraction off a custom property so the
+      // stylesheet owns everything about how it looks and this owns only the
+      // number. Set on the row rather than on a child because the bar is drawn
+      // as the row's own ::after — a full-width element under a flex row would
+      // have to be excluded from the layout it is not part of.
+      if (run && run.step && run.steps) {
+        li.style.setProperty("--rbprog", (100 * run.step / run.steps).toFixed(1) + "%");
       }
 
       li.title = runbookTitle(rb, broken, run);
@@ -210,7 +231,15 @@
       lines.push("runs itself on: " + rb.triggers.join(", ") +
         (rb.trigger_status ? "\ntriggers not armed: " + rb.trigger_status : ""));
     }
-    lines.push(run ? "running… " + runOrigin(run) : "click to run · right-click for more");
+    if (run) {
+      // The position goes first: on a run that has stopped moving, "step 4 of 7"
+      // is the line that says WHICH step to go and look at, and the origin is
+      // the follow-up question.
+      lines.push(run.step ? "running step " + run.step + " of " + (run.steps || rb.steps) : "running…");
+      lines.push(runOrigin(run));
+    } else {
+      lines.push("click to run · right-click for more");
+    }
     return lines.join("\n");
   }
 
@@ -234,6 +263,23 @@
   }
 
   function stepCount(n) { return n + (n === 1 ? " step" : " steps"); }
+
+  // runbookCount is what the numeric column holds: the document's length when
+  // nothing is running, the run's position in it when something is.
+  //
+  // The run's own total wins over the listing's. They are normally the same
+  // number, but a file edited while it runs makes the listing describe a
+  // document this run is not executing — and the count beside a moving position
+  // has to be the one that position is counting towards, or the row shows "4/3".
+  //
+  // A run that has taken its slot and not yet reached step 1 shows the plain
+  // total: "0/5" reads as a run that is stuck rather than one that is a
+  // millisecond old, and the pulsing dot has already said it is running.
+  function runbookCount(rb, run) {
+    const total = (run && run.steps) || rb.steps;
+    if (run && run.step) return run.step + "/" + total;
+    return String(total);
+  }
 
   // runbookError drops the leading file path a load error carries. Parse
   // prefixes every message with the file it came from ("<path>: step 1: …")

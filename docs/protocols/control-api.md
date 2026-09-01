@@ -1015,13 +1015,27 @@ by an `on:` clause firing with nobody watching — which is the case a query cou
 never have caught, since nothing on disk changes while a runbook runs. The
 tooltip names the origin, and a trigger's own event name with it.
 
+Each run carries its **position** — the step being executed, out of the
+document's length — which the row shows where the step count normally sits
+(`3/7`) and as a hairline under it. That is the distinction a blinking mark
+cannot draw: a step may legitimately sit on a build for minutes, and "running"
+looks identical to "running and getting somewhere" until something advances.
+
 Whole set rather than start/stop deltas, so a reconnecting window converges
-instead of keeping a mark lit for a run that ended while it was away. Per run
-rather than per step, and a browser message rather than a control-API event, for
-the reason `broadcastRecord` documents one phase earlier: events feed
-`fireRunbookTriggers`, so an event per run start would hand a runbook an event
-that starting a runbook produces. Automation that wants the outcome already has
-`runbook_finished`, once per run, at the end.
+instead of keeping a mark lit for a run that ended while it was away. A browser
+message rather than a control-API event, for the reason `broadcastRecord`
+documents one phase earlier: events feed `fireRunbookTriggers`, so an event per
+run start would hand a runbook an event that starting a runbook produces.
+Automation that wants the outcome already has `runbook_finished`, once per run,
+at the end.
+
+It carries progress but is not a per-step **message**. A run of inline commands
+executes every step inside a single turn of the orchestrator loop, so a
+broadcast per step would be a burst describing positions that existed for
+microseconds and were never drawn. Progress is marked dirty and flushed once per
+loop turn, beside the client census and for the same reason; the two edges send
+immediately, because those are transitions and a window that learned them a turn
+late would flash a mark on and off for a run that had already ended.
 
 #### References
 

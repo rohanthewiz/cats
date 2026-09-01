@@ -162,7 +162,7 @@ func TestTriggerDoesNotStackRuns(t *testing.T) {
 
 	// Hold the slot as an in-flight run would, without needing a step that
 	// blocks: what the trigger consults is the accounting, not the steps.
-	if msg := o.claimRunbookSlot("t"); msg != "" {
+	if msg := o.claimRunbookSlot("t", 1); msg != "" {
 		t.Fatalf("claim: %s", msg)
 	}
 	o.emitEvent(app.EventPaneExited, 1, app.PaneExitedEvent{Pane: 1})
@@ -182,7 +182,7 @@ func TestTriggerDoesNotStackRuns(t *testing.T) {
 func TestManualRunRefusedWhileRunning(t *testing.T) {
 	o, dir := newTriggerOrch(t)
 	writeRunbook(t, dir, "t.yaml", "steps:\n  - run: pane.last\n")
-	if msg := o.claimRunbookSlot("t"); msg != "" {
+	if msg := o.claimRunbookSlot("t", 1); msg != "" {
 		t.Fatalf("claim: %s", msg)
 	}
 	c := run(t, o, app.RunbookRunParams{Name: "t"})
@@ -503,7 +503,7 @@ steps:
 func TestConnectBurstCarriesRunsInFlight(t *testing.T) {
 	o, _ := newTriggerOrch(t)
 	for _, name := range []string{"zeta", "alpha"} {
-		if msg := o.claimRunbookSlot(name); msg != "" {
+		if msg := o.claimRunbookSlot(name, 3); msg != "" {
 			t.Fatalf("claiming %s: %s", name, msg)
 		}
 	}
@@ -527,4 +527,137 @@ func TestConnectBurstCarriesRunsInFlight(t *testing.T) {
 		t.Fatalf("after one release the window was told %+v, want zeta alone still running", msgs)
 	}
 	o.releaseRunbookSlot("zeta")
+}
+
+// Progress is coalesced to the loop turn, and the edges are not.
+//
+// Every step of the runbook below resolves inline, so the whole run executes
+// inside what would be one turn of the orchestrator loop. A broadcast per step
+// would put five messages on every socket describing positions that existed for
+// microseconds and were never drawn; the run must still be exactly the two
+// messages its edges are.
+//
+// The test emulates the loop the way the focus and multiclient tests do — by
+// calling the flush itself between closures — because these tests do not run
+// the loop goroutine.
+func TestRunbookProgressIsCoalescedToTheLoopTurn(t *testing.T) {
+	o, dir := newTriggerOrch(t)
+	writeRunbook(t, dir, "five.yaml", `
+name: five
+steps:
+  - run: pane.last
+  - run: pane.last
+  - run: pane.last
+  - run: pane.last
+  - run: pane.last
+`)
+	c := newConn(o, false, browserproto.Init{Cols: 80, Rows: 24, CellWPx: 8, CellHPx: 16})
+	drain(c)
+
+	run(t, o, app.RunbookRunParams{Name: "five"}).result(t)
+	o.flushRunbookRuns() // what run() does between mailbox closures
+
+	msgs := runbookRunsSeen(t, c)
+	if len(msgs) != 2 {
+		t.Fatalf("a five-step run sent %d runbook_runs messages, want 2 — the edges, with the "+
+			"positions between them coalesced away", len(msgs))
+	}
+	// The start message knows how long the run is before a single step has run,
+	// so a row can draw "0 of 5" rather than waiting to find out.
+	if got := msgs[0].Runs; len(got) != 1 || got[0].Steps != 5 || got[0].Step != 0 {
+		t.Errorf("the start message carried %+v, want five steps and no position yet", got)
+	}
+	if len(msgs[1].Runs) != 0 {
+		t.Errorf("the finish message carried %+v, want an empty set", msgs[1].Runs)
+	}
+}
+
+// The flush contract, which the coalescing above rests on: several moves inside
+// one turn are one message carrying the LATEST position, a turn that moved
+// nothing is silent, and a name with no slot is ignored rather than resurrected.
+//
+// Driven directly because no command these tests can reach resolves
+// asynchronously without a daemon, so a real run can never be caught between
+// two steps. The numbers the executor feeds this are checked against a live
+// instance instead.
+func TestRunbookProgressFlush(t *testing.T) {
+	o, _ := newTriggerOrch(t)
+	if msg := o.claimRunbookSlot("deploy", 7); msg != "" {
+		t.Fatalf("claim: %s", msg)
+	}
+	c := newConn(o, false, browserproto.Init{Cols: 80, Rows: 24, CellWPx: 8, CellHPx: 16})
+	drain(c)
+
+	o.flushRunbookRuns()
+	if msgs := runbookRunsSeen(t, c); len(msgs) != 0 {
+		t.Fatalf("a turn that moved nothing sent %+v, want silence", msgs)
+	}
+
+	o.noteRunbookStep("deploy", 1)
+	o.noteRunbookStep("deploy", 2)
+	o.noteRunbookStep("deploy", 3)
+	o.flushRunbookRuns()
+	msgs := runbookRunsSeen(t, c)
+	if len(msgs) != 1 {
+		t.Fatalf("three moves in one turn sent %d messages, want 1", len(msgs))
+	}
+	if got := msgs[0].Runs; len(got) != 1 || got[0].Step != 3 || got[0].Steps != 7 {
+		t.Fatalf("the flush carried %+v, want step 3 of 7 — the last position, not the first", got)
+	}
+
+	// Re-noting the same step is not a move. A runbook that sat on step 3 for a
+	// minute must not send a message per loop turn for a number that has not
+	// changed.
+	drain(c)
+	o.noteRunbookStep("deploy", 3)
+	o.flushRunbookRuns()
+	if msgs := runbookRunsSeen(t, c); len(msgs) != 0 {
+		t.Fatalf("re-noting the same step sent %+v, want silence", msgs)
+	}
+
+	// An edge answers whatever the flag was going to ask for, so it clears it —
+	// otherwise a run that finished inside one turn would be followed by a flush
+	// of the position it no longer has.
+	o.noteRunbookStep("deploy", 4)
+	o.releaseRunbookSlot("deploy")
+	drain(c)
+	o.flushRunbookRuns()
+	if msgs := runbookRunsSeen(t, c); len(msgs) != 0 {
+		t.Fatalf("a release left the dirty flag set (%+v), want the edge to have answered it", msgs)
+	}
+
+	// And a run that is gone cannot be advanced back into existence.
+	o.noteRunbookStep("deploy", 5)
+	o.flushRunbookRuns()
+	if msgs := runbookRunsSeen(t, c); len(msgs) != 0 {
+		t.Fatalf("noting a step for a released run sent %+v, want it ignored", msgs)
+	}
+}
+
+// A triggered run knows its length too, taken from the document the trigger
+// matched rather than from a caller — there is no caller.
+func TestTriggeredRunCarriesItsStepCount(t *testing.T) {
+	o, dir := newTriggerOrch(t)
+	pane := uint32(o.session.AllPaneIDs()[0])
+	writeRunbook(t, dir, "t.yaml", `
+name: t
+on: pane_agent
+steps:
+  - run: pane.rename
+    params: {pane: "{{ event.pane }}", name: one}
+  - run: pane.rename
+    params: {pane: "{{ event.pane }}", name: two}
+`)
+	c := newConn(o, false, browserproto.Init{Cols: 80, Rows: 24, CellWPx: 8, CellHPx: 16})
+	drain(c)
+
+	fire(o, app.EventPaneAgent, app.PaneAgentEvent{Pane: pane, Agent: "claude", State: "blocked"})
+
+	msgs := runbookRunsSeen(t, c)
+	if len(msgs) == 0 {
+		t.Fatal("a triggered run sent no runbook_runs message")
+	}
+	if got := msgs[0].Runs; len(got) != 1 || got[0].Steps != 2 {
+		t.Fatalf("the start message carried %+v, want a two-step run", got)
+	}
 }
