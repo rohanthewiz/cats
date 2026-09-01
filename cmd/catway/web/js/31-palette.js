@@ -65,9 +65,9 @@
       const lead = runbookLead(rb);
       // A runbook that is ALREADY RUNNING has no run left in it. The server's
       // concurrency slot is per runbook name, so a second start comes back
-      // "already in flight" — startRunbookRun knows this and refuses the click
-      // before it is sent, which from the palette means an entry whose Enter is
-      // a toast saying no. That is the exact mistake "start recording" avoids
+      // "already in flight" — startRunbookRun knows this and refuses before
+      // sending, which from the palette means an entry whose Enter is a toast
+      // saying no. That is the exact mistake "start recording" avoids
       // twenty lines up, and the fix is the same one: offer the verb that
       // applies. While a run is in flight that verb is PREVIEW — which is also
       // what somebody watching panes appear by themselves actually wants, since

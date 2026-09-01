@@ -1000,14 +1000,26 @@ naming how many it is not showing. Values keep their `{{ ... }}` references
 unresolved, which is the point in the vars dialog: you can see where what you
 are about to type ends up. Right-click
 adds *preview steps* — the same outline in a dialog with nothing to agree to,
-for reading a runbook you are not about to run and for the row that is already
-running one, where the click is refused before any gate opens — plus *open in
+for reading a runbook you are not about to run — plus *open in
 editor* (`pane.open_file`, on the local host — the runbooks are on catway's own
 disk, not the focused pane's), *copy path*, and the `catctl` spelling. A listing
 without an `outline` (an older server) offers no preview entry rather than an
 empty one. The row's tooltip names that entry wherever it exists — *right-click
-to preview the steps*, and on a running row, where there is no click left, that
-hint is the whole of what it offers.
+to preview the steps*.
+
+While that runbook is **running**, the click changes verb for the same reason
+the palette entry does: the concurrency slot is per name, so a second start
+comes back *already in flight* and the browser refuses it before sending, which
+leaves a click whose entire outcome is a toast. A running row's click opens the
+**preview** instead, and its tooltip says so — *click to preview the steps ·
+right-click for more*, under the position and the origin. The right-click menu
+drops its *run…* entry for the same duration and leads with *preview steps*, so
+the two agree; the editor, the path and the `catctl` spelling stay. A running
+row whose listing carries no `outline` has no preview to route to; its click
+falls back to the refusal, which at least names who started the run, and its
+tooltip promises nothing but the menu. (A row cannot drop out of the sidebar the
+way the palette entry drops out of the list — the row is what is reporting the
+run.)
 
 The **command palette** reads the same outline. Its `run runbook: …` entries are
 one line each, so they spend it on the first step and the total — `built:

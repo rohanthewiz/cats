@@ -32,7 +32,8 @@ eq(err && String(err), null, "the concatenated bundle compiles");
 // but a duplicate `function runbookLead` in a second part file would pass the
 // compile above (function declarations may repeat in sloppy mode) while
 // silently shadowing the one the tests exercise.
-for (const name of ["runbookLead", "runbookOutlineText", "runbookOutline", "paletteCommands"]) {
+for (const name of ["runbookLead", "runbookOutlineText", "runbookOutline", "runbookRowVerb",
+  "paletteCommands"]) {
   const n = bundle.split(new RegExp("\\bfunction " + name + "\\s*\\(")).length - 1;
   eq(n, 1, `${name} is declared exactly once across the bundle`);
 }

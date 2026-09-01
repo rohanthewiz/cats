@@ -202,14 +202,29 @@
       }
 
       li.title = runbookTitle(rb, broken, run);
-      // A broken file's click OPENS it, because that is the only useful verb
-      // for a row whose whole content is an error message.
+      // What the click does is runbookRowVerb's to say — the tooltip above
+      // asks the same function, so the row cannot name a verb the click does
+      // not take.
+      //
+      // The verb is worked out at CLICK time rather than closed over from the
+      // render. renderRunbooks re-runs on every change to the run set, so the
+      // `run` captured above is normally still true when the click lands; but
+      // routing off a snapshot is correct only for as long as that stays true,
+      // and startRunbookRun's own refusal is meant to be the backstop rather
+      // than the thing standing between a stale row and a doomed command.
       li.addEventListener("click", () => {
-        if (broken) openRunbookFile(rb); else startRunbookRun(rb);
+        switch (runbookRowVerb(rb, broken, runbookRunOf(rb.name))) {
+          case "open": openRunbookFile(rb); break;
+          case "preview": previewRunbook(rb); break;
+          default: startRunbookRun(rb);
+        }
       });
       li.addEventListener("contextmenu", (ev) => {
         ev.preventDefault();
-        openCtx(ev.clientX, ev.clientY, runbookMenuItems(rb, broken));
+        // Read fresh, for the reason the click does: the menu is built at the
+        // moment it opens, so it can be built against what is true then rather
+        // than against whatever the last render saw.
+        openCtx(ev.clientX, ev.clientY, runbookMenuItems(rb, broken, runbookRunOf(rb.name)));
       });
       rbListEl.appendChild(li);
     }
@@ -237,11 +252,18 @@
       // the follow-up question.
       lines.push(run.step ? "running step " + run.step + " of " + (run.steps || rb.steps) : "running…");
       lines.push(runOrigin(run));
-      // A running row has no click left — startRunbookRun refuses it before any
-      // dialog opens — so the hint it gets is the one verb that still works,
-      // and it is the verb somebody watching panes appear actually wants:
-      // what is coming next.
-      if (runbookHasPreview(rb, broken)) lines.push("right-click to preview the steps");
+      // While a run is in flight the CLICK is the preview — runbookRowVerb owns
+      // that rule and this line reads it, so the hint and the handler cannot
+      // drift. It is the verb somebody watching panes appear by themselves
+      // actually wants: what is coming next.
+      //
+      // Without an outline there is no preview to route to, the click falls
+      // back to startRunbookRun's refusal toast, and a toast is not a verb to
+      // advertise. What is left to point at is the menu, which still holds the
+      // file and the path.
+      lines.push(runbookRowVerb(rb, broken, run) === "preview"
+        ? "click to preview the steps · right-click for more"
+        : "right-click for more");
     } else {
       // The menu holds four verbs and the tooltip names one, because a
       // first-time reader is not asking what else is in there — they are asking
@@ -263,6 +285,36 @@
   // that does not send one.
   function runbookHasPreview(rb, broken) {
     return !broken && !!(rb.outline && rb.outline.length);
+  }
+
+  // runbookRowVerb is what a CLICK on the row does, in one word. It exists as a
+  // function rather than as a condition inside the handler because the TOOLTIP
+  // has to name the same verb: a row that promises "click to run" and then
+  // opens a preview is worse than either behaviour alone, and two sites
+  // drifting apart is precisely what runbookHasPreview was pulled out to stop
+  // between the tooltip and the menu.
+  //
+  //   broken  → "open"     the file never parsed, so its whole content is an
+  //                        error message and the editor is the only verb that
+  //                        does anything with it.
+  //   running → "preview"  the server's concurrency slot is per runbook name,
+  //                        so a second start comes back "already in flight" and
+  //                        startRunbookRun refuses it before sending. Preview
+  //                        is the verb that still applies — and the one being
+  //                        asked for, since the question during a run has
+  //                        stopped being "shall I run this".
+  //   else    → "run"
+  //
+  // A RUNNING runbook with no outline (a listing from a server too old to send
+  // one) has no preview to offer, so it falls through to "run" and lands on
+  // startRunbookRun's refusal. That is deliberate: the toast names who started
+  // the run, which on a row with nothing else left to give beats silence. The
+  // palette drops such an entry instead — an entry in a list can be absent,
+  // while a row showing a live run cannot.
+  function runbookRowVerb(rb, broken, run) {
+    if (broken) return "open";
+    if (run && runbookHasPreview(rb, broken)) return "preview";
+    return "run";
   }
 
   // runOrigin says WHO started the run, which is the whole point of hearing
@@ -391,10 +443,10 @@
   // cannot serve: reading a runbook you are not about to run. Getting there
   // through the run dialog means opening a panel that says "run N steps against
   // this session" and then pressing cancel — which works, and asks the user to
-  // decline something they never proposed. It also does not work at all for a
-  // row that is currently running, where the click is refused before any dialog
-  // opens; that is precisely the moment somebody wants to see what the steps
-  // are.
+  // decline something they never proposed. It is also where a RUNNING row's own
+  // click now lands: the run verb is spoken for while a run is in flight, and
+  // the moment panes are appearing by themselves is precisely the moment
+  // somebody wants to see what the steps are (see runbookRowVerb).
   //
   // Deliberately a notice and not a confirm with a "run" button. A preview that
   // can start the thing it is previewing is the gate again, and the gate is one
@@ -522,9 +574,20 @@
   // spelling live here rather than on the row for the reason History's copy
   // does — the click is the one thing worth doing without a menu, and putting a
   // second verb beside it would make the row a toolbar.
-  function runbookMenuItems(rb, broken) {
+  function runbookMenuItems(rb, broken, run) {
     const items = [];
-    if (!broken) items.push({ label: "run…", fn: () => startRunbookRun(rb) });
+    // No "run…" while one is in flight. The concurrency slot is per runbook
+    // name, so startRunbookRun would refuse a second start before sending it,
+    // and an entry that exists only to answer with a toast is the same mistake
+    // the row's click and the palette entry have both now stopped making — a
+    // menu that lists verbs it knows will be refused is a menu you stop
+    // reading. There is no disabled state in openCtx to grey it with, and
+    // inventing one for a single entry would be new machinery for a case that
+    // absence already states.
+    //
+    // What is left leads with "preview steps", which is both the live verb and
+    // the one the row's click now takes, so the menu and the click agree.
+    if (!broken && !run) items.push({ label: "run…", fn: () => startRunbookRun(rb) });
     // Gated by runbookHasPreview (the row's tooltip asks the same function, so
     // the two cannot disagree about whether this entry exists). It sits beside
     // "open in editor" because the two are the same verb at two magnifications —
