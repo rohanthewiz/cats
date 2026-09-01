@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -60,6 +62,7 @@ func (o *orch) RunbookList(r app.Responder) {
 			Vars:          varNames(rb),
 			Triggers:      rb.TriggerEvents(),
 			TriggerStatus: o.runbookTriggerStatus(rb),
+			Outline:       stepOutline(rb),
 		})
 	}
 	for _, b := range set.Broken {
@@ -70,6 +73,122 @@ func (o *orch) RunbookList(r app.Responder) {
 		})
 	}
 	r.OK(app.RunbookListResult{Dir: dir, Runbooks: out})
+}
+
+// --- the outline ---------------------------------------------------------------
+//
+// One short line per step, so a caller about to run a runbook can be shown what
+// it will do. It is a SUMMARY and it is rendered here rather than by the client
+// for one reason: the alternative is putting the params on the wire, and a
+// `file.put` step's params are a whole file. runbook.list re-reads on every run
+// finish, so it must not be able to carry a payload.
+//
+// What is deliberately NOT in a line: `continue_on_error` and `expect`. Both
+// are real and both change what the run MEANS, but a line already truncated to
+// fit a dialog has room for what the step does or for how it is judged, not
+// both — and "what will this do to my session" is the question a preview is
+// answering. The file answers the other one, and "open in editor" is one
+// right-click away.
+
+const (
+	// outlineLineBudget bounds one step's line. Sized for a modal at a
+	// comfortable reading width rather than for a terminal: past this a reader
+	// has stopped scanning a list and started reading a document, which is what
+	// the file is for.
+	outlineLineBudget = 72
+
+	// maxOutlineSteps bounds how many lines a runbook contributes, well under
+	// the 200-step ceiling a document has. Two dozen is already more than a
+	// dialog is read at; past it a caller shows the count it already has from
+	// Steps and says how many it left out.
+	maxOutlineSteps = 24
+)
+
+// stepOutline renders a runbook's steps, capped.
+func stepOutline(rb *runbook.Runbook) []string {
+	n := len(rb.Steps)
+	if n > maxOutlineSteps {
+		n = maxOutlineSteps
+	}
+	if n == 0 {
+		return nil
+	}
+	out := make([]string, 0, n)
+	for _, st := range rb.Steps[:n] {
+		out = append(out, clip(stepLine(st), outlineLineBudget))
+	}
+	return out
+}
+
+// stepLine is one step as `id: command k=v k=v`.
+//
+// Params are sorted by key because Params is a map and its iteration order is
+// not stable — an outline that reordered itself between two calls would look
+// like the file had changed.
+func stepLine(st runbook.Step) string {
+	var b strings.Builder
+	if st.ID != "" {
+		// The id is what LATER steps call this one, so it belongs at the front
+		// where a reader scanning for `{{ build.pane }}` will find it.
+		b.WriteString(st.ID)
+		b.WriteString(": ")
+	}
+	b.WriteString(st.Run)
+	keys := make([]string, 0, len(st.Params))
+	for k := range st.Params {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		if b.Len() > outlineLineBudget {
+			break // the rest would be clipped away anyway
+		}
+		b.WriteByte(' ')
+		b.WriteString(k)
+		b.WriteByte('=')
+		b.WriteString(paramDigest(st.Params[k]))
+	}
+	return b.String()
+}
+
+// paramDigest renders one param value small enough to sit in a line.
+//
+// A composite value becomes its SHAPE rather than its content. That is not
+// only about length: the values that are big are the ones nobody wants in a
+// preview (a file.put payload, a whole env block), and a reader who needs them
+// needs the file, not a longer line.
+//
+// Strings keep their quotes and are escaped, so a `text:` step carrying a
+// newline stays one line, and an empty string is visible as "" rather than as
+// nothing at all. They are clipped BEFORE quoting so a megabyte of base64 is
+// never allocated a second time just to be thrown away.
+func paramDigest(v any) string {
+	switch x := v.(type) {
+	case string:
+		return strconv.Quote(clip(x, outlineLineBudget))
+	case nil:
+		return "null"
+	case map[string]any:
+		return "{…}"
+	case []any:
+		return "[…]"
+	default:
+		return fmt.Sprint(x)
+	}
+}
+
+// clip shortens a string to n characters, marking that it was shortened. Rune
+// aware: cutting a multi-byte character in half would put a replacement
+// character on screen and blame the runbook for it.
+func clip(s string, n int) string {
+	if len(s) <= n { // the common case, and len is a cheap upper bound on runes
+		return s
+	}
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n-1]) + "…"
 }
 
 // varNames lists a runbook's declared vars in sorted order.

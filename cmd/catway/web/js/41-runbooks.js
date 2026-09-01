@@ -296,6 +296,28 @@
     return e.startsWith(rb.path + ": ") ? e.slice(rb.path.length + 2) : e;
   }
 
+  // runbookOutline turns runbook.list's pre-rendered step lines into the two
+  // options both dialogs take.
+  //
+  // The server caps how many lines it sends (a 200-step document must not ride
+  // along on a listing that re-reads after every run), so the tail says what was
+  // left out — using rb.steps, which is always the TRUE count. Silence there
+  // would be the worse failure: a preview that quietly stops at 24 of 200 does
+  // not look truncated, it looks like the runbook.
+  //
+  // An empty outline yields empty options rather than a note, and the dialog is
+  // then exactly the one it was before this existed. That is the case for a
+  // listing from a server too old to send the field at all.
+  function runbookOutline(rb) {
+    const lines = rb.outline || [];
+    if (!lines.length) return {};
+    const rest = (rb.steps || 0) - lines.length;
+    return {
+      lines,
+      linesNote: rest > 0 ? "…and " + rest + " more " + (rest === 1 ? "step" : "steps") : "",
+    };
+  }
+
   // startRunbookRun is the gate between a click and a sequence of side effects
   // on a live desktop.
   //
@@ -313,12 +335,20 @@
     // command.
     const cur = runbookRunOf(rb.name);
     if (cur) { toast(rb.name + " is already running, " + runOrigin(cur)); return; }
+    // Both gates show the STEPS, not just how many. "4 steps against this
+    // session" is a number to agree to without knowing what it buys; the
+    // outline is the same gate answering the question the number raises. The
+    // values still carry their `{{ vars.x }}` references unresolved, which is
+    // the point in the fields dialog — the reader can see where what they are
+    // about to type ends up.
+    const preview = runbookOutline(rb);
     if (!rb.vars || !rb.vars.length) {
       dialogConfirm({
         title: "run runbook",
         message: "Run “" + rb.name + "”? " + (rb.description ? rb.description + " — " : "") +
           "it runs " + stepCount(rb.steps) + " against this session.",
         confirmLabel: "run",
+        ...preview,
         onConfirm: () => runRunbook(rb, {}),
       });
       return;
@@ -329,6 +359,7 @@
       hint: (rb.description ? rb.description + " · " : "") + stepCount(rb.steps) +
         " · a blank field keeps the runbook's own default",
       fields: rb.vars.map((v) => ({ label: v, value: "", placeholder: "default" })),
+      ...preview,
       onSubmit: (...vals) => {
         // Only the fields the user actually filled in are sent. An empty field
         // means "leave the declared default alone"; sending "" would OVERRIDE

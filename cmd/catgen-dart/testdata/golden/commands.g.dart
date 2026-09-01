@@ -2080,6 +2080,7 @@ class RunbookInfo {
     this.vars = const <String>[],
     this.triggers = const <String>[],
     this.triggerStatus = '',
+    this.outline = const <String>[],
     this.error = '',
   });
 
@@ -2103,6 +2104,21 @@ class RunbookInfo {
   /// listing cannot otherwise answer: "why did my runbook stop running?", whose
   /// causes are all invisible state in the daemon.
   final String triggerStatus;
+
+  /// Outline is one short line per step — the command and a digest of its
+  /// params — so a caller can show what a runbook WILL DO before running it.
+  /// Empty for a file that would not parse, which has no steps to describe.
+  ///
+  /// Pre-rendered by the server, and truncated there, because the alternative
+  /// is shipping the params themselves: a `file.put` step carries its whole
+  /// payload, and a listing that re-reads on every run finish cannot be
+  /// carrying file contents. Each line is capped, and so is the NUMBER of
+  /// lines — Steps already reports the true count, so a caller can say how
+  /// many were left out without the listing growing with the document.
+  ///
+  /// A summary, not a specification: the values shown still carry their
+  /// `{{ ... }}` references unresolved, since resolving them needs a run.
+  final List<String> outline;
   final String error;
 
   factory RunbookInfo.fromJson(Map<String, Object?> j) => RunbookInfo(
@@ -2113,6 +2129,7 @@ class RunbookInfo {
         vars: asList(j['vars'], asString),
         triggers: asList(j['triggers'], asString),
         triggerStatus: asString(j['trigger_status']),
+        outline: asList(j['outline'], asString),
         error: asString(j['error']),
       );
 
@@ -2124,6 +2141,7 @@ class RunbookInfo {
         if (vars.isNotEmpty) 'vars': vars,
         if (triggers.isNotEmpty) 'triggers': triggers,
         if (triggerStatus.isNotEmpty) 'trigger_status': triggerStatus,
+        if (outline.isNotEmpty) 'outline': outline,
         if (error.isNotEmpty) 'error': error,
       };
 }

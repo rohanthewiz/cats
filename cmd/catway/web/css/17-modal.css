@@ -31,6 +31,27 @@
   .modal .field + .field { margin-top:10px; } /* multi-field dialogs (new workspace) */
   .modal .field label { display:block; color:var(--muted); font-size:11px; margin-bottom:4px; }
   .modal .hint { color:var(--muted); font-size:11px; margin-top:8px; }
+  /* A dialog's preview of what its action will do: one line per step, numbered
+     by the browser so the numbers match how the thing being previewed numbers
+     itself (a runbook failure reported as "step 4" is the fourth line here).
+
+     Monospace and nowrap because these lines are command names and `k=v` pairs
+     — code, not prose — and a wrapped one would look like two steps. They are
+     already truncated by the sender, so the overflow here is the safety net for
+     a narrow window rather than the mechanism; it scrolls rather than clips so
+     the tail stays reachable.
+
+     Capped in height at roughly a dozen rows: past that the list has stopped
+     being something you glance at before clicking `run` and the buttons have
+     left the screen, which is worse than scrolling for the rest. */
+  .modal .steplist { margin:10px 0 0; padding:6px 8px 6px 26px; max-height:15em; overflow:auto;
+    background:var(--bg); border:1px solid var(--line); border-radius:5px;
+    color:var(--fg); font-size:11px; line-height:1.6; }
+  .modal .steplist li { white-space:nowrap; font-family:var(--mono, monospace); }
+  .modal .steplist li::marker { color:var(--muted); font-family:inherit; }
+  /* The tail for a list the sender cut short. Outside the <ol> — it is not one
+     of the steps, and numbering it would claim there is a step that says so. */
+  .modal .steplist-more { margin-top:6px; font-style:italic; }
   .modal .btns { display:flex; gap:8px; justify-content:flex-end; padding:10px 14px; border-top:1px solid var(--line); }
   .modal .btns button { background:var(--panel); color:var(--fg); border:1px solid var(--line); border-radius:5px;
     padding:5px 12px; font:inherit; font-size:12px; cursor:pointer; }

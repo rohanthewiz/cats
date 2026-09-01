@@ -241,6 +241,39 @@
     };
   }
 
+  // dialogLines renders opts.lines: a numbered list of what a dialog's action
+  // is about to do, one short line each. Shared by both dialogs rather than
+  // written into either, because "confirm this" and "fill these in, then do it"
+  // are the same question about the same list.
+  //
+  // An <ol> so the numbering is the browser's and matches how the thing being
+  // previewed numbers itself — a runbook failure reported as "step 4" names the
+  // fourth line here. opts.linesNote is the tail for a list that was cut short
+  // ("…and 180 more steps"): it sits outside the list because it is not one of
+  // the items, and numbering it would claim there is a step that says that.
+  //
+  // The lines arrive already truncated. This deliberately does not shorten them
+  // further — the sender knows what it is describing and how much of it matters,
+  // and a second truncation with a different budget would cut mid-escape.
+  function dialogLines(body, opts) {
+    if (!opts.lines || !opts.lines.length) return;
+    const ol = document.createElement("ol"); ol.className = "steplist";
+    for (const line of opts.lines) {
+      const li = document.createElement("li");
+      li.textContent = line;
+      // The full line in the title too: it is already clipped, but a reader who
+      // wants the tail of a long one should not have to open the file for it.
+      li.title = line;
+      ol.appendChild(li);
+    }
+    body.appendChild(ol);
+    if (opts.linesNote) {
+      const more = document.createElement("div");
+      more.className = "hint steplist-more"; more.textContent = opts.linesNote;
+      body.appendChild(more);
+    }
+  }
+
   // dialogFields: a prompt over one or more text fields (opts.fields:
   // [{label?, value?, placeholder?, pick?}]). Enter submits from any field and
   // Esc cancels, so a multi-field dialog still costs one keystroke for anyone who
@@ -297,6 +330,11 @@
         fire();
       });
       if (opts.hint) { const t = document.createElement("div"); t.className = "hint"; t.textContent = opts.hint; body.appendChild(t); }
+      // Last, below the fields, in both dialogs. The fields are what the user
+      // has come to do and where focus lands; the list is the reference they
+      // scan before committing, and a ten-line preview above the inputs would
+      // push the thing they are typing into off the top of a small window.
+      dialogLines(body, opts);
       m.appendChild(body);
       const submit = () => {
         for (const pk of pickers.values()) pk.commit();
@@ -341,6 +379,7 @@
         const wp = document.createElement("p"); wp.className = "errline"; wp.textContent = opts.warn;
         body.appendChild(wp);
       }
+      dialogLines(body, opts);
       m.appendChild(body);
       const go = () => { closeModal(); opts.onConfirm(); };
       const btns = document.createElement("div"); btns.className = "btns";

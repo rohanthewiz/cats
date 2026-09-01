@@ -988,9 +988,17 @@ recursion would surface as a wedged loop rather than as a mistake in a file.
 **From the browser**, the same two commands are the sidebar's **RUNBOOKS**
 section, below AGENTS. One row per file: `▸` and the name, `⚡` for a runbook
 with an `on:` clause, and the step count. A click runs it — through a dialog
-first, which asks for the declared vars where there are any and otherwise names
-the runbook and its step count, because unlike every other clickable row in that
-column this one splits panes and types into shells with no undo. Right-click
+first, because unlike every other clickable row in that column this one splits
+panes and types into shells with no undo. The dialog asks for the declared vars
+where there are any, and either way it **lists the steps**: `runbook.list`
+carries an `outline`, one short line per step (`pane.send_input pane=1
+text="make all\n"`), so the gate answers "what will this do?" rather than only
+"how many things will it do?". The lines are rendered and truncated server-side
+— a `file.put` step's params are a whole file, and a listing that re-reads after
+every run must not be able to carry one — and capped in number, with the dialog
+naming how many it is not showing. Values keep their `{{ ... }}` references
+unresolved, which is the point in the vars dialog: you can see where what you
+are about to type ends up. Right-click
 adds *open in editor* (`pane.open_file`, on the local host — the runbooks are on
 catway's own disk, not the focused pane's), *copy path*, and the `catctl`
 spelling.

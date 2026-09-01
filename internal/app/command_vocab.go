@@ -1827,7 +1827,21 @@ type RunbookInfo struct {
 	// listing cannot otherwise answer: "why did my runbook stop running?", whose
 	// causes are all invisible state in the daemon.
 	TriggerStatus string `json:"trigger_status,omitempty"`
-	Error         string `json:"error,omitempty"`
+	// Outline is one short line per step — the command and a digest of its
+	// params — so a caller can show what a runbook WILL DO before running it.
+	// Empty for a file that would not parse, which has no steps to describe.
+	//
+	// Pre-rendered by the server, and truncated there, because the alternative
+	// is shipping the params themselves: a `file.put` step carries its whole
+	// payload, and a listing that re-reads on every run finish cannot be
+	// carrying file contents. Each line is capped, and so is the NUMBER of
+	// lines — Steps already reports the true count, so a caller can say how
+	// many were left out without the listing growing with the document.
+	//
+	// A summary, not a specification: the values shown still carry their
+	// `{{ ... }}` references unresolved, since resolving them needs a run.
+	Outline []string `json:"outline,omitempty"`
+	Error   string   `json:"error,omitempty"`
 }
 
 // RunbookListResult is CmdResult.Data for runbook.list.
