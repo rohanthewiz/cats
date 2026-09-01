@@ -33,7 +33,7 @@ eq(err && String(err), null, "the concatenated bundle compiles");
 // compile above (function declarations may repeat in sloppy mode) while
 // silently shadowing the one the tests exercise.
 for (const name of ["runbookLead", "runbookOutlineText", "runbookOutline", "runbookRowVerb",
-  "paletteCommands"]) {
+  "runbookJudgement", "stepNumbers", "paletteCommands"]) {
   const n = bundle.split(new RegExp("\\bfunction " + name + "\\s*\\(")).length - 1;
   eq(n, 1, `${name} is declared exactly once across the bundle`);
 }

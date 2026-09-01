@@ -75,6 +75,20 @@ function endOfString(src, i) {
   throw new Error("unterminated string literal");
 }
 
+// sliceConst pulls one top-level single-line `const NAME = …;` out of a part
+// file, source and all.
+//
+// Lifted rather than re-declared in the test, because these are BUDGETS — a
+// line length, a step cap — and a test that hard-coded 12 beside a shipped 12
+// would keep passing after the shipped one changed, asserting nothing about the
+// number the browser actually uses. Single-line only: every budget in this code
+// base is a literal, and a multi-line const would want the brace scanner above.
+export function sliceConst(src, name) {
+  const m = new RegExp("^\\s*const " + name + "\\s*=.*?;\\s*$", "m").exec(src);
+  if (!m) throw new Error(`sliceConst: no single-line const ${name} =`);
+  return m[0];
+}
+
 /**
  * loadFns evaluates the named functions from the named part files.
  *
@@ -85,11 +99,15 @@ function endOfString(src, i) {
  * @param {string[]} o.stubs  free names to bind to a no-op function — for the
  *                            references that are evaluated eagerly (`fn: foo`)
  *                            but never called by the test
+ * @param {string[]} o.consts top-level single-line consts the lifted functions
+ *                            read, lifted with their VALUES so a budget cannot
+ *                            drift between the browser and the test
  * @returns {object} the functions, keyed by name
  */
-export function loadFns({ files, names, env = {}, stubs = [] }) {
+export function loadFns({ files, names, env = {}, stubs = [], consts = [] }) {
   const src = files.map(readPart).join("\n");
-  const picked = names.map((n) => slice(src, n)).join("\n\n");
+  const picked = consts.map((c) => sliceConst(src, c))
+    .concat(names.map((n) => slice(src, n))).join("\n\n");
   const bindings = { ...Object.fromEntries(stubs.map((s) => [s, () => {}])), ...env };
   const body = [
     '"use strict";',

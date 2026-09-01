@@ -5,6 +5,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -440,6 +441,94 @@ func TestStepOutlineIsCapped(t *testing.T) {
 	if rb.Steps != maxOutlineSteps+15 {
 		t.Errorf("Steps = %d, want the TRUE count %d — the cap must not hide it",
 			rb.Steps, maxOutlineSteps+15)
+	}
+}
+
+// The two fields that change what a run MEANS are reported as POSITIONS beside
+// the outline. They are not in the lines — a clipped line has room for what a
+// step does or for how it is judged — so a preview says which steps underneath.
+func TestStepJudgement(t *testing.T) {
+	o, dir := newRunbookOrch(t)
+	writeRunbook(t, dir, "j.yaml", `
+name: j
+steps:
+  - run: pane.last
+  - id: waited
+    run: pane.wait_for_output
+    params: {pane: 1, pattern: "done"}
+    expect: "{{ waited.matched }}"
+  - run: pane.send_input
+    params: {pane: 1, text: "tidy\n"}
+    continue_on_error: true
+  - id: again
+    run: pane.wait_for_output
+    params: {pane: 1, pattern: "ok"}
+    expect: "{{ again.matched }}"
+    continue_on_error: true
+`)
+	c := &capture{}
+	o.RunbookList(c)
+	rb := c.data.(app.RunbookListResult).Runbooks[0]
+	if e := rb.Error; e != "" {
+		t.Fatalf("the fixture did not parse: %s", e)
+	}
+	// 1-based, and in file order: the numbers have to name the same steps the
+	// dialog's <ol> and a failure report ("step 4") do.
+	if got, want := rb.ExpectSteps, []int{2, 4}; !slices.Equal(got, want) {
+		t.Errorf("ExpectSteps = %v, want %v", got, want)
+	}
+	if got, want := rb.ContinueOnErrorSteps, []int{3, 4}; !slices.Equal(got, want) {
+		t.Errorf("ContinueOnErrorSteps = %v, want %v", got, want)
+	}
+	// A step may carry both, and each list reports it independently — the two
+	// are separate claims about the same step, not alternatives.
+	if !slices.Contains(rb.ExpectSteps, 4) || !slices.Contains(rb.ContinueOnErrorSteps, 4) {
+		t.Error("step 4 carries both fields and must appear in both lists")
+	}
+	// A step that carries neither appears in neither, which is what lets the
+	// browser render a note only when there is something to say.
+	if slices.Contains(rb.ExpectSteps, 1) || slices.Contains(rb.ContinueOnErrorSteps, 1) {
+		t.Error("step 1 carries neither field and must not be listed")
+	}
+}
+
+// A runbook with neither field sends neither list. nil rather than an empty
+// slice, so `omitempty` drops the keys and an older client sees the listing it
+// always saw.
+func TestStepJudgementIsAbsentWhenUnused(t *testing.T) {
+	o, dir := newRunbookOrch(t)
+	writeRunbook(t, dir, "plain.yaml", "name: plain\nsteps:\n  - run: pane.last\n")
+	c := &capture{}
+	o.RunbookList(c)
+	rb := c.data.(app.RunbookListResult).Runbooks[0]
+	if rb.ExpectSteps != nil || rb.ContinueOnErrorSteps != nil {
+		t.Errorf("a plain runbook reported expect=%v continue=%v, want both nil",
+			rb.ExpectSteps, rb.ContinueOnErrorSteps)
+	}
+}
+
+// The positions are NOT capped the way the outline is. Under-reporting an
+// `expect:` would be a wrong claim about the run; not printing a line is only
+// a shorter list, and the caller is already told how many it is not showing.
+func TestStepJudgementIsNotCappedWithTheOutline(t *testing.T) {
+	o, dir := newRunbookOrch(t)
+	body := "name: many\nsteps:\n"
+	for i := 0; i < maxOutlineSteps+15; i++ {
+		body += "  - run: pane.last\n    continue_on_error: true\n"
+	}
+	writeRunbook(t, dir, "many.yaml", body)
+	c := &capture{}
+	o.RunbookList(c)
+	rb := c.data.(app.RunbookListResult).Runbooks[0]
+	if len(rb.ContinueOnErrorSteps) != maxOutlineSteps+15 {
+		t.Errorf("ContinueOnErrorSteps has %d entries, want all %d — the outline's cap is not this one",
+			len(rb.ContinueOnErrorSteps), maxOutlineSteps+15)
+	}
+	// The last position names a step the outline never showed, on purpose: the
+	// step is in the file whether or not the list got that far.
+	if last := rb.ContinueOnErrorSteps[len(rb.ContinueOnErrorSteps)-1]; last <= maxOutlineSteps {
+		t.Errorf("the last reported position is %d, want one past the outline's %d lines",
+			last, maxOutlineSteps)
 	}
 }
 

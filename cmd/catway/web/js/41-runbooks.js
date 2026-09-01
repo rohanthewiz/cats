@@ -437,6 +437,65 @@
     return o.lines.concat(o.linesNote ? [o.linesNote] : []).join("\n");
   }
 
+  // maxNoteSteps bounds how many step numbers one judgement note prints.
+  //
+  // Past a dozen the note has stopped saying WHICH steps and become a second
+  // list of the list above it, which is the one thing a note under a list must
+  // not turn into. The count then carries the rest, the same way linesNote
+  // carries the steps the outline itself left out.
+  const maxNoteSteps = 12;
+
+  // stepNumbers renders positions as "step 3" / "steps 2, 5", capped.
+  //
+  // The numbers are the server's 1-based positions, which is deliberately the
+  // same numbering the <ol> above the note uses and the same one a failed run
+  // reports ("step 4"). A note that counted from zero would be readable and
+  // wrong in the one place a reader is most likely to act on it.
+  function stepNumbers(nums) {
+    const shown = nums.slice(0, maxNoteSteps);
+    const rest = nums.length - shown.length;
+    return (nums.length === 1 ? "step " : "steps ") + shown.join(", ") +
+      (rest > 0 ? ", …and " + rest + " more" : "");
+  }
+
+  // runbookJudgement is the notes that say how a runbook's steps are JUDGED:
+  // which carry an `expect:` check, and which are allowed to fail without
+  // stopping the run.
+  //
+  // These are the two fields that change what a run MEANS while changing what
+  // no step DOES, which is exactly why they are not in the outline lines — a
+  // clipped line has room for one or the other — and why they went unmentioned
+  // by every surface for five sessions. A runbook whose step 3 may fail
+  // previewed identically to one where a failure aborts everything after it,
+  // which is the more consequential of the two facts.
+  //
+  // Notes rather than markers on the lines: the positions arrive uncapped while
+  // the outline is capped at 24, so a judged step 90 has no line to mark, and a
+  // marker that silently applied only to the visible steps would under-report
+  // in precisely the long documents where it matters most.
+  //
+  // Each note leads with the YAML key rather than a paraphrase, so a reader who
+  // wants the check itself knows the word to look for once the file is open —
+  // the clause after the dash is what the key does, for a reader meeting it for
+  // the first time.
+  //
+  // Empty for a listing from a server that sends neither field, so the dialog
+  // is then exactly the one it was before this existed.
+  function runbookJudgement(rb) {
+    const notes = [];
+    const checked = rb.expect_steps || [];
+    const lenient = rb.continue_on_error_steps || [];
+    if (checked.length) {
+      notes.push("expect: " + stepNumbers(checked) +
+        " — each fails unless its check holds once it has run");
+    }
+    if (lenient.length) {
+      notes.push("continue_on_error: " + stepNumbers(lenient) +
+        " — a failure there does not stop the run");
+    }
+    return notes;
+  }
+
   // previewRunbook shows the outline with nothing attached to it.
   //
   // The gate already lists the steps, so this exists for the case the gate
@@ -459,6 +518,7 @@
   // be sure about.
   function previewRunbook(rb) {
     const run = runbookRunOf(rb.name);
+    const outline = runbookOutline(rb);
     const bits = [stepCount(rb.steps)];
     if (rb.vars && rb.vars.length) bits.push("vars: " + rb.vars.join(", "));
     // Only while something is running it. The row's dot and count already say
@@ -469,7 +529,13 @@
     dialogNotice({
       title: rb.name,
       message: (rb.description ? rb.description + " — " : "") + bits.join(" · "),
-      ...runbookOutline(rb),
+      ...outline,
+      // The judgement notes go under the list, after the truncation tail, and
+      // ONLY here. The two gates are a decision — "run this?" — and answering
+      // it takes what the steps do; this dialog exists to be read, so it is the
+      // one surface with room to also say how they are judged. dialogLines
+      // drops the tail when it is empty, so the slot can be passed either way.
+      linesNote: [outline.linesNote].concat(runbookJudgement(rb)),
     });
   }
 

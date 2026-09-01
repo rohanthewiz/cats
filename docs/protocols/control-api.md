@@ -1046,6 +1046,30 @@ that is merely not the current one. A running runbook whose listing carries no
 as *start recording* does while the recorder is busy; the sidebar row still
 shows the run.
 
+The **preview** says more than the gates do, because it is the one runbook
+dialog that exists to be read rather than agreed to. `runbook.list` carries
+`expect_steps` and `continue_on_error_steps` — the 1-based positions of the
+steps declaring an `expect:` check and of those allowed to fail — and the
+preview prints them as notes under the numbered list: *expect: steps 2, 4 —
+each fails unless its check holds once it has run*, *continue_on_error: step 3
+— a failure there does not stop the run*. Those two fields change what a run
+MEANS while changing what no step DOES, and a runbook whose step 3 may fail
+otherwise looks exactly like one where a failure aborts everything after it.
+
+Positions rather than more text in the lines. An outline line is already
+clipped to fit and has room for what a step does or for how it is judged, not
+both — and the surfaces that carry one line per step (the palette entry, the
+row's hover) have the least room of all. The positions are also **uncapped**
+where the outline is capped at 24 lines: a document is bounded at 200 steps, so
+the cost is two short arrays, and they may name a step the outline never
+printed, which is right — the step is in the file whether or not the list got
+that far. Under-reporting an `expect:` would be a wrong claim about the run;
+not printing a line is only a shorter list, and the dialog already says how
+many it left out. A listing from a server that sends neither field previews
+exactly as it did before they existed. The notes lead with the YAML key rather
+than a paraphrase, so a reader who wants the check itself knows the word to
+look for once the file is open.
+
 Files that failed to parse list too, in red, carrying the load error and opening
 in the editor rather than offering a run. The `⚡` goes amber when
 `trigger_status` says the triggers are not armed, which is the one place that

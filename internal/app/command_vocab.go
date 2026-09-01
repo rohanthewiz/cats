@@ -1841,7 +1841,28 @@ type RunbookInfo struct {
 	// A summary, not a specification: the values shown still carry their
 	// `{{ ... }}` references unresolved, since resolving them needs a run.
 	Outline []string `json:"outline,omitempty"`
-	Error   string   `json:"error,omitempty"`
+	// ExpectSteps and ContinueOnErrorSteps are the 1-based positions of the
+	// steps carrying `expect:` and `continue_on_error: true` — the two fields
+	// that change what a run MEANS without changing what any step does.
+	//
+	// Positions rather than lines because that is what they cost: an outline
+	// line is prose the server had to render and clip, while a position is
+	// three bytes that a caller already has a numbered list to resolve against.
+	// It is also why they are NOT folded into Outline — a line has room for
+	// what the step does or for how it is judged, not both, and the surfaces
+	// that show one line per step (the palette, the row's hover) are the ones
+	// with the least room of all. A caller with a whole dialog to spend, such
+	// as the browser's preview notice, reads these and says which steps.
+	//
+	// Uncapped, unlike Outline: a document is bounded at 200 steps, so the
+	// worst case here is two short int arrays, and capping them would mean
+	// under-reporting an `expect:` rather than merely not printing a line.
+	// They therefore may name steps beyond the outline's own cap, which is
+	// correct — the step is in the file whether or not the list showed it.
+	ExpectSteps          []int `json:"expect_steps,omitempty"`
+	ContinueOnErrorSteps []int `json:"continue_on_error_steps,omitempty"`
+
+	Error string `json:"error,omitempty"`
 }
 
 // RunbookListResult is CmdResult.Data for runbook.list.

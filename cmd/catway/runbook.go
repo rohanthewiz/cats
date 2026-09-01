@@ -63,6 +63,10 @@ func (o *orch) RunbookList(r app.Responder) {
 			Triggers:      rb.TriggerEvents(),
 			TriggerStatus: o.runbookTriggerStatus(rb),
 			Outline:       stepOutline(rb),
+			// Judgement rides alongside the outline rather than inside it —
+			// see stepJudgement for why the two are separate fields.
+			ExpectSteps:          stepJudgement(rb, func(st runbook.Step) bool { return st.Expect != "" }),
+			ContinueOnErrorSteps: stepJudgement(rb, func(st runbook.Step) bool { return st.ContinueOnError }),
 		})
 	}
 	for _, b := range set.Broken {
@@ -87,8 +91,15 @@ func (o *orch) RunbookList(r app.Responder) {
 // are real and both change what the run MEANS, but a line already truncated to
 // fit a dialog has room for what the step does or for how it is judged, not
 // both — and "what will this do to my session" is the question a preview is
-// answering. The file answers the other one, and "open in editor" is one
-// right-click away.
+// answering.
+//
+// They are not lost, though. Keeping them out of the LINE is not the same as
+// keeping them off the wire, and for five sessions it was treated as if it
+// were: they went unmentioned by every surface, so a runbook whose step 3 is
+// allowed to fail previewed identically to one where it is not. stepJudgement
+// reports their POSITIONS instead, which costs a line nothing and lets a
+// caller with room below the list — the browser's preview notice — say which
+// steps without crowding any of them.
 
 const (
 	// outlineLineBudget bounds one step's line. Sized for a modal at a
@@ -116,6 +127,26 @@ func stepOutline(rb *runbook.Runbook) []string {
 	out := make([]string, 0, n)
 	for _, st := range rb.Steps[:n] {
 		out = append(out, clip(stepLine(st), outlineLineBudget))
+	}
+	return out
+}
+
+// stepJudgement lists the 1-based positions of the steps matching pred.
+//
+// One function with a predicate rather than two near-identical loops: the two
+// fields differ only in which bit of a Step they read, and the part that is
+// easy to get wrong — the off-by-one between a slice index and the number the
+// <ol> in the dialog (and a failure report's "step 4") uses — is then written
+// once.
+//
+// nil for no matches, so the field is omitted from the JSON entirely and a
+// client's `if (list.length)` and a client's `if (list)` agree.
+func stepJudgement(rb *runbook.Runbook, pred func(runbook.Step) bool) []int {
+	var out []int
+	for i, st := range rb.Steps {
+		if pred(st) {
+			out = append(out, i+1)
+		}
 	}
 	return out
 }

@@ -248,9 +248,17 @@
   //
   // An <ol> so the numbering is the browser's and matches how the thing being
   // previewed numbers itself — a runbook failure reported as "step 4" names the
-  // fourth line here. opts.linesNote is the tail for a list that was cut short
-  // ("…and 180 more steps"): it sits outside the list because it is not one of
-  // the items, and numbering it would claim there is a step that says that.
+  // fourth line here, and so does a note underneath saying step 4 is allowed to
+  // fail. opts.linesNote is what goes under the list: the tail for a list that
+  // was cut short ("…and 180 more steps"), and any further remark ABOUT the
+  // list rather than in it. Such remarks sit outside the <ol> because numbering
+  // them would claim there is a step that says that.
+  //
+  // A string or an array of them, and empty entries are dropped. The array form
+  // exists so a caller that has two things to say does not have to join them
+  // into one sentence — each is its own hint line, and a caller whose optional
+  // first note is absent (a list that was NOT cut short) can still pass the
+  // slot and let this decide.
   //
   // The lines arrive already truncated. This deliberately does not shorten them
   // further — the sender knows what it is describing and how much of it matters,
@@ -267,9 +275,9 @@
       ol.appendChild(li);
     }
     body.appendChild(ol);
-    if (opts.linesNote) {
+    for (const note of [].concat(opts.linesNote || []).filter(Boolean)) {
       const more = document.createElement("div");
-      more.className = "hint steplist-more"; more.textContent = opts.linesNote;
+      more.className = "hint steplist-more"; more.textContent = note;
       body.appendChild(more);
     }
   }
