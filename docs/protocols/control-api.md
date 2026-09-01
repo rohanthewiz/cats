@@ -1009,6 +1009,17 @@ empty one. The row's tooltip names that entry wherever it exists — *right-clic
 to preview the steps*, and on a running row, where there is no click left, that
 hint is the whole of what it offers.
 
+The **command palette** reads the same outline. Its `run runbook: …` entries are
+one line each, so they spend it on the first step and the total — `built:
+pane.split direction="right" pane=1` beside `3 steps` — with the whole outline on
+hover; Enter reaches the gate, which lists it properly. The first step rather
+than the description, because that is the field that tells `deploy` from
+`deploy-staging` once the names have stopped doing it, and it is searchable for
+the same reason it is shown: the palette matches on what a row renders, so a
+query that finds a runbook by something it *does* has the reason on screen. An
+entry from a server that sends no `outline` is exactly the entry it was before —
+the name alone, no step line, no count.
+
 Files that failed to parse list too, in red, carrying the load error and opening
 in the editor rather than offering a run. The `⚡` goes amber when
 `trigger_status` says the triggers are not armed, which is the one place that

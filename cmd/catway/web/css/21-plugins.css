@@ -9,10 +9,10 @@
      for the common installed case, was 52px of nothing pushing the label into
      truncation. */
   .modal.plugins .row .kind { width:auto; }
-  /* The linked-checkout path. Shrinks before the label does (flex 0 1 auto with
-     min-width:0) so a deep path truncates instead of pushing the buttons off. */
-  .pal .row .sub { color:var(--muted); font-size:11px; flex:0 1 auto; min-width:0;
-    overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+  /* The linked-checkout path uses .sub, which now has a second caller (the
+     palette's runbook entries) and so lives with the rest of the row chrome in
+     20-palette.css. It still truncates before the label does, which is what
+     keeps a deep path from pushing the buttons off the row. */
   .pal .row .acts { margin-left:auto; display:flex; gap:4px; flex:none; }
   .pal .row .acts button { background:var(--panel); color:var(--fg); border:1px solid var(--line);
     border-radius:4px; padding:1px 8px; font:inherit; font-size:11px; cursor:pointer; }

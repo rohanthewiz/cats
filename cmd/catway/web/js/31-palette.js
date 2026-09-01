@@ -47,7 +47,31 @@
     // carries the parse error that makes them actionable.
     for (const rb of runbookItems) {
       if (rb.error) continue;
-      items.push({ label: "run runbook: " + rb.name + "…", fn: () => startRunbookRun(rb) });
+      // The listing carries an outline, so the entry can say what the runbook
+      // DOES and not only what somebody called it. Three depths, because a
+      // palette row is one line and an outline is up to two dozen:
+      //
+      //   sub    the first step — always visible, and what tells "deploy" from
+      //          "deploy-staging" when the names have stopped doing it.
+      //   meta   the total, which is what makes the sub readable as ONE of N
+      //          rather than as the whole runbook.
+      //   title  the outline entire, for the mouse. Enter reaches the same list
+      //          in the gate, so this is the hover shortcut, not the only route.
+      //
+      // Without an outline (a server too old to send one) all three stay empty
+      // and the entry is exactly the one it was before this existed — the same
+      // fallback runbookOutline takes in the dialogs.
+      const lead = runbookLead(rb);
+      items.push({
+        label: "run runbook: " + rb.name + "…",
+        sub: lead,
+        meta: lead ? stepCount(rb.steps) : "",
+        // The name is already in the label, so the hover is the steps and
+        // nothing else; repeating the row above it would push the tail note
+        // ("…and N more steps") further from the eye that needs it.
+        title: lead ? runbookOutlineText(rb) : "",
+        fn: () => startRunbookRun(rb),
+      });
     }
     if (f !== null) {
       items.push(
@@ -73,7 +97,14 @@
         { label: "close workspace…", fn: () => confirmCloseWorkspace(aw) },
       );
     }
-    return items.map((it) => ({ kind: "cmd", label: it.label, meta: "", fn: it.fn }));
+    // Commands carried no columns but their label until the runbook entries
+    // gained an outline to show, so the extras are defaulted here rather than
+    // spelled out on the twenty-odd entries that have none.
+    return items.map((it) => ({
+      kind: "cmd", label: it.label,
+      meta: it.meta || "", sub: it.sub || "", title: it.title || "",
+      fn: it.fn,
+    }));
   }
 
   // fuzzyScore: subsequence match with a run bonus and a word-start bonus;
@@ -114,8 +145,15 @@
     const filtered = () => {
       const all = paneItems.concat(items);
       if (!query) return all;
+      // The haystack is exactly what the row RENDERS — label, meta, kind, and
+      // now the sub. A field that is searched but not shown produces the worst
+      // row in a fuzzy list: one that matched for a reason you cannot see. That
+      // rule also decides the question the outline raises: only the first step
+      // is searchable, because only the first step is on screen. The other
+      // twenty-three are one Enter away in the gate, which is a list you read
+      // rather than one you filter.
       return all
-        .map((it) => ({ it, s: fuzzyScore(query, it.label + " " + it.meta + " " + it.kind) }))
+        .map((it) => ({ it, s: fuzzyScore(query, it.label + " " + it.meta + " " + it.kind + " " + (it.sub || "")) }))
         .filter((x) => x.s >= 0)
         .sort((a, b) => b.s - a.s)
         .map((x) => x.it);
@@ -135,6 +173,19 @@
         const kind = document.createElement("span"); kind.className = "kind"; kind.textContent = it.kind;
         const lbl = document.createElement("span"); lbl.className = "lbl"; lbl.textContent = it.label;
         row.appendChild(kind); row.appendChild(lbl);
+        // Between the label and the right-aligned meta, and the only part of
+        // the row that gives way when the modal runs out of width (the
+        // stylesheet's min-width:0) — a clipped step line still reads, a
+        // clipped runbook name does not.
+        if (it.sub) {
+          const sub = document.createElement("span");
+          sub.className = "sub"; sub.textContent = it.sub;
+          row.appendChild(sub);
+        }
+        // Only where a row asked for one. A title on every row would put a
+        // tooltip under the pointer as it travels the list, and the list is
+        // navigated with the keyboard anyway.
+        if (it.title) row.title = it.title;
         if (it.meta) {
           const meta = document.createElement("span");
           meta.className = "meta" + (it.stateClass ? " " + it.stateClass : "");

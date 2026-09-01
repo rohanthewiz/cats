@@ -340,6 +340,35 @@
     };
   }
 
+  // runbookLead is the single outline line a ONE-LINE surface can carry: the
+  // first step.
+  //
+  // The first step rather than the description, which is what a row this narrow
+  // would otherwise reach for. A description is optional and, where it exists,
+  // usually restates the name in a longer form ("deploy — deploys the app");
+  // step one is the fact that separates two runbooks whose names have stopped
+  // separating them, which is exactly the moment a fuzzy list stops helping.
+  //
+  // Empty without an outline, so a caller can fall back to the entry it had
+  // before this existed rather than invent a line.
+  function runbookLead(rb) {
+    const lines = rb.outline || [];
+    return lines.length ? lines[0] : "";
+  }
+
+  // runbookOutlineText is the whole outline as one block of text, for a surface
+  // that can hold it on hover but not on screen.
+  //
+  // Built on runbookOutline so the truncation tail is worded in ONE place: a
+  // hover that stopped silently at 24 of 200 steps would be the same lie the
+  // dialogs took the trouble to avoid, and a second copy of the wording is how
+  // the two drift.
+  function runbookOutlineText(rb) {
+    const o = runbookOutline(rb);
+    if (!o.lines) return "";
+    return o.lines.concat(o.linesNote ? [o.linesNote] : []).join("\n");
+  }
+
   // previewRunbook shows the outline with nothing attached to it.
   //
   // The gate already lists the steps, so this exists for the case the gate

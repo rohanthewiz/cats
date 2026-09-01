@@ -6,6 +6,14 @@
   .pal .row.sel, .pal .row:hover { background:var(--chrome-focus); }
   .pal .row .kind { flex:none; width:52px; color:var(--muted); font-size:10px; text-transform:uppercase; letter-spacing:.5px; }
   .pal .row .lbl { overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+  /* The secondary column, shared by two surfaces that both want a muted line
+     after the label: a runbook entry's first step here, and the plugins
+     dialog's linked-checkout path (21-plugins.css). It is the part that gives
+     way — flex 0 1 auto with min-width:0 makes it shrink before .lbl, whose
+     nowrap min-content keeps the name whole — because a clipped step line still
+     reads and a clipped name does not. */
+  .pal .row .sub { color:var(--muted); font-size:11px; flex:0 1 auto; min-width:0;
+    overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
   .pal .row .meta { margin-left:auto; color:var(--muted); font-size:11px; flex:none; }
   .pal .empty { padding:10px 12px; color:var(--muted); font-style:italic; }
 

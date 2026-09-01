@@ -30,7 +30,7 @@ GIT_HASH  := $(shell git rev-parse --short HEAD 2>/dev/null)
 GIT_SUBJ  := $(shell git log -1 --pretty=%s 2>/dev/null | base64 | tr -d '\n')
 STAMP     := -ldflags "-X $(STAMP_PKG).hash=$(GIT_HASH) -X $(STAMP_PKG).subjectB64=$(GIT_SUBJ)"
 
-.PHONY: all vt build test build-ghostty test-ghostty race-ghostty binaries \
+.PHONY: all vt build test jstest build-ghostty test-ghostty race-ghostty binaries \
         local dist macapp macapp-client fmt-check vet vet-ghostty check clean
 
 all: binaries
@@ -47,6 +47,14 @@ build:
 
 test:
 	go test ./...
+
+# The front-end's own tests. cmd/catway/web/js/ is one closure with no exports,
+# so these lift functions out of the part files and evaluate them against stubs
+# — see cmd/catway/web/jstest/testutil.mjs. Node only; skipped, loudly, where
+# there is none, because nothing else in the build needs it.
+jstest:
+	@command -v node >/dev/null 2>&1 || { echo "jstest: node not found — skipping the front-end tests"; exit 0; }
+	@for t in cmd/catway/web/jstest/*.test.mjs; do node "$$t" || exit 1; done
 
 # --- ghostty-tagged (the real terminal path) ----------------------------------
 
@@ -166,7 +174,7 @@ vet-ghostty:
 	$(GHOSTTY) go vet $(TAGS) ./...
 
 # Everything CI runs, in order.
-check: fmt-check vet build test vet-ghostty race-ghostty
+check: fmt-check vet build test jstest vet-ghostty race-ghostty
 
 clean:
 	rm -rf bin dist

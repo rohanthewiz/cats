@@ -29,6 +29,9 @@ jobs:
       - run: make vet
       - run: make build
       - run: make test
+      # The front-end suite. ubuntu-latest ships node, so this is a real run
+      # rather than the skip the target falls back to locally.
+      - run: make jstest
 
   # The real terminal path: build the vendored VT engine, then vet + race-test
   # everything with -tags ghostty.

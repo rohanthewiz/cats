@@ -115,11 +115,21 @@ flowchart TD
   B["vet<br/>untagged"]
   C["build<br/>untagged"]
   D["test<br/>untagged"]
+  J["jstest<br/>cmd/catway/web/jstest/*.test.mjs"]
   E["vet-ghostty"]
   F["race-ghostty<br/>go test -tags ghostty -race ./..."]
 
-  A --> B --> C --> D --> E --> F
+  A --> B --> C --> D --> J --> E --> F
 ```
+
+`jstest` is the front end's own suite. `cmd/catway/web/js/` ships as one closure
+with no exports (see the note atop `assets.go`), so nothing there can be
+imported: the harness lifts a function's source out of its part file and
+evaluates it against stubs the test supplies, which is enough for the string- and
+list-building half of the UI and needs no DOM. It also compiles the whole
+concatenated bundle, which is the only check that catches a `const` declared in
+two part files — a syntax error that would reach the browser as a blank page. It
+runs on `node` and skips itself, with a message, where there is none.
 
 CI (`.github/workflows/ci.yml`) runs the untagged quick checks on Linux first for a
 fast signal, then the ghostty-tagged race tests on **both** Linux and macOS.
