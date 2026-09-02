@@ -600,7 +600,7 @@ func (d *Dispatcher) dispatch(name string, dec ParamDecoder, r Responder) {
 		// Stage before ApplyModel, which is what creates the new pane's PTY. An
 		// explicit cwd always wins over the inherited one — same precedence
 		// tab.create gives its params over the neighbor tab's directory.
-		ov, stage := sp.spawnOverride()
+		ov, stage := sp.SpawnOverride()
 		if ov.Cwd == "" && inherited != "" {
 			ov.Cwd, stage = inherited, true
 		}
@@ -805,7 +805,7 @@ func (d *Dispatcher) dispatch(name string, dec ParamDecoder, r Responder) {
 		// Stage the spawn override before ApplyModel: that call reconciles the
 		// daemon's PTY set and is what actually creates the pane's process. An
 		// explicit cwd always wins over the inherited one.
-		ov, stage := p.spawnOverride()
+		ov, stage := p.SpawnOverride()
 		if ov.Cwd == "" && inherited != "" {
 			ov.Cwd, stage = inherited, true
 		}
@@ -1227,7 +1227,7 @@ func (d *Dispatcher) dispatch(name string, dec ParamDecoder, r Responder) {
 				return
 			}
 		}
-		if err := uniqueActionIDs(p.Actions); err != nil {
+		if err := UniqueActionIDs(p.Actions); err != nil {
 			r.Fail(err.Error())
 			return
 		}

@@ -1,6 +1,8 @@
 package app
 
 import (
+	"github.com/rohanthewiz/cats/wire"
+
 	"encoding/json"
 	"reflect"
 	"strconv"
@@ -206,7 +208,7 @@ var recordedParamClasses = map[string]map[string]string{
 // nothing above describes a field or a command that no longer exists.
 func TestRecordedParamsAreClassified(t *testing.T) {
 	seen := map[string]bool{}
-	for _, spec := range commandSpecs {
+	for _, spec := range wire.CommandSpecs() {
 		if !spec.Recorded {
 			if _, listed := recordedParamClasses[spec.Name]; listed {
 				t.Errorf("%s is listed in recordedParamClasses but is not Recorded", spec.Name)
@@ -239,7 +241,7 @@ func TestRecordedParamsAreClassified(t *testing.T) {
 // nested field would be read by nothing, so finding one means the walk has to
 // grow rather than the tag being trusted.
 func TestNoClassificationHidesInANestedStruct(t *testing.T) {
-	for _, spec := range commandSpecs {
+	for _, spec := range wire.CommandSpecs() {
 		for _, root := range []any{spec.Params, spec.Result} {
 			if root == nil {
 				continue
@@ -276,7 +278,7 @@ func findNestedTags(t *testing.T, path string, rt reflect.Type, depth int) {
 func TestEveryHandleKindHasAProducer(t *testing.T) {
 	produced := map[string]bool{}
 	consumed := map[string]bool{}
-	for _, spec := range commandSpecs {
+	for _, spec := range wire.CommandSpecs() {
 		if !spec.Recorded {
 			continue
 		}

@@ -1,4 +1,4 @@
-package app
+package wire
 
 import (
 	"errors"
@@ -8,9 +8,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/rohanthewiz/cats/internal/flags"
-	"github.com/rohanthewiz/cats/internal/layout"
 )
 
 // This file is the protocol-neutral §7 command vocabulary: the command names,
@@ -491,17 +488,6 @@ const (
 	SplitV = "v" // top/bottom (layout.Vertical)
 )
 
-// SplitDirection maps a wire direction value onto layout.Direction.
-func SplitDirection(s string) (layout.Direction, bool) {
-	switch s {
-	case SplitH:
-		return layout.Horizontal, true
-	case SplitV:
-		return layout.Vertical, true
-	}
-	return 0, false
-}
-
 // Cardinal direction wire values (pane.focus_direction, pane.swap).
 const (
 	DirLeft  = "left"
@@ -509,21 +495,6 @@ const (
 	DirUp    = "up"
 	DirDown  = "down"
 )
-
-// NavDirection maps a wire cardinal value onto layout.NavDirection.
-func NavDirection(s string) (layout.NavDirection, bool) {
-	switch s {
-	case DirLeft:
-		return layout.Left, true
-	case DirRight:
-		return layout.Right, true
-	case DirUp:
-		return layout.Up, true
-	case DirDown:
-		return layout.Down, true
-	}
-	return 0, false
-}
 
 // BorderPath decodes a border id ("r" + one '0'/'1' per split step, e.g. "r01",
 // produced by browserproto.BorderID) back into a split path for
@@ -589,7 +560,7 @@ func (p SplitParams) Validate() error { return validateSpawnCommand(p.Command) }
 
 // spawnOverride extracts the runtime-relevant fields; the zero flag tells the
 // dispatcher whether staging is needed at all.
-func (p SplitParams) spawnOverride() (SpawnOverride, bool) {
+func (p SplitParams) SpawnOverride() (SpawnOverride, bool) {
 	return newSpawnOverride(p.Cwd, p.Command, p.Env)
 }
 
@@ -637,7 +608,7 @@ type CycleParams struct {
 }
 
 // FlagInfo is a user flag as it appears on the wire: three flat fields,
-// embedded into every struct that can carry one (WorkspaceInfo, PaneInfo, and
+// embedded into every struct that can carry one (WorkspaceEntry, PaneInfo, and
 // their browserproto counterparts).
 //
 // Flat rather than a nested object, and embedded rather than repeated, for two
@@ -661,15 +632,6 @@ type FlagInfo struct {
 	// changed — a client that wants "flagged 3d ago" subtracts it from its own
 	// clock and re-renders on its own tick.
 	FlagAtMs int64 `json:"flag_at_ms,omitempty"`
-}
-
-// NewFlagInfo projects a model flag onto the wire; a nil flag yields the zero
-// FlagInfo, which is the unflagged encoding.
-func NewFlagInfo(f *flags.Flag) FlagInfo {
-	if f == nil {
-		return FlagInfo{}
-	}
-	return FlagInfo{Flag: string(f.Kind), FlagNote: f.Note, FlagAtMs: f.AtMs}
 }
 
 // FlagPaneParams: pane.flag. Kind "" clears the flag, the same way an empty
@@ -719,8 +681,8 @@ type FlagListParams struct {
 // Both slices are always present, empty rather than null, so a client can loop
 // over them without a nil check.
 type FlagListResult struct {
-	Workspaces []WorkspaceInfo `json:"workspaces"`
-	Panes      []PaneInfo      `json:"panes"`
+	Workspaces []WorkspaceEntry `json:"workspaces"`
+	Panes      []PaneInfo       `json:"panes"`
 }
 
 // RenamePaneParams: pane.rename ("" clears the custom name).
@@ -1048,8 +1010,8 @@ type SessionInfoResult struct {
 	Cwd             string `json:"cwd"`
 }
 
-// WorkspaceInfo describes one workspace for workspace.list.
-type WorkspaceInfo struct {
+// WorkspaceEntry describes one workspace for workspace.list.
+type WorkspaceEntry struct {
 	ID       string `json:"id"`   // stable public handle, e.g. "w1"
 	Name     string `json:"name"` // display name (custom or auto)
 	Active   bool   `json:"active"`
@@ -1067,11 +1029,11 @@ type WorkspaceInfo struct {
 
 // WorkspaceListResult is CmdResult.Data for workspace.list.
 type WorkspaceListResult struct {
-	Workspaces []WorkspaceInfo `json:"workspaces"`
+	Workspaces []WorkspaceEntry `json:"workspaces"`
 }
 
-// TabInfo describes one tab for tab.list.
-type TabInfo struct {
+// TabEntry describes one tab for tab.list.
+type TabEntry struct {
 	Num    int    `json:"num"`  // stable public tab number
 	Name   string `json:"name"` // display name (custom or the number)
 	Active bool   `json:"active"`
@@ -1082,8 +1044,8 @@ type TabInfo struct {
 // TabListResult is CmdResult.Data for tab.list. Workspace echoes the resolved
 // workspace id (useful when the request omitted it and got the active one).
 type TabListResult struct {
-	Workspace string    `json:"workspace"`
-	Tabs      []TabInfo `json:"tabs"`
+	Workspace string     `json:"workspace"`
+	Tabs      []TabEntry `json:"tabs"`
 }
 
 // PaneInfo describes one pane for pane.list / pane.get. Pane is the internal id
@@ -1240,7 +1202,7 @@ type SpawnOverride struct {
 
 // spawnOverride extracts the runtime-relevant fields; the zero flag tells the
 // dispatcher whether staging is needed at all.
-func (p TabCreateParams) spawnOverride() (SpawnOverride, bool) {
+func (p TabCreateParams) SpawnOverride() (SpawnOverride, bool) {
 	return newSpawnOverride(p.Cwd, p.Command, p.Env)
 }
 
@@ -2145,16 +2107,6 @@ func (e EditorInfo) IsEditorAgent(agent string) bool {
 	return false
 }
 
-// optPaneID converts an optional wire pane id into an optional layout.PaneID
-// (nil = the focused pane).
-func optPaneID(p *uint32) *layout.PaneID {
-	if p == nil {
-		return nil
-	}
-	id := layout.PaneID(*p)
-	return &id
-}
-
 // uniqueActionIDs fills in an empty action id from its index and reports a
 // collision. Two buttons sharing an id is not a cosmetic problem: the id is the
 // whole address of an action, so the second one would be unreachable and the
@@ -2164,7 +2116,7 @@ func optPaneID(p *uint32) *layout.PaneID {
 // The generated ids are "1", "2", … rather than the labels, because a label is
 // display text (it gets translated, it gets emoji, it collides) and an id is an
 // address.
-func uniqueActionIDs(actions []NotifyAction) error {
+func UniqueActionIDs(actions []NotifyAction) error {
 	seen := make(map[string]bool, len(actions))
 	for i := range actions {
 		if actions[i].ID == "" {

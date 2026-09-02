@@ -29,7 +29,7 @@ import (
 // groups additionally preserves each const block's membership IN DECLARATION
 // ORDER, keyed by its first member. That ordering is load-bearing twice over:
 // the emitter walks a group to write a Dart constant class, and the message
-// roots are discovered by walking browserproto's Type block and probing the
+// roots are discovered by walking wire's Type block and probing the
 // real decoder with each value — so a message type added to the block and wired
 // into DecodeDown reaches Dart without anyone editing this generator.
 type source struct {

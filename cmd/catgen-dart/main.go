@@ -15,9 +15,10 @@
 //	reflect  →  field set, JSON tags, omitempty, embedding, ALIASES, Go kinds
 //	go/ast   →  doc comments, const-block names and values
 //
-// internal/browserproto/cmd.go is ~50 type aliases into internal/app, which a
-// pure AST walk would have to chase by hand; and the doc comments — the best
-// documentation in this repo — are invisible to reflect. So: both.
+// The vocabulary and the messages share package wire, whose embedded structs
+// and typed constants a pure AST walk would have to chase by hand; and the doc
+// comments — the best documentation in this repo — are invisible to reflect.
+// So: both.
 //
 // # The drift gate
 //
@@ -41,21 +42,19 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/rohanthewiz/cats/internal/app"
-	"github.com/rohanthewiz/cats/internal/browserproto"
+	"github.com/rohanthewiz/cats/wire"
 )
 
 const modPath = "github.com/rohanthewiz/cats"
 
 // Package import paths, spelled once.
 const (
-	pkgBrowserProto = modPath + "/internal/browserproto"
-	pkgApp          = modPath + "/internal/app"
-	pkgOrch         = modPath + "/internal/orchestration"
+	pkgWire = modPath + "/wire"
+	pkgOrch = modPath + "/internal/orchestration"
 )
 
 // sourceDirs are the package directories go/ast reads, repo-root relative.
-var sourceDirs = []string{"internal/browserproto", "internal/app", "internal/orchestration"}
+var sourceDirs = []string{"wire", "internal/orchestration"}
 
 func main() {
 	out := flag.String("out", "", "directory to write the generated Dart into")
@@ -183,34 +182,34 @@ type message struct {
 }
 
 // messageRoots discovers every message type WITHOUT a hand-written list, by
-// walking browserproto's Type const block and asking the real decoders what
+// walking wire's Type const block and asking the real decoders what
 // each value decodes to. A type added to the block and wired into DecodeDown
 // therefore reaches Dart with no edit here — and one added to the block but
 // never routed fails generation, which is the same bidirectional check
 // TestCommandSpecsRouted makes for commands.
 func messageRoots(src *source, reg *registry) ([]message, error) {
-	names := src.groups[pkgBrowserProto+".MsgWelcome"]
+	names := src.groups[pkgWire+".MsgWelcome"]
 	if len(names) == 0 {
-		return nil, fmt.Errorf("browserproto's Type const block was not found; " +
+		return nil, fmt.Errorf("wire's Type const block was not found; " +
 			"did the first constant stop being MsgWelcome?")
 	}
 	var out []message
 	for _, name := range names {
-		c := src.consts[pkgBrowserProto+"."+name]
+		c := src.consts[pkgWire+"."+name]
 		if c == nil {
-			return nil, fmt.Errorf("browserproto.%s did not resolve to a literal", name)
+			return nil, fmt.Errorf("wire.%s did not resolve to a literal", name)
 		}
 		disc := strings.Trim(c.dart, "'")
 		envelope := []byte(fmt.Sprintf(`{"t":%q}`, disc))
 
 		var v any
 		up := false
-		if down, err := browserproto.DecodeDown(envelope); err == nil {
+		if down, err := wire.DecodeDown(envelope); err == nil {
 			v = down
-		} else if u, err := browserproto.DecodeUp(envelope); err == nil {
+		} else if u, err := wire.DecodeUp(envelope); err == nil {
 			v, up = u, true
 		} else {
-			return nil, fmt.Errorf("browserproto.%s (%q) is in the Type block but neither "+
+			return nil, fmt.Errorf("wire.%s (%q) is in the Type block but neither "+
 				"DecodeUp nor DecodeDown routes it", name, disc)
 		}
 		reg.curFile = fileWire
@@ -225,18 +224,18 @@ func messageRoots(src *source, reg *registry) ([]message, error) {
 
 // commandCall is one §7 command with its Dart-side shapes resolved.
 type commandCall struct {
-	spec   app.CommandSpec
+	spec   wire.CommandSpec
 	dart   string // Dart method / constant name
 	params *classDef
 	result *classDef
 }
 
-// commandRoots resolves app.CommandSpecs() — the same table `catctl commands`
+// commandRoots resolves wire.CommandSpecs() — the same table `catctl commands`
 // prints — into Dart classes. The table is the point: 47 hand-written call
 // sites become 47 generated typed methods, and the "silently dropped without an
 // id" rule arrives as a documented property rather than a bug hunt.
 func commandRoots(reg *registry) ([]commandCall, error) {
-	specs := app.CommandSpecs()
+	specs := wire.CommandSpecs()
 	out := make([]commandCall, 0, len(specs))
 	reg.curFile = fileCommands
 	for _, spec := range specs {
@@ -271,7 +270,7 @@ func commandIdent(name string) string {
 func emitWire(src *source, reg *registry, msgs []message) (string, error) {
 	e := &emitter{src: src, reg: reg}
 	e.header("The WS9 browser-facing protocol: every message shape, both directions.",
-		[]string{"internal/browserproto/{proto,up,down,frame,layout}.go"})
+		[]string{"wire/{proto,up,down}.go"})
 
 	e.p("// ignore_for_file: deprecated_member_use_from_same_package")
 	e.nl()
@@ -288,35 +287,35 @@ func emitWire(src *source, reg *registry, msgs []message) (string, error) {
 	e.p("//     import 'package:catsproto/catsproto.dart' as cats;")
 	e.nl()
 
-	if err := e.topConst(pkgBrowserProto, "ProtocolVersion", "kProtocolVersion", "int",
+	if err := e.topConst(pkgWire, "ProtocolVersion", "kProtocolVersion", "int",
 		"Sent in `init.v` and echoed in `welcome.v`. catway requires EXACT equality\n"+
 			"and closes the socket on a mismatch, so a bump means \"app update required\"\n"+
 			"— never a silent degrade."); err != nil {
 		return "", err
 	}
-	if err := e.topConst(pkgBrowserProto, "UsagePctUnknown", "kUsagePctUnknown", "double",
+	if err := e.topConst(pkgWire, "UsagePctUnknown", "kUsagePctUnknown", "double",
 		"Render a window at this percentage as TEXT (its `detail`), never as a bar at\n"+
 			"zero: a missing denominator must read as missing, not as \"nothing spent\"."); err != nil {
 		return "", err
 	}
 
 	groups := []constGroup{
-		{class: "MsgType", pkg: pkgBrowserProto, first: "MsgWelcome", strip: "Msg", typ: "String",
+		{class: "MsgType", pkg: pkgWire, first: "MsgWelcome", strip: "Msg", typ: "String",
 			doc: "Every `t` discriminator, both directions. Unknown values must be IGNORED\n" +
 				"rather than treated as errors — that rule is what lets the server add a\n" +
 				"message type without a version bump."},
-		{class: "KeyKind", pkg: pkgBrowserProto, first: "KeyDown", strip: "Key", typ: "String",
+		{class: "KeyKind", pkg: pkgWire, first: "KeyDown", strip: "Key", typ: "String",
 			doc: "Key event kinds (`key.kind`)."},
-		{class: "Mods", pkg: pkgBrowserProto, first: "ModShift", strip: "Mod", typ: "int",
+		{class: "Mods", pkg: pkgWire, first: "ModShift", strip: "Mod", typ: "int",
 			doc: "Modifier bits for `key.mods` / `mouse.mods`."},
-		{class: "MouseKind", pkg: pkgBrowserProto, first: "MouseDown", strip: "Mouse", typ: "String",
+		{class: "MouseKind", pkg: pkgWire, first: "MouseDown", strip: "Mouse", typ: "String",
 			doc: "Pointer event kinds (`mouse.kind`)."},
-		{class: "MouseButton", pkg: pkgBrowserProto, first: "BtnLeft", strip: "Btn", typ: "int",
+		{class: "MouseButton", pkg: pkgWire, first: "BtnLeft", strip: "Btn", typ: "int",
 			doc: "Pointer buttons (`mouse.btn`)."},
-		{class: "AgentState", pkg: pkgBrowserProto, first: "AgentIdle", strip: "Agent", typ: "String",
+		{class: "AgentState", pkg: pkgWire, first: "AgentIdle", strip: "Agent", typ: "String",
 			doc: "Agent activity states. The roster groups by these, and `seen: false`\n" +
 				"renders as \"Done\" — the \"your agent finished while you were away\" signal."},
-		{class: "Caps", pkg: pkgBrowserProto, first: "CapViewer", strip: "Cap", typ: "String",
+		{class: "Caps", pkg: pkgWire, first: "CapViewer", strip: "Cap", typ: "String",
 			doc: "Optional server behaviours, advertised in `welcome.caps`.\n" +
 				"\n" +
 				"Check these rather than assuming. A server that ignored `key.pane` looks\n" +
@@ -384,7 +383,7 @@ func emitDecoder(e *emitter, msgs []message, up bool) {
 func emitCommands(src *source, reg *registry, calls []commandCall) (string, error) {
 	e := &emitter{src: src, reg: reg}
 	e.header("The §7 command vocabulary: names, params, results, and a typed client.",
-		[]string{"internal/app/command_vocab.go (app.CommandSpecs)"})
+		[]string{"wire/vocab.go (wire.CommandSpecs)"})
 
 	e.p("import 'dart:convert';")
 	e.p("import 'dart:typed_data';")
@@ -402,9 +401,9 @@ func emitCommands(src *source, reg *registry, calls []commandCall) (string, erro
 	e.nl()
 
 	groups := []constGroup{
-		{class: "SplitDir", pkg: pkgApp, first: "SplitH", strip: "Split", typ: "String",
+		{class: "SplitDir", pkg: pkgWire, first: "SplitH", strip: "Split", typ: "String",
 			doc: "Split directions (`pane.split`)."},
-		{class: "NavDir", pkg: pkgApp, first: "DirLeft", strip: "Dir", typ: "String",
+		{class: "NavDir", pkg: pkgWire, first: "DirLeft", strip: "Dir", typ: "String",
 			doc: "Cardinal directions (`pane.focus_direction`, `pane.swap`)."},
 	}
 	for _, g := range groups {
@@ -449,7 +448,7 @@ func emitCommands(src *source, reg *registry, calls []commandCall) (string, erro
 }
 
 func emitCommandSpecs(e *emitter, calls []commandCall) {
-	e.p("/// One §7 command as data, mirroring app.CommandSpec.")
+	e.p("/// One §7 command as data, mirroring wire.CommandSpec.")
 	e.p("class CommandSpec {")
 	e.p("  const CommandSpec(")
 	e.p("    this.name, {")

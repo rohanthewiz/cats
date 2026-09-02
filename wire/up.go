@@ -1,4 +1,4 @@
-package browserproto
+package wire
 
 import "encoding/json"
 

@@ -1,10 +1,8 @@
-package browserproto
+package wire
 
 import (
 	"encoding/json"
 	"time"
-
-	"github.com/rohanthewiz/cats/internal/app"
 )
 
 // --- Session (§2) -------------------------------------------------------------
@@ -151,7 +149,7 @@ type WorkspaceInfo struct {
 	// FlagInfo is the user's annotation on this workspace (workspace.flag): a
 	// glyph with a meaning plus an optional note, drawn beside the name. Zero
 	// when unflagged, which is the usual case.
-	app.FlagInfo
+	FlagInfo
 }
 
 // TabInfo is one tab of the active workspace.
@@ -181,7 +179,7 @@ type PaneRectInfo struct {
 	// redrawn from it; the sidebar's copies of the same fact come from the
 	// agents rollup and pane.list, each of which reaches panes this message
 	// does not (it carries the active tab only).
-	app.FlagInfo
+	FlagInfo
 }
 
 // BorderInfo is one draggable split boundary (layout.SplitBorder shape). ID is
@@ -234,7 +232,7 @@ type AgentItem struct {
 	// the only message that spans every workspace: the AGENTS list is where a
 	// "come back to this one" is most often set, and most of its rows are panes
 	// the layout never mentions.
-	app.FlagInfo
+	FlagInfo
 }
 
 func NewAgents(items []AgentItem) Agents { return Agents{T: MsgAgents, Items: items} }
@@ -263,7 +261,7 @@ type HostItem struct {
 	Connected bool   `json:"connected"`
 	AddrKind  string `json:"addr_kind,omitempty"`
 	// Default marks where panes that name no host land. Spelled "is_default" for
-	// the same reason app.HostInfo's is: `default` is reserved in Dart, and the
+	// the same reason HostInfo's is: `default` is reserved in Dart, and the
 	// mobile client's types are generated from these keys.
 	Default bool `json:"is_default,omitempty"`
 	// Local marks this catway's own machine (the synthesized "local" host). The
@@ -490,14 +488,14 @@ func NewClipboard(data []byte) Clipboard { return Clipboard{T: MsgClipboard, Dat
 // look the notification up to answer it, which matters because a toast can
 // outlive the reconnect that would have invalidated any client-side handle.
 type Notify struct {
-	T       Type               `json:"t"`
-	Kind    string             `json:"kind"`
-	Message string             `json:"message"`
-	Body    string             `json:"body,omitempty"`
-	Pane    uint32             `json:"pane,omitempty"`
-	Pub     string             `json:"pub,omitempty"`
-	ID      string             `json:"id,omitempty"`
-	Actions []app.NotifyAction `json:"actions,omitempty"`
+	T       Type           `json:"t"`
+	Kind    string         `json:"kind"`
+	Message string         `json:"message"`
+	Body    string         `json:"body,omitempty"`
+	Pane    uint32         `json:"pane,omitempty"`
+	Pub     string         `json:"pub,omitempty"`
+	ID      string         `json:"id,omitempty"`
+	Actions []NotifyAction `json:"actions,omitempty"`
 }
 
 func NewNotify(kind, message, body string) Notify {
@@ -514,11 +512,11 @@ func NewNotify(kind, message, body string) Notify {
 // short, and one message that is always the complete answer costs less than a
 // delta protocol the client could fall out of step with.
 type History struct {
-	T       Type              `json:"t"`
-	Entries []app.LedgerEntry `json:"entries"`
+	T       Type          `json:"t"`
+	Entries []LedgerEntry `json:"entries"`
 }
 
-func NewHistory(entries []app.LedgerEntry) History {
+func NewHistory(entries []LedgerEntry) History {
 	return History{T: MsgHistory, Entries: entries}
 }
 

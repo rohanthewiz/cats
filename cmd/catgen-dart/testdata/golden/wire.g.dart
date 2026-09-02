@@ -3,7 +3,7 @@
 // The WS9 browser-facing protocol: every message shape, both directions.
 //
 // Source of truth (in the cats repo):
-//   internal/browserproto/{proto,up,down,frame,layout}.go
+//   wire/{proto,up,down}.go
 //
 // Regenerate:  go run ./cmd/catgen-dart -out <this directory>
 //
@@ -1047,7 +1047,7 @@ class ErrorMsg {
 }
 
 /// FlagInfo is a user flag as it appears on the wire: three flat fields,
-/// embedded into every struct that can carry one (WorkspaceInfo, PaneInfo, and
+/// embedded into every struct that can carry one (WorkspaceEntry, PaneInfo, and
 /// their browserproto counterparts).
 ///
 /// Flat rather than a nested object, and embedded rather than repeated, for two
@@ -1180,7 +1180,7 @@ class HostItem {
   final String addrKind;
 
   /// Default marks where panes that name no host land. Spelled "is_default" for
-  /// the same reason app.HostInfo's is: `default` is reserved in Dart, and the
+  /// the same reason HostInfo's is: `default` is reserved in Dart, and the
   /// mobile client's types are generated from these keys.
   final bool isDefault;
 

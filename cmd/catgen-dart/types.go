@@ -11,7 +11,7 @@ import (
 // This file is the reflect half of the hybrid: the field set, the JSON tags and
 // omitempty, embedded-struct flattening, and the Go kinds. It resolves type
 // ALIASES for free, which is why reflection is here at all —
-// internal/browserproto/cmd.go is ~50 aliases into internal/app, and a pure
+// The vocabulary and the messages share package wire now, and a pure
 // go/ast walk would have to chase every one of them by hand.
 //
 // The output is a registry of classDefs: a Dart-shaped description that the
@@ -75,16 +75,15 @@ func newRegistry(src *source) *registry {
 
 // dartNameOverrides renames a generated class. Two reasons, both hard failures
 // otherwise: a clash with dart:core (Error), and two distinct Go types that
-// share a name across packages (browserproto's layout-chrome WorkspaceInfo/
-// TabInfo versus internal/app's workspace.list/tab.list rows).
+// once shared a name across packages (the layout-chrome WorkspaceInfo/
+// TabInfo versus the workspace.list/tab.list rows, since renamed WorkspaceEntry/
+// TabEntry in Go, which is why those two entries are gone).
 //
 // Nothing here is cosmetic. `ensure` fails the generator on any unlisted clash,
 // so this table can only ever shrink by deleting a Go type, never by neglect.
 var dartNameOverrides = map[string]string{
-	"github.com/rohanthewiz/cats/internal/browserproto.Error":  "ErrorMsg",
-	"github.com/rohanthewiz/cats/internal/browserproto.Record": "RecordMsg",
-	"github.com/rohanthewiz/cats/internal/app.WorkspaceInfo":   "WorkspaceEntry",
-	"github.com/rohanthewiz/cats/internal/app.TabInfo":         "TabEntry",
+	"github.com/rohanthewiz/cats/wire.Error":  "ErrorMsg",
+	"github.com/rohanthewiz/cats/wire.Record": "RecordMsg",
 }
 
 // dartDeprecated marks a class deprecated on the Dart side only. Resize is the
@@ -93,7 +92,7 @@ var dartNameOverrides = map[string]string{
 // bites if the generator says so — Go has no reason to deprecate Resize, since
 // the browser sends it legitimately.
 var dartDeprecated = map[string]string{
-	"github.com/rohanthewiz/cats/internal/browserproto.Resize": "" +
+	"github.com/rohanthewiz/cats/wire.Resize": "" +
 		"A cats mobile client is a viewer: it never reshapes the session grid, " +
 		"because the session has one grid shared by every connection and a phone " +
 		"announcing its own size would reflow the desktop's panes. CatsConnection " +
@@ -285,10 +284,10 @@ type arrayClass struct {
 }
 
 // arrayClasses is keyed by reflect.Type.String(), which is stable and covers
-// both the named case (browserproto.Rect) and the unnamed one ([2]uint32 in
+// both the named case (wire.Rect) and the unnamed one ([2]uint32 in
 // ReadParams, where there is no Go type to hang a name on).
 var arrayClasses = map[string]*arrayClass{
-	"browserproto.Rect": {
+	"wire.Rect": {
 		dart:       "Rect",
 		components: []string{"x", "y", "w", "h"},
 		numeric:    true,

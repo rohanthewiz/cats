@@ -3,7 +3,7 @@
 // The §7 command vocabulary: names, params, results, and a typed client.
 //
 // Source of truth (in the cats repo):
-//   internal/app/command_vocab.go (app.CommandSpecs)
+//   wire/vocab.go (wire.CommandSpecs)
 //
 // Regenerate:  go run ./cmd/catgen-dart -out <this directory>
 //
@@ -2686,7 +2686,7 @@ class TabCreateResult {
       };
 }
 
-/// TabInfo describes one tab for tab.list.
+/// TabEntry describes one tab for tab.list.
 class TabEntry {
   const TabEntry({
     required this.num,
@@ -3136,7 +3136,7 @@ class WorkspaceCreateResult {
       };
 }
 
-/// WorkspaceInfo describes one workspace for workspace.list.
+/// WorkspaceEntry describes one workspace for workspace.list.
 class WorkspaceEntry {
   const WorkspaceEntry({
     required this.id,
@@ -3471,7 +3471,7 @@ class WorktreeRemoveParams {
       };
 }
 
-/// One §7 command as data, mirroring app.CommandSpec.
+/// One §7 command as data, mirroring wire.CommandSpec.
 class CommandSpec {
   const CommandSpec(
     this.name, {

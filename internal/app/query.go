@@ -37,15 +37,15 @@ func (s *Session) InfoIn(wsID string) SessionInfoResult {
 }
 
 // ListWorkspaces describes every workspace in order (workspace.list).
-func (s *Session) ListWorkspaces() []WorkspaceInfo { return s.ListWorkspacesIn("") }
+func (s *Session) ListWorkspaces() []WorkspaceEntry { return s.ListWorkspacesIn("") }
 
 // ListWorkspacesIn is ListWorkspaces with Active meaning "the one this view
 // shows" rather than "the one the session defaults to".
-func (s *Session) ListWorkspacesIn(wsID string) []WorkspaceInfo {
+func (s *Session) ListWorkspacesIn(wsID string) []WorkspaceEntry {
 	active := s.viewWorkspaceIndex(wsID)
-	out := make([]WorkspaceInfo, 0, len(s.workspaces))
+	out := make([]WorkspaceEntry, 0, len(s.workspaces))
 	for i, ws := range s.workspaces {
-		out = append(out, WorkspaceInfo{
+		out = append(out, WorkspaceEntry{
 			ID:     ws.ID,
 			Name:   ws.DisplayName(),
 			Active: i == active,
@@ -63,13 +63,13 @@ func (s *Session) ListWorkspacesIn(wsID string) []WorkspaceInfo {
 // echoing the resolved workspace id. ok is false only when a non-empty id names
 // no known workspace (tab.list). meta feeds tab auto-naming (TabDisplayName);
 // nil skips derivation and reports the plain custom-name-or-number.
-func (s *Session) ListTabs(workspaceID string, meta func(uint32) PaneMeta) (tabs []TabInfo, resolved string, ok bool) {
+func (s *Session) ListTabs(workspaceID string, meta func(uint32) PaneMeta) (tabs []TabEntry, resolved string, ok bool) {
 	return s.ListTabsIn("", workspaceID, meta)
 }
 
 // ListTabsIn is ListTabs with the caller's view supplying the default: an
 // unaddressed tab.list from a window lists *that window's* workspace.
-func (s *Session) ListTabsIn(viewWS, workspaceID string, meta func(uint32) PaneMeta) (tabs []TabInfo, resolved string, ok bool) {
+func (s *Session) ListTabsIn(viewWS, workspaceID string, meta func(uint32) PaneMeta) (tabs []TabEntry, resolved string, ok bool) {
 	idx := s.viewWorkspaceIndex(viewWS)
 	if workspaceID != "" {
 		i, found := s.workspaceIndexByID(workspaceID)
@@ -79,13 +79,13 @@ func (s *Session) ListTabsIn(viewWS, workspaceID string, meta func(uint32) PaneM
 		idx = i
 	}
 	ws := s.workspaces[idx]
-	out := make([]TabInfo, 0, len(ws.Tabs))
+	out := make([]TabEntry, 0, len(ws.Tabs))
 	for i, tab := range ws.Tabs {
 		name := tab.DisplayName()
 		if meta != nil {
 			name = s.TabDisplayName(tab, meta)
 		}
-		out = append(out, TabInfo{
+		out = append(out, TabEntry{
 			Num:    tab.Number,
 			Name:   name,
 			Active: i == ws.ActiveTabIndex(),
@@ -141,7 +141,7 @@ func (s *Session) ListFlaggedIn(wsID string, kind flags.Kind) FlagListResult {
 	}
 	// Non-nil empty slices: an empty listing is a normal answer, and a client
 	// looping over `res.panes` should not have to tell null from [].
-	out := FlagListResult{Workspaces: []WorkspaceInfo{}, Panes: []PaneInfo{}}
+	out := FlagListResult{Workspaces: []WorkspaceEntry{}, Panes: []PaneInfo{}}
 	for _, w := range s.ListWorkspacesIn(wsID) {
 		if match(w.FlagInfo) {
 			out.Workspaces = append(out.Workspaces, w)

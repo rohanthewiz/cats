@@ -8,9 +8,11 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/rohanthewiz/cats/wire"
 )
 
-// These tests guard the §7 command table (commandSpecs) as the machine-readable
+// These tests guard the §7 command table (wire.CommandSpecs) as the machine-readable
 // truth about the vocabulary: cmd/catgen-dart emits a typed client from it, so a
 // wrong or missing entry is not a stale comment — it is a client method that
 // does not exist, or one whose signature lies about what comes back.
@@ -26,7 +28,7 @@ import (
 
 // --- source-level: the table, the constants and the switch agree --------------
 
-// Every Cmd* constant must be listed in commandSpecs AND routed by Dispatch, and
+// Every Cmd* constant must be listed in wire.CommandSpecs() AND routed by Dispatch, and
 // nothing may be routed or specced that is not a declared constant. The existing
 // TestCommandNamesAllRouted covers one direction by dispatching each name and
 // watching for the "not supported yet" default; it cannot see the other one — a
@@ -34,20 +36,20 @@ import (
 // and absent from every generated client, with no test failing. Reading the
 // switch's AST closes that side.
 func TestCommandSpecsRouted(t *testing.T) {
-	declared := parseCommandConsts(t, "command_vocab.go") // wire name -> Go constant name
+	declared := parseCommandConsts(t, "../../wire/vocab.go") // wire name -> Go constant name
 	routed := parseDispatchCases(t, "commands.go", declared)
 
-	specced := make(map[string]bool, len(commandSpecs))
-	for _, spec := range commandSpecs {
+	specced := make(map[string]bool, len(wire.CommandSpecs()))
+	for _, spec := range wire.CommandSpecs() {
 		if specced[spec.Name] {
-			t.Errorf("command %q is listed twice in commandSpecs", spec.Name)
+			t.Errorf("command %q is listed twice in wire.CommandSpecs()", spec.Name)
 		}
 		specced[spec.Name] = true
 	}
 
 	for name, constName := range declared {
 		if !specced[name] {
-			t.Errorf("%s (%q) is declared but missing from commandSpecs — it will not reach `catctl commands` or any generated client", constName, name)
+			t.Errorf("%s (%q) is declared but missing from wire.CommandSpecs() — it will not reach `catctl commands` or any generated client", constName, name)
 		}
 		if !routed[name] {
 			t.Errorf("%s (%q) is declared but has no case in Dispatch", constName, name)
@@ -55,7 +57,7 @@ func TestCommandSpecsRouted(t *testing.T) {
 	}
 	for name := range routed {
 		if !specced[name] {
-			t.Errorf("%q has a Dispatch case but no commandSpecs entry", name)
+			t.Errorf("%q has a Dispatch case but no wire.CommandSpecs() entry", name)
 		}
 	}
 	for name := range specced {
@@ -173,63 +175,6 @@ func parseDispatchCases(t *testing.T, file string, consts map[string]string) map
 // slice would still compile and still marshal, but a generator emitting a Dart
 // class from reflect.TypeOf would produce nonsense from it, and the nil that
 // means "no params" would become indistinguishable from a typed nil pointer.
-func TestCommandSpecsShape(t *testing.T) {
-	for _, spec := range commandSpecs {
-		if spec.Name == "" {
-			t.Fatalf("commandSpecs has an entry with no name")
-		}
-		for _, f := range []struct {
-			what string
-			v    any
-		}{{"Params", spec.Params}, {"Result", spec.Result}} {
-			if f.v == nil {
-				continue
-			}
-			if k := reflect.TypeOf(f.v).Kind(); k != reflect.Struct {
-				t.Errorf("%s: %s is a %s, want a struct value or nil", spec.Name, f.what, k)
-			}
-		}
-		if spec.ReplyRequired && spec.Result == nil {
-			t.Errorf("%s: ReplyRequired with no Result — a command dropped for want of a reply channel must have something to say", spec.Name)
-		}
-	}
-}
-
-// CommandNames is derived from the table, and CommandSpecs hands out a copy:
-// a caller reordering what it got back must not reorder the vocabulary.
-func TestCommandSpecsCopyAndNames(t *testing.T) {
-	names := CommandNames()
-	specs := CommandSpecs()
-	if len(names) != len(specs) {
-		t.Fatalf("CommandNames has %d entries, CommandSpecs %d", len(names), len(specs))
-	}
-	for i := range specs {
-		if names[i] != specs[i].Name {
-			t.Fatalf("order drift at %d: name %q, spec %q", i, names[i], specs[i].Name)
-		}
-	}
-
-	first := specs[0].Name
-	specs[0] = CommandSpec{Name: "clobbered"}
-	if got := CommandSpecs()[0].Name; got != first {
-		t.Fatalf("CommandSpecs shares its backing array: first entry is now %q, want %q", got, first)
-	}
-}
-
-// --- behaviour: the two flags describe what Dispatch actually does ------------
-
-// specParams supplies valid params for the commands that need them before the
-// dispatcher will get far enough to exercise a flag. Only the reply-gated ones
-// matter: everything else either takes optional params or is expected to fail on
-// the missing ones, which is itself the assertion.
-var specParams = map[string]any{
-	CmdRead:          ReadParams{Pane: 1, Cursor: [2]uint32{0, 4}},
-	CmdCapture:       CaptureParams{Pane: 1},
-	CmdWaitForOutput: WaitForOutputParams{Pane: 1, Pattern: "ok"},
-	CmdFileStat:      FileStatParams{Path: "/tmp/x"},
-	CmdFileGet:       FileGetParams{Path: "/tmp/x"},
-	CmdFilePut:       FilePutParams{Path: "/tmp/x", Data: []byte("hi")},
-}
 
 func specDecoder(t *testing.T, name string) jsonDec {
 	t.Helper()
@@ -245,7 +190,7 @@ func specDecoder(t *testing.T, name string) jsonDec {
 // it is not a params complaint.
 func TestCommandSpecsParamsRequired(t *testing.T) {
 	const badPrefix = "bad params"
-	for _, spec := range commandSpecs {
+	for _, spec := range wire.CommandSpecs() {
 		t.Run(spec.Name, func(t *testing.T) {
 			h := newCmdHarness(t) // fresh session per command; order-independent
 			r := h.resp()
@@ -270,7 +215,7 @@ func TestCommandSpecsParamsRequired(t *testing.T) {
 // The shared log carries both halves (backend effects and replies), so "nothing
 // happened" is one assertion over it.
 func TestCommandSpecsReplyRequired(t *testing.T) {
-	for _, spec := range commandSpecs {
+	for _, spec := range wire.CommandSpecs() {
 		t.Run(spec.Name, func(t *testing.T) {
 			h := newCmdHarness(t)
 			r := &fakeResponder{log: h.log, wants: false}
@@ -294,7 +239,7 @@ func TestCommandSpecsReplyRequired(t *testing.T) {
 // are skipped here rather than asserted against a value that does not exist.
 func TestCommandSpecsResultTypes(t *testing.T) {
 	checked := 0
-	for _, spec := range commandSpecs {
+	for _, spec := range wire.CommandSpecs() {
 		t.Run(spec.Name, func(t *testing.T) {
 			h := newCmdHarness(t)
 			r := h.resp()
@@ -316,4 +261,17 @@ func TestCommandSpecsResultTypes(t *testing.T) {
 	if checked < 8 {
 		t.Errorf("only %d result types were actually compared — the harness is no longer resolving commands", checked)
 	}
+}
+
+// specParams supplies valid params for the commands that need them before the
+// dispatcher will get far enough to exercise a flag. Only the reply-gated ones
+// matter: everything else either takes optional params or is expected to fail on
+// the missing ones, which is itself the assertion.
+var specParams = map[string]any{
+	CmdRead:          ReadParams{Pane: 1, Cursor: [2]uint32{0, 4}},
+	CmdCapture:       CaptureParams{Pane: 1},
+	CmdWaitForOutput: WaitForOutputParams{Pane: 1, Pattern: "ok"},
+	CmdFileStat:      FileStatParams{Path: "/tmp/x"},
+	CmdFileGet:       FileGetParams{Path: "/tmp/x"},
+	CmdFilePut:       FilePutParams{Path: "/tmp/x", Data: []byte("hi")},
 }

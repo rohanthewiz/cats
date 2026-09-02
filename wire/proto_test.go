@@ -1,4 +1,4 @@
-package browserproto
+package wire
 
 import (
 	"encoding/json"
@@ -264,23 +264,6 @@ func TestCmdParamsRoundTrip(t *testing.T) {
 	}
 	if p.Pane == nil || *p.Pane != paneID || p.Direction != SplitH {
 		t.Fatalf("params = %+v", p)
-	}
-	if d, ok := SplitDirection(p.Direction); !ok || d != 0 {
-		t.Fatalf("SplitDirection(%q) = %v, %v (want layout.Horizontal)", p.Direction, d, ok)
-	}
-}
-
-func TestDirectionMappings(t *testing.T) {
-	if _, ok := SplitDirection("x"); ok {
-		t.Error("bad split direction accepted")
-	}
-	for _, dir := range []string{DirLeft, DirRight, DirUp, DirDown} {
-		if _, ok := NavDirection(dir); !ok {
-			t.Errorf("NavDirection(%q) rejected", dir)
-		}
-	}
-	if _, ok := NavDirection("northwest"); ok {
-		t.Error("bad nav direction accepted")
 	}
 }
 

@@ -1,5 +1,6 @@
-// Package browserproto is the WS9 browser-facing protocol: the one versioned
-// WebSocket contract between the Go server and the browser. Layout + per-pane
+// Package wire is the WS9 browser-facing protocol: the one versioned WebSocket
+// contract between the Go server and every client of it, the browser and the
+// phone alike. Layout + per-pane
 // grid diffs + chrome state flow down; structured key/mouse/paste/resize and
 // commands flow up. Full spec: ai_docs/phase-c-ws9-protocol.md.
 //
@@ -8,11 +9,14 @@
 // encoding behind a version bump. Unknown "t" values must be ignored by both
 // ends (DecodeUp/DecodeDown report them as ErrUnknownType so callers can).
 //
-// This package is the wire contract only. The β orchestration seam
-// (internal/orchestration) is unchanged; frame.go translates β frames into
-// browser messages, layout.go builds the layout message from
-// internal/layout + internal/workspace state.
-package browserproto
+// This package is the wire contract only, and it is deliberately a leaf: it
+// imports nothing but the standard library, so an out-of-tree client (the
+// phone, built with gomobile and for GOOS=js) can depend on it without the
+// server behind it. Anything that needs internal/layout, internal/flags or the
+// β orchestration seam lives on the server side: internal/browserproto's
+// frame.go translates β frames into these messages and its layout.go builds
+// the layout message; internal/app converts wire values onto model types.
+package wire
 
 import (
 	"encoding/json"

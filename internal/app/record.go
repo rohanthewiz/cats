@@ -1,6 +1,8 @@
 package app
 
 import (
+	"github.com/rohanthewiz/cats/wire"
+
 	"encoding/json"
 	"reflect"
 	"sort"
@@ -234,8 +236,8 @@ func Spec(cmd string) (CommandSpec, bool) {
 // once per dispatched command and would otherwise be a linear scan of seventy
 // entries on the session's one goroutine.
 var specByName = func() map[string]CommandSpec {
-	m := make(map[string]CommandSpec, len(commandSpecs))
-	for _, s := range commandSpecs {
+	m := make(map[string]CommandSpec, len(wire.CommandSpecs()))
+	for _, s := range wire.CommandSpecs() {
 		m[s.Name] = s
 	}
 	return m
