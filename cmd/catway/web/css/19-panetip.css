@@ -9,7 +9,13 @@
     max-width:340px; pointer-events:none; display:none; }
   #panetip.show { display:grid; grid-template-columns:auto 1fr; gap:3px 10px; align-items:baseline; }
   #panetip .k { color:var(--muted); font-size:10px; text-transform:uppercase; letter-spacing:.5px; white-space:nowrap; }
-  #panetip .v { color:var(--fg); word-break:break-word; }
+  #panetip .v { color:var(--fg); word-break:break-word; min-width:0; }
+  /* A list that is meant to stay ONE row (the workspace card's todo panes):
+     clipped with an ellipsis rather than wrapped. joinTrunc already budgets the
+     text in characters, so this is the backstop for a name wider than the budget
+     assumed — min-width:0 above is what lets a grid item shrink far enough for
+     text-overflow to fire at all. */
+  #panetip .v.oneline { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   #panetip .v.pub { color:var(--accent); }
   #panetip .v.mono { font-family:inherit; }
   #panetip .v.exited { color:var(--err); }

@@ -43,19 +43,72 @@
     return st === "blocked" ? 4 : st === "done" ? 3 : st === "working" ? 2 : st === "idle" ? 1 : 0;
   }
 
-  // workspaceRollups buckets both of the lists a workspace row reads — the
-  // agents rollup and the pane inventory — by workspace, in one pass each.
-  // Asking per row instead cost O(workspaces × agents + workspaces × panes) on
-  // every render, and these lists are already grouped by workspace.
-  function workspaceRollups() {
-    const states = new Map(), todos = new Map();
-    let globalTodos = 0;
+  // agentStateCounts buckets the agents rollup by workspace, one pass over the
+  // whole list. Split out of workspaceRollups so the hover card can ask the same
+  // question for a single workspace without re-deriving it a second way — one
+  // definition of "what are this workspace's agents doing", used by the row's
+  // badge and by the card that spells the badge out.
+  function agentStateCounts() {
+    const states = new Map();
     for (const it of agentItems) {
       let c = states.get(it.workspace);
       if (!c) states.set(it.workspace, c = { blocked: 0, done: 0, working: 0, idle: 0 });
       const st = markerState(it);
       if (c[st] !== undefined) c[st]++;
     }
+    return states;
+  }
+
+  // wsOf reads the workspace id out of a pane handle ("w1:p3" -> "w1"). A handle
+  // with no colon is already a workspace id (the fallback rows renderPaneList
+  // builds before the first inventory lands).
+  function wsOf(handle) {
+    const i = handle.indexOf(":");
+    return i < 0 ? handle : handle.slice(0, i);
+  }
+
+  // wsTodoPanes: which panes in this workspace are advertising unfinished todo
+  // items, and how many each still owes — the paw print's count, itemized. Same
+  // source and same exclusions as the count itself (workspaceRollups): the raw
+  // pane title, with global managers left out because their backlog belongs to
+  // no single workspace.
+  //
+  // Scanned per hover rather than bucketed with the rest of the rollups: only the
+  // hovered row ever asks, and the inventory is re-fetched under a stationary
+  // pointer, so a list built at render time would be the stale one.
+  function wsTodoPanes(id) {
+    const out = [];
+    for (const pi of paneInv) {
+      if (!pi.handle || isGlobalTodoTitle(pi.title)) continue;
+      const n = todoOpenCount(pi.title);
+      if (!n || wsOf(pi.handle) !== id) continue;
+      out.push({ ref: paneRef(pi.handle, pi.pane), n });
+    }
+    return out;
+  }
+
+  // wsFlaggedPanes: the flags pinned to panes *inside* this workspace. The
+  // workspace row shows only its own flag, so a note left on a pane two tabs
+  // away is otherwise invisible from here — which is exactly the thing a flag
+  // is for. Read from the inventory, which carries every pane in the session,
+  // not just the ones on screen.
+  function wsFlaggedPanes(id) {
+    const out = [];
+    for (const pi of paneInv) {
+      if (!pi.handle || wsOf(pi.handle) !== id) continue;
+      const f = flagOf(pi);
+      if (f) out.push({ ref: paneRef(pi.handle, pi.pane), flag: f });
+    }
+    return out;
+  }
+
+  // workspaceRollups buckets both of the lists a workspace row reads — the
+  // agents rollup and the pane inventory — by workspace, in one pass each.
+  // Asking per row instead cost O(workspaces × agents + workspaces × panes) on
+  // every render, and these lists are already grouped by workspace.
+  function workspaceRollups() {
+    const states = agentStateCounts(), todos = new Map();
+    let globalTodos = 0;
     for (const pi of paneInv) {
       if (!pi.handle) continue;
       const n = todoOpenCount(pi.title);
@@ -70,8 +123,7 @@
         globalTodos = Math.max(globalTodos, n);
         continue;
       }
-      const i = pi.handle.indexOf(":"); // "w1:p3" → "w1"
-      const ws = i < 0 ? pi.handle : pi.handle.slice(0, i);
+      const ws = wsOf(pi.handle);
       todos.set(ws, (todos.get(ws) || 0) + n);
     }
     return { states, todos, globalTodos };
@@ -406,6 +458,17 @@
         // keyboard still switch, so this narrows the accident, not the workspace.
         li.addEventListener("dblclick", () => renameWorkspace(w));
         li.addEventListener("contextmenu", (e) => { e.preventDefault(); openCtx(e.clientX, e.clientY, wsMenuItems(w)); });
+        // Hover card, same as the PANES rows: the row's marks (flag, paw print)
+        // are 12px glyphs, and the note and the itemized todos only fit here.
+        // showWorkspaceTip is a no-op for a row with neither, so passing over a
+        // plain list pops nothing up. Hidden on mousedown as well as mouseleave:
+        // the press either switches workspace or begins a reorder drag, and a
+        // card trailing the pointer through a drag hides the drop bar it is
+        // being dragged against.
+        li.addEventListener("mouseenter", (e) => showWorkspaceTip(e, w));
+        li.addEventListener("mousemove", (e) => showWorkspaceTip(e, w));
+        li.addEventListener("mouseleave", hideTip);
+        li.addEventListener("mousedown", hideTip);
         // The switch rides the drag helper's own mouseup rather than a "click"
         // listener on the row: this list is rebuilt on every agents rollup, and a
         // row replaced between press and release never sees its click (see
