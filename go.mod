@@ -8,7 +8,7 @@ require (
 	github.com/pelletier/go-toml/v2 v2.4.3
 	github.com/rohanthewiz/btypedb v0.7.0
 	github.com/rohanthewiz/element v0.5.6
-	github.com/rohanthewiz/rweb v0.1.26
+	github.com/rohanthewiz/rweb v0.1.28
 	github.com/webview/webview_go v0.0.0-20240831120633-6173450d4dd6
 	go.mitchellh.com/libghostty v0.0.0-20260528200934-790a3ff6e9f6
 )
