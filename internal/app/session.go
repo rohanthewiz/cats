@@ -671,6 +671,14 @@ func (s *Session) resolvePaneTarget(target *layout.PaneID) (layout.PaneID, error
 	return s.ResolvePaneTargetIn("", target)
 }
 
+// PaneCount reports how many panes the session holds across every workspace and
+// tab — the number ClosePane's last-pane refusal turns on. Exported because a
+// caller that closes panes on its own schedule (the exited-pane reaper and the
+// auto-close countdown in catway) needs to know in ADVANCE whether a close would
+// be refused: a timer that visibly counts down to nothing is worse than no
+// timer, so it declines to start rather than failing at zero.
+func (s *Session) PaneCount() int { return s.totalPanes() }
+
 func (s *Session) totalPanes() int {
 	n := 0
 	for _, ws := range s.workspaces {

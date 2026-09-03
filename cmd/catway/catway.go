@@ -74,6 +74,17 @@ type paneRuntime struct {
 	// (chrome, input refusal, capture skip), exitedAt is "how long has it been
 	// one", and only the latter is cleared when a respawn brings the pane back.
 	exitedAt time.Time
+	// autoclose is the live timer counting this pane's corpse down to its own
+	// close (reap.go), nil when none is running — a live pane, a non-zero exit,
+	// a cancelled countdown (pane.keep), or panes.autoclose_exited off.
+	// autocloseAt is when it will fire, so a late-joining window can be told how
+	// much is LEFT rather than restarting the countdown from ten.
+	//
+	// The timer's callback only posts onto the loop goroutine, so everything
+	// that reads or clears these two fields — including the fire itself — runs
+	// there, and a Stop() racing a fire cannot close a pane that was kept.
+	autoclose   *time.Timer
+	autocloseAt time.Time
 	// --- hook-report ingestion (hooks.go), all loop-goroutine only ---
 	// agentAt stamps when the daemon's detection last reported (hook-vs-detection
 	// recency in effectiveAgent). hook is the live hook authority; agentSession
@@ -396,6 +407,14 @@ type orch struct {
 	// the config file — and again by server.reload_config, since a sweep
 	// parameter has nothing tying it to the process's lifetime.
 	reapAfter time.Duration
+	// autocloseAfter is the short countdown a CLEANLY exited pane gets before it
+	// closes itself (reap.go's armAutoclose), from panes.autoclose_exited; 0
+	// disables it. Wired exactly like reapAfter, and for the same reason
+	// live-reloadable — but note that changing it only affects countdowns armed
+	// AFTER the reload: an armed timer is already running with its old duration,
+	// and re-arming every corpse on reload would move a deadline the user is
+	// watching tick down.
+	autocloseAfter time.Duration
 	// --- session persistence (WS3), wired by main; zero values disable it ---
 	// sessionPath/historyPath are the state files ("" ⇒ persistence off). seeds
 	// and restoredCwds are loaded at startup and consumed by createPane for
@@ -630,6 +649,7 @@ func newOrchHostsWith(hosts []config.Host, cwd string, sess *app.Session) (*orch
 		spawnPlans:     make(map[uint32]app.SpawnOverride),
 		capturedHist:   make(map[uint32]string),
 		reapAfter:      defaultExitedPaneTTL,
+		autocloseAfter: defaultAutocloseTTL,
 		claudeProjects: claudeProjectsDir(),
 		modelRoots:     modelRootsFor(),
 		usageNudge:     make(chan struct{}, 1),
@@ -1110,6 +1130,12 @@ func (o *orch) syncDaemon() {
 			if rt.created {
 				o.hostOf(rt).send(orchestration.NewClosePane(pid))
 			}
+			// A pending auto-close outlives its runtime otherwise: the timer
+			// holds this closure for the rest of its countdown, and the pane id
+			// it names could belong to a NEW pane by then. fireAutoclose would
+			// still refuse it (that pane is alive), but not arming the gun beats
+			// relying on the safety.
+			o.cancelAutoclose(rt)
 			delete(o.panes, pid)
 			// A never-realized spawn override dies with its pane (a plan is
 			// staged live per tab.create, so unlike the restored-state maps it
@@ -1255,6 +1281,10 @@ func (o *orch) createPane(rt *paneRuntime) {
 	if rt.exited != nil {
 		rt.exited = nil
 		rt.exitedAt = time.Time{}
+		// …including the auto-close countdown, which would otherwise close a
+		// pane that is alive again — the respawn races it by construction, since
+		// a cathost reconnect inside the ten seconds is exactly when this runs.
+		o.cancelAutoclose(rt)
 		o.sendVisible(rt.id, browserproto.NewPaneRespawned(rt.id))
 	}
 }
@@ -1459,6 +1489,11 @@ func paneFlag(tab *workspace.Tab, id layout.PaneID) *flags.Flag {
 //
 // Deliberately not ApplyModel: nothing structural changed, so there are no PTYs
 // to reconcile, no viewport to recompute, and no frames to resend.
+// KeepPane implements app.Backend: cancel a pane's auto-close countdown
+// (pane.keep) and tell every window watching. Loop goroutine — the dispatcher
+// runs there.
+func (o *orch) KeepPane(pane uint32) bool { return o.keepPane(pane) }
+
 func (o *orch) BroadcastFlags() {
 	o.broadcastLayouts()
 	o.broadcast(o.agentsMsg())
@@ -2147,6 +2182,7 @@ func (o *orch) ReloadConfig() error {
 	}
 	o.cfg = cfg // keep config.get / config.set working from the reloaded state
 	o.reapAfter = reapAfterFromConfig(cfg.Panes)
+	o.autocloseAfter = autocloseAfterFromConfig(cfg.Panes)
 	page := renderPage(o.baseHTML, cfg)
 	o.page.Store(&page)
 	o.broadcastTheme() // the theme lands live everywhere; keybindings still need a reload
@@ -2291,7 +2327,11 @@ func (o *orch) sendPaneChrome(c *client, pid uint32) {
 		out(browserproto.NewPaneAgent(pid, agent, state, rt.agentModel, true))
 	}
 	if rt.exited != nil {
-		out(browserproto.NewPaneExited(pid, *rt.exited))
+		// With whatever is LEFT of the auto-close countdown, not a fresh one: a
+		// window that opens partway through draws the remainder, and the pane
+		// still closes when the server's single timer says so. autocloseLeft is 0 for
+		// every pane not counting down, which is the plain exit message.
+		out(browserproto.NewPaneExitedIn(pid, *rt.exited, o.autocloseLeft(rt)))
 	}
 }
 

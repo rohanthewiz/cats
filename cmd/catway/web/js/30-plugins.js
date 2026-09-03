@@ -126,7 +126,10 @@
 
   // pluginCatctlTab spawns `catctl plugin <args…>` in a fresh tab. The pane
   // stays on screen after exit (exited chrome), so the git/build output — or
-  // the failure — remains readable until the user closes it. cwd is optional
+  // the failure — remains readable. A FAILED run stays until the user closes
+  // it; a clean one tidies itself away after the countdown on its header
+  // (panes.autoclose_exited, twenty seconds — set with this output in mind),
+  // which the header's ✕ cancels if there is more to read. cwd is optional
   // and only matters for the link path (see focusedPaneCwd).
   function pluginCatctlTab(catctl, title, args, cwd) {
     closeModal();

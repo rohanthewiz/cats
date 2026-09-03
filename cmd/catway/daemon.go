@@ -1117,14 +1117,24 @@ func (d *daemon) dispatch(mt orchestration.MessageType, payload []byte) {
 				return
 			}
 			code := ev.ExitCode
-			if rt.exited == nil {
+			first := rt.exited == nil
+			if first {
 				// First exit wins the timestamp. A duplicate pane_exited (a
 				// reconnect replaying it, say) must not push the reaper's
 				// four-hour clock back to zero.
 				rt.exitedAt = time.Now()
 			}
 			rt.exited = &code
-			o.sendVisible(ev.PaneID, browserproto.NewPaneExited(ev.PaneID, ev.ExitCode))
+			// The tidy-exit countdown (reap.go). Armed only on the first exit —
+			// it hangs off the same `rt.exited == nil` question the stamp above
+			// does, so a replayed pane_exited cannot restart a countdown the
+			// user has already cancelled with pane.keep. `left` is 0 whenever no
+			// countdown is running, which is what the plain message means.
+			left := time.Duration(0)
+			if first {
+				left = o.armAutoclose(rt, code)
+			}
+			o.sendVisible(ev.PaneID, browserproto.NewPaneExitedIn(ev.PaneID, ev.ExitCode, left))
 			o.emitEvent(app.EventPaneExited, ev.PaneID, app.PaneExitedEvent{Pane: ev.PaneID, ExitCode: ev.ExitCode})
 			o.resolveWaitersOnExit(ev.PaneID) // no more output will come
 			o.clearHookOnExit(rt)             // a late hook packet must not resurrect a dead agent

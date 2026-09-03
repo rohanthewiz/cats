@@ -9,6 +9,11 @@
     const p = panes.get(id);
     if (!p) return;
     sendCmd("pane.focus", { pane: id });
+    // Selecting text in a dead pane is the clearest possible statement that its
+    // last screen is still wanted, so entering copy mode cancels the tidy-exit
+    // countdown. Without this the header would hide the countdown behind the
+    // copy-mode hints and then close the pane out from under the selection.
+    keepPane(id);
     exitCopyMode(); // only one pane at a time
     const start = (p.cur && p.cur.vis) ? { x: p.cur.x, y: p.cur.y } : { x: 0, y: 0 };
     p.cm = { cursor: start, anchor: null, rect: false };

@@ -92,7 +92,10 @@
         seg("agent", agentLabel(p.agent, p.agentModel));
         seg("astate " + stClass(p.agentState), p.agentState);
       }
-      if (p.exited !== null) seg("exited", "exited (" + p.exited + ")");
+      if (p.exited !== null) {
+        seg("exited", "exited (" + p.exited + ")");
+        drawAutoclose(p, add);
+      }
     }
     const zoom = p.chrome.querySelector(".zoom");
     if (tabZoomed && p.info && p.info.focused) {
@@ -108,3 +111,79 @@
     }
   }
 
+  // ---- The auto-close countdown on an exited header ----
+  //
+  //   pane 3 · build · ~/src · exited (0) — close in 7s ✕
+  //
+  // A cleanly exited pane closes itself after a few seconds (panes.autoclose_
+  // exited). The countdown is the server's — this only DISPLAYS it, from the
+  // remaining time pane_exited carried — so what is drawn here is what is
+  // actually going to happen, and every window watching agrees.
+  //
+  // ✕ sends pane.keep rather than clearing a local timer: the countdown being
+  // shared is the whole point, so cancelling has to be shared too. The server
+  // answers by re-sending pane_exited with no countdown, which is what takes
+  // this run off every header.
+  // `add` is renderChrome's own span-appender, passed in rather than
+  // reimplemented so this run lands in the same info row as every other field.
+  function drawAutoclose(p, add) {
+    if (!p.autocloseAt) return;
+    const left = Math.max(0, Math.ceil((p.autocloseAt - Date.now()) / 1000));
+    const s = add("autoclose", "— close in " + left + "s ");
+    const x = document.createElement("button");
+    x.className = "keep";
+    x.textContent = "✕";
+    x.title = "keep this pane open";
+    // The header's own mousedown starts a focus + swap drag; without this the
+    // press that cancels a countdown would also try to drag the pane.
+    x.addEventListener("mousedown", (e) => e.stopPropagation());
+    x.addEventListener("click", (e) => {
+      e.stopPropagation(); e.preventDefault();
+      keepPane(p.id);
+    });
+    s.appendChild(x);
+  }
+
+  // keepPane cancels a pane's countdown. The local clear is optimistic — the
+  // server's re-broadcast is what makes it true — because the click and the
+  // round trip are far enough apart to show one more tick, and a countdown
+  // that keeps counting after you told it to stop reads as a click that missed.
+  function keepPane(id) {
+    const p = panes.get(id);
+    if (!p || !p.autocloseAt) return;
+    p.autocloseAt = 0;
+    sendCmd("pane.keep", { pane: id });
+    renderChrome(p);
+  }
+
+  // One interval for every counting pane rather than a timer each: the ticker
+  // exists only to redraw a number once a second, and it stops itself as soon
+  // as no pane is counting, so an idle session runs nothing.
+  //
+  // It also expires deadlines that have passed. The pane_removed that follows
+  // the server's close is the real end of the story, but it arrives a network
+  // hop later, and "close in 0s" sitting on a header is a countdown that looks
+  // stuck.
+  // A box rather than a bare `let` so the ticker handle is reachable from a
+  // unit test, which lifts these functions out of the bundle one at a time and
+  // can bind a const but not a mutable free variable (web/jstest/testutil.mjs).
+  const autocloseTick = { timer: null };
+  function tickAutoclose() {
+    let live = 0;
+    const now = Date.now();
+    for (const p of panes.values()) {
+      if (!p.autocloseAt) continue;
+      if (p.autocloseAt <= now) p.autocloseAt = 0;
+      else live++;
+      renderChrome(p);
+    }
+    if (!live && autocloseTick.timer) { clearInterval(autocloseTick.timer); autocloseTick.timer = null; }
+  }
+
+  // startAutoclose is what pane_exited calls with the remaining milliseconds the
+  // server reported; 0 (or an absent field) stops the pane counting, which is
+  // how a cancel from another window lands here.
+  function startAutoclose(p, ms) {
+    p.autocloseAt = ms > 0 ? Date.now() + ms : 0;
+    if (p.autocloseAt && !autocloseTick.timer) autocloseTick.timer = setInterval(tickAutoclose, 500);
+  }

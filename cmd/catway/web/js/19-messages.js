@@ -56,11 +56,24 @@
         const p = pane(msg.pane); p.modes = { mouse: !!msg.mouse, alt: !!msg.alt_screen, kitty: msg.kitty | 0 };
         break;
       }
-      case "pane_exited": { const p = pane(msg.pane); p.exited = msg.code; renderChrome(p); refreshPaneList(); break; }
+      // autoclose_ms is what is LEFT of the server's tidy-exit countdown, and it
+      // is re-sent rather than sent once: this same message arrives with the
+      // field absent when somebody cancels the countdown (pane.keep, from any
+      // window), which is how a cancel reaches every header. So it is applied
+      // unconditionally — absent means "not counting", not "unchanged".
+      case "pane_exited": {
+        const p = pane(msg.pane); p.exited = msg.code;
+        startAutoclose(p, msg.autoclose_ms || 0);
+        renderChrome(p); refreshPaneList(); break;
+      }
       // The inverse: the pane's PTY came back (cathost restart, host move), so
       // the red header comes off. Needed because the exit is REMEMBERED here —
       // a live pane's chrome simply omits pane_exited, which retracts nothing.
-      case "pane_respawned": { const p = pane(msg.pane); p.exited = null; renderChrome(p); refreshPaneList(); break; }
+      case "pane_respawned": {
+        const p = pane(msg.pane); p.exited = null;
+        p.autocloseAt = 0; // the server cancelled its timer too — nothing to count down to
+        renderChrome(p); refreshPaneList(); break;
+      }
       case "agents": renderAgents(msg.items); break;
       case "hosts": renderHosts(msg.items); break;
       case "history": renderHistory(msg.entries || []); break;

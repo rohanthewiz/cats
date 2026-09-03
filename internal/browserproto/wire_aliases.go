@@ -212,6 +212,7 @@ const (
 	CmdNavBack            = wire.CmdNavBack
 	CmdNavForward         = wire.CmdNavForward
 	CmdPaneClose          = wire.CmdPaneClose
+	CmdPaneKeep           = wire.CmdPaneKeep
 	CmdPaneCycle          = wire.CmdPaneCycle
 	CmdPaneFlag           = wire.CmdPaneFlag
 	CmdPaneFocus          = wire.CmdPaneFocus
@@ -366,6 +367,7 @@ var (
 	NewPaneBranch       = wire.NewPaneBranch
 	NewPaneCwd          = wire.NewPaneCwd
 	NewPaneExited       = wire.NewPaneExited
+	NewPaneExitedIn     = wire.NewPaneExitedIn
 	NewPaneRespawned    = wire.NewPaneRespawned
 	NewPaneTitle        = wire.NewPaneTitle
 	NewRecord           = wire.NewRecord

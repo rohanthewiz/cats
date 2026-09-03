@@ -63,6 +63,17 @@ type Backend interface {
 	// unlike ApplyModel this reconciles no PTYs and moves no viewport.
 	BroadcastFlags()
 
+	// KeepPane cancels the auto-close countdown on an exited pane (pane.keep),
+	// reporting false for a pane the backend does not know. A pane with no
+	// countdown running is a no-op success: "keep this pane" is already true of
+	// it, and a client that clicks ✕ twice, or races another window's click,
+	// must not see a failure for getting what it asked for.
+	//
+	// It sits on the Backend seam rather than the Session because the countdown
+	// is runtime state — a timer in the orchestrator — and the domain model has
+	// no idea a pane's child ever exited.
+	KeepPane(pane uint32) bool
+
 	// ScrollPane passes a scrollback delta straight to the pane's PTY; it errors
 	// if the pane is unknown.
 	ScrollPane(pane uint32, delta int) error
@@ -621,6 +632,26 @@ func (d *Dispatcher) dispatch(name string, dec ParamDecoder, r Responder) {
 			return
 		}
 		d.backend.ApplyModel()
+		r.OK(nil)
+
+	case CmdPaneKeep:
+		var kp OptPaneParams
+		if err := decodeOptional(dec, &kp); err != nil {
+			bad(err)
+			return
+		}
+		// Resolved through the session like any pane-addressed command, so an
+		// omitted pane means the focused one and an unknown id fails here rather
+		// than in the backend.
+		id, err := d.session.ResolvePaneTargetIn(d.ws(), optPaneID(kp.Pane))
+		if err != nil {
+			r.Fail(err.Error())
+			return
+		}
+		if !d.backend.KeepPane(uint32(id)) {
+			r.Fail(fmt.Sprintf("unknown pane %d", id))
+			return
+		}
 		r.OK(nil)
 
 	case CmdScroll:

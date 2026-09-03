@@ -20,8 +20,15 @@ import (
 // Command names (§7): the control-API vocabulary. The dispatcher implements one
 // command table serving both this protocol and the CLI/API.
 const (
-	CmdPaneSplit          = "pane.split"
-	CmdPaneClose          = "pane.close"
+	CmdPaneSplit = "pane.split"
+	CmdPaneClose = "pane.close"
+	// CmdPaneKeep cancels the auto-close countdown running on an exited pane
+	// (panes.autoclose_exited), keeping the corpse and its last screen until
+	// somebody closes it by hand. It is the [x] on the header's "close in 10s",
+	// and it is a command rather than a browser-local timer cancel because the
+	// countdown is the server's: one clock, one close, and one person's "keep
+	// this" reaches every window watching the pane.
+	CmdPaneKeep           = "pane.keep"
 	CmdPaneFocus          = "pane.focus"
 	CmdPaneFocusDirection = "pane.focus_direction"
 	CmdPaneCycle          = "pane.cycle"
@@ -330,6 +337,10 @@ var commandSpecs = []CommandSpec{
 	// sends no id), and its result is a handle, not the point of the call.
 	{Name: CmdPaneSplit, Params: SplitParams{}, Result: SplitResult{}, ParamsRequired: true, Recorded: true},
 	{Name: CmdPaneClose, Params: OptPaneParams{}, Recorded: true},
+	// Not Recorded: cancelling a countdown is an answer to something that
+	// happened while the recorder was on, not a step of the work being
+	// recorded. Replaying it would ask a pane that never exited to stay.
+	{Name: CmdPaneKeep, Params: OptPaneParams{}},
 	{Name: CmdPaneFocus, Params: PaneParams{}, ParamsRequired: true, Recorded: true},
 	{Name: CmdPaneFocusDirection, Params: DirParams{}, ParamsRequired: true, Recorded: true},
 	{Name: CmdPaneCycle, Params: CycleParams{}, ParamsRequired: true, Recorded: true},

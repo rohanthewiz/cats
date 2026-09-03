@@ -216,6 +216,25 @@ that the pane is scenery rather than something still being read, and settable to
 `"off"` to keep the old keep-forever behaviour. The value is live-reloadable:
 the next sweep reads whatever `catctl reload` left on the orch.
 
+A **cleanly exited** pane does not wait that long. When its child exits with
+status 0 there is nothing left on screen worth keeping, so it counts itself down
+and closes — `panes.autoclose_exited`, twenty seconds by default:
+
+```
+pane 3 · build · ~/src · exited (0) — close in 7s ✕
+```
+
+The timer lives on the orchestrator (`armAutoclose` in `reap.go`), not in the
+browser, so the pane is closed once however many windows are watching, every
+window draws the same remaining time (`pane_exited.autoclose_ms`), and a window
+that joins mid-countdown continues it instead of starting a fresh countdown.
+`✕` sends `pane.keep`, which stops the timer and re-broadcasts the exit without
+a countdown — one person's "keep this" reaches every window. Entering copy mode
+on the pane does the same, since selecting text in a corpse is the clearest
+possible statement that its last screen is still wanted. A non-zero exit arms
+nothing at all: that pane's last screen is the failure, and it waits for the
+reaper like before.
+
 The clock starts on the `pane_exited` event (first one wins; a replayed
 duplicate does not reset it) and is cleared by `createPane` along with the rest
 of the pane's exit state, so a pane whose PTY was respawned under it — a cold

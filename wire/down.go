@@ -379,10 +379,40 @@ type PaneExited struct {
 	T    Type   `json:"t"`
 	Pane uint32 `json:"pane"`
 	Code int    `json:"code"`
+	// AutocloseMS is how long is LEFT on the server's auto-close countdown for
+	// this pane, in milliseconds; absent (0) means no countdown is running and
+	// the corpse stays until someone closes it. A client renders it as the
+	// "close in 20s" run on the exited header and may cancel it with pane.keep.
+	//
+	// A remaining time rather than a deadline, because the two clocks involved
+	// are on different machines: a wall-clock instant would need the browser's
+	// clock to agree with the server's, and it need not. A duration is skewless
+	// — the client starts counting when the message lands, and the worst error
+	// is the network hop.
+	//
+	// It is also why this is re-sent rather than computed once: a late joiner's
+	// chrome carries what is left at the moment it connects (see
+	// sendPaneChrome), so a window opened partway through a countdown draws the
+	// remainder instead of restarting it. Cancelling re-sends the same message with the
+	// field absent, which is how every window learns the countdown stopped.
+	AutocloseMS int64 `json:"autoclose_ms,omitempty"`
 }
 
+// NewPaneExited reports an exit with no auto-close running — a non-zero exit,
+// or any exit when panes.autoclose_exited is off.
 func NewPaneExited(pane uint32, code int) PaneExited {
 	return PaneExited{T: MsgPaneExited, Pane: pane, Code: code}
+}
+
+// NewPaneExitedIn is NewPaneExited for a pane the server intends to close by
+// itself once `remaining` has passed. A non-positive remaining degrades to the
+// plain form rather than sending a countdown that is already over.
+func NewPaneExitedIn(pane uint32, code int, remaining time.Duration) PaneExited {
+	m := NewPaneExited(pane, code)
+	if remaining > 0 {
+		m.AutocloseMS = remaining.Milliseconds()
+	}
+	return m
 }
 
 // PaneRespawned reports that a dead pane has a live child again — the inverse

@@ -80,6 +80,7 @@ var subcommands = []subcommand{
 	// Pane commands.
 	{"split", app.CmdPaneSplit, "split [h|v] [pane]", []argKind{argSplitDir, argPane}, "split a pane (h by default)", buildSplit},
 	{"close", app.CmdPaneClose, "close [pane]", []argKind{argPane}, "close a pane (focused by default)", buildOptPane},
+	{"keep", app.CmdPaneKeep, "keep [pane]", []argKind{argPane}, "cancel the auto-close countdown on an exited pane", buildOptPane},
 	{"focus", app.CmdPaneFocus, "focus <pane>", []argKind{argPane}, "focus a pane", buildPane},
 	{"focus-dir", app.CmdPaneFocusDirection, "focus-dir <left|right|up|down>", []argKind{argDirection}, "focus the neighbour in a direction", buildDir},
 	{"cycle", app.CmdPaneCycle, "cycle [prev]", []argKind{argCycleDir}, "focus the next pane (prev for previous)", buildCycle},

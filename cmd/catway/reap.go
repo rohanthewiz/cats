@@ -7,6 +7,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/rohanthewiz/cats/internal/browserproto"
 	"github.com/rohanthewiz/cats/internal/config"
 	"github.com/rohanthewiz/cats/internal/layout"
 )
@@ -125,4 +126,154 @@ func (o *orch) reapExitedPanes(now time.Time) int {
 		o.histSaveSoon()
 	}
 	return n
+}
+
+// ---- Auto-closing a cleanly exited pane -------------------------------------
+//
+// The reaper above is the long timescale: it stops a session silting up over
+// hours. This is the short one, and it exists because most dead panes are not
+// interesting for even a minute — you ran a command, it finished, and the pane
+// is now a rectangle with a prompt-less shell in it.
+//
+// So a pane whose child exits with status 0 counts itself down and closes:
+//
+//	pane 3 · build · ~/src · exited (0) — close in 7s ✕
+//
+// Three properties are what make that safe to do automatically:
+//
+//   - Only status 0 arms it. A non-zero exit is a stack trace or a failed
+//     build — precisely what keeping dead panes is FOR — so those keep the old
+//     behaviour untouched and wait for the reaper.
+//   - The clock is here, not in the browser. One timer per pane means the pane
+//     is closed once however many windows are watching, every window draws the
+//     same remaining time (PaneExited.AutocloseMS), and a window joining
+//     mid-countdown picks it up where it is instead of starting a fresh
+//     countdown of its own.
+//   - It is cancellable, and the cancel is shared: the header's ✕ sends
+//     pane.keep, which stops the timer and re-broadcasts the exit with no
+//     countdown, so one person's "keep this" reaches everyone.
+//
+// Everything here runs on the loop goroutine; the timer callback only posts.
+const (
+	// defaultAutocloseTTL mirrors config.Default()'s panes.autoclose_exited,
+	// duplicated for the same reason defaultExitedPaneTTL is: an orch built
+	// with no config file (tests, an embedded caller) must still behave, and a
+	// zero field means "off" rather than "default".
+	defaultAutocloseTTL = 20 * time.Second
+)
+
+// autocloseAfterFromConfig resolves the configured countdown, falling back to
+// the built-in default if the value is unparseable — Config.Validate has
+// already refused that at load, so this is belt-and-braces plus a log line.
+func autocloseAfterFromConfig(p config.Panes) time.Duration {
+	d, err := p.AutocloseExitedAfter()
+	if err != nil {
+		log.Printf("catway: panes.%v — using %s", err, defaultAutocloseTTL)
+		return defaultAutocloseTTL
+	}
+	return d
+}
+
+// armAutoclose starts the countdown on a pane that has just exited cleanly, and
+// reports the countdown to send to clients (0 = none, which is what every
+// caller-visible "no countdown" case resolves to).
+//
+// Called from the pane_exited path only, which is also why re-arming is not a
+// concern: that path arms only on the FIRST exit, so a duplicate pane_exited
+// replayed by a reconnecting host cannot push a running countdown back to ten.
+// Loop goroutine.
+func (o *orch) armAutoclose(rt *paneRuntime, code int) time.Duration {
+	if code != 0 || o.autocloseAfter <= 0 {
+		return 0
+	}
+	// The last pane is never auto-closed — ClosePaneIn would refuse it anyway
+	// (see reapExitedPanes), and a countdown that visibly does nothing when it
+	// reaches zero is worse than no countdown. Checked when arming rather than
+	// when firing so the header never shows a promise that cannot be kept.
+	//
+	// It is deliberately not re-checked later: a session that grows a second
+	// pane during the countdown leaves this corpse to the reaper, which is
+	// the same answer the sweep gives.
+	if o.session.PaneCount() <= 1 {
+		return 0
+	}
+	d := o.autocloseAfter
+	pid := rt.id
+	rt.autocloseAt = time.Now().Add(d)
+	rt.autoclose = time.AfterFunc(d, func() { o.post(func() { o.fireAutoclose(pid) }) })
+	return d
+}
+
+// cancelAutoclose stops a pane's countdown if one is running and reports
+// whether it actually stopped one. Idempotent, and safe on a live pane.
+//
+// The Stop() return is ignored on purpose: a timer that has already fired has
+// posted its closure onto the loop, and fireAutoclose re-reads rt.autoclose —
+// which this has just cleared — so the fire is dropped. Clearing the field is
+// what cancels, not stopping the timer. Loop goroutine.
+func (o *orch) cancelAutoclose(rt *paneRuntime) bool {
+	if rt == nil || rt.autoclose == nil {
+		return false
+	}
+	rt.autoclose.Stop()
+	rt.autoclose = nil
+	rt.autocloseAt = time.Time{}
+	return true
+}
+
+// autocloseLeft is how much of a pane's countdown remains, 0 when none is
+// running — what a late joiner's chrome carries so its header continues the
+// countdown instead of restarting it. Loop goroutine.
+func (o *orch) autocloseLeft(rt *paneRuntime) time.Duration {
+	if rt == nil || rt.autoclose == nil {
+		return 0
+	}
+	if d := time.Until(rt.autocloseAt); d > 0 {
+		return d
+	}
+	// Due, but the fire has not been processed yet. Report a tick rather than
+	// 0, which a client reads as "no countdown" and would draw as a header that
+	// silently stops counting a moment before the pane vanishes.
+	return time.Millisecond
+}
+
+// fireAutoclose is the countdown reaching zero: close the pane. Posted by the
+// timer, so it re-validates everything — the pane may have been closed, kept,
+// or respawned in the meantime, and each of those clears rt.autoclose, which is
+// the one flag this trusts. Loop goroutine.
+func (o *orch) fireAutoclose(pid uint32) {
+	rt := o.panes[pid]
+	if rt == nil || rt.autoclose == nil || rt.exited == nil {
+		return // gone, kept, or alive again
+	}
+	rt.autoclose = nil
+	rt.autocloseAt = time.Time{}
+	id := layout.PaneID(pid)
+	if _, err := o.session.ClosePaneIn("", &id); err != nil {
+		// The last-pane refusal, almost certainly (the session shrank under the
+		// countdown). Leave the corpse and its exit stamp alone: the reaper
+		// still owns it, and the clients' countdown simply ends without the
+		// pane going away.
+		log.Printf("catway: pane %d auto-close refused: %v", pid, err)
+		return
+	}
+	delete(o.capturedHist, pid) // the corpse's scrollback seed goes with it
+	o.applyModel()
+	o.histSaveSoon()
+}
+
+// keepPane cancels a pane's auto-close (the pane.keep command) and tells every
+// window watching, by re-sending the exit with no countdown on it. Returns
+// false for an unknown pane so the command can fail rather than silently
+// succeed; cancelling a pane with no countdown running is a no-op success, since
+// "keep this pane" is already true of it. Loop goroutine.
+func (o *orch) keepPane(pid uint32) bool {
+	rt := o.panes[pid]
+	if rt == nil {
+		return false
+	}
+	if o.cancelAutoclose(rt) && rt.exited != nil {
+		o.sendVisible(pid, browserproto.NewPaneExited(pid, *rt.exited))
+	}
+	return true
 }

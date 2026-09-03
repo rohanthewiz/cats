@@ -54,7 +54,7 @@ server assumes a default 120×32 area.
 | `pane_branch` | the git branch checked out in that working directory (`""` when the pane is not in a repository); sent separately from `pane_cwd` because a checkout moves the branch without moving the pane |
 | `pane_agent` | agent identity + arbitrated state for a pane |
 | `pane_modes` | the pane's DEC mode state, so the UI knows whether a drag belongs to the program or to selection |
-| `pane_exited` | the pane's child exited |
+| `pane_exited` | the pane's child exited. `autoclose_ms` is what remains of the server's tidy-exit countdown (`panes.autoclose_exited`) — a clean exit closes its own pane after a few seconds — and is absent when no countdown is running: a non-zero exit, the knob off, the session's last pane, or a countdown cancelled with `pane.keep`. It is a REMAINING time rather than a deadline, so no clock agreement is needed, and it is re-sent (chrome to a late joiner, and again on a cancel) so every window shows the same number and stops counting together |
 | `pane_respawned` | the pane has a live child again (a cathost restart or a host move re-spawned its PTY) — the retraction of a `pane_exited`, since a client remembers the exit and the chrome sent to a late joiner simply omits `pane_exited` for a live pane |
 
 A `Rect` on the wire is a compact `[x, y, w, h]` array of cell coordinates.

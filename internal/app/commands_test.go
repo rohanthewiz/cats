@@ -114,6 +114,7 @@ func (b *fakeBackend) ApplyModel()                 { b.rec("applyModel") }
 func (b *fakeBackend) BroadcastLayout()            { b.rec("broadcastLayout") }
 func (b *fakeBackend) BroadcastPaneTitle(p uint32) { b.rec("title"); b.lastTitle = p }
 func (b *fakeBackend) BroadcastFlags()             { b.rec("broadcastFlags") }
+func (b *fakeBackend) KeepPane(pane uint32) bool   { b.rec("keepPane"); return true }
 func (b *fakeBackend) PaneExists(uint32) bool      { return b.paneExists }
 func (b *fakeBackend) DaemonConnected() bool       { return b.daemonUp }
 

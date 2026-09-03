@@ -321,6 +321,7 @@ channel, since a result with nowhere to go is not worth producing.
 |--------|----------------|
 | `pane.split` | `split [h\|v] [pane]` |
 | `pane.close` | `close [pane]` |
+| `pane.keep` | `keep [pane]` — cancel the auto-close countdown on a cleanly exited pane (`panes.autoclose_exited`), for every window watching it. A pane with no countdown running succeeds unchanged |
 | `pane.focus` | `focus <pane>` |
 | `pane.focus_direction` | `focus-dir <left\|right\|up\|down>` |
 | `pane.cycle` | `cycle [prev]` |

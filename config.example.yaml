@@ -93,6 +93,13 @@ panes:
   reap_exited: "4h"                    # Go duration. "off" (or "0"/"never")
                                        # keeps exited panes forever, which is
                                        # what cats did before the reaper.
+  # A pane whose shell exited CLEANLY (status 0) has nothing left to show, so it
+  # closes itself after a short, visible countdown: the header reads
+  # "exited (0) — close in 20s [x]", and the [x] keeps the pane. Only status 0
+  # counts down; a pane that died non-zero stays put, since its last screen is
+  # the failure you are about to read.
+  autoclose_exited: "20s"              # Go duration. "off" (or "0"/"never")
+                                       # keeps every corpse until reap_exited.
 
 # Git worktrees (workspace > new worktree): where new checkouts are created.
 worktrees:

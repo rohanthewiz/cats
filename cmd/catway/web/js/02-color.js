@@ -40,6 +40,10 @@
       gs: 1, ox: 0, oy: 0,   // grid inset: scale + centring offsets (setInset)
       defFg: THEME_FG, defBg: THEME_BG, modes: { mouse: false, alt: false, kitty: 0 },
       title: "", cwd: "", branch: "", agent: "", agentState: "", agentModel: "", exited: null,
+      // autocloseAt is when the server intends to close this exited pane by
+      // itself (a local Date.now() deadline derived from the remaining time it
+      // sent), 0 when no countdown is running. See armAutoclose in reap.go.
+      autocloseAt: 0,
       pressed: -1, lastCell: "", dirty: false, scroll: null, sel: null, cm: null };
     // Clicking the header (not its buttons) focuses the pane; double-click
     // renames, right-click opens the pane menu (chrome or canvas); holding

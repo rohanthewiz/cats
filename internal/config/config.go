@@ -441,6 +441,15 @@ type Worktrees struct {
 // again either, so a session left running for days silted up with dead panes.
 // The reaper closes one once it is old enough to be scenery rather than
 // something still being read.
+// defaultAutocloseExited is the countdown a cleanly exited pane gets when the
+// config says nothing. Both spellings exist because the value is needed as a
+// duration by AutocloseExitedAfter's absent-value case and as the string that
+// Default() writes into a fresh config file, and they must not drift.
+const (
+	defaultAutocloseExited    = 20 * time.Second
+	defaultAutocloseExitedStr = "20s"
+)
+
 type Panes struct {
 	// ReapExited is how long a pane is kept after its child exits, as a Go
 	// duration string. Empty, "0", "off" or "never" keeps corpses forever —
@@ -451,6 +460,48 @@ type Panes struct {
 	// The session's last pane is never reaped whatever this says; a terminal
 	// that tidies itself out of existence is not a tidy terminal.
 	ReapExited string `yaml:"reap_exited"`
+
+	// AutocloseExited is the short countdown a pane gets when its child exits
+	// CLEANLY (status 0), as a Go duration string; the same off-switch
+	// spellings as ReapExited disable it. It is the tidy-up end of the same
+	// idea the reaper serves, at the other end of the timescale: reap_exited
+	// is the sweep that stops a long session silting up, this is the pane
+	// closing itself the moment you stop needing it.
+	//
+	// Only a clean exit qualifies. A pane that died non-zero is showing a
+	// stack trace or a failed build — the very thing dead panes are kept for —
+	// and sweeping that away on a timer would destroy the output at
+	// exactly the moment it became interesting. A `exit`ed shell has nothing
+	// left to say.
+	//
+	// The countdown is visible in the pane header and cancellable from it
+	// (pane.keep), so the twenty seconds are a chance to say "no", not a
+	// deadline to race. The default is set by the SLOWEST thing worth reading
+	// off a pane that then exits cleanly — a plugin run's git or build output
+	// (see pluginCatctlTab), which wants long enough to skim, not just long
+	// enough to notice.
+	AutocloseExited string `yaml:"autoclose_exited"`
+}
+
+// AutocloseExitedAfter parses AutocloseExited. 0 means "never auto-close",
+// which — as with ReapExitedAfter — is what the off-switch spellings resolve
+// to. An ABSENT value does not: it takes the default from Default(), since a
+// config file written before this knob existed should still get the behaviour.
+func (p Panes) AutocloseExitedAfter() (time.Duration, error) {
+	switch strings.ToLower(strings.TrimSpace(p.AutocloseExited)) {
+	case "0", "off", "never", "none":
+		return 0, nil
+	case "":
+		return defaultAutocloseExited, nil
+	}
+	d, err := time.ParseDuration(p.AutocloseExited)
+	if err != nil {
+		return 0, fmt.Errorf("autoclose_exited %q: %w", p.AutocloseExited, err)
+	}
+	if d < 0 {
+		return 0, fmt.Errorf("autoclose_exited %q: must not be negative", p.AutocloseExited)
+	}
+	return d, nil
 }
 
 // ReapExitedAfter parses ReapExited. 0 means "never reap", which is what the
@@ -576,7 +627,10 @@ func Default() Config {
 		// Four hours is "since before lunch": long enough that a pane still
 		// worth reading is still there, short enough that a week-long session
 		// is not a graveyard.
-		Panes:       Panes{ReapExited: "4h"},
+		// Ten seconds for a clean exit is long enough to read "exited (0)",
+		// notice the countdown and stop it if the pane still has something on
+		// screen you wanted.
+		Panes:       Panes{ReapExited: "4h", AutocloseExited: defaultAutocloseExitedStr},
 		Theme:       Theme{Colors: map[string]string{}},
 		Keybindings: Keybindings{CopyMode: cloneKeyMap(defaultCopyMode)},
 		Worktrees:   Worktrees{Directory: "~/.cats/worktrees"},
@@ -700,6 +754,9 @@ func (c Config) Validate() error {
 		return fmt.Errorf("persistence.history_lines %d: must be >= 0", c.Persistence.HistoryLines)
 	}
 	if _, err := c.Panes.ReapExitedAfter(); err != nil {
+		return fmt.Errorf("panes.%w", err)
+	}
+	if _, err := c.Panes.AutocloseExitedAfter(); err != nil {
 		return fmt.Errorf("panes.%w", err)
 	}
 	for action, keys := range c.Keybindings.CopyMode {

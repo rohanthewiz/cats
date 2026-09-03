@@ -271,6 +271,7 @@ See [Persistence](../subsystems/persistence.md).
 ```yaml
 panes:
   reap_exited: "4h"        # "off" / "0" / "never" keeps exited panes forever
+  autoclose_exited: "20s"  # a CLEANLY exited pane closes itself after this
 ```
 
 A pane whose child exits is **kept**: the chrome turns red, the last screen
@@ -281,6 +282,7 @@ how long that corpse is kept before a five-minute sweep closes it.
 | Key | Flag | Notes |
 |-----|------|-------|
 | `reap_exited` | — | Go duration; `""`, `"0"`, `"off"`, `"never"` disable reaping |
+| `autoclose_exited` | — | Go duration; `"0"`, `"off"`, `"never"` disable it. Absent means the 20s default |
 
 Two things the sweep will not do, whatever this is set to:
 
@@ -294,6 +296,30 @@ Two things the sweep will not do, whatever this is set to:
 Reaping a pane is an ordinary close from the model's point of view, so it emits
 `pane_removed` on the [control API](../protocols/control-api.md) like any other.
 Live-reloadable: `catctl reload` and the next sweep uses the new value.
+
+### `autoclose_exited` — the tidy exit
+
+The reaper's short-timescale sibling. A pane whose child exits with **status 0**
+has said everything it was going to say, so instead of sitting there red until
+the four-hour sweep it closes itself after a countdown you can see and stop:
+
+```
+pane 3 · build · ~/src · exited (0) — close in 7s ✕
+```
+
+* **Only status 0 counts down.** A non-zero exit keeps today's behaviour exactly
+  — the red header stays until you close it or the reaper does — because that
+  pane's last screen is the failure you came to read.
+* **The clock is the server's, not the browser's.** Every window watching the
+  pane draws the same remaining time, a window that joins mid-countdown picks it
+  up where it is, and the pane is closed once no matter how many windows are
+  open.
+* **`✕` cancels it for everyone** by sending `pane.keep`, which stops the
+  countdown server-side and re-broadcasts the exit without one. The pane then
+  behaves exactly like a non-zero corpse: yours until you close it, or until
+  `reap_exited` comes around.
+* **The last pane is never auto-closed**, for the same reason it is never
+  reaped. The countdown simply stops.
 
 ## `push`
 

@@ -111,6 +111,23 @@
   .pane .chrome .info .host.off { color:var(--err); }
   .pane .chrome .info .agent { color:var(--warn); }
   .pane .chrome .info .exited { color:var(--err); font-weight:600; }
+  /* The tidy-exit countdown, immediately after "exited (0)" and deliberately
+     quieter than it: the exit is the news, the countdown is what the pane is
+     about to do about it. Muted rather than red so a header that is merely
+     tidying itself up does not read as two alarms, and flex:none because a
+     number that truncates ("close in 1…") is worse than a title that does.
+     It carries no separator dot — it is a clause of the exit, not another
+     field. */
+  .pane .chrome .info .autoclose { flex:none; color:var(--muted); padding-left:6px;
+    white-space:nowrap; }
+  /* The keep button lives inside that run rather than in the .ctl toolbar: it
+     answers the sentence it sits at the end of, and the toolbar's ✕ already
+     means the opposite thing (close now). Sized to the surrounding text so it
+     reads as punctuation, and brightened on hover like the toolbar buttons. */
+  .pane .chrome .info .autoclose .keep { background:none; border:1px solid var(--muted);
+    color:var(--muted); cursor:pointer; font:inherit; line-height:1; margin-left:2px;
+    padding:0 4px; border-radius:3px; }
+  .pane .chrome .info .autoclose .keep:hover { color:var(--fg-strong); border-color:var(--fg-strong); }
   /* Pane-scoped mode chips (copy mode, zoom) ride the header of the pane they
      describe — the tab-row status area only keeps the app-global affordances. */
   .pane .chrome .info .mode { color:var(--warn); font-weight:600; }

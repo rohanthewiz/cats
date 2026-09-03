@@ -139,6 +139,7 @@ const (
 	CmdNavBack            = wire.CmdNavBack
 	CmdNavForward         = wire.CmdNavForward
 	CmdPaneClose          = wire.CmdPaneClose
+	CmdPaneKeep           = wire.CmdPaneKeep
 	CmdPaneCycle          = wire.CmdPaneCycle
 	CmdPaneFlag           = wire.CmdPaneFlag
 	CmdPaneFocus          = wire.CmdPaneFocus

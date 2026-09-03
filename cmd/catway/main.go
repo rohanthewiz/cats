@@ -206,6 +206,9 @@ func main() {
 	// The exited-pane reaper's TTL (reap.go). Live-reloadable, so this is only
 	// the starting value — `catctl reload` re-reads it.
 	o.reapAfter = reapAfterFromConfig(cfg.Panes)
+	// …and the short countdown a cleanly exited pane closes itself on, which is
+	// the same knob at the other end of the timescale.
+	o.autocloseAfter = autocloseAfterFromConfig(cfg.Panes)
 	// Outbound push bridge: an agent that blocks while nobody is watching still
 	// reaches a phone. Deliberately independent of every client-facing path — it
 	// is an ordinary outbound POST, so it keeps working when no client is
