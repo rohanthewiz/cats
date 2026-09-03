@@ -90,9 +90,9 @@ failure is silence: `capture`, `read`, `pane.wait_for_output`, `worktree.list`,
 `plugin.list`, `path.list`, `config.get` and `theme.list` exist only to produce
 data, so one sent with nowhere to reply does nothing at all.
 
-The table is what a generated client is emitted from — a command added here
-arrives in the mobile app as a typed method instead of a hand-written string;
-see [Dart client generation](dart-client.md).
+The table is what the phone builds its typed calls from: cats-mobile imports
+`wire` directly (its `go.mod` pins a cats commit), so a command added here is a
+Go constant there, not a hand-written string.
 `app.CommandNames()` is derived from it (so names and shapes cannot disagree) and
 remains the enumerable vocabulary: `catctl commands` prints it, so a client can
 validate a method name before sending it.

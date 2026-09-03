@@ -13,8 +13,8 @@ import (
 )
 
 // These tests guard the §7 command table (wire.CommandSpecs) as the machine-readable
-// truth about the vocabulary: cmd/catgen-dart emits a typed client from it, so a
-// wrong or missing entry is not a stale comment — it is a client method that
+// truth about the vocabulary: the phone (cats-mobile) builds its typed calls from
+// it, so a wrong or missing entry is not a stale comment — it is a client method that
 // does not exist, or one whose signature lies about what comes back.
 //
 // Three kinds of check, deliberately separate:

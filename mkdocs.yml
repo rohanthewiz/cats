@@ -90,7 +90,6 @@ nav:
       - Browser protocol: protocols/browser-protocol.md
       - Control API: protocols/control-api.md
       - Hook API: protocols/hook-api.md
-      - Dart client generation: protocols/dart-client.md
   - Subsystems:
       - Session model: subsystems/session-model.md
       - Terminal and input: subsystems/terminal.md

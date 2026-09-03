@@ -235,9 +235,10 @@ type Flag struct {
 	// AtMs is when the flag was last set or edited, in Unix milliseconds.
 	//
 	// Milliseconds rather than a time.Time for two reasons that point the same
-	// way: the wire structs are reflected into Dart by cmd/catgen-dart, which has
-	// no mapping for time.Time, and a persisted integer cannot acquire a timezone
-	// or a format between one release and the next. Clients that want "flagged 3d
+	// way: the wire structs are shared with the phone (cats-mobile imports `wire`),
+	// and a bare integer crosses every codec the same way, and a persisted
+	// integer cannot acquire a timezone or a format between one release and the
+	// next. Clients that want "flagged 3d
 	// ago" subtract it from their own clock, exactly as they already do with the
 	// agents rollup's SinceMs.
 	AtMs int64 `json:"at_ms,omitempty"`

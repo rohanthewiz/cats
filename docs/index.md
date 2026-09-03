@@ -108,8 +108,6 @@ cmd/catway/           cats server: orchestrator event loop, web UI, WS bridge,
 cmd/cathost/          terminal-backend daemon (orchestration Host over a socket)
 cmd/catctl/           control-API CLI, agent-integration installers, WS probe
 cmd/catapp/           macOS launcher (webview + daemon supervisor)
-cmd/catgen-dart/      generates the mobile client's Dart wire layer from
-                       browserproto + the command table (golden committed)
 internal/app/         session model + the command table (the Dispatcher seam)
 internal/browserproto/  browser WebSocket protocol
 internal/orchestration/ catway<->cathost seam (protocol + terminal Host)

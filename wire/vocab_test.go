@@ -6,8 +6,8 @@ import (
 )
 
 // These tests guard the §7 command table (commandSpecs) as the machine-readable
-// truth about the vocabulary: cmd/catgen-dart emits a typed client from it, and
-// the phone imports this package directly, so a wrong or missing entry is not a
+// truth about the vocabulary: the phone (cats-mobile) imports this package
+// directly and builds its typed calls from it, so a wrong or missing entry is not a
 // stale comment — it is a client method that does not exist, or one whose
 // signature lies about what comes back.
 //
