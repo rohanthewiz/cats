@@ -281,3 +281,89 @@ func TestCellOmission(t *testing.T) {
 		}
 	}
 }
+
+// TestMarshalStampsEveryType pins the msgTypes table against the decoders in
+// both directions: every entry, zero-valued and un-stamped, must come off
+// Marshal with its "t" set and decode (via DecodeUp or DecodeDown) back to a
+// pointer of the same Go type; and every "t" a decoder knows must be in the
+// table. A struct added to one and not the other fails here, not on a phone.
+func TestMarshalStampsEveryType(t *testing.T) {
+	seen := map[Type]bool{}
+	for rt, want := range msgTypes {
+		seen[want] = true
+		zero := reflect.New(rt) // *T with T == ""
+		for _, pass := range []struct {
+			name string
+			msg  any
+		}{{"pointer", zero.Interface()}, {"value", zero.Elem().Interface()}} {
+			data, err := Marshal(pass.msg)
+			if err != nil {
+				t.Errorf("%s %s: Marshal: %v", rt, pass.name, err)
+				continue
+			}
+			got, err := peekType(data)
+			if err != nil || got != want {
+				t.Errorf("%s %s: stamped %q (err %v), want %q", rt, pass.name, got, err, want)
+			}
+			// The one that succeeds tells us the direction; the other must
+			// report ErrUnknownType, never a decode of the wrong shape.
+			var decoded any
+			for _, decode := range []func([]byte) (any, error){DecodeUp, DecodeDown} {
+				v, err := decode(data)
+				if errors.Is(err, ErrUnknownType) {
+					continue
+				}
+				if err != nil {
+					t.Errorf("%s %s: decode: %v", rt, pass.name, err)
+					continue
+				}
+				decoded = v
+			}
+			if decoded == nil || reflect.TypeOf(decoded) != reflect.PointerTo(rt) {
+				t.Errorf("%s %s: decoded to %T, want *%s", rt, pass.name, decoded, rt)
+			}
+		}
+		// The caller's value is never mutated: T stays empty on the pointer.
+		if got := zero.Elem().FieldByName("T").String(); got != "" {
+			t.Errorf("%s: Marshal wrote T=%q back into the caller's struct", rt, got)
+		}
+	}
+	// Reverse: every "t" the decoders accept has a table entry. Probe with a
+	// bare envelope, which decodes into the zero struct for any known type.
+	for _, name := range []string{"init", "key", "mouse", "paste", "image", "resize", "focus", "raw", "cmd",
+		"welcome", "layout", "agents", "hosts", "pane_title", "pane_cwd", "pane_branch", "pane_agent",
+		"pane_modes", "pane_exited", "pane_respawned", "pane_frame", "pane_diff", "clipboard", "notify",
+		"title", "error", "shutdown", "update_ready", "theme", "usage", "clients", "cmd_result", "history",
+		"record", "runbook_runs", "chat_state", "chat_snapshot", "chat_row", "chat_delta", "chat_perm"} {
+		if !seen[Type(name)] {
+			t.Errorf("decoders know %q but msgTypes does not stamp it", name)
+		}
+	}
+	if len(seen) != 40 {
+		t.Errorf("msgTypes has %d distinct types, want 40; update this test with the decoders", len(seen))
+	}
+}
+
+// TestMarshalRespectsAndChecksT: an already-stamped message is encoded as-is,
+// and a T that contradicts the Go type is refused rather than sent.
+func TestMarshalRespectsAndChecksT(t *testing.T) {
+	data, err := Marshal(Init{T: MsgInit, V: 1, Cols: 80})
+	if err != nil || !strings.Contains(string(data), `"t":"init"`) {
+		t.Fatalf("pre-stamped Init: %s, %v", data, err)
+	}
+	if _, err := Marshal(&Key{T: MsgPaste}); !errors.Is(err, ErrTypeMismatch) {
+		t.Errorf("Key stamped as paste should be ErrTypeMismatch, got %v", err)
+	}
+	// Non-message values still encode plainly, so harness code that sends raw
+	// JSON fixtures through Marshal keeps working.
+	if data, err := Marshal(map[string]any{"t": "bogus"}); err != nil || string(data) != `{"t":"bogus"}` {
+		t.Errorf("map passthrough: %s, %v", data, err)
+	}
+	var nilInit *Init
+	if data, err := Marshal(nilInit); err != nil || string(data) != "null" {
+		t.Errorf("nil pointer should encode as null, got %s, %v", data, err)
+	}
+	if data, err := Marshal(nil); err != nil || string(data) != "null" {
+		t.Errorf("untyped nil should encode as null, got %s, %v", data, err)
+	}
+}

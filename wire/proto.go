@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 )
 
 // ProtocolVersion is bumped on any breaking change to the message shapes.
@@ -96,9 +97,100 @@ const (
 // should errors.Is-check and drop the message rather than fail the session.
 var ErrUnknownType = errors.New("browserproto: unknown message type")
 
+// msgTypes maps each message struct to its "t" discriminator. It is the
+// single source Marshal stamps from, and TestMarshalStampsEveryType pins it
+// against DecodeUp/DecodeDown so a struct cannot be added to one and not the
+// other. Keyed by the struct type, not the pointer: Marshal derefs first.
+var msgTypes = map[reflect.Type]Type{
+	// Up.
+	reflect.TypeOf(Init{}):   MsgInit,
+	reflect.TypeOf(Key{}):    MsgKey,
+	reflect.TypeOf(Mouse{}):  MsgMouse,
+	reflect.TypeOf(Paste{}):  MsgPaste,
+	reflect.TypeOf(Image{}):  MsgImage,
+	reflect.TypeOf(Resize{}): MsgResize,
+	reflect.TypeOf(Focus{}):  MsgFocus,
+	reflect.TypeOf(Raw{}):    MsgRaw,
+	reflect.TypeOf(Cmd{}):    MsgCmd,
+	// Down.
+	reflect.TypeOf(Welcome{}):       MsgWelcome,
+	reflect.TypeOf(Layout{}):        MsgLayout,
+	reflect.TypeOf(Agents{}):        MsgAgents,
+	reflect.TypeOf(Hosts{}):         MsgHosts,
+	reflect.TypeOf(PaneTitle{}):     MsgPaneTitle,
+	reflect.TypeOf(PaneCwd{}):       MsgPaneCwd,
+	reflect.TypeOf(PaneBranch{}):    MsgPaneBranch,
+	reflect.TypeOf(PaneAgent{}):     MsgPaneAgent,
+	reflect.TypeOf(PaneModes{}):     MsgPaneModes,
+	reflect.TypeOf(PaneExited{}):    MsgPaneExited,
+	reflect.TypeOf(PaneRespawned{}): MsgPaneRespawned,
+	reflect.TypeOf(PaneFrame{}):     MsgPaneFrame,
+	reflect.TypeOf(PaneDiff{}):      MsgPaneDiff,
+	reflect.TypeOf(Clipboard{}):     MsgClipboard,
+	reflect.TypeOf(Notify{}):        MsgNotify,
+	reflect.TypeOf(Title{}):         MsgTitle,
+	reflect.TypeOf(Error{}):         MsgError,
+	reflect.TypeOf(Shutdown{}):      MsgShutdown,
+	reflect.TypeOf(UpdateReady{}):   MsgUpdateReady,
+	reflect.TypeOf(Theme{}):         MsgTheme,
+	reflect.TypeOf(Usage{}):         MsgUsage,
+	reflect.TypeOf(Clients{}):       MsgClients,
+	reflect.TypeOf(CmdResult{}):     MsgCmdResult,
+	reflect.TypeOf(History{}):       MsgHistory,
+	reflect.TypeOf(Record{}):        MsgRecord,
+	reflect.TypeOf(RunbookRuns{}):   MsgRunbookRuns,
+	reflect.TypeOf(ChatState{}):     MsgChatState,
+	reflect.TypeOf(ChatSnapshot{}):  MsgChatSnapshot,
+	reflect.TypeOf(ChatRowMsg{}):    MsgChatRow,
+	reflect.TypeOf(ChatDelta{}):     MsgChatDelta,
+	reflect.TypeOf(ChatPerm{}):      MsgChatPerm,
+}
+
+// ErrTypeMismatch is returned by Marshal when a message's T field disagrees
+// with its Go type, e.g. a Key struct carrying "paste". That is always a
+// caller bug, and letting it onto the wire would make the far end decode the
+// wrong shape, so it is refused here rather than discovered there.
+var ErrTypeMismatch = errors.New("browserproto: message T does not match its Go type")
+
 // Marshal encodes one message for one WebSocket text frame.
+//
+// The "t" discriminator is derived from the Go type: a message struct passed
+// with an empty T (by value or by pointer) goes out stamped, so no caller has
+// to remember the constant. The stamp lands on a copy, never on the caller's
+// value, which keeps Marshal side-effect free for values shared between
+// goroutines. A T already set is left alone if it agrees with the type and is
+// an ErrTypeMismatch if it does not.
+//
+// Anything not in msgTypes (a raw json.RawMessage, a map, a test fixture)
+// is encoded as-is, exactly as before stamping existed.
 func Marshal(m any) ([]byte, error) {
-	return json.Marshal(m)
+	v := reflect.ValueOf(m)
+	for v.Kind() == reflect.Pointer && !v.IsNil() {
+		v = v.Elem()
+	}
+	// An untyped nil has no Type (reflect panics); a nil *Init stops the loop
+	// above as a pointer, which is not in the table. Both fall through to
+	// plain encoding, "null", as before.
+	if !v.IsValid() || v.Kind() != reflect.Struct {
+		return json.Marshal(m)
+	}
+	want, known := msgTypes[v.Type()]
+	if !known {
+		return json.Marshal(m)
+	}
+	// Every struct in msgTypes has its discriminator as the exported field T.
+	f := v.FieldByName("T")
+	switch have := Type(f.String()); {
+	case have == want:
+		return json.Marshal(m)
+	case have != "":
+		return nil, fmt.Errorf("%w: %T has %q, want %q", ErrTypeMismatch, m, have, want)
+	}
+	// Copy so the caller's struct is untouched even when passed by pointer.
+	cp := reflect.New(v.Type()).Elem()
+	cp.Set(v)
+	cp.FieldByName("T").SetString(string(want))
+	return json.Marshal(cp.Interface())
 }
 
 func decodeAs[T any](data []byte) (any, error) {
