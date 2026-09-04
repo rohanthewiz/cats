@@ -25,7 +25,61 @@
     paneTipEl.style.top = Math.max(4, y) + "px";
   }
 
-  function hideTip() { paneTipEl.classList.remove("show"); }
+  function hideTip() { paneTipEl.classList.remove("show"); restoreTitles(); }
+
+  // ---- Native tooltips vs. the hover card ----
+  //
+  // Every mark inside a row carries a title attribute — the flag's note, the
+  // paw print's count, the lock's meaning — and for a row that never opens a
+  // card that attribute is the whole story, so it stays. But once a card *is*
+  // up, the browser's own tooltip is a second popup, a second later, saying a
+  // subset of what the card already says in full, in its own box wherever the
+  // pointer happens to sit — two competing surfaces for one row. So the row
+  // that owns the visible card gives up its titles for exactly as long as it
+  // owns it, and gets them back the moment the card goes.
+  //
+  // The old value is stashed on the node itself (data-tiptitle) rather than in
+  // a map keyed by element: these lists are rebuilt under a stationary pointer
+  // on every rollup, and an attribute travels with the node and dies with it,
+  // so a record can never outlive the row it describes. Restoring into a row
+  // that has since been replaced is therefore harmless — it writes to a
+  // detached node nobody will see again.
+  let mutedRow = null;
+
+  // titleNodes: the element and its descendants that carry attr. The root is
+  // included as well as its marks, since a row that titles itself competes with
+  // the card exactly as a glyph inside it does.
+  function titleNodes(el, attr) {
+    const out = el.hasAttribute(attr) ? [el] : [];
+    for (const n of el.querySelectorAll("[" + attr + "]")) out.push(n);
+    return out;
+  }
+
+  // muteTitles takes the row's native tooltips away. Idempotent per row, since
+  // the hover handlers run on every mousemove: re-muting an already-muted row
+  // would otherwise stash the empty string over the real title and give the
+  // row back a blank tooltip.
+  function muteTitles(el) {
+    if (!el || el === mutedRow) return;
+    restoreTitles();
+    for (const n of titleNodes(el, "title")) {
+      n.dataset.tiptitle = n.getAttribute("title");
+      n.removeAttribute("title");
+    }
+    mutedRow = el;
+  }
+
+  // restoreTitles is called from hideTip, so "no card showing" and "titles
+  // live" are the same state no matter which way the card went away —
+  // mouseleave, mousedown, or a row that stopped qualifying for a card.
+  function restoreTitles() {
+    if (!mutedRow) return;
+    for (const n of titleNodes(mutedRow, "data-tiptitle")) {
+      n.setAttribute("title", n.dataset.tiptitle);
+      delete n.dataset.tiptitle;
+    }
+    mutedRow = null;
+  }
 
   // Pane-list rows truncate title/agent to fit their narrow column, so the full
   // details are only reachable on hover. Rebuilt on each show since the
@@ -64,6 +118,12 @@
     if (cols && rows) items.push(["Window", cols + "×" + rows + " cells"]);
     items.push(["Link", connState.text, connState.err ? "err" : "ok"]);
     showTip(e, items);
+    // The card is the row's tooltip now — same bargain the workspace rows make
+    // (see muteTitles): the flag's note is already spelled out here in full, so
+    // the flag mark's own title would only repeat a slice of it, a second later,
+    // in a second box. Unconditional here where it is conditional there, since
+    // a pane row always opens a card.
+    muteTitles(e.currentTarget);
   }
 
 
@@ -166,6 +226,13 @@
   // stationary pointer.
   function showWorkspaceTip(e, w) {
     const items = workspaceTipItems(w);
+    // A row that earns no card keeps its glyph tooltips — they are all it has.
+    // hideTip restores them, so a row that loses its flag while hovered hands
+    // its titles back rather than staying silent until the pointer leaves.
     if (!items) { hideTip(); return; }
     showTip(e, items);
+    // The card is the row's tooltip now: silence the browser's, so the flag
+    // note and the todo counts are said once, in the card, and not again in a
+    // box that opens over it a second later.
+    muteTitles(e.currentTarget);
   }

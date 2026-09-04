@@ -465,6 +465,12 @@
         // the press either switches workspace or begins a reorder drag, and a
         // card trailing the pointer through a drag hides the drop bar it is
         // being dragged against.
+        //
+        // While the card is up it also owns the row's tooltips: showWorkspaceTip
+        // strips the title attributes off the row's marks (muteTitles) and
+        // hideTip puts them back, so the flag note and the todo counts are never
+        // said twice — once in the card and again in a native tooltip that opens
+        // over it a second later. A row that opens no card keeps its titles.
         li.addEventListener("mouseenter", (e) => showWorkspaceTip(e, w));
         li.addEventListener("mousemove", (e) => showWorkspaceTip(e, w));
         li.addEventListener("mouseleave", hideTip);

@@ -237,6 +237,11 @@
     // riding just right of the pointer; mouseleave tears it down. showPaneTip
     // re-reads live pane state by id, so a re-render between enter and move
     // still shows the current title/agent/state.
+    //
+    // While the card is up it owns the row's tooltips too: showPaneTip strips
+    // the title attributes off the row's marks (muteTitles) and hideTip puts
+    // them back, so the flag's note is said once — in the card, in full —
+    // rather than again a second later in a native tooltip over it.
     li.addEventListener("mouseenter", (e) => showPaneTip(e, row));
     li.addEventListener("mousemove", (e) => showPaneTip(e, row));
     li.addEventListener("mouseleave", hideTip);
