@@ -242,8 +242,12 @@
     // the title attributes off the row's marks (muteTitles) and hideTip puts
     // them back, so the flag's note is said once — in the card, in full —
     // rather than again a second later in a native tooltip over it.
-    li.addEventListener("mouseenter", (e) => showPaneTip(e, row));
-    li.addEventListener("mousemove", (e) => showPaneTip(e, row));
+    // Both through armTip, so the card waits out a short dwell before it opens
+    // and a pass down the list on the way somewhere else pops nothing up; once
+    // it is up, moves within the row go straight through and it rides along.
+    const tip = (e) => armTip(e, (ev) => showPaneTip(ev, row));
+    li.addEventListener("mouseenter", tip);
+    li.addEventListener("mousemove", tip);
     li.addEventListener("mouseleave", hideTip);
     return li;
   }

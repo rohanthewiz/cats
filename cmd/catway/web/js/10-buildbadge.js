@@ -14,8 +14,12 @@
       ["Build", b.hash + (b.dirty ? " · modified tree" : "")],
       ["Commit", b.subject],
     ];
-    el.addEventListener("mouseenter", (e) => showTip(e, items));
-    el.addEventListener("mousemove", (e) => showTip(e, items));
+    // Through armTip like the sidebar rows: one popup element, one rule about
+    // when it opens — a badge that answered instantly while the rows next to it
+    // waited would read as two different behaviours in the same corner.
+    const tip = (e) => armTip(e, (ev) => showTip(ev, items));
+    el.addEventListener("mouseenter", tip);
+    el.addEventListener("mousemove", tip);
     el.addEventListener("mouseleave", hideTip);
     document.getElementById("brand").appendChild(el);
   })();

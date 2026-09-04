@@ -25,7 +25,55 @@
     paneTipEl.style.top = Math.max(4, y) + "px";
   }
 
-  function hideTip() { paneTipEl.classList.remove("show"); restoreTitles(); }
+  function hideTip() { cancelTip(); paneTipEl.classList.remove("show"); restoreTitles(); }
+
+  // ---- Dwell before the card ----
+  //
+  // The card used to open on the first mousemove over a row, which made a pass
+  // through the sidebar a run of popups: crossing WORKSPACES on the way to the
+  // PANES list built and tore down a card per row, each one landing under the
+  // pointer and covering the rows still to be crossed. A short dwell is what
+  // separates "the pointer is on its way past this row" from "the pointer is
+  // asking about this row", and it is the same bargain the native tooltips the
+  // card replaced (see muteTitles) always made.
+  //
+  // The wait is only ever paid on the way *in*. Once a card is up, moves within
+  // the row go straight through, so the card keeps riding the pointer and
+  // keeps re-reading live state at the frame rate it always did.
+  const TIP_DELAY_MS = 400;
+  let tipTimer = null; // the pending show, or null when nothing is waiting
+  let tipArmed = null; // {ev, show} — what that timer will run when it fires
+
+  // armTip defers show(ev) until the pointer has rested TIP_DELAY_MS.
+  //
+  // The event itself cannot be kept: currentTarget is nulled once dispatch
+  // ends, so the deferred call gets a plain snapshot of the three fields the
+  // card builders read (the position to place at, and the row to build from and
+  // mute). The snapshot is refreshed by every move within the row *without*
+  // restarting the clock, so the card is placed where the pointer came to rest
+  // while the dwell is still measured from when the row was entered — a hand
+  // that drifts a cell or two would otherwise never wait long enough anywhere.
+  function armTip(e, show) {
+    const ev = { clientX: e.clientX, clientY: e.clientY, currentTarget: e.currentTarget };
+    if (paneTipEl.classList.contains("show")) { show(ev); return; }
+    if (tipArmed && tipArmed.ev.currentTarget === ev.currentTarget) { tipArmed.ev = ev; return; }
+    cancelTip(); // a different row: its wait starts over
+    tipArmed = { ev, show };
+    tipTimer = setTimeout(() => {
+      const a = tipArmed;
+      tipTimer = null; tipArmed = null;
+      a.show(a.ev);
+    }, TIP_DELAY_MS);
+  }
+
+  // cancelTip drops a wait that never earned its card. Called from hideTip, so
+  // every existing teardown path (mouseleave, mousedown, a row that stopped
+  // qualifying) also disarms a pending one — a card must never open after the
+  // pointer has already left.
+  function cancelTip() {
+    if (tipTimer) clearTimeout(tipTimer);
+    tipTimer = null; tipArmed = null;
+  }
 
   // ---- Native tooltips vs. the hover card ----
   //

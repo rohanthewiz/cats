@@ -471,8 +471,13 @@
         // hideTip puts them back, so the flag note and the todo counts are never
         // said twice — once in the card and again in a native tooltip that opens
         // over it a second later. A row that opens no card keeps its titles.
-        li.addEventListener("mouseenter", (e) => showWorkspaceTip(e, w));
-        li.addEventListener("mousemove", (e) => showWorkspaceTip(e, w));
+        // Both events go through armTip, which holds the card back until the
+        // pointer has actually settled on the row (see TIP_DELAY_MS): mouseenter
+        // starts the wait, and mousemove is what keeps it running for a row that
+        // was swapped in under a pointer already sitting on it.
+        const tip = (e) => armTip(e, (ev) => showWorkspaceTip(ev, w));
+        li.addEventListener("mouseenter", tip);
+        li.addEventListener("mousemove", tip);
         li.addEventListener("mouseleave", hideTip);
         li.addEventListener("mousedown", hideTip);
         // The switch rides the drag helper's own mouseup rather than a "click"
