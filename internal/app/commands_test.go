@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/rohanthewiz/cats/internal/layout"
+	"github.com/rohanthewiz/cats/internal/workspace"
 )
 
 // errScroll stands in for a backend ScrollPane failure (e.g. unknown pane).
@@ -90,6 +91,12 @@ type fakeBackend struct {
 	// a sequence of commands as one window.
 	view      View
 	viewMoves []string
+	// activity is the canned per-pane answer PaneActivity gives (clean.go);
+	// resumed records StageResume calls and resumeRefuse names the agents the
+	// fake declines to resume.
+	activity     map[uint32]PaneActivity
+	resumed      map[uint32]workspace.ParkedAgent
+	resumeRefuse map[string]bool
 }
 
 // SetViewWorkspace moves the fake's view, standing in for catway moving the
@@ -225,6 +232,32 @@ func (b *fakeBackend) SendInput(pane uint32, text string, submit bool) error {
 	b.lastSend = SendInputParams{Pane: pane, Text: text, Submit: submit}
 	return b.sendErr
 }
+
+// PaneActivity answers from the canned activity map; a pane not in it is a
+// plain shell at its prompt (Known, nothing running) — the common case, and
+// the one a session of fresh panes is entirely made of. A nil map means the
+// same for every pane.
+func (b *fakeBackend) PaneActivity(p uint32) PaneActivity {
+	if act, ok := b.activity[p]; ok {
+		return act
+	}
+	return PaneActivity{Known: true}
+}
+
+// StageResume records the ref staged for a pane, refusing any ref whose agent
+// is in resumeRefuse so a test can cover the take-the-pane-back path.
+func (b *fakeBackend) StageResume(pane uint32, a workspace.ParkedAgent) bool {
+	b.rec("stageResume")
+	if b.resumeRefuse[a.Agent] {
+		return false
+	}
+	if b.resumed == nil {
+		b.resumed = make(map[uint32]workspace.ParkedAgent)
+	}
+	b.resumed[pane] = a
+	return true
+}
+
 func (b *fakeBackend) StageSpawn(pane uint32, ov SpawnOverride) {
 	b.rec("stageSpawn")
 	if b.staged == nil {

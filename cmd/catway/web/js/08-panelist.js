@@ -53,6 +53,11 @@
       row.flag = flagOf(pr) || flagOf(pi);
 
       const wsID = row.pub.split(":")[0];
+      // A sleeping workspace's one pane is a placeholder with no terminal —
+      // the shell it will get on wake. Listing it would offer a row that
+      // cannot be typed into; the WORKSPACES shelf is where a sleeping
+      // workspace is reached.
+      if (wsAsleep(wsID)) continue;
       if (!groups.length || groups[groups.length - 1].ws !== wsID) groups.push({ ws: wsID, rows: [] });
       groups[groups.length - 1].rows.push(row);
     }

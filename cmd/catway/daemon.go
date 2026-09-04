@@ -1089,6 +1089,19 @@ func (d *daemon) dispatch(mt orchestration.MessageType, payload []byte) {
 		}
 		o.post(func() { o.onPaneAgent(ev) })
 
+	case orchestration.MsgPaneJob:
+		var ev orchestration.PaneJob
+		if err := json.Unmarshal(payload, &ev); err != nil {
+			return
+		}
+		// Runtime state only: nothing is drawn for it, and the one reader is
+		// PaneActivity (clean.go) on the loop goroutine.
+		o.post(func() {
+			if rt := o.panes[ev.PaneID]; rt != nil {
+				rt.job = ev.Busy
+			}
+		})
+
 	case orchestration.MsgPaneAgentSession:
 		var ev orchestration.PaneAgentSession
 		if err := json.Unmarshal(payload, &ev); err != nil {

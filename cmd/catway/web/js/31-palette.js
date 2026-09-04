@@ -129,6 +129,10 @@
       items.push(
         { label: "rename workspace…", fn: () => renameWorkspace(aw) },
         { label: aw.locked ? "unlock workspace" : "lock workspace (no plugins or agents)", fn: () => toggleWorkspaceLock(aw) },
+        { label: "clean workspace (close idle panes)", fn: () => cleanWorkspace(aw, "") },
+        { label: "clean workspace, park idle agents", fn: () => cleanWorkspace(aw, "park") },
+        { label: "sleep workspace…", fn: () => sleepWorkspace(aw, "") },
+        { label: "sleep workspace, park idle agents…", fn: () => sleepWorkspace(aw, "park") },
         { label: "flag workspace…", fn: () => openFlagDialog(wsFlagTarget(aw)) },
         { label: "close workspace…", fn: () => confirmCloseWorkspace(aw) },
       );
@@ -166,7 +170,8 @@
 
     if (layoutMsg) {
       for (const w of layoutMsg.workspaces) {
-        items.push({ kind: "ws", label: w.name + " (" + w.id + ")", meta: w.active ? "active" : "",
+        // A sleeping workspace is listed like any other; focusing it wakes it.
+        items.push({ kind: "ws", label: w.name + " (" + w.id + ")", meta: w.active ? "active" : w.asleep ? "asleep" : "",
           fn: () => { if (!w.active) sendCmd("workspace.focus", { id: w.id }); } });
         items.push({ kind: "ws", label: "open " + w.name + " in new window", meta: w.id,
           fn: () => openWindow(w.id) });

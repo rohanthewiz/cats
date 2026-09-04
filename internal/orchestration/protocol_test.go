@@ -160,6 +160,7 @@ func TestCodecRoundTrip(t *testing.T) {
 		NewPaneSelection(42, "hello world"),
 		NewPaneText(42, "scrollback"),
 		NewPaneBranch(42, "feature/remote"),
+		NewPaneJob(42, true),
 		NewPaneModes(42, terminal.InputModes{
 			BracketedPaste: true, MouseMode: terminal.MouseAnyMotion,
 			MouseEncoding: terminal.MouseEncodingSGR, KittyKeyboardFlags: 5,
@@ -180,7 +181,7 @@ func TestCodecRoundTrip(t *testing.T) {
 
 	wantTypes := []MessageType{
 		MsgHello, MsgHello, MsgCreatePane, MsgInput, MsgResize, MsgClosePane, MsgRequestSelection, MsgRequestText,
-		MsgRequestResync, MsgShutdown, MsgWelcome, MsgPaneExited, MsgError, MsgPaneSelection, MsgPaneText, MsgPaneBranch, MsgPaneModes, MsgPaneFrame,
+		MsgRequestResync, MsgShutdown, MsgWelcome, MsgPaneExited, MsgError, MsgPaneSelection, MsgPaneText, MsgPaneBranch, MsgPaneJob, MsgPaneModes, MsgPaneFrame,
 	}
 	for i, want := range wantTypes {
 		typ, payload, err := ReadMessage(&buf)

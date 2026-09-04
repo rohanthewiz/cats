@@ -11,6 +11,7 @@ package app
 import (
 	"github.com/rohanthewiz/cats/internal/flags"
 	"github.com/rohanthewiz/cats/internal/layout"
+	"github.com/rohanthewiz/cats/internal/workspace"
 )
 
 // SplitDirection maps a wire direction value onto layout.Direction.
@@ -56,4 +57,18 @@ func optPaneID(p *uint32) *layout.PaneID {
 	}
 	id := layout.PaneID(*p)
 	return &id
+}
+
+// ParkedInfo is the wire view of a workspace's parked agents: label and former
+// pane only. The session ids stay on the server — a client has no use for
+// them, and workspace.list is what an automation client reads most.
+func ParkedInfo(parked []workspace.ParkedAgent) []ParkedAgentInfo {
+	if len(parked) == 0 {
+		return nil
+	}
+	out := make([]ParkedAgentInfo, 0, len(parked))
+	for _, p := range parked {
+		out = append(out, ParkedAgentInfo{Agent: p.Agent, Pane: p.Pane})
+	}
+	return out
 }

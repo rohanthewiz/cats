@@ -69,5 +69,20 @@ func RestoreSession(spawner workspace.PaneSpawner, snap Snapshot) (*Session, err
 
 	workspace.ReserveWorkspaceIDs(wsIDs)
 	layout.ReservePaneIDs(allPanes)
-	return &Session{spawner: spawner, cwd: snap.Cwd, workspaces: workspaces, active: snap.Active}, nil
+	s := &Session{spawner: spawner, cwd: snap.Cwd, workspaces: workspaces, active: snap.Active}
+	// The active workspace is never asleep (sleep.go). A file that says
+	// otherwise — written by a build with a different rule, or by hand — is
+	// healed rather than refused: the active index moves to the nearest awake
+	// workspace, and if every workspace is asleep the active one is woken, so
+	// the session has something to show. Its parked agents are dropped in that
+	// last case (there is no dispatcher here to resume them); a corrupt file
+	// costs a resume, not the session.
+	if s.workspaces[s.active].Asleep {
+		if j := s.nearestAwake(s.active); j >= 0 {
+			s.active = j
+		} else {
+			s.workspaces[s.active].Wake()
+		}
+	}
+	return s, nil
 }

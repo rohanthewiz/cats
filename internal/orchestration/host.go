@@ -116,6 +116,11 @@ type pane struct {
 	lastSessionAgent string
 	lastSessionID    string
 	hasSession       bool // a pane_agent_session has been emitted at least once
+	// Foreground-job state, as last reported via pane_job (detectPump writes,
+	// resync reads). hasJob is set once a job has ever been reported, so a
+	// pane that has only ever sat at its prompt replays nothing.
+	lastJob bool
+	hasJob  bool
 	// Branch state, written by the branch pump and read by resync. branchCwd is
 	// the directory lastBranch was resolved for, which is what separates "we
 	// already answered this" from "the pane moved" — the throttle only applies
@@ -197,6 +202,21 @@ func (p *pane) setAgentMeta(agent, state string, visBlocker, visWorking bool) {
 	p.lastVisBlocker, p.lastVisWorking = visBlocker, visWorking
 	p.hasAgent = true
 	p.metaMu.Unlock()
+}
+
+// setJobMeta records the foreground-job state and reports whether it changed
+// what the client has been told. The starting state is "no job" and is never
+// announced: the first emission is the first job, and going back to none
+// after that IS news (the build finished), so it is emitted too.
+func (p *pane) setJobMeta(busy bool) (changed bool) {
+	p.metaMu.Lock()
+	defer p.metaMu.Unlock()
+	if busy == p.lastJob {
+		return false
+	}
+	p.lastJob = busy
+	p.hasJob = true
+	return true
 }
 
 // setAgentSessionMeta records the last-emitted agent session for resync and
@@ -813,6 +833,7 @@ func (h *Host) resyncPane(p *pane) {
 	vb, vw, hasAgent := p.lastVisBlocker, p.lastVisWorking, p.hasAgent
 	branch, hasBranch := p.lastBranch, p.hasBranch
 	sessAgent, sessID, hasSession := p.lastSessionAgent, p.lastSessionID, p.hasSession
+	job, hasJob := p.lastJob, p.hasJob
 	p.metaMu.Unlock()
 	if cwd != "" {
 		h.emit(NewPaneCwd(p.id, cwd))
@@ -835,6 +856,12 @@ func (h *Host) resyncPane(p *pane) {
 	// never.
 	if hasSession {
 		h.emit(NewPaneAgentSession(p.id, sessAgent, sessID))
+	}
+	// And whether a job holds the terminal, for the same reason: a client
+	// deciding what is idle must not be left with the answer from before it
+	// reconnected.
+	if hasJob {
+		h.emit(NewPaneJob(p.id, job))
 	}
 }
 
@@ -1103,6 +1130,18 @@ func (h *Host) detectPump(p *pane) {
 		// Identity: a cheap tcgetpgrp every tick gates the expensive enumeration.
 		foregroundPgid := detect.ForegroundPGID(p.ptmx.Fd())
 		groupChanged := foregroundGroupChanged(foregroundPgid, lastForegroundPgid)
+
+		// The same probe answers "is a job running": the child is a session
+		// leader (pty.Start sets Setsid), so its pgid is its pid, and any
+		// other group holding the terminal is something the shell launched.
+		// A pane that execs a command instead of a shell reports no job by
+		// this test — the orchestrator knows it exec'd one and treats that as
+		// busy on its own. noPGID (probe unsupported or failed) reads as no
+		// job rather than as a job that never ends.
+		jobRunning := foregroundPgid > 0 && foregroundPgid != p.childPid()
+		if p.setJobMeta(jobRunning) {
+			h.emit(NewPaneJob(p.id, jobRunning))
+		}
 
 		var acquisitionAge time.Duration
 		if hasAcquisition {

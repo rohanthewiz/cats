@@ -55,6 +55,19 @@ type Workspace struct {
 	// restart is a reminder that lapses at the one moment nobody is watching
 	// for it.
 	Flag *flags.Flag
+	// Asleep marks a workspace that is kept in the list but holds no live
+	// terminal: its panes exist in the model (one tab, one root pane — the
+	// placeholder that becomes the first shell on wake) and the backend spawns
+	// nothing for them. Durable, like the lock: the whole point of sleeping a
+	// workspace rather than closing it is that its name, flag, lock and todos
+	// are still there tomorrow, and a restart must not quietly respawn a shell
+	// into every workspace the user had put to bed. See sleep.go.
+	Asleep bool
+	// ParkedAgents are the resumable agent conversations that were running in
+	// this workspace when it was cleaned or put to sleep with agent parking on:
+	// the pane is gone, the session id is kept, and wake resumes each one in a
+	// pane of its own. Durable for the same reason Asleep is.
+	ParkedAgents []ParkedAgent
 	// CachedGitBranch / CachedGitAheadBehind are plain optionals fed by the
 	// deferred GitProvider seam (WS1 Stage 4); nil until wired.
 	CachedGitBranch      *string

@@ -187,6 +187,9 @@ catctl close-ws [id]            catctl rename-ws <id> <name...>
 catctl lock-ws [id]             catctl unlock-ws [id]
 catctl flag-ws <id> <kind> [note...]
 catctl unflag-ws [id]
+catctl clean-ws [id] [park | run <text...>]
+catctl sleep-ws [id] [park | run <text...>]
+catctl wake-ws <id>
 ```
 
 `lock-ws` sets a workspace aside for hand work: no launching a plugin or an agent
@@ -200,6 +203,20 @@ group. Neither dimmed row takes a click: the workspace row will not switch to it
 and an agent row inside it will not reveal its pane — revealing a pane *is* a
 switch, so the two refusals are the same one. Every deliberate route in still
 works: the row's context menu, the command palette, and the keyboard.
+
+`clean-ws` closes a workspace's idle panes — exited panes and shells sitting at
+their prompt — and leaves anything busy: a build, an editor, a plugin, an agent
+mid-turn. `sleep-ws` goes further: every pane closes and the workspace stays in
+the list with no terminal running, keeping its name, flag, lock and todos; it
+refuses while anything is busy, naming the panes in the way, and a `clean-ws`
+that finds nothing worth keeping sleeps the workspace the same way. `wake-ws`
+(or a click on the sleeping row) brings it back with a fresh shell — the layout
+is not kept. An idle **agent** is left alone by default, since its context is
+what you would lose; `park` closes it and keeps its session id on the workspace
+so `wake-ws` resumes the conversation in a pane of its own, and `run <text>`
+types the text into each idle agent instead (`run /exit`) and leaves it for a
+later sleep. See the [control API](../protocols/control-api.md#clean-sleep-and-wake)
+for the exact rules.
 
 `flag` pins a persistent, annotated mark to a pane or a workspace — the thing
 you set so you can find it again tomorrow:

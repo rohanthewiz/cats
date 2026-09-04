@@ -460,6 +460,12 @@ func (s *Session) CreateTabInWith(wsID string, spec workspace.SpawnSpec) (int, l
 	if ws == nil {
 		return 0, 0, fmt.Errorf("unknown workspace %s", wsID)
 	}
+	// A tab in a sleeping workspace would be a pane the backend spawns nothing
+	// for. Refused rather than waking as a side effect: a fan-out that creates
+	// a tab in every workspace must not quietly wake the ones put to bed.
+	if ws.Asleep {
+		return 0, 0, workspaceAsleepErr(ws.ID)
+	}
 	cwd := ws.IdentityCwd
 	if cwd == "" {
 		cwd = s.cwd
@@ -566,6 +572,12 @@ func (s *Session) FocusWorkspace(id string) error {
 	i, ok := s.workspaceIndexByID(id)
 	if !ok {
 		return fmt.Errorf("unknown workspace %s", id)
+	}
+	// The active workspace is never asleep (sleep.go): the dispatcher wakes a
+	// workspace before focusing it, so this is only reached by a caller that
+	// skipped that step, and the refusal names the step.
+	if s.workspaces[i].Asleep {
+		return workspaceAsleepErr(id)
 	}
 	s.active = i
 	return nil

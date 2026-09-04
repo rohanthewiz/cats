@@ -141,6 +141,14 @@ type paneRuntime struct {
 	// zero value (unfocused) means a fresh pane earns an explicit focus-in
 	// on the first sync rather than silently assuming it is being watched.
 	appFocused bool
+	// job mirrors the daemon's pane_job: the shell has a foreground process
+	// group other than itself (a build, an editor). execCmd records that the
+	// pane was spawned to exec a command rather than a shell — a plugin, a
+	// resumed agent — which the pgid test cannot see (the child IS the job).
+	// Together they are the "busy" half of PaneActivity (clean.go): a pane
+	// with no agent that is nonetheless not just a prompt.
+	job     bool
+	execCmd bool
 }
 
 // orch is the WS2 orchestrator: a single event-loop actor (run) that owns all
@@ -895,6 +903,15 @@ func (o *orch) desiredGrids() map[uint32][2]uint16 {
 		return h
 	}
 	for _, ws := range o.session.Workspaces() {
+		// A sleeping workspace is the one exception to "every pane is a live
+		// PTY": its placeholder pane gets no grid, so syncDaemon spawns nothing
+		// for it — and, on the way IN to sleep, closes whatever the workspace
+		// had, since those panes are no longer in the model at all. Wake clears
+		// the flag and the next sync realizes the placeholder like any pane it
+		// has not created yet.
+		if ws.Asleep {
+			continue
+		}
 		// Each workspace is sized against its OWN area — the grid of the window
 		// showing it — not one grid shared by the whole session. Off-screen tabs
 		// of that workspace ride along, as they always have: they are live PTYs
@@ -1266,6 +1283,11 @@ func (o *orch) createPane(rt *paneRuntime) {
 	}
 	o.hostOf(rt).send(cp)
 	rt.created = true
+	// What this pane runs is decided here and nowhere else, so this is where
+	// the busy test learns whether the child is a shell. A fresh PTY has no
+	// job until the daemon says so.
+	rt.execCmd = cp.Command != ""
+	rt.job = false
 	// The pane is alive again, so nothing may still be treating it as a corpse.
 	// This path is reached for a pane the daemon no longer holds — a cold
 	// restore, a host reconnect after a cathost restart, or a pane moved to

@@ -221,7 +221,10 @@
     const f = flagOf(w);
     const todos = wsTodoPanes(w.id);
     const flagged = wsFlaggedPanes(w.id);
-    if (!f && !todos.length && !flagged.length) return null;
+    const parked = w.parked || [];
+    // A sleeping row earns the card too: the moon says "asleep", and only the
+    // card has room to say what a wake brings back.
+    if (!f && !todos.length && !flagged.length && !w.asleep) return null;
 
     const items = [["Workspace", w.name || w.id, "pub"]];
     if (f) {
@@ -255,6 +258,16 @@
 
     if (multiHost() && w.host) items.push(["Host", "@" + hostLabel(w.host)]);
     if (w.locked) items.push(["Locked", "no plugins or agents here"]);
+    if (w.asleep) {
+      items.push(["Asleep", "nothing running — click to wake"]);
+      // One row, comma separated, like the todos: "claude (w2:p3), codex (w2:p5)".
+      // The pane handle is history — the pane is gone — but it is how the user
+      // remembers which conversation this was.
+      if (parked.length) {
+        items.push([nOf(parked.length, "parked agent"),
+          joinTrunc(parked.map((p) => p.agent + (p.pane ? " (" + p.pane + ")" : ""))), "oneline"]);
+      }
+    }
     // The agent rollup the row shows as "●2 ●1", spelled out.
     const c = agentStateCounts().get(w.id);
     if (c) {

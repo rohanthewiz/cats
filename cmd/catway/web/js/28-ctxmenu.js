@@ -228,6 +228,19 @@
       { label: "rename workspace…", fn: () => renameWorkspace(w) },
       { label: w.locked ? "unlock workspace" : "lock workspace", fn: () => toggleWorkspaceLock(w) },
       { label: flagRowLabel(flagOf(w)), sub: flagMenuItems(wsFlagTarget(w)) },
+      // Clean and sleep are submenus for the one decision they need: what to do
+      // with idle agents. The plain entry leaves them; the second parks them
+      // for the wake. A sleeping row offers the way back instead.
+      ...(w.asleep ? [{ label: "wake workspace", fn: () => wakeWorkspace(w) }] : [
+        { label: "clean workspace", sub: [
+          { label: "close idle panes", fn: () => cleanWorkspace(w, "") },
+          { label: "close idle panes, park idle agents", fn: () => cleanWorkspace(w, "park") },
+        ] },
+        { label: "sleep workspace…", sub: [
+          { label: "sleep (refuse if anything runs)", fn: () => sleepWorkspace(w, "") },
+          { label: "sleep, park idle agents", fn: () => sleepWorkspace(w, "park") },
+        ] },
+      ]),
       "-",
       { label: "new worktree…", fn: openNewWorktreeDialog },
       { label: "open worktree…", fn: openWorktreeOpenDialog },

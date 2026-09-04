@@ -225,6 +225,59 @@
       toast((w.name || w.id) + (locked ? " locked — no plugins or agents" : " unlocked"));
     });
   }
+  // ---- Clean / sleep / wake (workspace.clean / workspace.sleep / workspace.wake) ----
+  //
+  // cleanWorkspace closes a workspace's idle panes; sleepWorkspace closes all of
+  // them and keeps the workspace in the list with no terminal. Both leave busy
+  // panes alone, and both leave an IDLE agent alone unless told to park it —
+  // an agent's context is the one thing in an idle pane worth more than the
+  // resources it costs. The server decides what is idle (it can see the
+  // foreground job and the agent state); the client only says which mode.
+  //
+  // No confirm on clean: nothing busy is touched, and the result toast says
+  // exactly what went. Sleep confirms, since it closes every pane — but the
+  // refusal case (something still busy) is the server's, and its message
+  // names the panes in the way, so the dialog does not try to predict it.
+  function cleanWorkspace(w, agents) {
+    sendCmdAwait("workspace.clean", { id: w.id, agents: agents || "" }, (res) => {
+      if (!res.ok) { toast("clean workspace: " + (res.error || "unknown")); return; }
+      toast(cleanSummary(w, res.data));
+    });
+  }
+  function sleepWorkspace(w, agents) {
+    const parking = agents === "park";
+    dialogConfirm({
+      title: "sleep workspace",
+      message: "Put “" + (w.name || w.id) + "” (" + w.id + ") to sleep? Every pane closes; the workspace stays in the list "
+        + "with its name, flag and todos, and wakes with a fresh shell when you click it."
+        + (parking ? " Idle agents are parked and resumed on wake." : " It will refuse while an agent or a job is still running."),
+      confirmLabel: "sleep", danger: true,
+      onConfirm: () => sendCmdAwait("workspace.sleep", { id: w.id, agents: agents || "" }, (res) => {
+        if (!res.ok) { toast("sleep workspace: " + (res.error || "unknown")); return; }
+        toast(cleanSummary(w, res.data));
+      }),
+    });
+  }
+  function wakeWorkspace(w) {
+    sendCmdAwait("workspace.wake", { id: w.id }, (res) => {
+      if (!res.ok) { toast("wake workspace: " + (res.error || "unknown")); return; }
+      toast((w.name || w.id) + " awake");
+    });
+  }
+  // cleanSummary phrases a clean/sleep result: "w2 asleep — 3 panes closed, 1
+  // agent parked", or "w2: 2 panes closed, 1 kept". Zero counts are left out;
+  // an empty result (nothing to do) still says so rather than showing nothing.
+  function cleanSummary(w, d) {
+    d = d || {};
+    const parts = [];
+    if (d.closed) parts.push(nOf(d.closed, "pane") + " closed");
+    if (d.parked) parts.push(nOf(d.parked, "agent") + " parked");
+    if (d.sent) parts.push("command sent to " + nOf(d.sent, "agent"));
+    if (d.kept) parts.push(nOf(d.kept, "pane") + " kept");
+    const name = w.name || w.id;
+    if (d.asleep) return name + " asleep" + (parts.length ? " — " + parts.join(", ") : "");
+    return name + ": " + (parts.length ? parts.join(", ") : "nothing to clean");
+  }
   // ---- Flags (workspace.flag / pane.flag) ----
   //
   // One sender for both commands: a target names the command and the params that

@@ -113,6 +113,9 @@ var subcommands = []subcommand{
 	{"rename-ws", app.CmdWorkspaceRename, "rename-ws <id> <name...>", []argKind{argWorkspace}, "rename a workspace (empty name clears)", buildRenameWorkspace},
 	{"lock-ws", app.CmdWorkspaceLock, "lock-ws [id]", []argKind{argWorkspace}, "close a workspace to plugins and agents (active by default)", buildLockWorkspace},
 	{"unlock-ws", app.CmdWorkspaceLock, "unlock-ws [id]", []argKind{argWorkspace}, "reopen a locked workspace (active by default)", buildUnlockWorkspace},
+	{"clean-ws", app.CmdWorkspaceClean, "clean-ws [id] [park | run <text...>]", []argKind{argWorkspace}, "close a workspace's idle panes (active by default); park idle agents, or run a command in them", buildCleanWorkspace},
+	{"sleep-ws", app.CmdWorkspaceSleep, "sleep-ws [id] [park | run <text...>]", []argKind{argWorkspace}, "close every pane and keep the workspace in the list with no terminal (active by default)", buildSleepWorkspace},
+	{"wake-ws", app.CmdWorkspaceWake, "wake-ws <id>", []argKind{argWorkspace}, "bring a sleeping workspace back: a shell, plus its parked agents resumed", buildWakeWorkspace},
 	{"flag-ws", app.CmdWorkspaceFlag, "flag-ws <id> <kind> [note...]", []argKind{argWorkspace, argFlagKind}, "pin a flag (and an optional note) to a workspace", buildFlagWorkspace},
 	{"unflag-ws", app.CmdWorkspaceFlag, "unflag-ws [id]", []argKind{argWorkspace}, "clear a workspace's flag (active by default)", buildUnflagWorkspace},
 
@@ -771,6 +774,58 @@ func buildWorkspaceLock(args []string, locked bool, synopsis string) (json.RawMe
 	p := app.LockWorkspaceParams{Locked: locked}
 	if len(args) == 1 {
 		p.ID = args[0]
+	}
+	return marshal(p)
+}
+
+// buildCleanWorkspace / buildSleepWorkspace: clean-ws [id] [park | run <text...>]
+// and the same shape for sleep-ws. Two verbs over one params type, as
+// lock-ws/unlock-ws are — the difference is the command. The id is optional
+// and comes first; what follows says what to do with idle agents, which are
+// left alone unless told otherwise:
+//
+//	catctl clean-ws                 close idle panes in the active workspace
+//	catctl clean-ws w2 park         …and park w2's idle agents for a later wake
+//	catctl sleep-ws w2 run /exit    type /exit into w2's idle agents, then
+//	                                sleep once they have gone (see the docs)
+//
+// The id is told from the mode by spelling: "park" and "run" are the modes,
+// anything else in the first slot is the id. No workspace is called "park".
+func buildCleanWorkspace(args []string) (json.RawMessage, error) {
+	return buildWorkspaceClean(args, "clean-ws [id] [park | run <text...>]")
+}
+
+func buildSleepWorkspace(args []string) (json.RawMessage, error) {
+	return buildWorkspaceClean(args, "sleep-ws [id] [park | run <text...>]")
+}
+
+// buildWakeWorkspace: wake-ws <id>. The id is required — the active workspace
+// is awake by definition, so there is no default worth naming.
+func buildWakeWorkspace(args []string) (json.RawMessage, error) {
+	if len(args) != 1 {
+		return nil, usageErr{"wake-ws <id>"}
+	}
+	return marshal(app.WorkspaceParams{ID: args[0]})
+}
+
+func buildWorkspaceClean(args []string, synopsis string) (json.RawMessage, error) {
+	var p app.CleanWorkspaceParams
+	if len(args) > 0 && args[0] != "park" && args[0] != "run" {
+		p.ID = args[0]
+		args = args[1:]
+	}
+	switch {
+	case len(args) == 0:
+	case args[0] == "park" && len(args) == 1:
+		p.Agents = "park"
+	case args[0] == "run" && len(args) > 1:
+		p.Agents = "command"
+		p.Command = strings.Join(args[1:], " ")
+	default:
+		return nil, usageErr{synopsis}
+	}
+	if p == (app.CleanWorkspaceParams{}) {
+		return nil, nil // the bare form: no params, the active workspace
 	}
 	return marshal(p)
 }

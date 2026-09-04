@@ -62,22 +62,21 @@ type View struct {
 // validate a user-supplied workspace id still do so themselves — this resolves
 // a view, not a parameter.
 func (s *Session) viewWorkspace(wsID string) *workspace.Workspace {
-	if wsID == "" {
-		return s.ActiveWorkspace()
-	}
-	if i, ok := s.workspaceIndexByID(wsID); ok {
-		return s.workspaces[i]
-	}
-	return s.ActiveWorkspace()
+	return s.workspaces[s.viewWorkspaceIndex(wsID)]
 }
 
 // viewWorkspaceIndex is viewWorkspace's index half, for the queries that report
 // "is this the active one".
+//
+// A sleeping workspace resolves like a closed one: it has nothing to show (its
+// one pane has no terminal), so a window still pointing at it after a sleep
+// from elsewhere falls back to the active workspace rather than driving a
+// pane that does not run.
 func (s *Session) viewWorkspaceIndex(wsID string) int {
 	if wsID == "" {
 		return s.active
 	}
-	if i, ok := s.workspaceIndexByID(wsID); ok {
+	if i, ok := s.workspaceIndexByID(wsID); ok && !s.workspaces[i].Asleep {
 		return i
 	}
 	return s.active
@@ -307,6 +306,11 @@ func (s *Session) SplitPaneWithIn(wsID string, target *layout.PaneID, dir layout
 		return 0, err
 	}
 	_, ws := s.workspaceIndexOf(id)
+	// The only pane a sleeping workspace has is its placeholder, and a split
+	// off it would be a second pane with no terminal (see CreateTabInWith).
+	if ws.Asleep {
+		return 0, workspaceAsleepErr(ws.ID)
+	}
 	_, np, err := ws.SplitPane(id, dir, true, spec)
 	if err != nil {
 		return 0, err
@@ -413,6 +417,9 @@ func (s *Session) MoveTabTo(srcWS string, num int, dstWS string) (int, error) {
 	}
 	if src == dst {
 		return 0, errors.New("the tab is already in that workspace")
+	}
+	if dst.Asleep {
+		return 0, workspaceAsleepErr(dst.ID)
 	}
 	idx, ok := s.tabIndexByNumber(src, num)
 	if !ok {

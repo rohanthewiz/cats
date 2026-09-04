@@ -127,6 +127,17 @@ var recordedParamClasses = map[string]map[string]string{
 		"kind": ClassPlain,
 		"note": ClassPlain,
 	},
+	"workspace.clean": {
+		"id":      ClassWorkspaceHandle,
+		"agents":  ClassPlain,
+		"command": ClassPlain,
+	},
+	"workspace.sleep": {
+		"id":      ClassWorkspaceHandle,
+		"agents":  ClassPlain,
+		"command": ClassPlain,
+	},
+	"workspace.wake":       {"id": ClassWorkspaceHandle},
 	"agent.focus":          {"pane": ClassPaneHandle},
 	"server.reload_config": {},
 	"usage.refresh":        {},

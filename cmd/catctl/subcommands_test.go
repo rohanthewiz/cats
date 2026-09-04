@@ -139,6 +139,24 @@ func TestBuildFlag(t *testing.T) {
 	buildErr(t, "unflag-ws", []string{"w2", "extra"})
 }
 
+// clean-ws / sleep-ws: an optional id first, then the agent mode; wake-ws
+// takes the id it cannot guess.
+func TestBuildCleanWorkspace(t *testing.T) {
+	for _, verb := range []string{"clean-ws", "sleep-ws"} {
+		buildOK(t, verb, nil, app.CleanWorkspaceParams{})
+		buildOK(t, verb, []string{"w2"}, app.CleanWorkspaceParams{ID: "w2"})
+		buildOK(t, verb, []string{"park"}, app.CleanWorkspaceParams{Agents: "park"})
+		buildOK(t, verb, []string{"w2", "park"}, app.CleanWorkspaceParams{ID: "w2", Agents: "park"})
+		buildOK(t, verb, []string{"w2", "run", "/exit"}, app.CleanWorkspaceParams{ID: "w2", Agents: "command", Command: "/exit"})
+		buildOK(t, verb, []string{"run", "/compact", "then", "rest"}, app.CleanWorkspaceParams{Agents: "command", Command: "/compact then rest"})
+		buildErr(t, verb, []string{"w2", "run"})          // run needs its text
+		buildErr(t, verb, []string{"w2", "park", "more"}) // park takes nothing
+		buildErr(t, verb, []string{"w2", "w3"})           // one id
+	}
+	buildOK(t, "wake-ws", []string{"w2"}, app.WorkspaceParams{ID: "w2"})
+	buildErr(t, "wake-ws", nil)
+}
+
 // new-ws names the workspace when asked and stays a bare no-params command
 // otherwise (the shape a key binding sends).
 func TestBuildNewWorkspace(t *testing.T) {

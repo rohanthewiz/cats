@@ -10,6 +10,7 @@ package workspace
 import (
 	"fmt"
 	"maps"
+	"slices"
 
 	"github.com/rohanthewiz/cats/internal/flags"
 	"github.com/rohanthewiz/cats/internal/layout"
@@ -45,12 +46,18 @@ type TabSnapshot struct {
 
 // Snapshot is a workspace's durable state.
 type Snapshot struct {
-	ID             string                `json:"id"`
-	CustomName     string                `json:"custom_name,omitempty"`
-	IdentityCwd    string                `json:"identity_cwd,omitempty"`
-	HostID         string                `json:"host,omitempty"`
-	Locked         bool                  `json:"locked,omitempty"`
-	Flag           *flags.Flag           `json:"flag,omitempty"`
+	ID          string      `json:"id"`
+	CustomName  string      `json:"custom_name,omitempty"`
+	IdentityCwd string      `json:"identity_cwd,omitempty"`
+	HostID      string      `json:"host,omitempty"`
+	Locked      bool        `json:"locked,omitempty"`
+	Flag        *flags.Flag `json:"flag,omitempty"`
+	// Asleep / ParkedAgents are the sleep state (sleep.go), omitted when the
+	// workspace is awake with nothing parked — which is every workspace in a
+	// session written before sleeping existed, so those files restore
+	// byte-identically.
+	Asleep         bool                  `json:"asleep,omitempty"`
+	ParkedAgents   []ParkedAgent         `json:"parked_agents,omitempty"`
 	ActiveTab      int                   `json:"active_tab"`
 	PaneNumbers    map[layout.PaneID]int `json:"pane_numbers"`
 	NextPaneNumber int                   `json:"next_pane_number"`
@@ -92,6 +99,8 @@ func (w *Workspace) Snapshot() Snapshot {
 		HostID:         w.HostID,
 		Locked:         w.Locked,
 		Flag:           w.Flag.Clone(),
+		Asleep:         w.Asleep,
+		ParkedAgents:   slices.Clone(w.ParkedAgents),
 		ActiveTab:      w.activeTab,
 		PaneNumbers:    numbers,
 		NextPaneNumber: w.nextPublicPaneNumber,
@@ -121,6 +130,8 @@ func Restore(s PaneSpawner, snap Snapshot) (*Workspace, error) {
 		HostID:            snap.HostID,
 		Locked:            snap.Locked,
 		Flag:              snap.Flag.Clone(),
+		Asleep:            snap.Asleep,
+		ParkedAgents:      slices.Clone(snap.ParkedAgents),
 		PublicPaneNumbers: make(map[layout.PaneID]int, len(snap.PaneNumbers)),
 		activeTab:         snap.ActiveTab,
 		spawner:           s,

@@ -75,18 +75,22 @@ func (o *orch) viewWS(c *client) string {
 	if o.session == nil {
 		return "" // a bare orch (test harnesses build them); no workspaces to name
 	}
-	if c != nil && c.view.ws != "" {
-		if o.session.WorkspaceByID(c.view.ws) != nil {
-			return c.view.ws
-		}
+	// A sleeping workspace resolves like a closed one, here as in the session's
+	// own view resolution: it has no terminal to show, so a window still
+	// pointing at it after a sleep issued elsewhere falls through to the
+	// active workspace rather than streaming a pane that does not run.
+	showable := func(id string) bool {
+		ws := o.session.WorkspaceByID(id)
+		return ws != nil && !ws.Asleep
+	}
+	if c != nil && c.view.ws != "" && showable(c.view.ws) {
+		return c.view.ws
 	}
 	// A "" view (a viewer, or a window that named nothing) follows the primary,
 	// which is the phone's whole idea of "the desktop": whichever window the
 	// user touched last.
-	if p := o.primaryView(); p != nil && p != c && p.view.ws != "" {
-		if o.session.WorkspaceByID(p.view.ws) != nil {
-			return p.view.ws
-		}
+	if p := o.primaryView(); p != nil && p != c && p.view.ws != "" && showable(p.view.ws) {
+		return p.view.ws
 	}
 	return o.session.ActiveWorkspaceID()
 }

@@ -64,7 +64,14 @@ const (
 	// CmdWorkspaceFlag is CmdPaneFlag one level up: the same annotation pinned
 	// to a whole workspace.
 	CmdWorkspaceFlag = "workspace.flag"
-	CmdAgentFocus    = "agent.focus"
+	// CmdWorkspaceClean closes a workspace's idle panes; CmdWorkspaceSleep is
+	// clean's empty case made explicit — every pane gone, the workspace kept
+	// in the list with no terminal behind it; CmdWorkspaceWake brings a
+	// sleeping workspace back with one fresh shell (plus its parked agents).
+	CmdWorkspaceClean = "workspace.clean"
+	CmdWorkspaceSleep = "workspace.sleep"
+	CmdWorkspaceWake  = "workspace.wake"
+	CmdAgentFocus     = "agent.focus"
 	// CmdNavBack / CmdNavForward walk the issuing window's focus-location
 	// history (nav.go): back to where focus was before, forward again. Temporal
 	// navigation, where pane.focus_direction is spatial and pane.last is a
@@ -375,6 +382,9 @@ var commandSpecs = []CommandSpec{
 	{Name: CmdWorkspaceMove, Params: MoveWorkspaceParams{}, ParamsRequired: true, Recorded: true},
 	{Name: CmdWorkspaceLock, Params: LockWorkspaceParams{}, ParamsRequired: true, Recorded: true},
 	{Name: CmdWorkspaceFlag, Params: FlagWorkspaceParams{}, ParamsRequired: true, Recorded: true},
+	{Name: CmdWorkspaceClean, Params: CleanWorkspaceParams{}, Result: CleanWorkspaceResult{}, Recorded: true},
+	{Name: CmdWorkspaceSleep, Params: CleanWorkspaceParams{}, Result: CleanWorkspaceResult{}, Recorded: true},
+	{Name: CmdWorkspaceWake, Params: WorkspaceParams{}, ParamsRequired: true, Recorded: true},
 
 	// Global focus + server lifecycle. nav.back/forward are Recorded on the
 	// pane.last precedent: a relative motion over ephemeral focus state, whose
@@ -1003,6 +1013,65 @@ type LockWorkspaceParams struct {
 	Locked bool   `json:"locked"`
 }
 
+// CleanWorkspaceParams: workspace.clean and workspace.sleep. ID "" means the
+// active workspace, the lock/close default; the whole object may be absent.
+//
+// Both commands walk the workspace's panes and close the idle ones — an exited
+// pane, a shell sitting at its prompt with no foreground job, and (subject to
+// Agents) an agent in its idle state. Anything busy is left alone: a running
+// build, an editor, an agent mid-turn. clean stops there and reports what it
+// did. sleep goes one step further: it requires that NOTHING busy is left, and
+// then keeps the workspace in the list with no terminal at all (see
+// WorkspaceInfo.Asleep); a busy pane makes sleep fail without closing anything,
+// naming the panes in the way.
+//
+// Agents decides what an IDLE agent counts as — the one kind of idle pane that
+// holds state worth more than the resources it costs:
+//
+//   - "leave" (the default): an idle agent is not idle for this purpose. Its
+//     pane stays, and a sleep that finds one fails the way it fails for a
+//     busy pane. Nothing an agent has in its head is lost by default.
+//   - "park": an idle agent whose conversation is resumable (the runtime
+//     knows its session id) has its pane closed and its id parked on the
+//     workspace; workspace.wake resumes each parked conversation in a pane of
+//     its own. An idle agent with no known session is left, as under "leave".
+//   - "command": Command is typed into every idle agent's pane, followed by
+//     Enter, and the pane is left running — "/exit" to have them shut down
+//     cleanly, "/compact" to have them tidy up first. The panes are then still
+//     there, so a sleep under this mode never sleeps on the spot: it sends the
+//     command and reports the panes it left, and the caller sleeps again once
+//     the agents have gone (an exited pane is idle, and closes on its own
+//     when panes.autoclose_exited is on).
+type CleanWorkspaceParams struct {
+	ID      string `json:"id,omitempty" cats:"handle=workspace"`
+	Agents  string `json:"agents,omitempty"`  // "leave" | "park" | "command"; "" = leave
+	Command string `json:"command,omitempty"` // the text for Agents "command"
+}
+
+// CleanWorkspaceResult is CmdResult.Data for workspace.clean / workspace.sleep:
+// what happened to the panes. Closed counts panes closed as idle (parked
+// agents included), Parked the agent conversations put on the workspace for
+// wake, Sent the idle agents the command was typed into, Kept the panes left
+// running because they were busy or an agent that was neither parked nor
+// commanded; Asleep reports whether the workspace ended up asleep — always
+// false for clean, and for a sleep that sent a command.
+type CleanWorkspaceResult struct {
+	Closed    int      `json:"closed"`
+	Parked    int      `json:"parked,omitempty"`
+	Sent      int      `json:"sent,omitempty"`
+	Kept      int      `json:"kept,omitempty"`
+	Asleep    bool     `json:"asleep,omitempty"`
+	KeptPanes []string `json:"kept_panes,omitempty"` // public handles, for the message
+}
+
+// ParkedAgentInfo is one parked agent conversation as the sidebar sees it: the
+// agent's label and the pane handle it used to live at (see workspace.clean's
+// "park" mode). The session id itself stays server-side.
+type ParkedAgentInfo struct {
+	Agent string `json:"agent"`
+	Pane  string `json:"pane,omitempty"` // no cats tag: nested, and classification is top-level only
+}
+
 // --- Query params & results (§7 read-only commands) --------------------------
 
 // TabListParams: tab.list. Workspace "" = the active workspace.
@@ -1023,12 +1092,16 @@ type SessionInfoResult struct {
 
 // WorkspaceEntry describes one workspace for workspace.list.
 type WorkspaceEntry struct {
-	ID       string `json:"id"`   // stable public handle, e.g. "w1"
-	Name     string `json:"name"` // display name (custom or auto)
-	Active   bool   `json:"active"`
-	Tabs     int    `json:"tabs"`             // tab count
-	Locked   bool   `json:"locked,omitempty"` // closed to automation (workspace.lock)
-	FlagInfo        // the user's annotation (workspace.flag); zero when unflagged
+	ID     string `json:"id"`   // stable public handle, e.g. "w1"
+	Name   string `json:"name"` // display name (custom or auto)
+	Active bool   `json:"active"`
+	Tabs   int    `json:"tabs"`             // tab count
+	Locked bool   `json:"locked,omitempty"` // closed to automation (workspace.lock)
+	// Asleep: kept in the list with no terminal behind it (workspace.sleep);
+	// Parked are the agent conversations a wake will resume.
+	Asleep   bool              `json:"asleep,omitempty"`
+	Parked   []ParkedAgentInfo `json:"parked,omitempty"`
+	FlagInfo                   // the user's annotation (workspace.flag); zero when unflagged
 	// Host is the cathost new panes in this workspace land on, as the MODEL
 	// records it: empty means "whatever the default host is", which is what a
 	// workspace created before hosts existed (or on the default) stores. It is a

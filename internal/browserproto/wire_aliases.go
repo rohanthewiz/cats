@@ -75,6 +75,9 @@ type (
 	LedgerListResult         = wire.LedgerListResult
 	LedgerOutputResult       = wire.LedgerOutputResult
 	LockWorkspaceParams      = wire.LockWorkspaceParams
+	CleanWorkspaceParams     = wire.CleanWorkspaceParams
+	CleanWorkspaceResult     = wire.CleanWorkspaceResult
+	ParkedAgentInfo          = wire.ParkedAgentInfo
 	Mouse                    = wire.Mouse
 	MoveTabParams            = wire.MoveTabParams
 	MoveTabToWorkspaceParams = wire.MoveTabToWorkspaceParams
@@ -259,6 +262,9 @@ const (
 	CmdWorkspaceFocus     = wire.CmdWorkspaceFocus
 	CmdWorkspaceList      = wire.CmdWorkspaceList
 	CmdWorkspaceLock      = wire.CmdWorkspaceLock
+	CmdWorkspaceClean     = wire.CmdWorkspaceClean
+	CmdWorkspaceSleep     = wire.CmdWorkspaceSleep
+	CmdWorkspaceWake      = wire.CmdWorkspaceWake
 	CmdWorkspaceMove      = wire.CmdWorkspaceMove
 	CmdWorkspaceRename    = wire.CmdWorkspaceRename
 	CmdWorktreeCreate     = wire.CmdWorktreeCreate

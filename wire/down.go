@@ -142,6 +142,12 @@ type WorkspaceInfo struct {
 	// Locked: closed to automation (workspace.lock). The sidebar draws the row
 	// dimmed with a lock beside the name; the refusal itself is the server's.
 	Locked bool `json:"locked,omitempty"`
+	// Asleep: kept in the list with no live terminal (workspace.sleep). The
+	// sidebar draws the row set aside on its own shelf, and a click on it
+	// wakes it (workspace.focus wakes before it switches). Parked lists the
+	// agent conversations that wake will resume, for the hover card.
+	Asleep bool              `json:"asleep,omitempty"`
+	Parked []ParkedAgentInfo `json:"parked,omitempty"`
 	// Host is the cathost new panes in this workspace land on, resolved (never
 	// the empty "means the default" form the model stores). The sidebar shows it
 	// only while more than one host exists — see the hosts message.

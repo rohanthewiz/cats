@@ -43,5 +43,18 @@
   #ws-list li .lock-mark { flex:0 0 auto; align-self:center; color:var(--muted);
     display:inline-flex; margin-left:-1px; }
   #ws-list li .lock { width:calc(12px * var(--sb-scale)); height:calc(12px * var(--sb-scale)); }
+  /* A sleeping workspace — kept in the list, nothing running — steps back the
+     same way a locked one does, and for the same reason: it is not where the
+     work is. Its moon stays at full strength, as the lock does, being the one
+     thing in the row that just became more true; the flag likewise. Unlike a
+     locked row it keeps the pointer: a click wakes it, which is the whole
+     point of keeping it around. */
+  #ws-list li.ws.asleep > :not(.sleep-mark):not(.flag-mark) { opacity:.5; }
+  #ws-list li .sleep-mark { flex:0 0 auto; align-self:center; color:var(--muted);
+    display:inline-flex; align-items:flex-start; margin-left:-1px; }
+  #ws-list li .sleep { width:calc(12px * var(--sb-scale)); height:calc(12px * var(--sb-scale)); }
+  /* The parked-agent count rides the moon as the todo count rides the paw. */
+  #ws-list li .sleep-n { font-size:calc(8px * var(--sb-scale)); line-height:1; font-weight:600;
+    margin-left:-1px; }
   #ws-list li.add { color:var(--muted); font-style:italic; cursor:pointer; }
   #ws-list li.add:hover { color:var(--accent); background:none; }

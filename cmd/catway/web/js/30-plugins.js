@@ -85,10 +85,14 @@
   function pluginRunActionAll(p, a) {
     closeModal();
     const wss = (layoutMsg && layoutMsg.workspaces) || [];
-    const targets = wss.filter((w) => !w.locked);
+    // Sleeping workspaces are skipped alongside locked ones: a tab.create there
+    // is refused (the server will not wake a workspace as a side effect), and a
+    // fan-out that woke every workspace you had put to bed would undo the
+    // reason you put them there.
+    const targets = wss.filter((w) => !w.locked && !w.asleep);
     const label = a.title || a.id;
     if (!targets.length) {
-      toast(label + ": every workspace is locked");
+      toast(label + ": every workspace is locked or asleep");
       return;
     }
     // One reply per launch, summarised once at the end: N in-flight commands
@@ -238,7 +242,7 @@
             // longer name, and offering it would be inventing a decision.
             if (((layoutMsg && layoutMsg.workspaces) || []).length > 1) {
               actBtn("run all", "", (e) => pluginPickAction(p, e, (a) => pluginRunActionAll(p, a)),
-                "start in all workspaces (locked ones are skipped)");
+                "start in all workspaces (locked and sleeping ones are skipped)");
             }
           }
           if (!p.broken && !p.linked) {

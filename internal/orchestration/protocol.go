@@ -109,26 +109,28 @@ const (
 	MsgPaneAgent  MessageType = "pane_agent"
 	// MsgPaneAgentSession names the conversation behind the detected agent.
 	MsgPaneAgentSession MessageType = "pane_agent_session"
-	MsgPaneClipboard    MessageType = "pane_clipboard"
-	MsgPaneTitle        MessageType = "pane_title"
-	MsgPaneSelection    MessageType = "pane_selection"
-	MsgPaneText         MessageType = "pane_text"
-	MsgPaneModes        MessageType = "pane_modes"
-	MsgPaneBranch       MessageType = "pane_branch"
-	MsgPaneExited       MessageType = "pane_exited"
-	MsgPong             MessageType = "pong"
-	MsgHostStats        MessageType = "host_stats"
-	MsgCommandStart     MessageType = "command_start"
-	MsgCommandEnd       MessageType = "command_end"
-	MsgBlockResult      MessageType = "block_result"
-	MsgDirListing       MessageType = "dir_listing"
-	MsgWorktreeResult   MessageType = "worktree_result"
-	MsgFileResult       MessageType = "file_result"
-	MsgHookReport       MessageType = "hook_report"
-	MsgControlOpen      MessageType = "control_open"
-	MsgControlData      MessageType = "control_data"
-	MsgControlClose     MessageType = "control_close"
-	MsgError            MessageType = "error"
+	// MsgPaneJob reports whether the pane's shell has a foreground job.
+	MsgPaneJob        MessageType = "pane_job"
+	MsgPaneClipboard  MessageType = "pane_clipboard"
+	MsgPaneTitle      MessageType = "pane_title"
+	MsgPaneSelection  MessageType = "pane_selection"
+	MsgPaneText       MessageType = "pane_text"
+	MsgPaneModes      MessageType = "pane_modes"
+	MsgPaneBranch     MessageType = "pane_branch"
+	MsgPaneExited     MessageType = "pane_exited"
+	MsgPong           MessageType = "pong"
+	MsgHostStats      MessageType = "host_stats"
+	MsgCommandStart   MessageType = "command_start"
+	MsgCommandEnd     MessageType = "command_end"
+	MsgBlockResult    MessageType = "block_result"
+	MsgDirListing     MessageType = "dir_listing"
+	MsgWorktreeResult MessageType = "worktree_result"
+	MsgFileResult     MessageType = "file_result"
+	MsgHookReport     MessageType = "hook_report"
+	MsgControlOpen    MessageType = "control_open"
+	MsgControlData    MessageType = "control_data"
+	MsgControlClose   MessageType = "control_close"
+	MsgError          MessageType = "error"
 )
 
 // --- Capabilities ------------------------------------------------------------
@@ -707,6 +709,32 @@ type PaneAgentSession struct {
 	PaneID    uint32      `json:"pane_id"`
 	Agent     string      `json:"agent"`
 	SessionID string      `json:"session_id"`
+}
+
+// PaneJob reports whether a pane's shell currently has a foreground job — a
+// process group other than the shell's own holding the terminal (a build, an
+// editor, a pager). It is the one thing the orchestrator's idle test for
+// workspace.clean cannot see from the outside: pane_agent only speaks for the
+// agents detection recognises, and a shell running `make` is not one of them.
+//
+// Its own message rather than a field on PaneAgent because it moves on its
+// own clock (every job start and end, agent or no agent) and is meaningful
+// precisely when there is no agent to report. Emitted on change, and replayed
+// on resync once it has ever been emitted; an orchestrator that does not know
+// it drops it, as with every event type it has not learned.
+//
+// The probe is the tcgetpgrp the detect pump already runs every tick, so a
+// pane at its prompt costs nothing extra. A platform without the probe
+// (detect's stub) never reports one, and the orchestrator's default of "no
+// job" stands — clean there trusts the agent detection alone.
+type PaneJob struct {
+	Type   MessageType `json:"type"`
+	PaneID uint32      `json:"pane_id"`
+	Busy   bool        `json:"busy"`
+}
+
+func NewPaneJob(id uint32, busy bool) PaneJob {
+	return PaneJob{Type: MsgPaneJob, PaneID: id, Busy: busy}
 }
 
 func NewPaneAgentSession(id uint32, agent, sessionID string) PaneAgentSession {

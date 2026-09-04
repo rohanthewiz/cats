@@ -84,6 +84,20 @@ type Backend interface {
 	// if the pane is unknown/exited or the encode fails.
 	SendInput(pane uint32, text string, submit bool) error
 
+	// PaneActivity is the runtime's account of what a pane is doing — the
+	// half of workspace.clean's idle test the session cannot answer (see
+	// clean.go). A pane the backend has no runtime for, or whose host is not
+	// connected, reports Known false and is left alone.
+	PaneActivity(pane uint32) PaneActivity
+	// StageResume stages an agent resume for a pane the next ApplyModel will
+	// create (workspace.wake's parked agents): the pane execs the agent's
+	// resume command in place of a shell, exactly as a cold restart resumes a
+	// pane. Reports false when the ref cannot be resumed on this backend —
+	// unresumable agent, or a host other than the one holding the transcript
+	// — so the caller can take the pane back rather than leave a shell where
+	// an agent was promised.
+	StageResume(pane uint32, a workspace.ParkedAgent) bool
+
 	// StageSpawn registers a one-shot spawn override for a pane the next
 	// ApplyModel will realize: an argv to exec instead of the default shell, a
 	// cwd override, and/or extra environment (tab.create's optional params).
@@ -1014,9 +1028,25 @@ func (d *Dispatcher) dispatch(name string, dec ParamDecoder, r Responder) {
 			r.Fail(fmt.Sprintf("unknown workspace %s", p.ID))
 			return
 		}
+		// Focusing a sleeping workspace wakes it: the sidebar click is how a
+		// workspace put to bed comes back, and a switch onto a workspace with
+		// no terminal would show nothing. The wake happens before the view
+		// moves, so the layout the window is about to be sent has real panes.
+		if p.ID != "" {
+			d.wakeIfAsleep(p.ID)
+		}
 		d.backend.SetViewWorkspace(p.ID)
 		d.backend.ApplyModel()
 		r.OK(nil)
+
+	case CmdWorkspaceClean:
+		d.cleanWorkspace(dec, r, false)
+
+	case CmdWorkspaceSleep:
+		d.cleanWorkspace(dec, r, true)
+
+	case CmdWorkspaceWake:
+		d.wakeWorkspace(dec, r)
 
 	case CmdWorkspaceRename:
 		var p RenameWorkspaceParams

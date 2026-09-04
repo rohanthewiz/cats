@@ -148,7 +148,7 @@
   // "locked" shelf says nothing about which provider or which workspace of panes
   // you last folded.
   const WGRP_KEY = "cats.workspaces.collapsed";
-  const WS_OPEN = "open", WS_LOCKED = "locked";
+  const WS_OPEN = "open", WS_LOCKED = "locked", WS_ASLEEP = "asleep";
   // The third id is not a shelf. With nothing locked there is only one shelf and
   // no header is drawn for it (renderWorkspaces), so the fold pair would have
   // nothing to act on — WS_ALL is what it acts on instead: the section's own list,

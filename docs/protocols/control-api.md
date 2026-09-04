@@ -397,6 +397,9 @@ catctl pane.split --params '{"direction":"v","command":["ced","main.go"]}'
 | `workspace.move` | — |
 | `workspace.lock` | `lock-ws [id]` / `unlock-ws [id]` |
 | `workspace.flag` | `flag-ws <id> <kind> [note...]` / `unflag-ws [id]` |
+| `workspace.clean` | `clean-ws [id] [park \| run <text...>]` |
+| `workspace.sleep` | `sleep-ws [id] [park \| run <text...>]` |
+| `workspace.wake` | `wake-ws <id>` |
 
 `tab.move_to_workspace` moves a tab, with its panes and their live terminals,
 into another workspace: `{"workspace":"w2","num":3}`. That is how a tab travels
@@ -440,6 +443,70 @@ id they act on the active workspace. The lock is durable (it survives a catway
 restart) and reported by `workspace.list` as `locked`, but it is a guardrail
 rather than a permission boundary — `workspace.lock` is itself an ordinary
 command, so anything holding the control API can lift it.
+
+### Clean, sleep and wake
+
+A workspace is normally either fully alive — every pane a live PTY on its
+cathost, restart or not — or gone, with its name, flag, lock and todos. These
+three commands add the state in between, so a workspace can stay in the list
+for quick access without a terminal running in it.
+
+`workspace.clean` closes a workspace's **idle** panes and leaves the rest: an
+exited pane, or a shell sitting at its prompt with no foreground job, closes;
+a running build, an editor, a plugin, or an agent mid-turn stays. `{"id":"w2"}`
+names the workspace, an omitted id means the caller's own (the
+`workspace.lock` default). The result says what happened —
+`{"closed":3,"kept":1,"kept_panes":["w2:p4"]}`.
+
+`workspace.sleep` is clean's empty case made explicit: it requires that nothing
+busy is left, and then keeps the workspace in the list with **no terminal at
+all**. A busy pane makes it fail without closing anything, naming the panes in
+the way (`cannot sleep workspace w2: 2 panes still busy (w2:p1, w2:p3)`). A
+clean whose verdict is "everything goes" sleeps the workspace the same way
+rather than emptying it pane by pane. The last awake workspace cannot sleep.
+
+The layout is deliberately not kept. A sleeping workspace holds one placeholder
+pane and nothing else; `workspace.wake` turns that into a fresh shell in the
+workspace's directory. So is anything the panes had on screen: sleep is a tidy-
+up, not a snapshot.
+
+What sleep can keep is the one thing worth more than a layout: which agent
+conversations were running. An **idle agent is not idle** by default — its
+context is exactly what you would lose — so both commands leave it alone unless
+told otherwise with `agents`:
+
+| `agents` | an idle agent's pane |
+|---|---|
+| `"leave"` (default) | stays; a sleep that finds one fails as for a busy pane |
+| `"park"` | closes, and its session id is parked on the workspace — `wake` resumes it in a pane of its own; an agent with no known session stays |
+| `"command"` | gets `command` typed into it (and Enter), and stays — `/exit` to have it shut down cleanly, `/compact` to have it tidy up first |
+
+Under `"command"` a sleep never sleeps on the spot: it sends the command,
+closes the plain idle panes, and reports `"asleep":false` with the agents it
+left; sleep again once they have gone (an exited pane is idle, and closes on
+its own when `panes.autoclose_exited` is on). A resumable session is one the
+runtime knows through the [agent hooks](../reference/cli.md#catctl-integration) or the
+daemon's own detection, and it is resumed the way a cold restart resumes a
+pane: the pane execs the agent's native resume command (`claude --resume <id>`,
+`codex resume <id>`, …) on the host the transcript lives on.
+
+`workspace.wake` needs the id: the caller's own workspace is awake by
+definition. `workspace.focus` on a sleeping workspace wakes it first, which is
+how a click on the sidebar row brings one back. A sleeping workspace refuses
+`tab.create`, a split, and a tab moved into it — none of them wake it as a side
+effect, so the browser's "start in all workspaces" fan-out skips it as it skips
+locked ones. Sleep is durable: a restart respawns nothing into a workspace
+that was asleep, and `workspace.list` reports it as `asleep`, with `parked`
+listing the agents (`[{"agent":"claude","pane":"w2:p3"}]` — the pane is where
+it used to live) a wake will bring back.
+
+What counts as busy is the runtime's call, made on the loop against live
+state: the daemon reports a foreground job the moment one starts or ends
+(`pane_job`, off the same `tcgetpgrp` the agent detection already runs), and
+the agent state is whatever the hooks and detection currently say. A pane the
+runtime cannot vouch for — its host disconnected, or its PTY not yet created —
+is kept: a clean issued during an outage must not read "no answer" as "nothing
+running".
 
 ### Flags
 

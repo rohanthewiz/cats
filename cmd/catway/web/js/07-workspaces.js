@@ -37,6 +37,14 @@
     return !!(w && w.locked);
   }
 
+  // Is this workspace asleep — kept in the list with no terminal behind it
+  // (workspace.sleep)? Same lookup as the lock, for the same reason: the PANES
+  // section has to know not to list the sleeping workspace's placeholder pane.
+  function wsAsleep(id) {
+    const w = layoutMsg && layoutMsg.workspaces.find((x) => x.id === id);
+    return !!(w && w.asleep);
+  }
+
   // attentionRank orders marker states for aggregation (cats's
   // workspace_attention_priority): blocked > done(unseen) > working > idle.
   function attentionRank(st) {
@@ -314,6 +322,34 @@
     return wrap;
   }
 
+  // sleepMark: the crescent a workspace row wears while it is asleep
+  // (workspace.sleep) — nothing is running in it, and it is one click from
+  // running again. With agents parked on it the count rides beside the moon,
+  // the way the todo mark carries its number: those are the conversations a
+  // wake brings back, and the reason the workspace was slept rather than closed.
+  function sleepMark(w) {
+    const svg = document.createElementNS(SVGNS, "svg");
+    svg.setAttribute("class", "sleep");
+    svg.setAttribute("viewBox", "0 0 16 16");
+    svg.setAttribute("fill", "currentColor");
+    const moon = document.createElementNS(SVGNS, "path");
+    // A crescent: the outer arc of one circle less the inner arc of another,
+    // offset up and to the right so the bite is where a moon's is.
+    moon.setAttribute("d", "M9.5 2.2a6 6 0 1 0 4.3 9.6 5 5 0 0 1-4.3-9.6z");
+    svg.appendChild(moon);
+    const wrap = document.createElement("span");
+    wrap.className = "sleep-mark";
+    const n = (w.parked || []).length;
+    wrap.title = "asleep — no terminal is running here; click to wake it"
+      + (n ? " and resume " + nOf(n, "parked agent") : "");
+    wrap.appendChild(svg);
+    if (n) {
+      const cnt = document.createElement("span"); cnt.className = "sleep-n"; cnt.textContent = String(n);
+      wrap.appendChild(cnt);
+    }
+    return wrap;
+  }
+
   // tabMarker: the highest-attention agent state among a tab's panes, as a
   // colored dot on the tab (cats's bell/activity markers; the rollup's tab
   // field keys the grouping — tab bar rows are the active workspace's tabs).
@@ -366,11 +402,18 @@
     // Each row remembers its index in the session's order, because grouping
     // reorders the list on screen while workspace.move still speaks in gaps in
     // the session's order — see wsDropIndex for the translation back.
+    //
+    // A third shelf holds the workspaces put to sleep (workspace.sleep): kept in
+    // the list, nothing running. It sits below "locked" because it is the
+    // quieter state — a locked workspace is still doing something, a sleeping
+    // one is only a name with a place to come back to. A workspace that is both
+    // is shelved as asleep: that is the fact that decides what a click does.
     const groups = [
       { id: WS_OPEN, label: "open", rows: [] },
       { id: WS_LOCKED, label: "locked", rows: [] },
+      { id: WS_ASLEEP, label: "asleep", rows: [] },
     ];
-    msg.workspaces.forEach((w, i) => groups[w.locked ? 1 : 0].rows.push({ w, idx: i }));
+    msg.workspaces.forEach((w, i) => groups[w.asleep ? 2 : w.locked ? 1 : 0].rows.push({ w, idx: i }));
     // Headers are drawn only when the split is real. With nothing locked (the
     // common case) one shelf holds everything, and a header reading "open" over
     // the whole list is a row that says nothing — the section stays the flat list
@@ -413,7 +456,7 @@
         const w = ent.w;
         wsRenderOrder.push(ent.idx);
         const li = document.createElement("li");
-        li.className = "ws" + (w.active ? " active" : "") + (w.locked ? " locked" : "");
+        li.className = "ws" + (w.active ? " active" : "") + (w.locked ? " locked" : "") + (w.asleep ? " asleep" : "");
         const name = document.createElement("span");
         name.textContent = (w.active ? "● " : "○ ") + w.name;
         li.appendChild(name);
@@ -426,6 +469,10 @@
         // the workspace itself — what may be started in it — where the todo mark
         // reports on the project inside.
         if (w.locked) li.appendChild(lockMark());
+        // The moon rides where the lock does, being the same kind of statement
+        // about the workspace itself; the parked-agent count rides on it, since
+        // "asleep with two agents waiting" is the thing worth noticing.
+        if (w.asleep) li.appendChild(sleepMark(w));
         // A workspace's host is where its NEW panes land — a property of the
         // workspace itself, like the lock, so it rides beside the name rather
         // than out at the right edge with the agent rollup. Multi-host only, for
@@ -495,6 +542,11 @@
           onClick: () => {
             if (w.active) return;
             if (w.locked) { toast((w.name || w.id) + " is locked — unlock it to switch"); return; }
+            // A sleeping row takes the click: workspace.focus wakes the
+            // workspace before it switches, and the click is the everyday
+            // way back in. The toast covers the second or so before the
+            // shell (and any parked agents) are on screen.
+            if (w.asleep) toast("waking " + (w.name || w.id) + (w.parked && w.parked.length ? " — resuming " + nOf(w.parked.length, "agent") : ""));
             sendCmd("workspace.focus", { id: w.id });
           },
         }));

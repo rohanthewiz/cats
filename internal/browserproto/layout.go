@@ -96,6 +96,8 @@ func BuildLayout(workspaces []*workspace.Workspace, active int, area layout.Rect
 			Name:     ws.DisplayName(),
 			Active:   i == active,
 			Locked:   ws.Locked,
+			Asleep:   ws.Asleep,
+			Parked:   app.ParkedInfo(ws.ParkedAgents),
 			FlagInfo: app.NewFlagInfo(ws.Flag),
 		})
 	}

@@ -51,6 +51,8 @@ func (s *Session) ListWorkspacesIn(wsID string) []WorkspaceEntry {
 			Active: i == active,
 			Tabs:   len(ws.Tabs),
 			Locked: ws.Locked,
+			Asleep: ws.Asleep,
+			Parked: ParkedInfo(ws.ParkedAgents),
 			Host:   ws.HostID, // as stored: "" = whatever the default host is
 
 			FlagInfo: NewFlagInfo(ws.Flag),
