@@ -159,7 +159,7 @@ const (
 	// duplicated for the same reason defaultExitedPaneTTL is: an orch built
 	// with no config file (tests, an embedded caller) must still behave, and a
 	// zero field means "off" rather than "default".
-	defaultAutocloseTTL = 20 * time.Second
+	defaultAutocloseTTL = 10 * time.Second
 )
 
 // autocloseAfterFromConfig resolves the configured countdown, falling back to

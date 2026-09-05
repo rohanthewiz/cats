@@ -388,7 +388,7 @@ type PaneExited struct {
 	// AutocloseMS is how long is LEFT on the server's auto-close countdown for
 	// this pane, in milliseconds; absent (0) means no countdown is running and
 	// the corpse stays until someone closes it. A client renders it as the
-	// "close in 20s" run on the exited header and may cancel it with pane.keep.
+	// "close in 10s" run on the exited header and may cancel it with pane.keep.
 	//
 	// A remaining time rather than a deadline, because the two clocks involved
 	// are on different machines: a wall-clock instant would need the browser's

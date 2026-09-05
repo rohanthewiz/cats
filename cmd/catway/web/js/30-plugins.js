@@ -132,9 +132,11 @@
   // stays on screen after exit (exited chrome), so the git/build output — or
   // the failure — remains readable. A FAILED run stays until the user closes
   // it; a clean one tidies itself away after the countdown on its header
-  // (panes.autoclose_exited, twenty seconds — set with this output in mind),
-  // which the header's ✕ cancels if there is more to read. cwd is optional
-  // and only matters for the link path (see focusedPaneCwd).
+  // (panes.autoclose_exited, ten seconds by default), which the header's ✕
+  // cancels if there is more to read. Ten seconds is enough to notice the
+  // countdown, not to skim a long git log — so a run whose output matters is
+  // kept with ✕ or by entering copy mode, both of which stop the clock. cwd
+  // is optional and only matters for the link path (see focusedPaneCwd).
   function pluginCatctlTab(catctl, title, args, cwd) {
     closeModal();
     const params = { title, command: [catctl, "plugin"].concat(args) };

@@ -218,7 +218,7 @@ the next sweep reads whatever `catctl reload` left on the orch.
 
 A **cleanly exited** pane does not wait that long. When its child exits with
 status 0 there is nothing left on screen worth keeping, so it counts itself down
-and closes — `panes.autoclose_exited`, twenty seconds by default:
+and closes — `panes.autoclose_exited`, ten seconds by default:
 
 ```
 pane 3 · build · ~/src · exited (0) — close in 7s ✕

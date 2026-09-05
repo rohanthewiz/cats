@@ -271,7 +271,7 @@ See [Persistence](../subsystems/persistence.md).
 ```yaml
 panes:
   reap_exited: "4h"        # "off" / "0" / "never" keeps exited panes forever
-  autoclose_exited: "20s"  # a CLEANLY exited pane closes itself after this
+  autoclose_exited: "10s"  # a CLEANLY exited pane closes itself after this
 ```
 
 A pane whose child exits is **kept**: the chrome turns red, the last screen
@@ -282,7 +282,7 @@ how long that corpse is kept before a five-minute sweep closes it.
 | Key | Flag | Notes |
 |-----|------|-------|
 | `reap_exited` | — | Go duration; `""`, `"0"`, `"off"`, `"never"` disable reaping |
-| `autoclose_exited` | — | Go duration; `"0"`, `"off"`, `"never"` disable it. Absent means the 20s default |
+| `autoclose_exited` | — | Go duration; `"0"`, `"off"`, `"never"` disable it. Absent means the 10s default |
 
 Two things the sweep will not do, whatever this is set to:
 

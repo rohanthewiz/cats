@@ -446,8 +446,8 @@ type Worktrees struct {
 // duration by AutocloseExitedAfter's absent-value case and as the string that
 // Default() writes into a fresh config file, and they must not drift.
 const (
-	defaultAutocloseExited    = 20 * time.Second
-	defaultAutocloseExitedStr = "20s"
+	defaultAutocloseExited    = 10 * time.Second
+	defaultAutocloseExitedStr = "10s"
 )
 
 type Panes struct {
@@ -475,11 +475,13 @@ type Panes struct {
 	// left to say.
 	//
 	// The countdown is visible in the pane header and cancellable from it
-	// (pane.keep), so the twenty seconds are a chance to say "no", not a
-	// deadline to race. The default is set by the SLOWEST thing worth reading
-	// off a pane that then exits cleanly — a plugin run's git or build output
-	// (see pluginCatctlTab), which wants long enough to skim, not just long
-	// enough to notice.
+	// (pane.keep), so the ten seconds are a chance to say "no", not a deadline
+	// to race. The default is sized to NOTICING, not to reading: long enough
+	// to see the countdown appear and hit ✕ (or enter copy mode, which also
+	// keeps the pane), not long enough to skim a plugin run's git or build
+	// output. Output worth reading is worth keeping, and keeping it is one
+	// click — sizing the default for the slowest reader instead would leave
+	// every ordinary `exit`ed shell sitting around for its sake.
 	AutocloseExited string `yaml:"autoclose_exited"`
 }
 
