@@ -286,6 +286,33 @@ func (s *Session) PaneFlag(id layout.PaneID) *flags.Flag {
 	return nil
 }
 
+// SetPanePlugin records (or clears, with "") which plugin's action a pane was
+// launched to run — the CATS_PLUGIN_ID its spawn environment carried. The
+// runtime calls this from the one place that decides a pane's child, so the
+// value is rewritten on every respawn: a pane that comes back as a plain shell
+// after a cathost restart loses the claim rather than keeping it.
+//
+// Reports whether the value actually changed, so the caller can skip the save
+// on the overwhelmingly common no-op (every ordinary shell pane, every respawn
+// of the same plugin).
+func (s *Session) SetPanePlugin(id layout.PaneID, plugin string) bool {
+	st := s.paneState(id)
+	if st == nil || st.PluginID == plugin {
+		return false
+	}
+	st.PluginID = plugin
+	return true
+}
+
+// PanePlugin returns the plugin a pane was launched to run ("" for an ordinary
+// pane, or an unknown one).
+func (s *Session) PanePlugin(id layout.PaneID) string {
+	if st := s.paneState(id); st != nil {
+		return st.PluginID
+	}
+	return ""
+}
+
 // PaneCustomName returns a pane's custom title and whether the pane exists.
 func (s *Session) PaneCustomName(id layout.PaneID) (string, bool) {
 	if st := s.paneState(id); st != nil {

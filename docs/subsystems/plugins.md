@@ -483,6 +483,36 @@ dialog. The roster comes from one `plugin.list` before the dialog opens; a faile
 or empty list drops the field rather than the dialog, since creating a workspace
 must not depend on the plugin host being healthy.
 
+### Where a running action shows up
+
+Every launch carries `CATS_PLUGIN_ID` in its spawn environment, and catway
+records that value on the pane it created — the env it was handed, not a manifest
+it read, so the server stays plugin-agnostic. The sidebar's **AGENTS** section
+uses it to list the panes a plugin is running, in their own block under the
+coding agents, one block per plugin, each closed by a hairline:
+
+```
+● claude opus 5                       cats:p1 · 2m ago · idle
+──────────────────────────────────────────────────────────────
+● cats-todo  todo: cats (3)                          cats:p4
+──────────────────────────────────────────────────────────────
+```
+
+A plugin row names the plugin and, beside it, the pane's own terminal title —
+the plugin's one channel, and the reason cats-todo advertises its open count
+there. It carries no state dot colour and no age: a plugin is a program, not an
+agent taking turns, and there is nothing catway could report that would mean what
+"idle 5m ago" means on the row above. Clicking one reveals the pane, exactly as
+an agent row does; right-clicking reaches the same pane menu, so a plugin pane
+can be flagged like any other.
+
+The id is durable pane state (`PaneState.PluginID`), so the grouping survives a
+catway restart against a live cathost — where the pane is adopted with its plugin
+process still running. It is rewritten on every spawn rather than only set, so a
+pane that comes back as a plain shell (a cathost restart, with nothing to resume
+it) drops the claim instead of keeping it. An exited pane leaves the section: its
+red header already says what happened to it.
+
 ## Environment a plugin gets
 
 | Variable | Meaning |

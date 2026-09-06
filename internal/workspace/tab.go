@@ -39,6 +39,20 @@ type PaneState struct {
 	// to this agent" still true after the agent has been restarted in place.
 	// It also means a plain shell can be flagged, which costs nothing extra.
 	Flag *flags.Flag
+	// PluginID is the plugin whose action this pane was launched to run — the
+	// CATS_PLUGIN_ID the launch carried in its spawn environment ("" for every
+	// pane started as a plain shell or an agent). The host stays plugin-
+	// agnostic: this is the value the launcher already put in the child's
+	// environment, recorded rather than interpreted, and no manifest is read to
+	// obtain it.
+	//
+	// Durable, like CustomName and Flag, because catway can restart while
+	// cathost keeps the PTY: the pane comes back adopted, with its plugin
+	// process still running and nothing left in memory to say whose it is. The
+	// runtime rewrites it whenever it decides a pane's child (createPane), so a
+	// pane respawned as a plain shell after a cathost restart clears it rather
+	// than keeping a claim that is no longer true.
+	PluginID string
 }
 
 // NewPaneState returns a pane state attached to the given terminal, marked seen.

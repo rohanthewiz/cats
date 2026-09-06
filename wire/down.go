@@ -209,9 +209,22 @@ const (
 
 // Agents is the full sidebar rollup across ALL workspaces (frames stream only
 // for visible panes, but agent chrome is global).
+//
+// Two lists, deliberately not one. Items is the roster of panes running a
+// detected coding agent, and everything downstream of it — the workspace
+// badges, the tab-bar activity markers, the attention sweep that reopens a
+// folded sidebar — reads it as exactly that. Plugins is the roster of panes a
+// cats plugin's action was launched into (§ plugin host): they sit in the same
+// sidebar section because they are the other kind of long-lived thing a user
+// starts and comes back to, but they have no agent state to contribute and must
+// not be counted as if they had one. Keeping them in their own list is what
+// makes that structural rather than a filter every consumer has to remember.
 type Agents struct {
 	T     Type        `json:"t"`
 	Items []AgentItem `json:"items"`
+	// Plugins is grouped by plugin id and ordered by it, so a client can draw
+	// the groups by walking the list once and cutting wherever Plugin changes.
+	Plugins []PluginPane `json:"plugins,omitempty"`
 }
 
 type AgentItem struct {
@@ -241,7 +254,33 @@ type AgentItem struct {
 	FlagInfo
 }
 
-func NewAgents(items []AgentItem) Agents { return Agents{T: MsgAgents, Items: items} }
+func NewAgents(items []AgentItem, plugins []PluginPane) Agents {
+	return Agents{T: MsgAgents, Items: items, Plugins: plugins}
+}
+
+// PluginPane is one live pane running a plugin action — the sidebar's other
+// kind of AGENTS row. It carries no state and no age: a plugin is a program,
+// not an agent taking turns, so there is nothing the server could report that
+// would mean what "idle 5m ago" means on an agent row. What it carries instead
+// is Title, which is the channel a plugin actually speaks on (cats-todo
+// advertises its open count in its OSC title, "todo: cats (3)").
+type PluginPane struct {
+	Pane      uint32 `json:"pane"`
+	Pub       string `json:"pub"`
+	Workspace string `json:"workspace"`
+	Tab       int    `json:"tab"`
+	// Plugin is the launcher's CATS_PLUGIN_ID ("rohanthewiz.cats-todo"): the
+	// row's identity and the key its group is cut on. Never a manifest name —
+	// catway does not read manifests.
+	Plugin string `json:"plugin"`
+	// Title is the pane's live terminal title, the plugin's own word for what
+	// it is showing; "" before the program has set one.
+	Title string `json:"title,omitempty"`
+	// FlagInfo rides along for the same reason it does on AgentItem: this
+	// rollup is the only message that spans every workspace, and a plugin pane
+	// is as flaggable as any other.
+	FlagInfo
+}
 
 // Hosts is the cathost roster, pushed on connect and re-pushed whenever a host
 // connects or drops. It is the client's answer to two different questions:

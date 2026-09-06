@@ -47,7 +47,7 @@ server assumes a default 120×32 area.
 |-----|---------|
 | `welcome` | protocol version, plus an `error` string if the connection is being refused |
 | `layout` | **full replacement** of the viewport structure: workspaces (sidebar), the active workspace's tabs, the active tab's pane rects, and border handles. Computed rects only — the BSP tree never crosses the wire |
-| `agents` | the cross-session agent roster for the sidebar |
+| `agents` | the cross-session agent roster for the sidebar, plus the panes plugin actions are running in |
 | `hosts` | the cathost roster: one item per configured host with `id`, `label`, `connected`, `addr_kind`, `is_default`, `panes`, an `error` explaining a host that is down, `latency_ms` (the last measured round trip, fractional, omitted when unknown), and `lists_dirs` (the start-path picker works against this host — always so for the local machine, and for a remote one whose cathost can list its own directories). Sent on connect, whenever a host connects or drops, and when a host's latency moves enough to change what is drawn — not on every sample, since every host pushes the whole roster to every client. A single-item roster is the normal single-machine session, which is how a client knows to draw no host UI at all |
 | `pane_title` | OSC 0/2 title for a pane |
 | `pane_cwd` | working directory for a pane |
@@ -150,6 +150,16 @@ The `agents` rollup is the deliberate exception: it covers every pane in the
 session, so the sidebar roster and the notification path have state for panes you
 are not looking at. That is what makes "an agent finished in another workspace" a
 thing you can be told about.
+
+It carries two lists, not one. `items` is the panes running a detected coding
+agent, and everything computed from the rollup — the workspace badges, the
+tab-bar activity markers, the attention sweep that reopens a folded sidebar —
+reads that one. `plugins` is the panes a plugin action was launched into
+(`CATS_PLUGIN_ID`, recorded on the pane at spawn), ordered and grouped by plugin
+id so a client can cut the groups by walking the list once. They are separate
+because a plugin pane has no agent state to contribute and must not be counted as
+though it had one; a pane that is both — a plugin that started an agent — is
+reported once, as the agent.
 
 Anything else a front end wants about an off-screen pane it asks for, rather than
 waiting to be told. `pane.list` reports every pane in the session with its live

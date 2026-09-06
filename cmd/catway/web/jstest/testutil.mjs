@@ -102,16 +102,22 @@ export function sliceConst(src, name) {
  * @param {string[]} o.consts top-level single-line consts the lifted functions
  *                            read, lifted with their VALUES so a budget cannot
  *                            drift between the browser and the test
+ * @param {string[]} o.lets   env bindings the lifted code ASSIGNS to — the part
+ *                            files' module-level state (`agentItems = items`).
+ *                            Declared with `let` rather than `const`, which is
+ *                            the difference between a render that works and a
+ *                            TypeError the test would report as a bug.
  * @returns {object} the functions, keyed by name
  */
-export function loadFns({ files, names, env = {}, stubs = [], consts = [] }) {
+export function loadFns({ files, names, env = {}, stubs = [], consts = [], lets = [] }) {
   const src = files.map(readPart).join("\n");
   const picked = consts.map((c) => sliceConst(src, c))
     .concat(names.map((n) => slice(src, n))).join("\n\n");
   const bindings = { ...Object.fromEntries(stubs.map((s) => [s, () => {}])), ...env };
   const body = [
     '"use strict";',
-    ...Object.keys(bindings).map((k) => `const ${k} = __env[${JSON.stringify(k)}];`),
+    ...Object.keys(bindings).map((k) =>
+      `${lets.includes(k) ? "let" : "const"} ${k} = __env[${JSON.stringify(k)}];`),
     picked,
     `return { ${names.join(", ")} };`,
   ].join("\n");

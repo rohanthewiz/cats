@@ -74,7 +74,7 @@
         p.autocloseAt = 0; // the server cancelled its timer too — nothing to count down to
         renderChrome(p); refreshPaneList(); break;
       }
-      case "agents": renderAgents(msg.items); break;
+      case "agents": renderAgents(msg.items, msg.plugins); break;
       case "hosts": renderHosts(msg.items); break;
       case "history": renderHistory(msg.entries || []); break;
       // The macro recorder is session state, not this window's: the server

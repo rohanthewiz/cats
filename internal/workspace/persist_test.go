@@ -37,6 +37,9 @@ func buildWorkspace(t *testing.T) *Workspace {
 	// so the round trip covers both halves of the vocabulary. The root pane of
 	// tab 1 is the one that survives every close above.
 	ws.Tabs[0].SetFlag(ws.Tabs[0].RootPane, &flags.Flag{Kind: "🍕", Note: "lunch build", AtMs: 1_700_000_001_000})
+	// And a pane launched by a plugin: the id has to survive a restart, since
+	// catway can restart while the plugin's process keeps running under cathost.
+	ws.Tabs[0].Panes[ws.Tabs[0].RootPane].PluginID = "rohanthewiz.cats-todo"
 	ws.Tabs[0].SetCustomName("build")
 	return ws
 }
@@ -85,6 +88,9 @@ func TestWorkspaceSnapshotRoundTrip(t *testing.T) {
 	if got := restored.Tabs[0].Panes[restored.Tabs[0].RootPane].Flag; got == nil ||
 		got.Kind != "🍕" || got.Note != "lunch build" {
 		t.Fatalf("pane flag: got %+v", got)
+	}
+	if got := restored.Tabs[0].Panes[restored.Tabs[0].RootPane].PluginID; got != "rohanthewiz.cats-todo" {
+		t.Fatalf("pane plugin id: got %q", got)
 	}
 	if restored.ActiveTabIndex() != ws.ActiveTabIndex() {
 		t.Fatalf("active tab: got %d want %d", restored.ActiveTabIndex(), ws.ActiveTabIndex())

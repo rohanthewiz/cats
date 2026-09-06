@@ -25,6 +25,7 @@ import (
 	"github.com/rohanthewiz/cats/internal/ledger"
 	"github.com/rohanthewiz/cats/internal/orchestration"
 	"github.com/rohanthewiz/cats/internal/persist"
+	"github.com/rohanthewiz/cats/internal/plugin"
 	"github.com/rohanthewiz/cats/internal/push"
 	"github.com/rohanthewiz/cats/internal/terminal"
 	"github.com/rohanthewiz/cats/internal/workspace"
@@ -1276,6 +1277,23 @@ func (o *orch) createPane(rt *paneRuntime) {
 			}
 			delete(o.spawnPlans, rt.id)
 		}
+		// Who this pane belongs to is decided here for the same reason its
+		// child is: this is the only place that knows what is actually being
+		// launched. A plugin launch carries CATS_PLUGIN_ID in its spawn
+		// environment (the browser's pluginRunAction and `catctl plugin run`
+		// both send the manifest's env through tab.create), and recording it on
+		// the pane is what lets the sidebar group the plugin's panes long after
+		// the launch — including across a catway restart, since the pane state
+		// is durable.
+		//
+		// Written on every spawn, not only on a plugin one, so the value is
+		// cleared as well as set: a plugin pane whose host restarted comes back
+		// through here as a plain shell, and a stale id would leave the sidebar
+		// claiming a program that is no longer running. The env is read rather
+		// than a manifest parsed — catway stays plugin-agnostic.
+		if o.session.SetPanePlugin(layout.PaneID(rt.id), cp.Env[plugin.IDEnvVar]) {
+			o.saveSoon()
+		}
 		if h, ok := o.seeds[rt.id]; ok {
 			cp.InitialHistory = h
 			delete(o.seeds, rt.id)
@@ -1455,8 +1473,21 @@ func (o *orch) resyncPane(pid uint32) {
 
 // agentsMsg builds the global sidebar rollup from every pane's cached agent
 // state (agent chrome is not viewport-filtered, §8).
+//
+// Two rosters come out of the one walk. The agent items are the panes running a
+// detected coding agent, exactly as before. The plugin panes are the panes a
+// plugin action was launched into (PaneState.PluginID) — the sidebar draws them
+// under the agents, grouped by plugin — and they are a separate list because
+// they carry no agent state: everything that counts attention off this rollup
+// reads Items and must keep seeing only the things that have a state to count.
+//
+// A pane can only be in one of them. A plugin that runs an agent is reported as
+// the agent, because the agent row is strictly the more informative of the two:
+// it says what the pane is doing right now, while the plugin row could only say
+// who started it.
 func (o *orch) agentsMsg() browserproto.Agents {
 	items := []browserproto.AgentItem{}
+	plugins := []browserproto.PluginPane{}
 	for _, ws := range o.session.Workspaces() {
 		for _, tab := range ws.Tabs {
 			for _, id := range tab.Layout.PaneIDs() {
@@ -1466,6 +1497,18 @@ func (o *orch) agentsMsg() browserproto.Agents {
 				}
 				agent, state := rt.effectiveAgent()
 				if agent == "" {
+					// A corpse is left out of both rosters: an exited plugin is
+					// no longer running anything, and its pane is either about
+					// to be reaped or sitting there with a red header that
+					// already says so.
+					if plug := panePlugin(tab, id); plug != "" && rt.exited == nil {
+						pub, _ := o.session.PublicPaneID(id)
+						plugins = append(plugins, browserproto.PluginPane{
+							Pane: rt.id, Pub: pub, Workspace: ws.ID, Tab: tab.Number,
+							Plugin: plug, Title: rt.title,
+							FlagInfo: app.NewFlagInfo(paneFlag(tab, id)),
+						})
+					}
 					continue
 				}
 				pub, _ := o.session.PublicPaneID(id)
@@ -1486,7 +1529,30 @@ func (o *orch) agentsMsg() browserproto.Agents {
 			}
 		}
 	}
-	return browserproto.NewAgents(items)
+	// Grouped by plugin so the client can cut the groups by walking the list
+	// once, and by id rather than by discovery order so the groups keep their
+	// places between rollups — a section whose blocks reshuffle whenever a pane
+	// is opened somewhere else is one nobody can point at. Ties fall back to the
+	// pane id, which preserves the walk's own (workspace, tab, layout) order
+	// within a group.
+	slices.SortStableFunc(plugins, func(a, b browserproto.PluginPane) int {
+		if c := strings.Compare(a.Plugin, b.Plugin); c != 0 {
+			return c
+		}
+		return int(a.Pane) - int(b.Pane)
+	})
+	return browserproto.NewAgents(items, plugins)
+}
+
+// panePlugin reads the plugin a pane was launched to run out of the tab holding
+// it — the same tab-in-hand shortcut paneFlag takes, for the same reason: the
+// walk above already has it, and Session.PanePlugin would rescan every
+// workspace to find it again.
+func panePlugin(tab *workspace.Tab, id layout.PaneID) string {
+	if st := tab.Panes[id]; st != nil {
+		return st.PluginID
+	}
+	return ""
 }
 
 // paneFlag reads one pane's user flag out of the tab that holds it, nil when the

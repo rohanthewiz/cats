@@ -109,6 +109,7 @@ type (
 	PluginActionInfo         = wire.PluginActionInfo
 	PluginInfo               = wire.PluginInfo
 	PluginListResult         = wire.PluginListResult
+	PluginPane               = wire.PluginPane
 	PluginUninstallParams    = wire.PluginUninstallParams
 	PluginUninstallResult    = wire.PluginUninstallResult
 	Raw                      = wire.Raw

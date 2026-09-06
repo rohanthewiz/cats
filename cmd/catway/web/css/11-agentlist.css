@@ -48,6 +48,26 @@
   #agent-list li.empty { color:var(--muted); font-style:italic; cursor:default; }
   #agent-list li.empty:hover { background:none; }
 
+  /* The rule closing each block of rows — the agents, then one block per plugin.
+     A row of its own rather than a border on the neighbouring row: rows here
+     take a hover and a focus background, which would paint over such a border
+     the moment the pointer crossed it. Inset by the rows' own 8px so the rule
+     starts where the text does and reads as belonging to the list rather than
+     to the panel; zero height with the hairline as its top edge, and the same
+     --line every other divider in the sidebar uses. Both row defaults
+     (#agent-list li) have to be taken back: a divider is not clickable and does
+     not light up. */
+  #agent-list li.sep { height:0; padding:0; margin:5px 8px; border-top:1px solid var(--line);
+    border-radius:0; cursor:default; }
+  #agent-list li.sep:hover { background:none; }
+  /* A plugin row's title half is the pane's live terminal title, which is
+     arbitrary text a program chose — it can be long, and it must not push the
+     pane handle off the right edge. The name shrinks and ellipsizes; the handle
+     never does. (Agent rows need neither: a trimmed model label is three words
+     at most.) */
+  #agent-list li.plug .aname { min-width:0; overflow:hidden; text-overflow:ellipsis; }
+  #agent-list li.plug .ameta { flex:none; }
+
   /* The idle dot, pulled a step off full green. In AGENTS every settled agent
      shows one, so a column of saturated dots was the brightest thing in the
      section while saying the least — idle is the resting state, not news.
