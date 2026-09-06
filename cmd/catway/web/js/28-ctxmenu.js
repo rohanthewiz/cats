@@ -11,6 +11,14 @@
   // the colour is half of what a flag mark means, and a menu that teaches only
   // the shape leaves the reader to learn the palette from the sidebar by
   // induction. Everything else omits it and renders exactly as before.
+  //
+  // Finally, {head: "Workspace"} is an inert section heading. A menu whose rows
+  // address two different subjects (the workspace and its worktrees) otherwise
+  // has to carry the subject in every label — "new workspace…", "new worktree…"
+  // — which is the same word repeated down the column with the verb, the part
+  // that actually differs, pushed to the right. Naming the subject once at the
+  // top of its group buys the labels back: under a heading, "new…" is not
+  // ambiguous.
   function openCtx(x, y, items) {
     closeCtx();
     ctxEl = buildCtx(x, y, items);
@@ -30,6 +38,15 @@
     for (const it of items) {
       if (it === "-") {
         const s = document.createElement("div"); s.className = "sep"; m.appendChild(s);
+        continue;
+      }
+      // A heading is a label, not a target: no hover, no click, and — unlike an
+      // ordinary row — it does not close an open sibling submenu, so sliding the
+      // pointer past one on the way out of a submenu leaves that submenu up.
+      if (it.head) {
+        const h = document.createElement("div");
+        h.className = "head"; h.textContent = it.head;
+        m.appendChild(h);
         continue;
       }
       const el = document.createElement("div");
@@ -217,36 +234,46 @@
     return items;
   }
 
+  // The workspace menu speaks about two subjects: the workspace this row is, and
+  // the git worktrees it can be pointed at. Each gets its own heading, with a
+  // separator between the groups, which is what lets the labels drop the subject
+  // word and read as a plain list of verbs.
   function wsMenuItems(w) {
     return [
-      { label: "new workspace…", fn: newWorkspace },
+      { head: "Workspace" },
+      // The three that address the workspace ITSELF come first — make one, name
+      // one, mark one — since those are the rows reached most often and the
+      // ones a reader scans for. Everything below changes the workspace's state.
+      { label: "new…", fn: newWorkspace },
+      { label: "rename…", fn: () => renameWorkspace(w) },
+      { label: flagRowLabel(flagOf(w)), sub: flagMenuItems(wsFlagTarget(w)) },
       // A second window on this workspace, leaving the current one where it is.
       // Two windows on ONE workspace mirror each other; the useful shape is one
       // window per project, which is why this sits on the row rather than on
       // the section heading.
       { label: "open in new window", fn: () => openWindow(w.id) },
-      { label: "rename workspace…", fn: () => renameWorkspace(w) },
-      { label: w.locked ? "unlock workspace" : "lock workspace", fn: () => toggleWorkspaceLock(w) },
-      { label: flagRowLabel(flagOf(w)), sub: flagMenuItems(wsFlagTarget(w)) },
-      // Clean and sleep are submenus for the one decision they need: what to do
-      // with idle agents. The plain entry leaves them; the second parks them
-      // for the wake. A sleeping row offers the way back instead.
-      ...(w.asleep ? [{ label: "wake workspace", fn: () => wakeWorkspace(w) }] : [
-        { label: "clean workspace", sub: [
+      { label: w.locked ? "unlock" : "lock", fn: () => toggleWorkspaceLock(w) },
+      // The winding-down rows, in the order they escalate: clean drops idle
+      // panes, sleep parks the whole thing, close ends it. Clean and sleep are
+      // submenus for the one decision they need — what to do with idle agents:
+      // the plain entry leaves them, the second parks them for the wake. A
+      // sleeping workspace offers the way back instead.
+      ...(w.asleep ? [{ label: "wake", fn: () => wakeWorkspace(w) }] : [
+        { label: "clean", sub: [
           { label: "close idle panes", fn: () => cleanWorkspace(w, "") },
           { label: "close idle panes, park idle agents", fn: () => cleanWorkspace(w, "park") },
         ] },
-        { label: "sleep workspace…", sub: [
+        { label: "sleep…", sub: [
           { label: "sleep (refuse if anything runs)", fn: () => sleepWorkspace(w, "") },
           { label: "sleep, park idle agents", fn: () => sleepWorkspace(w, "park") },
         ] },
       ]),
+      { label: "close…", danger: true, fn: () => confirmCloseWorkspace(w) },
       "-",
-      { label: "new worktree…", fn: openNewWorktreeDialog },
-      { label: "open worktree…", fn: openWorktreeOpenDialog },
-      { label: "delete worktree checkout…", danger: true, fn: () => removeWorktreeFor(w) },
-      "-",
-      { label: "close workspace…", danger: true, fn: () => confirmCloseWorkspace(w) },
+      { head: "Worktree" },
+      { label: "new…", fn: openNewWorktreeDialog },
+      { label: "open…", fn: openWorktreeOpenDialog },
+      { label: "delete checkout…", danger: true, fn: () => removeWorktreeFor(w) },
     ];
   }
 

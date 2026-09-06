@@ -26,3 +26,13 @@
   #ctxmenu .item.sub::after { content:"▸"; margin-left:auto; color:var(--muted); }
   #ctxmenu .item.sub:hover::after { color:var(--fg-bright); }
 
+  /* A section heading (28-ctxmenu.js): the subject the rows under it act on,
+     named once so the rows themselves can be bare verbs. It is deliberately
+     quieter than a row — muted, small, uppercase, no hover — so the eye reads
+     the column of actions first and only drops to the heading when a label
+     ("new…") needs its subject. Matches the sidebar's own h2 treatment so the
+     menu's groups look like the panel's groups. The first-child rule kills the
+     leading gap when a menu opens on a heading, which is the common case. */
+  #ctxmenu .head { padding:4px 10px 2px; font-size:10px; text-transform:uppercase;
+    letter-spacing:.8px; color:var(--muted); cursor:default; margin-top:4px; }
+  #ctxmenu .head:first-child { margin-top:0; }
