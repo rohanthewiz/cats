@@ -21,6 +21,7 @@
     el.addEventListener("mouseenter", tip);
     el.addEventListener("mousemove", tip);
     el.addEventListener("mouseleave", hideTip);
+    el.addEventListener("mousedown", hideTip); // one popup, one set of rules
     document.getElementById("brand").appendChild(el);
   })();
 

@@ -254,6 +254,13 @@
     li.addEventListener("mouseenter", tip);
     li.addEventListener("mousemove", tip);
     li.addEventListener("mouseleave", hideTip);
+    // And down on the press, as the WORKSPACES rows have always done: the press
+    // either focuses the pane or begins a swap drag, and a card riding the
+    // pointer through that drag covers the pane rects it is being dragged onto.
+    // This row was the one that lacked it, so a click here — the ordinary way
+    // to reach a pane from the sidebar — left a card standing over whatever the
+    // click brought up, with the pointer never moving again to take it down.
+    li.addEventListener("mousedown", hideTip);
     return li;
   }
 

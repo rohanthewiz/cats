@@ -25,9 +25,25 @@
     paneTipEl.style.top = Math.max(4, y) + "px";
   }
 
-  function hideTip() { cancelTip(); paneTipEl.classList.remove("show"); restoreTitles(); }
+  // hideTip is the pointer's own teardown: the card goes, the row it was about
+  // gets its native tooltips back, and a dwell that never earned its card is
+  // dropped. It deliberately leaves the warm window standing (see TIP_WARM_MS)
+  // — the hand is still on the list, so the next row it reaches is part of the
+  // same read rather than a fresh arrival.
+  function hideTip() {
+    if (paneTipEl.classList.contains("show")) tipWarmUntil = Date.now() + TIP_WARM_MS;
+    cancelTip(); paneTipEl.classList.remove("show"); restoreTitles();
+  }
 
-  // ---- Dwell before the card ----
+  // dropTip is hideTip for everything that is NOT the pointer moving on — the
+  // window going to the background, the tab being hidden, a key being pressed,
+  // a menu or a dialog opening. Each of those means the hand has left the list
+  // entirely, so the warm window goes down with the card: coming back should
+  // pay the dwell again rather than find a card waiting the instant the pointer
+  // lands. Cleared after hideTip, since hideTip is what sets it.
+  function dropTip() { hideTip(); tipWarmUntil = 0; }
+
+  // ---- Dwell before the card, warm window after it ----
   //
   // The card used to open on the first mousemove over a row, which made a pass
   // through the sidebar a run of popups: crossing WORKSPACES on the way to the
@@ -37,14 +53,35 @@
   // asking about this row", and it is the same bargain the native tooltips the
   // card replaced (see muteTitles) always made.
   //
-  // The wait is only ever paid on the way *in*. Once a card is up, moves within
-  // the row go straight through, so the card keeps riding the pointer and
-  // keeps re-reading live state at the frame rate it always did.
+  // The dwell is only ever paid on the way *in*. Once a card is up, moves
+  // within the row go straight through, so the card keeps riding the pointer
+  // and keeps re-reading live state at the frame rate it always did.
+  //
+  // The warm window is the other half of that bargain. One dwell per row is the
+  // right price for a pointer arriving from somewhere else and the wrong one
+  // for a pointer already reading the list: comparing two workspaces, or
+  // walking the PANES list looking for a flag's note, would mean holding still
+  // over every row in turn. So for TIP_WARM_MS after a card comes down, the
+  // next row's card opens on contact.
+  //
+  //   pointer  ──past──▶│ row A │──── rest ────▶│ row B │──▶│ row C │──▶
+  //   card               ·       400ms           ███████    ███████
+  //                    (nothing) dwell           opens on   still warm:
+  //                                              the dwell  opens at once
+  //
+  // Only the pointer keeps the window warm. Every other way of leaving the list
+  // clears it (see dropTip), because a card that opens on contact when the hand
+  // comes back from a keyboard or another app is exactly the eagerness the
+  // dwell was added to fix.
   const TIP_DELAY_MS = 400;
-  let tipTimer = null; // the pending show, or null when nothing is waiting
-  let tipArmed = null; // {ev, show} — what that timer will run when it fires
+  const TIP_WARM_MS = 800;
+  let tipTimer = null;  // the pending show, or null when nothing is waiting
+  let tipArmed = null;  // {ev, show} — what that timer will run when it fires
+  let tipWarmUntil = 0; // Date.now() past which the next card pays the dwell again
 
-  // armTip defers show(ev) until the pointer has rested TIP_DELAY_MS.
+  // armTip defers show(ev) until the pointer has rested TIP_DELAY_MS — unless a
+  // card is already up, or one came down recently enough that the warm window
+  // is still open, in which cases it shows straight away.
   //
   // The event itself cannot be kept: currentTarget is nulled once dispatch
   // ends, so the deferred call gets a plain snapshot of the three fields the
@@ -55,25 +92,71 @@
   // that drifts a cell or two would otherwise never wait long enough anywhere.
   function armTip(e, show) {
     const ev = { clientX: e.clientX, clientY: e.clientY, currentTarget: e.currentTarget };
-    if (paneTipEl.classList.contains("show")) { show(ev); return; }
+    if (paneTipEl.classList.contains("show") || Date.now() < tipWarmUntil) { show(ev); return; }
     if (tipArmed && tipArmed.ev.currentTarget === ev.currentTarget) { tipArmed.ev = ev; return; }
     cancelTip(); // a different row: its wait starts over
     tipArmed = { ev, show };
     tipTimer = setTimeout(() => {
       const a = tipArmed;
       tipTimer = null; tipArmed = null;
+      // The row can have gone during the wait: these lists are rebuilt under a
+      // stationary pointer on every rollup, and a removed node dispatches no
+      // mouseleave to cancel with. Building from it would place a card
+      // describing a row that is no longer on screen and strip title
+      // attributes off marks nobody can reach. The replacement row arms its own
+      // wait from the mouseenter it gets on arrival, so nothing is lost.
+      if (a.ev.currentTarget && !a.ev.currentTarget.isConnected) return;
       a.show(a.ev);
     }, TIP_DELAY_MS);
   }
 
   // cancelTip drops a wait that never earned its card. Called from hideTip, so
-  // every existing teardown path (mouseleave, mousedown, a row that stopped
-  // qualifying) also disarms a pending one — a card must never open after the
-  // pointer has already left.
+  // every teardown path — mouseleave, mousedown, a row that stopped qualifying,
+  // and everything routed through dropTip below — also disarms a pending one:
+  // a card must never open after the pointer, or the hand, has already left.
   function cancelTip() {
     if (tipTimer) clearTimeout(tipTimer);
     tipTimer = null; tipArmed = null;
   }
+
+  // ---- Teardown that is not the pointer ----
+  //
+  // Every way the card came down used to be a pointer event on the row itself:
+  // mouseleave, mousedown, a row that stopped qualifying. That covers the hand
+  // moving on and nothing else, so any way of leaving the sidebar that does not
+  // move the pointer left the card standing — and, being fixed to the viewport
+  // above everything else, standing over whatever came next:
+  //
+  //   • the window going to the background (⌘-tab, another app taking the
+  //     front, the mac app losing key). No mouseleave is dispatched for a
+  //     pointer that never moved, so the card was still there on the way back,
+  //     describing a row whose flag or agent state had moved on without it.
+  //   • the tab being hidden, which is the same thing by another route.
+  //   • the hand going back to the keyboard. In catway that means typing into a
+  //     pane with the pointer parked on the sidebar — the card then sits over
+  //     the list the keys are moving through, which is the failure cats-todo's
+  //     card already answers by clearing on any keystroke.
+  //   • a context menu or a dialog opening from a key, or from a press on a row
+  //     that has no mousedown teardown of its own.
+  //
+  // The context menu has closed itself on window blur since it was written
+  // (28-ctxmenu.js); the card is the same kind of transient floating surface
+  // and now keeps the same promise. All of these go through dropTip rather than
+  // hideTip: they are the hand leaving, not the pointer travelling, so the warm
+  // window closes with the card.
+  window.addEventListener("blur", dropTip);
+  document.addEventListener("visibilitychange", () => { if (document.hidden) dropTip(); });
+  // Capture phase, so the card is gone before the key reaches 20-keys.js — that
+  // handler preventDefaults and returns early on a good many chords, and which
+  // branch a key takes is no business of the card's.
+  window.addEventListener("keydown", dropTip, true);
+  // A null relatedTarget means the pointer left the document itself rather than
+  // crossing into another element — the one departure a row cannot see for
+  // itself, since it gets no mouseleave when the pointer exits the window over
+  // the row's own edge. hideTip, not dropTip: the pointer is still what is
+  // doing the leaving, and a hand that slips off the window edge and comes
+  // straight back is mid-read.
+  document.addEventListener("mouseout", (e) => { if (!e.relatedTarget) hideTip(); });
 
   // ---- Native tooltips vs. the hover card ----
   //

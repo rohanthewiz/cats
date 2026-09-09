@@ -21,6 +21,13 @@
   // ambiguous.
   function openCtx(x, y, items) {
     closeCtx();
+    // The hover card is the other floating surface over this page, and a menu
+    // opens exactly where the pointer already is — so an open menu and a card
+    // are two boxes stacked on the same cell, one of them answering a question
+    // the press has already moved past. Menus reached by keyboard, and
+    // right-clicks on rows with no press teardown of their own, are the ways in
+    // that no pointer event would have cleared.
+    dropTip();
     ctxEl = buildCtx(x, y, items);
     // Only the root menu dims what is under it; buildCtx recurses for submenus
     // and must not, or opening one would re-dim an already-dimmed dialog.

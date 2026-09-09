@@ -35,6 +35,11 @@
   // appends its .modal. A mousedown on the backdrop dismisses.
   function openOverlay(build) {
     closeModal(); closeCtx();
+    // And the hover card, for the reason openCtx drops it: a dialog opened from
+    // a key with the pointer parked on a sidebar row would come up underneath a
+    // card that nothing was going to take down — the row is covered, so it
+    // never sees another pointer event.
+    dropTip();
     const ov = document.createElement("div");
     ov.id = "overlay";
     ov.addEventListener("mousedown", (e) => { if (e.target === ov) closeModal(); });
