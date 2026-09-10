@@ -84,18 +84,21 @@
      rather than shrinkable: a generated worktree slug can run to 60 characters,
      and past ~24 it stops being an identifier you read and starts eating the
      row.
-       Bold on top of the hue, at the same 600 the row gives its other emphasised
-     runs ("exited", the mode badge): colour alone separates the branch from its
-     neighbours, but weight is what makes it the field the eye lands on first
+       Bold on top of the hue, a step above the 600 the row gives its other
+     emphasised runs ("exited", the mode badge): colour alone separates it from
+     its neighbours, but weight is what makes it the field the eye lands on first
      when it sweeps a wall of near-identical headers. It survives .pane.dead's
      font-weight:400 for the same reason the hue does — this rule follows it and
      wins the specificity tie — so a dead pane still says which branch died on.
   */
-  .pane .chrome .info .branch { color:var(--branch); font-weight:600;
+  .pane .chrome .info .branch { color:var(--branch); font-weight:700;
     max-width:24ch; overflow:hidden; text-overflow:ellipsis; }
   /* A detached HEAD ("@a1b2c3d") is drawn as the warning it is: a commit made
-     there belongs to no branch, and the header is the only place that says so. */
-  .pane .chrome .info .branch.detached { color:var(--warn); }
+     there belongs to no branch, and the header is the only place that says so.
+     Its red-leaning amber has to stay separable from the branch orange sitting
+     in the same slot on the pane one row over, which is why it is its own token
+     and not --warn. */
+  .pane .chrome .info .branch.detached { color:var(--branch-detached); }
   /* The host badge: which machine this pane's terminal is actually running on.
      Drawn only while the session spans more than one cathost (renderChrome asks
      the roster first), because with one the answer is the same for every pane in

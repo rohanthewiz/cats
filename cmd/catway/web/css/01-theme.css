@@ -13,11 +13,19 @@
        greenish brown so they read as group dividers without competing with the
        green section titles. Themes that don't set it get plain --muted. */
     --ws-heading:#a09a62;
-    /* The git branch in a pane header. Same warm tan as the workspace headers
-       (and derived from it for themes that author neither): it has to read as a
-       distinct field beside the green handle and the yellow agent without
-       adding a fourth hue to a 19px strip. */
-    --branch:#a09a62;
+    /* The git branch in a pane header. A warm orange: the branch is the field a
+       glance hunts for on a wall of near-identical headers, so it takes the one
+       hue on the strip that nothing else claims — clear of the green handle, the
+       yellow agent state and the tan workspace headings it used to share. Kept
+       on the light side of orange (rather than a saturated signal orange) so it
+       stays ~6:1 on the --chrome strip without reading as an error. */
+    --branch:#ea9a4e;
+    /* A detached HEAD, drawn as its own token rather than borrowing --warn: now
+       that the branch itself is orange, the old amber warning sat one step away
+       from it and the two read as the same field at a glance. Pulled toward red
+       — far enough that "no branch" is visibly not a branch name, short of the
+       --err red that the header reserves for a pane that actually died. */
+    --branch-detached:#e0714a;
     /* The todo reminder mark keeps the old warm yellow: it has to stay clear of
        the green agent-state dots so it reads as a reminder, not as a state. */
     --todo:#f0dfa0;
