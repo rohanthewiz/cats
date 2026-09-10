@@ -221,3 +221,32 @@
   // native menu items call back into Go, which Evals this. delta of 0 resets.
   window.catsAdjustFont = (delta) => setFontSize(delta ? FONT_PX + delta : FONT_DEFAULT);
 
+
+  // ---- Startup reporting to the native launcher ----
+  //
+  // The Mac app shows a startup window listing what it is doing while it brings
+  // the daemons up (cmd/catapp/bootlog.go), because everything between a
+  // double-click and a window used to be invisible. The LAST steps of that
+  // launch happen in here, not out there: the socket opening, the server's
+  // welcome, and the first layout — the moment there is actually a workspace on
+  // screen. Without these the launcher would have to guess that a page which
+  // finished loading is a page that works, and a catway that serves HTML but
+  // cannot reach cathost would look like a successful start.
+  //
+  // window.catsBoot is injected by the native shell only (window_darwin.m), so
+  // in a browser every call here is a no-op: the guard is the whole
+  // compatibility story, and nothing else in the page depends on it.
+  let bootReported = false;
+  function bootPhase(phase, detail) {
+    if (!window.catsBoot) return;
+    try { window.catsBoot(phase, detail || ""); } catch (e) { /* best-effort */ }
+  }
+
+  // bootReady is the phase that ends the launch and closes the startup window.
+  // Only the first layout counts — every one after it is an ordinary update,
+  // and a reconnect hours later is not a startup.
+  function bootReady() {
+    if (bootReported) return;
+    bootReported = true;
+    bootPhase("ready");
+  }

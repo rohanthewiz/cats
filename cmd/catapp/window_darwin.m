@@ -29,6 +29,9 @@
 //     window.catsClipRead() is still a promise.
 //   * catsApp — the connect form's three fire-and-forget callbacks, in remote
 //     mode.
+//   * catsBoot — the page's own startup phases, which the startup window shows
+//     as the last steps of the launch (splash_darwin.go). The page calls it
+//     only if it is there, so a browser is unaffected.
 //
 // window.open from the page (the sidebar's "open in new window") is intercepted
 // in WKUIDelegate and becomes a native window, which is how the app gets the
@@ -114,7 +117,8 @@ static NSString *const kBridgeJS =
     @"window.catsClipRead  = ()  => window.webkit.messageHandlers.catsClip.postMessage({op:'read'});\n"
     @"window.catsConnect = (u,l) => window.webkit.messageHandlers.catsApp.postMessage({op:'connect',url:String(u),label:String(l||'')});\n"
     @"window.catsForget  = (u)   => window.webkit.messageHandlers.catsApp.postMessage({op:'forget',url:String(u)});\n"
-    @"window.catsCancel  = ()    => window.webkit.messageHandlers.catsApp.postMessage({op:'cancel'});\n";
+    @"window.catsCancel  = ()    => window.webkit.messageHandlers.catsApp.postMessage({op:'cancel'});\n"
+    @"window.catsBoot = (p,d) => window.webkit.messageHandlers.catsBoot.postMessage({phase:String(p),detail:String(d||'')});\n";
 
 static WKWebViewConfiguration *catsConfig(CatsWindowController *owner) {
     WKWebViewConfiguration *cfg = [[WKWebViewConfiguration alloc] init];
@@ -130,6 +134,7 @@ static WKWebViewConfiguration *catsConfig(CatsWindowController *owner) {
                              contentWorld:[WKContentWorld pageWorld]
                                      name:@"catsClip"];
     [ucc addScriptMessageHandler:owner name:@"catsApp"];
+    [ucc addScriptMessageHandler:owner name:@"catsBoot"];
     [ucc addUserScript:[[WKUserScript alloc] initWithSource:kBridgeJS
                                               injectionTime:WKUserScriptInjectionTimeAtDocumentStart
                                            forMainFrameOnly:NO]];
@@ -216,16 +221,49 @@ static WKWebViewConfiguration *catsConfig(CatsWindowController *owner) {
     replyHandler(nil, @"unknown clipboard op");
 }
 
-// catsApp: the connect form's callbacks. Fire-and-forget — the form navigates
-// as a result of what Go does, not of a return value.
+// The two fire-and-forget bridges share one handler, told apart by name:
+// catsApp is the connect form's callbacks (the form navigates as a result of
+// what Go does, not of a return value), and catsBoot is the page reporting how
+// far its own startup has got.
 - (void)userContentController:(WKUserContentController *)ucc
       didReceiveScriptMessage:(WKScriptMessage *)message {
     NSDictionary *m = [message.body isKindOfClass:[NSDictionary class]] ? message.body : nil;
+    if ([message.name isEqualToString:@"catsBoot"]) {
+        NSString *phase = m[@"phase"] ?: @"";
+        NSString *detail = m[@"detail"] ?: @"";
+        catappBootPhase((char *)[phase UTF8String], (char *)[detail UTF8String]);
+        return;
+    }
     NSString *op = m[@"op"] ?: @"";
     NSString *url = m[@"url"] ?: @"";
     NSString *label = m[@"label"] ?: @"";
     catappConnectForm((char *)[op UTF8String], (char *)[url UTF8String],
                       (char *)[label UTF8String]);
+}
+
+// --- navigation, as a startup signal --------------------------------------------
+//
+// The launcher's own work ends when it hands a URL to a web view; whether that
+// URL turns into a page is the next thing that can go wrong, and it is
+// invisible from Go. These two report it to the startup log — the first page to
+// finish loading closes the "opening the window" step, and a page that cannot
+// load at all fails it. Both are ignored once startup is over
+// (splash_darwin.go), so ordinary navigation later costs nothing.
+
+- (void)webView:(WKWebView *)webView didFinishNavigation:(WKNavigation *)navigation {
+    catappWindowDidLoad();
+}
+
+- (void)webView:(WKWebView *)webView
+    didFailProvisionalNavigation:(WKNavigation *)navigation
+                       withError:(NSError *)error {
+    catappWindowLoadFailed((char *)[[error localizedDescription] UTF8String]);
+}
+
+- (void)webView:(WKWebView *)webView
+    didFailNavigation:(WKNavigation *)navigation
+            withError:(NSError *)error {
+    catappWindowLoadFailed((char *)[[error localizedDescription] UTF8String]);
 }
 
 // --- lifetime -------------------------------------------------------------------
@@ -237,6 +275,7 @@ static WKWebViewConfiguration *catsConfig(CatsWindowController *owner) {
     WKUserContentController *ucc = self.web.configuration.userContentController;
     [ucc removeScriptMessageHandlerForName:@"catsClip" contentWorld:[WKContentWorld pageWorld]];
     [ucc removeScriptMessageHandlerForName:@"catsApp"];
+    [ucc removeScriptMessageHandlerForName:@"catsBoot"];
     self.web.UIDelegate = nil;
     self.web.navigationDelegate = nil;
     [gWindows removeObject:self];

@@ -61,17 +61,41 @@ const (
 // reaches it — window close (deferred), Cmd-Q (the native menu, via the
 // cgo-exported catappCleanup), or a SIGINT/SIGTERM. sync.Once is the single
 // guard so daemons are reaped once and only once.
+//
+// The mutex is not redundant with the Once: since the backend is started on a
+// goroutine (see runLocal), the write of cleanupFn now races the main thread's
+// read of it — a Cmd-Q while the daemons are still coming up is exactly that
+// race. cleanupDone closes the other half of the same problem: a quit that
+// arrives BEFORE the backend registered would have found nothing to reap and
+// left the daemons behind, so a registration after the fact reaps immediately.
+// (A quit in the narrower window between spawning a daemon and registering can
+// still orphan it — the signal path calls os.Exit straight after — but that is
+// a few milliseconds against the several seconds startup can take.)
 var (
 	cleanupOnce sync.Once
+	cleanupMu   sync.Mutex
 	cleanupFn   func()
+	cleanupDone bool
 )
 
-func registerCleanup(fn func()) { cleanupFn = fn }
+func registerCleanup(fn func()) {
+	cleanupMu.Lock()
+	done := cleanupDone
+	cleanupFn = fn
+	cleanupMu.Unlock()
+	if done && fn != nil {
+		fn()
+	}
+}
 
 func runCleanup() {
 	cleanupOnce.Do(func() {
-		if cleanupFn != nil {
-			cleanupFn()
+		cleanupMu.Lock()
+		fn := cleanupFn
+		cleanupDone = true
+		cleanupMu.Unlock()
+		if fn != nil {
+			fn()
 		}
 	})
 }
@@ -84,7 +108,13 @@ func main() {
 	log.SetFlags(0)
 	log.SetPrefix("catapp: ")
 
+	// The boot log starts recording here, before there is any window to show it
+	// in; showSplash flushes the backlog into the startup window as soon as one
+	// exists. See bootlog.go for why any of this is worth doing.
+	id := boot.begin("reading app settings")
 	cfg := loadAppConfig()
+	boot.okDetail(id, "mode: "+cfg.Mode)
+
 	switch cfg.Mode {
 	case "remote":
 		runRemote(cfg)
@@ -97,27 +127,61 @@ func main() {
 // loopback. The backend is reaped when the LAST window closes (the app
 // delegate's applicationShouldTerminateAfterLastWindowClosed), on a Cmd-Q, or
 // on a termination signal — all routed through runCleanup.
+//
+// The order here is the reverse of the obvious one — shell first, daemons
+// after — and that is the point. Starting the backend on the main thread, as
+// this used to, puts the whole of startup before AppKit draws anything: a
+// login-shell probe, two process spawns and a readiness wait, which is a
+// second on a good day and fifteen on a bad one, with a bouncing Dock icon and
+// no way to tell a slow launch from a wedged one. Nothing could report progress
+// from there either, because the thread that would draw it is the thread that
+// is blocked.
+//
+// So: create NSApp, open the startup window, enter the run loop, and let the
+// supervision run on a goroutine that reports into the window as it goes.
 func runLocal(cfg appConfig) {
+	m := startWindowShell("", windowTitle)
+	installSignalHandler()
+	defer runCleanup()
+	showSplash()
+
+	go bootLocal(m, cfg)
+
+	m.run()
+}
+
+// bootLocal is everything between the startup window appearing and a workspace
+// being on screen. It runs off the main thread (see runLocal), reports each
+// step into the boot log, and hops back to the main thread for the AppKit work
+// at the end.
+//
+// A failure returns without opening anything: the startup window stays up
+// showing which step failed, what it said, and every line the daemons wrote on
+// the way there, which is a good deal more use than the one-line error sheet it
+// replaces.
+func bootLocal(m *winManager, cfg appConfig) {
 	// Before any child exists: a GUI launch hands us launchd's bare PATH, and
 	// everything downstream (daemons → panes → plugin build steps) inherits it.
 	hydratePATH()
 
+	// startBackend registers its own teardown as soon as it has something to
+	// tear down — earlier than here, because a quit can arrive while it is
+	// still spawning (see the note there).
 	b, err := startBackend()
 	if err != nil {
-		showError("Could not start cats", err.Error())
+		bootFailed("Could not start cats", err)
 		return
 	}
-	registerCleanup(b.stop)
-	defer runCleanup()
-	installSignalHandler()
 
 	// The window set from the last run, or one window on a first run. A saved
 	// window whose workspace has since been closed still opens: the server
 	// resolves an unknown ?ws= to the primary view rather than erroring, so a
 	// window layout survives the projects it was made for.
-	m := startWindowShell("http://"+b.addr, windowTitle)
-	m.restore(cfg.Windows)
-	m.run()
+	onMainThread(func() {
+		m.setBase("http://" + b.addr)
+		startUIWatch(len(cfg.Windows))
+		m.restore(cfg.Windows)
+	})
 }
 
 // runRemote is the thin-client path: no local daemons, just windows pointed at
@@ -142,7 +206,15 @@ func runRemote(cfg appConfig) {
 
 	m := startWindowShell(cfg.Remote.URL, windowTitle)
 	if cfg.Remote.URL != "" {
+		// The thin client has no daemons to wait for, but it has the half of
+		// startup that fails most often: reaching another machine. The same
+		// startup window carries it — the steps are the page load and the
+		// session the page brings back, and a host that is asleep or off the
+		// VPN shows up as one of them not finishing.
+		showSplash()
+		boot.note("mode", "thin client → "+cfg.Remote.URL)
 		m.setTitle(remoteTitle(cfg.Remote.URL))
+		startUIWatch(len(cfg.Windows))
 		m.restore(cfg.Windows)
 		rt.refreshMenu()
 	} else {
@@ -210,6 +282,10 @@ func (r *remoteRuntime) show(rawURL string) {
 // only when there is a session to go back to, so a first run cannot end up on a
 // page with a button that does nothing.
 func (r *remoteRuntime) showConnect() {
+	// Reaching the picker means startup is over, however it got here: there is
+	// a form to fill in, and a progress log in front of it would only be in the
+	// way.
+	finishBoot()
 	onMainThread(func() {
 		r.refreshMenu()
 		if windows != nil {

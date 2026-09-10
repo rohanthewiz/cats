@@ -2,6 +2,7 @@
   function onMessage(msg) {
     switch (msg.t) {
       case "welcome":
+        bootPhase("welcome", msg.error || "");
         if (msg.error) setStatus("rejected: " + msg.error, true);
         else {
           setStatus("connected");
@@ -15,7 +16,9 @@
           refreshRunbooks(false);
         }
         break;
-      case "layout": applyLayout(msg); break;
+      // The first layout is the end of startup as far as the native launcher is
+      // concerned: it is the message that puts a workspace on screen.
+      case "layout": applyLayout(msg); bootReady(); break;
       // The census: how many clients, and what each of them is looking at. Only
       // the sidebar reads it, so a re-render of the workspace list is the whole
       // reaction.

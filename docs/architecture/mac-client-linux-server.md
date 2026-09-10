@@ -90,7 +90,17 @@ sequenceDiagram
 ```
 
 On every later launch `app.json` already holds the URL, so the saved windows
-open straight on it. WKWebView persists the `hsess` cookie in a data store
+open straight on it — behind the same startup window Mode 1 uses
+(`cmd/catapp/bootlog.go`, and the [Mode 1 startup
+sequence](standalone-mac.md#startup-sequence)). There are no daemons to wait for
+here, but there is the half of startup that fails most often: reaching another
+machine. The steps are the page load and the session the page brings back, so a
+host that is asleep, off the VPN or behind an expired cookie shows up as one of
+them not finishing rather than as a window that never appears. A login page
+never reports a session, so the window closes 3 s after it loads and leaves the
+form in front. Reaching the connect picker at any point ends startup and takes
+the window away — there is a form to fill in, and a progress log over it would
+only be in the way. WKWebView persists the `hsess` cookie in a data store
 shared by every window, so re-launch is one click — and one login serves all of
 them — until the cookie's TTL expires, or until `catway` restarts, which
 invalidates outstanding sessions because the cookie signing key is per-process.

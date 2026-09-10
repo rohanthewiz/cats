@@ -105,6 +105,16 @@ func (m *winManager) setTitle(title string) {
 	C.catsSetWindowTitle(cTitle)
 }
 
+// setBase points the shell at the UI's root URL once it is known. Local mode
+// creates the shell BEFORE the catway has a port — the startup window has to
+// exist while the daemons come up, and nothing can be shown until the run loop
+// is going — so the base arrives here rather than at construction.
+func (m *winManager) setBase(base string) {
+	m.mu.Lock()
+	m.base = strings.TrimRight(base, "/")
+	m.mu.Unlock()
+}
+
 // windowURL is the address of a window showing a workspace. An empty id opens
 // on the primary view — whatever window the user touched last, which is what a
 // plain ⌘N means and what the server resolves an omitted Init.Workspace to.
@@ -125,10 +135,24 @@ func (m *winManager) open(wsID string, f savedWindow) {
 }
 
 func (m *winManager) openURL(u string, f savedWindow) {
+	// Local mode creates the shell before the catway has an address (see
+	// setBase), so for a moment there is no URL to open a window on. A ⌘N in
+	// that moment is dropped rather than opening a window on a relative URL:
+	// that window would fail to load, and a failed load during startup is
+	// reported as a failed startup.
+	if !windowAddressReady(u) {
+		log.Printf("no UI address yet; ignoring a request to open a window")
+		return
+	}
 	cURL := C.CString(u)
 	defer C.free(unsafe.Pointer(cURL))
 	C.catsOpenWindow(cURL, C.double(f.X), C.double(f.Y), C.double(f.W), C.double(f.H))
 }
+
+// windowAddressReady reports whether a window can be opened on this address.
+// Anything without a scheme is the placeholder base — the shell exists but the
+// catway does not yet have a port.
+func windowAddressReady(u string) bool { return strings.Contains(u, "://") }
 
 // restore opens the window set from the last run, or one window when there is
 // nothing to restore. A saved window whose workspace no longer exists is NOT an

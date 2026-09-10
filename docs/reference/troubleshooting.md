@@ -83,12 +83,41 @@ For a launchd job, set `WorkingDirectory` explicitly.
 
 The bundles are unsigned. One-time **right-click → Open** to clear Gatekeeper.
 
-## The app window shows an error page
+## The app is slow to open, or never opens
 
-That is `showError` — a double-clicked `.app` has no console, so a startup failure
-is surfaced in a small window. Common causes: the bundled `catway` or `cathost` is
-missing (an incomplete `make macapp`), or the catway did not become ready within
-10 s. The same text is logged, so `go run ./cmd/catapp` from a terminal shows more.
+Every launch shows a **startup window** first: the steps the launcher is taking,
+with the running one's clock ticking. A double-clicked `.app` has no console, so
+this is where a slow or wedged launch says what it is waiting on.
+
+```
+✓ reading app settings                        2ms   mode: local
+✓ reading PATH from the login shell          890ms
+✓ starting cathost                            11ms  pid 4211 on /var/folders/…
+✓ starting catway                              9ms  pid 4212
+⋯ waiting for the catway to accept connections 5.2s ← still going
+· catway: dialing cathost socket…
+```
+
+The last line with a number going up is where it is stuck. What each step means:
+
+| Step | Stuck there means |
+|------|-------------------|
+| reading PATH from the login shell | an rc file blocks; bounded at 5 s, then a warning and the launch continues |
+| locating the bundled daemons | `catway`/`cathost` are not next to the launcher — an incomplete `make macapp` |
+| reserving a loopback port | the whole 8422–8431 band is taken |
+| starting cathost / catway | the binary will not exec (quarantine, wrong architecture) |
+| waiting for the catway | it bound nothing; the tapped `catway:` lines below the step say why. Gives up at 10 s |
+| opening the window | the page will not load from the catway |
+| connecting to the session | the page is up but its WebSocket brings no session — usually a catway that cannot reach `cathost` |
+
+The window closes itself once a workspace is on screen, and stays up — showing
+which step failed — when it does not. Closing it by hand is always safe; closing
+it when it is the only window quits the app, which is the way out of a launch
+that is going nowhere.
+
+The same record is written to `~/Library/Application Support/cats/boot.log`
+after every launch, so a launch that was merely slow can be read afterwards.
+`go run ./cmd/catapp` from a terminal logs the same lines as they happen.
 
 ## Clipboard does not work
 

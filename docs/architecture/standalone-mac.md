@@ -65,7 +65,9 @@ to `$PATH` so `go run ./cmd/catapp` still works in development.
 ```mermaid
 sequenceDiagram
   participant U as user
-  participant APP as catapp
+  participant APP as catapp (main thread)
+  participant SP as startup window
+  participant BG as boot goroutine
   participant TH as cathost
   participant GW as catway
   participant WK as WKWebView
@@ -73,22 +75,46 @@ sequenceDiagram
   U->>APP: double-click Cats.app
   APP->>APP: runtime.LockOSThread()
   APP->>APP: loadAppConfig() -> mode "local"
-  APP->>APP: hydratePATH() from the login shell
-  APP->>APP: pickPort() on 127.0.0.1:0
-  APP->>APP: socketPath() for th / ctl / hooks under TMPDIR
-  APP->>TH: exec cathost -persistent -socket TMPDIR/cats-th-PID.sock
-  APP->>GW: exec catway --addr 127.0.0.1:PORT --auth none<br/>--socket ... --control-socket ... --hook-socket ...
+  APP->>APP: startWindowShell() — NSApp + app delegate
+  APP->>SP: showSplash() — the boot log, live
+  APP->>BG: go bootLocal()
+  APP->>APP: [NSApp run] — the loop, so the log can paint
+  BG->>BG: hydratePATH() from the login shell
+  BG->>BG: resolveBinary(), pickPort(), socketPath() for th / ctl / hooks
+  BG->>TH: exec cathost -persistent -socket TMPDIR/cats-th-PID.sock
+  BG->>GW: exec catway --addr 127.0.0.1:PORT --auth none<br/>--socket ... --control-socket ... --hook-socket ...
   loop backoff 50ms -> 500ms, 10s cap
-    APP->>GW: TCP dial 127.0.0.1:PORT
+    BG->>GW: TCP dial 127.0.0.1:PORT
   end
-  GW-->>APP: accepting
-  APP->>WK: webview.New, installMenu, bind clipboard
-  APP->>WK: Navigate("http://127.0.0.1:PORT")
+  GW-->>BG: accepting
+  BG->>APP: onMainThread: setBase + restore the window set
+  APP->>WK: NSWindow + WKWebView on http://127.0.0.1:PORT/?ws=...
   WK->>GW: GET / then WebSocket /ws
+  WK-->>SP: catsBoot("ready") — the first layout is on screen
+  SP->>SP: close
 ```
 
 A successful TCP dial is sufficient readiness: `catway` serves HTTP as soon as it
 binds and dials `cathost` lazily with its own retry loop.
+
+The order — **shell first, daemons after** — is what makes the startup window
+possible. Supervising on the main thread means the whole of startup happens
+before AppKit draws anything (a login-shell probe, two spawns, a readiness wait:
+a second on a good day and fifteen on a bad one), and nothing can report progress
+from there because the thread that would draw it is the thread that is blocked.
+So AppKit comes up first, the window opens, and the supervision reports into it
+from a goroutine.
+
+Every step above is recorded in the boot log (`cmd/catapp/bootlog.go`) as it
+starts and as it ends, and the daemons' own stdout/stderr is tapped into it as
+notes for as long as startup lasts. The window ticks the running step's clock, so
+a hang is the last line with a number going up rather than a Dock icon that never
+becomes a window. The last two steps come from outside this process: a
+`WKNavigationDelegate` says the page loaded, and the page's own `catsBoot` bridge
+reports its socket and its first layout — which is what actually closes the
+window. A page that does not report (an older `catway`, a login form) ends
+startup 3 s after it loads instead. The whole record is written to
+`~/Library/Application Support/cats/boot.log` at the end of every launch.
 
 ## Design decisions specific to this mode
 
@@ -249,9 +275,20 @@ simply skip signalling it.
 
 ## Failure surfacing
 
-A double-clicked `.app` has no console. If `startBackend()` fails, `catapp`
-opens a small fixed-size window with the reason (`showError`) — the only way the
-user learns why nothing appeared. It is also logged for a dev terminal.
+A double-clicked `.app` has no console, so a failed launch has to explain itself
+on screen. The startup window is already open by the time anything can fail, so
+that is where it lands: the failing step goes red with the error under it, and
+above it sit every step that succeeded and every line the daemons wrote on the
+way. Nothing else opens, and the window stays until it is closed — closing it
+when it is the only window quits the app, which is the way out of a launch that
+is going nowhere. It is all logged for a dev terminal too, and written to
+`boot.log`.
+
+`showError` — the old single-window error sheet — is kept for a failure with no
+AppKit behind it at all. It cannot be used once the shell is up: it builds a
+`webview_go` window, and `webview_go` makes itself `NSApp`'s delegate and calls
+`[NSApp run]`, which would re-enter a running loop and displace the delegate that
+owns teardown.
 
 ## Trade-offs
 

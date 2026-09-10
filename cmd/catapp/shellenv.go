@@ -28,6 +28,14 @@ import (
 // launched from the Finder/Dock. It is best-effort: any failure leaves the
 // inherited PATH in place, since a bare PATH still runs the bundled daemons
 // (they are resolved next to the executable, not via PATH).
+//
+// It is also the first thing in startup that can block for a noticeable time,
+// and occasionally forever: the probe runs the user's whole rc chain, and an
+// rc file that waits on something (a network mount, a prompt) waits with our
+// launch behind it. shellenv bounds that at 5s, and the step is recorded in the
+// boot log so the startup window can show those seconds passing instead of
+// leaving the app looking hung. Neither outcome stops the launch, so the
+// failures are warnings, not failures.
 func hydratePATH() {
 	// __CFBundleIdentifier is set by LaunchServices, so it marks a GUI launch —
 	// double-click, Dock, or `open -a`. A launch from a terminal (`go run
@@ -35,14 +43,20 @@ func hydratePATH() {
 	// inherited PATH is already the user's; re-deriving it would be wasted
 	// startup latency at best and a surprise override at worst.
 	if os.Getenv("__CFBundleIdentifier") == "" {
+		boot.note("path", "launched from a shell — keeping the inherited PATH")
 		return
 	}
+	step := boot.begin("reading PATH from the login shell")
 	shellPath := shellenv.LoginPATH()
 	if shellPath == "" {
 		log.Printf("could not read PATH from the login shell; using the inherited PATH")
+		boot.warn(step, "the login shell did not answer; using the inherited PATH")
 		return
 	}
 	if err := os.Setenv("PATH", shellenv.Merge(shellPath, os.Getenv("PATH"))); err != nil {
 		log.Printf("could not adopt login shell PATH: %v", err)
+		boot.warn(step, "could not adopt the login shell PATH: "+err.Error())
+		return
 	}
+	boot.ok(step)
 }

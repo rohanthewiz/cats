@@ -1,8 +1,13 @@
   // ---- Session ----
   function connect() {
     const proto = location.protocol === "https:" ? "wss" : "ws";
+    // Reported to the native launcher's startup window: a socket that never
+    // opens, or one that opens and closes in a loop, is the shape of a catway
+    // that is up but cannot serve a session. See bootPhase in 01-bootstrap.js.
+    bootPhase("ws-connecting", location.host);
     ws = new WebSocket(`${proto}://${location.host}/ws`);
     ws.onopen = () => {
+      bootPhase("ws-open");
       // A pane.list still in flight when the socket died never gets its callback,
       // which would leave the single-flight guard latched and freeze the Panes
       // section for the rest of the session. The reconnect's layout re-queries.
@@ -22,7 +27,11 @@
       if (!winFocused) sendMsg({ t: "focus", focused: false });
     };
     ws.onmessage = (ev) => onMessage(JSON.parse(ev.data));
-    ws.onclose = () => { setStatus("disconnected — retrying…", true); setTimeout(connect, 1500); };
+    ws.onclose = () => {
+      bootPhase("ws-closed");
+      setStatus("disconnected — retrying…", true);
+      setTimeout(connect, 1500);
+    };
     ws.onerror = () => ws.close();
   }
 

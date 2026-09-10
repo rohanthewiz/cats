@@ -4,6 +4,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -32,16 +33,27 @@ type backend struct {
 // only: there is no network exposure, so a login prompt would be pure friction.
 // cathost runs -persistent so panes survive a catway restart.
 func startBackend() (*backend, error) {
+	// Each stage is recorded in the boot log as it starts and as it ends, so a
+	// launch that stalls says where (bootlog.go). The details are the values
+	// worth having when the same launch misbehaves on someone else's machine:
+	// which binaries were picked up, which port, which pids.
+	find := boot.begin("locating the bundled daemons")
 	thPath, err := resolveBinary("cathost")
 	if err != nil {
+		boot.fail(find, err)
 		return nil, err
 	}
 	gwPath, err := resolveBinary("catway")
 	if err != nil {
+		boot.fail(find, err)
 		return nil, err
 	}
+	boot.okDetail(find, thPath+"\n"+gwPath)
+
+	portStep := boot.begin("reserving a loopback port")
 	port, err := pickPort()
 	if err != nil {
+		boot.fail(portStep, err)
 		return nil, err
 	}
 	// All three daemon sockets live under $TMPDIR (per-user, 0700 on macOS) keyed
@@ -57,38 +69,76 @@ func startBackend() (*backend, error) {
 		socket:  thSock,
 		sockets: []string{thSock, ctlSock, hookSock},
 	}
+	boot.okDetail(portStep, b.addr)
 
+	// Register the teardown BEFORE anything is spawned. Startup now runs on a
+	// goroutine while the app is alive and quittable — closing the startup
+	// window is a quit, and so is ⌘Q — so a launch can be ended between the
+	// first exec and the last. b.stop is safe on a partially-started backend,
+	// which is exactly what a quit at that moment leaves behind; registering
+	// only once everything is up would orphan it.
+	registerCleanup(b.stop)
+
+	thStep := boot.begin("starting cathost")
 	// Setpgid detaches each daemon into its own process group so a stray signal
 	// to the launcher's group (e.g. Ctrl-C in a dev terminal) doesn't pre-empt
 	// our orderly teardown; we signal each process explicitly on quit.
 	b.cathost = command(thPath, "-persistent", "-socket", thSock)
 	if err := b.cathost.Start(); err != nil {
-		return nil, fmt.Errorf("start cathost: %w", err)
+		err = fmt.Errorf("start cathost: %w", err)
+		boot.fail(thStep, err)
+		return nil, err
 	}
+	boot.okDetail(thStep, fmt.Sprintf("pid %d on %s", b.cathost.Process.Pid, thSock))
 
+	gwStep := boot.begin("starting catway")
 	b.catway = command(gwPath,
 		"--addr", b.addr, "--auth", "none",
 		"--socket", thSock, "--control-socket", ctlSock, "--hook-socket", hookSock)
 	if err := b.catway.Start(); err != nil {
 		b.stop()
-		return nil, fmt.Errorf("start catway: %w", err)
+		err = fmt.Errorf("start catway: %w", err)
+		boot.fail(gwStep, err)
+		return nil, err
 	}
+	boot.okDetail(gwStep, fmt.Sprintf("pid %d", b.catway.Process.Pid))
 
 	// The catway serves HTTP as soon as it binds — it dials cathost lazily with
 	// its own retry (cmd/catway/daemon.go) — so a successful TCP dial is a
 	// sufficient readiness signal to navigate the webview.
+	//
+	// This is the step that most often takes real time, and the one whose
+	// clock ticking in the startup window tells the user the launch has not
+	// died. Whatever the catway writes while we wait is tapped into the log
+	// beside it (see command), so a retry loop against a stale cathost socket
+	// is readable rather than merely slow.
+	readyStep := boot.begin("waiting for the catway to accept connections")
 	if err := waitReady(b.addr, 10*time.Second); err != nil {
 		b.stop()
+		boot.fail(readyStep, err)
 		return nil, err
 	}
+	boot.okDetail(readyStep, "http://"+b.addr)
 	return b, nil
 }
 
-// command builds an *exec.Cmd for a daemon: inherit our stdio (so daemon logs
-// surface in a dev terminal) and detach into its own process group.
+// command builds an *exec.Cmd for a daemon: pass its output through to our own
+// stdio (so daemon logs still surface in a dev terminal) and detach it into its
+// own process group.
+//
+// The output is also tapped into the boot log, which is what turns "waiting for
+// the catway — 9.4s" into a reason: the catway says what it is retrying, and
+// the line lands under the step that is waiting on it. The tap stops recording
+// the moment startup finishes (bootTap.Write), so the rest of the session's
+// logging costs a boolean.
 func command(path string, args ...string) *exec.Cmd {
 	c := exec.Command(path, args...)
-	c.Stdout, c.Stderr = os.Stdout, os.Stderr
+	name := filepath.Base(path)
+	// One tap per stream rather than one shared: they are written by different
+	// goroutines, and a shared partial-line buffer would interleave them into
+	// nonsense.
+	c.Stdout = io.MultiWriter(os.Stdout, newBootTap(name))
+	c.Stderr = io.MultiWriter(os.Stderr, newBootTap(name))
 	c.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	c.Dir = daemonDir()
 	return c

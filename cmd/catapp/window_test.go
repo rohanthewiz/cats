@@ -111,3 +111,25 @@ func TestAppConfigWithoutWindows(t *testing.T) {
 		t.Errorf("an empty window list should not be written: %s", data)
 	}
 }
+
+func TestWindowAddressIsNotReadyBeforeTheCatwayHasAPort(t *testing.T) {
+	// Local mode now builds the shell BEFORE the backend, so the startup log
+	// has somewhere to draw itself. For that moment the base is empty, and a
+	// ⌘N would otherwise open a window on "/" — a window that cannot load, and
+	// whose failed load is read as a failed startup.
+	m := &winManager{}
+	if windowAddressReady(m.windowURL("")) {
+		t.Errorf("%q was treated as an address to open a window on", m.windowURL(""))
+	}
+	if windowAddressReady(m.windowURL("w2")) {
+		t.Errorf("%q was treated as an address to open a window on", m.windowURL("w2"))
+	}
+
+	m.setBase("http://127.0.0.1:8422")
+	if got := m.windowURL("w2"); !windowAddressReady(got) {
+		t.Errorf("%q is not usable once the address is known", got)
+	}
+	if got, want := m.windowURL(""), "http://127.0.0.1:8422/"; got != want {
+		t.Errorf("after setBase, windowURL(\"\") = %q, want %q", got, want)
+	}
+}
