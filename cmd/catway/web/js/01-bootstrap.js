@@ -95,6 +95,13 @@
   let winFocused = document.hasFocus(); // window in OS foreground (see onWinFocus)
   let copyModePane = null;       // the pane in keyboard copy-mode, or null
   let agentItems = [];           // last agents rollup (drives sidebar + workspace summaries)
+  // Last ws_git rollup, keyed by workspace id: the colour of each workspace
+  // row's dot (see renderWorkspaces). A Map rather than the raw array because
+  // every read is "what about THIS workspace", once per row per render, and the
+  // rollup only lists the workspaces that had an answer — a missing key is the
+  // uncoloured state, which is also what an old server that never sends the
+  // message leaves every row in.
+  let wsGit = new Map();
   // Last pane.list snapshot: every pane in the session, across all workspaces and
   // tabs (the Panes sidebar section, see renderPaneList). The layout message can't
   // serve it — it carries the active tab's panes alone — so this is a query result

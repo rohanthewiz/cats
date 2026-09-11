@@ -307,6 +307,22 @@ type orch struct {
 	// sent the current numbers rather than an empty section for up to two
 	// minutes.
 	usage *browserproto.Usage
+	// wsGit is each workspace's last-resolved git sync state, keyed by public
+	// workspace id (gitsync.go). Only workspaces with something to say are in
+	// it: a directory that is not a repository, has no remote, or lives on
+	// another machine is simply absent, which is the same thing the client
+	// draws for "not polled yet".
+	//
+	// Held on the orch rather than on the workspace model for the reason the
+	// usage reading is: it is a cache of somebody else's state, not part of the
+	// session, and it must not be persisted into a snapshot that a restart
+	// would then restore as if it were still true.
+	wsGit map[string]browserproto.WorkspaceGitInfo
+	// wsGitBusy is set while a sweep is in flight, so a slow network round trip
+	// cannot stack sweeps on top of each other — with an unreachable remote the
+	// poll takes up to gitsync's remote timeout per workspace, which is longer
+	// than the interval for a session holding several of them.
+	wsGitBusy bool
 	// hostStats is each remote cathost's last reported reading of the machine
 	// it runs on, keyed by host id (hoststats.go). Kept beside the poll's
 	// reading rather than inside it because the two arrive on completely
@@ -645,6 +661,7 @@ func newOrchHostsWith(hosts []config.Host, cwd string, sess *app.Session) (*orch
 		cellH:          16,
 		cwd:            cwd,
 		wsArea:         make(map[string]layout.Rect),
+		wsGit:          make(map[string]browserproto.WorkspaceGitInfo),
 		visible:        make(map[uint32]bool),
 		pendingReqs:    make(map[reqKey][]*pending),
 		waiters:        make(map[uint32][]*waiter),
@@ -2802,6 +2819,15 @@ func (o *orch) registerConn(c *client, init *browserproto.Init) {
 		o.hostOf(rt).send(orchestration.NewRequestResync(pid))
 	}
 	o.send(c, o.agentsMsg())
+	// The git-sync rollup, when a sweep has already produced one. Gated on
+	// non-empty for the reason the history is: a session with no local git
+	// checkout in it never has anything to say here, and sending an empty list
+	// would only make every window re-render its workspace rows on connect.
+	// A window that arrives before the first sweep gets the rollup from the
+	// broadcast that sweep ends with.
+	if m := o.workspaceGitMsg(); len(m.Workspaces) > 0 {
+		o.send(c, m)
+	}
 	// The roster before the first frame settles: the host badges the layout
 	// already carries are only drawn once the client knows how many hosts there
 	// are, so sending it later would flash them in.

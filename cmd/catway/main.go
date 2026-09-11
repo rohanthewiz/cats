@@ -323,6 +323,7 @@ func main() {
 	go o.runExitedReaper() // periodic close of panes whose child exited long ago (a no-op when off)
 	go o.runAgentModels()  // periodic re-read of each agent pane's current model
 	go o.runPaneBranches() // periodic re-read of each pane's checked-out git branch
+	go o.runWorkspaceGit() // periodic re-ask of each workspace's remote: ahead, behind or level
 	go o.runUsage()        // periodic re-read of the account's rate-limit windows
 
 	// TLS: operator PEMs, or an auto-generated self-signed pair. Naming a cert,

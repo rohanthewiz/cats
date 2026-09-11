@@ -258,6 +258,61 @@ func NewAgents(items []AgentItem, plugins []PluginPane) Agents {
 	return Agents{T: MsgAgents, Items: items, Plugins: plugins}
 }
 
+// WorkspaceGit is the sidebar's git-sync rollup: for every workspace whose
+// start directory is a git checkout on THIS machine, whether its trunk branch
+// is level with the remote, ahead of it, or behind it.
+//
+// Its own message rather than fields on WorkspaceInfo, for the reason
+// PaneBranch is its own message rather than fields on PaneCwd: the two change
+// on completely different clocks. The layout goes out on every structural or
+// focus change — a split, a tab switch, a window resize — while this answer
+// moves on a two-minute network poll, and folding it into the layout would mean
+// either re-sending the whole viewport whenever a colleague pushes, or
+// re-resolving the network state on every keystroke that splits a pane.
+//
+// Sent whole rather than per workspace: it is a handful of rows, the sweep
+// produces them together, and a client that reconnects mid-sweep gets a
+// complete picture instead of whichever rows happened to change since.
+//
+// Added within protocol v1 — an old client ignores the type and draws the
+// uncoloured dot it has always drawn.
+type WorkspaceGit struct {
+	T          Type               `json:"t"`
+	Workspaces []WorkspaceGitInfo `json:"workspaces"`
+}
+
+// Sync values for WorkspaceGitInfo.Sync. A workspace with nothing to say — not
+// a repository, no main or master, no remote, unreachable, or living on another
+// host — is simply absent from the list rather than carried with an empty
+// state: "we do not know" and "we have not asked yet" are the same thing to the
+// client, and both draw the plain dot.
+const (
+	GitSynced = "synced" // level with the remote
+	GitAhead  = "ahead"  // commits here that the remote lacks
+	GitBehind = "behind" // commits on the remote that we lack (diverged included)
+)
+
+// WorkspaceGitInfo is one workspace's answer.
+type WorkspaceGitInfo struct {
+	Workspace string `json:"ws"`   // stable public workspace id, e.g. "w1"
+	Sync      string `json:"sync"` // one of GitSynced / GitAhead / GitBehind
+	// Branch and Remote name the pair that was actually compared. The tooltip
+	// says them out loud because neither is safe to assume: a tree that still
+	// uses master, or one whose main pushes to a fork rather than to origin,
+	// would otherwise report a state the user cannot account for.
+	Branch string `json:"branch,omitempty"`
+	Remote string `json:"remote,omitempty"`
+	// Ahead is how many commits are waiting to be pushed, set only alongside
+	// GitAhead. There is no matching Behind count: the poll deliberately does
+	// not fetch (see internal/gitsync), so the commits on the other side are not
+	// here to be counted.
+	Ahead int `json:"ahead,omitempty"`
+}
+
+func NewWorkspaceGit(items []WorkspaceGitInfo) WorkspaceGit {
+	return WorkspaceGit{T: MsgWorkspaceGit, Workspaces: items}
+}
+
 // PluginPane is one live pane running a plugin action — the sidebar's other
 // kind of AGENTS row. It carries no state and no age: a plugin is a program,
 // not an agent taking turns, so there is nothing the server could report that

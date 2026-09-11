@@ -34,16 +34,20 @@ type Type string
 
 const (
 	// Down (server → browser).
-	MsgWelcome    Type = "welcome"
-	MsgLayout     Type = "layout"
-	MsgAgents     Type = "agents"
-	MsgHosts      Type = "hosts"
-	MsgPaneTitle  Type = "pane_title"
-	MsgPaneCwd    Type = "pane_cwd"
-	MsgPaneBranch Type = "pane_branch"
-	MsgPaneAgent  Type = "pane_agent"
-	MsgPaneModes  Type = "pane_modes"
-	MsgPaneExited Type = "pane_exited"
+	MsgWelcome Type = "welcome"
+	MsgLayout  Type = "layout"
+	MsgAgents  Type = "agents"
+	// MsgWorkspaceGit is the sidebar's git-sync rollup (see WorkspaceGit).
+	// Added within protocol v1: an old client ignores the type and its
+	// workspace dots stay the plain focus markers they have always been.
+	MsgWorkspaceGit Type = "ws_git"
+	MsgHosts        Type = "hosts"
+	MsgPaneTitle    Type = "pane_title"
+	MsgPaneCwd      Type = "pane_cwd"
+	MsgPaneBranch   Type = "pane_branch"
+	MsgPaneAgent    Type = "pane_agent"
+	MsgPaneModes    Type = "pane_modes"
+	MsgPaneExited   Type = "pane_exited"
 	// MsgPaneRespawned is pane_exited's inverse: the pane's PTY came back
 	// (cathost restart, or a move to another host), so the chrome a pane_exited
 	// installed must come off. Added within protocol v1 — an old client ignores
@@ -116,6 +120,7 @@ var msgTypes = map[reflect.Type]Type{
 	reflect.TypeOf(Welcome{}):       MsgWelcome,
 	reflect.TypeOf(Layout{}):        MsgLayout,
 	reflect.TypeOf(Agents{}):        MsgAgents,
+	reflect.TypeOf(WorkspaceGit{}):  MsgWorkspaceGit,
 	reflect.TypeOf(Hosts{}):         MsgHosts,
 	reflect.TypeOf(PaneTitle{}):     MsgPaneTitle,
 	reflect.TypeOf(PaneCwd{}):       MsgPaneCwd,
@@ -257,6 +262,8 @@ func DecodeDown(data []byte) (any, error) {
 		return decodeAs[Layout](data)
 	case MsgAgents:
 		return decodeAs[Agents](data)
+	case MsgWorkspaceGit:
+		return decodeAs[WorkspaceGit](data)
 	case MsgHosts:
 		return decodeAs[Hosts](data)
 	case MsgPaneTitle:

@@ -48,6 +48,7 @@ server assumes a default 120×32 area.
 | `welcome` | protocol version, plus an `error` string if the connection is being refused |
 | `layout` | **full replacement** of the viewport structure: workspaces (sidebar), the active workspace's tabs, the active tab's pane rects, and border handles. Computed rects only — the BSP tree never crosses the wire |
 | `agents` | the cross-session agent roster for the sidebar, plus the panes plugin actions are running in |
+| `ws_git` | the sidebar's git-sync rollup: for each workspace whose start directory is a git checkout on the catway machine, whether its trunk branch (`main`, else `master`) is `synced` with, `ahead` of, or `behind` its remote, plus the `branch` and `remote` actually compared and, for `ahead`, how many commits are waiting. Its own message rather than fields on `layout` because the two move on completely different clocks — `layout` goes out on every split and focus change, this on a two-minute poll. Sent whole, only when something changed, and only listing the workspaces that HAVE an answer: not a repository, no remote, unreachable, or on another host are all simply absent, and a client draws those the way it draws "not polled yet" |
 | `hosts` | the cathost roster: one item per configured host with `id`, `label`, `connected`, `addr_kind`, `is_default`, `panes`, an `error` explaining a host that is down, `latency_ms` (the last measured round trip, fractional, omitted when unknown), and `lists_dirs` (the start-path picker works against this host — always so for the local machine, and for a remote one whose cathost can list its own directories). Sent on connect, whenever a host connects or drops, and when a host's latency moves enough to change what is drawn — not on every sample, since every host pushes the whole roster to every client. A single-item roster is the normal single-machine session, which is how a client knows to draw no host UI at all |
 | `pane_title` | OSC 0/2 title for a pane |
 | `pane_cwd` | working directory for a pane |
@@ -150,6 +151,10 @@ The `agents` rollup is the deliberate exception: it covers every pane in the
 session, so the sidebar roster and the notification path have state for panes you
 are not looking at. That is what makes "an agent finished in another workspace" a
 thing you can be told about.
+
+`ws_git` is session-wide for the same reason and with more force: the workspace
+whose repository has gone stale is, almost by definition, the one nobody is
+currently looking at.
 
 It carries two lists, not one. `items` is the panes running a detected coding
 agent, and everything computed from the rollup — the workspace badges, the

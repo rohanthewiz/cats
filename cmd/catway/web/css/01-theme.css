@@ -43,6 +43,20 @@
     /* A glyph the user invented has no meaning this palette knows, so it takes
        plain foreground rather than borrowing a named kind's colour. */
     --flag-custom:var(--fg-soft);
+    /* The workspace row's sync dot: is this checkout level with its remote?
+       Two of the three are var()s onto tokens that already mean exactly this —
+       --ok is the settled green everywhere else in the UI, and --done is the
+       cyan the sidebar already uses for "an agent finished and you have not
+       looked yet", which is the same sentence as "you have commits and have not
+       pushed them yet". Reusing them means the three states track a theme's
+       palette instead of fighting it, and means a user who has learned what
+       cyan means here does not have to learn it twice.
+       --git-behind is the one hue that had to be invented. It cannot be --err:
+       that red means "this pane died" one span over, and a colleague pushing is
+       not a fault. It cannot be --warn either, which --todo already occupies.
+       So: a magenta pulled toward red — unmistakably the loud one of the three,
+       clearly not the error red, and clear of every agent-state dot. */
+    --git-synced:var(--ok); --git-ahead:var(--done); --git-behind:#e0559b;
     --ok:#6ac47a; --warn:#e0b64e; --err:#e57373; --done:#00ccf5;
     /* Agent identity hues. AGENTS hands each tool name one of these six slots
        (AGENT_HUE below), so claude and ced in the same list are told apart

@@ -52,6 +52,13 @@ func TestRoundTrip(t *testing.T) {
 			Agent: "claude", State: AgentWorking, Seen: true}},
 			[]PluginPane{{Pane: 7, Pub: "w1:p2", Workspace: "w1", Tab: 1,
 				Plugin: "rohanthewiz.cats-todo", Title: "todo: cats (3)"}}), DecodeDown},
+		// The three sync states one rollup can carry at once, plus the ahead
+		// count that only the ahead row is allowed to hold.
+		{"ws_git", NewWorkspaceGit([]WorkspaceGitInfo{
+			{Workspace: "w1", Sync: GitSynced, Branch: "main", Remote: "origin"},
+			{Workspace: "w2", Sync: GitAhead, Branch: "main", Remote: "origin", Ahead: 3},
+			{Workspace: "w3", Sync: GitBehind, Branch: "master", Remote: "upstream"},
+		}), DecodeDown},
 		{"pane_title", NewPaneTitle(pane, "vim"), DecodeDown},
 		{"pane_cwd", NewPaneCwd(pane, "/tmp/x"), DecodeDown},
 		{"pane_agent", NewPaneAgent(pane, "claude", AgentBlocked, "claude-opus-5", false), DecodeDown},
@@ -333,7 +340,7 @@ func TestMarshalStampsEveryType(t *testing.T) {
 	// Reverse: every "t" the decoders accept has a table entry. Probe with a
 	// bare envelope, which decodes into the zero struct for any known type.
 	for _, name := range []string{"init", "key", "mouse", "paste", "image", "resize", "focus", "raw", "cmd",
-		"welcome", "layout", "agents", "hosts", "pane_title", "pane_cwd", "pane_branch", "pane_agent",
+		"welcome", "layout", "agents", "ws_git", "hosts", "pane_title", "pane_cwd", "pane_branch", "pane_agent",
 		"pane_modes", "pane_exited", "pane_respawned", "pane_frame", "pane_diff", "clipboard", "notify",
 		"title", "error", "shutdown", "update_ready", "theme", "usage", "clients", "cmd_result", "history",
 		"record", "runbook_runs", "chat_state", "chat_snapshot", "chat_row", "chat_delta", "chat_perm"} {
@@ -341,8 +348,8 @@ func TestMarshalStampsEveryType(t *testing.T) {
 			t.Errorf("decoders know %q but msgTypes does not stamp it", name)
 		}
 	}
-	if len(seen) != 40 {
-		t.Errorf("msgTypes has %d distinct types, want 40; update this test with the decoders", len(seen))
+	if len(seen) != 41 {
+		t.Errorf("msgTypes has %d distinct types, want 41; update this test with the decoders", len(seen))
 	}
 }
 

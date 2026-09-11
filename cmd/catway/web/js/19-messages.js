@@ -78,6 +78,7 @@
         renderChrome(p); refreshPaneList(); break;
       }
       case "agents": renderAgents(msg.items, msg.plugins); break;
+      case "ws_git": applyWorkspaceGit(msg.workspaces || []); break;
       case "hosts": renderHosts(msg.items); break;
       case "history": renderHistory(msg.entries || []); break;
       // The macro recorder is session state, not this window's: the server

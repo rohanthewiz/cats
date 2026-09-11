@@ -6,6 +6,28 @@
      mark it, but a list row has no such edge, so the color itself has to carry
      the "you are here" signal — and every theme's accent is its saturated hue. */
   #ws-list li.active { color:var(--accent); }
+  /* The dot in front of a workspace name carries two facts at once, on two
+     different channels, because they are two different questions and the row
+     has one glyph:
+
+       shape   ● focused · ○ not      which workspace the keyboard is in
+       colour  git sync state        whether this checkout is level with its
+                                     remote's main/master (the ws_git rollup)
+
+     Splitting them that way is what lets the colour be taken over without
+     losing anything: the filled/hollow pair was always the part that said
+     "here", and the row's own accent colour says it a second time.
+     An uncoloured dot is a real state and the common one — not a repository,
+     no remote, on another machine, or simply not polled yet — so it inherits
+     the row's colour exactly as it did before any of this existed.
+
+     Specificity: these have to out-rank "#ws-list li.active { color:accent }"
+     (1,1,1), so each is written through #ws-list with two classes (1,2,1). A
+     bare .git-synced would lose on the focused row alone, which is the one row
+     the user is most likely to be looking at. */
+  #ws-list li .ws-dot.git-synced { color:var(--git-synced); }
+  #ws-list li .ws-dot.git-ahead  { color:var(--git-ahead); }
+  #ws-list li .ws-dot.git-behind { color:var(--git-behind); }
   #ws-list li .sum { color:var(--muted); font-size:calc(10px * var(--sb-scale)); margin-left:auto; }
   #ws-list li .sum span { margin-left:4px; }
   /* The paw print a workspace row — or the Workspaces heading, for the global

@@ -339,6 +339,14 @@
     });
     if (flagged.length > MAXF) items.push(["", "+" + (flagged.length - MAXF) + " more flagged panes"]);
 
+    // The sync state the row's dot carries, spelled out. It rides along rather
+    // than qualifying the card — a colour is a whole sentence already, and
+    // popping a card over every workspace row in the list because each one is a
+    // git checkout would be a card that never stops appearing. The row is here
+    // so that while a card IS up (muteTitles having taken the dot's tooltip
+    // away) the state is still readable.
+    const sync = gitSyncText(wsGit.get(w.id));
+    if (sync) items.push(["Git", sync]);
     if (multiHost() && w.host) items.push(["Host", "@" + hostLabel(w.host)]);
     if (w.locked) items.push(["Locked", "no plugins or agents here"]);
     if (w.asleep) {

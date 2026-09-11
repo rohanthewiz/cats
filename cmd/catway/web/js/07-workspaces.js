@@ -350,6 +350,66 @@
     return wrap;
   }
 
+  // applyWorkspaceGit takes the ws_git rollup (see the Go WorkspaceGit message)
+  // and repaints the sidebar. The rollup is sent whole and only when something
+  // moved, so replacing the map outright is both correct and the cheapest thing
+  // to do — there is nothing to merge, and a workspace that has dropped out of
+  // it (its remote went away, or it was closed) must lose its colour, which a
+  // merge would quietly keep.
+  function applyWorkspaceGit(items) {
+    wsGit = new Map(items.map((it) => [it.ws, it]));
+    if (layoutMsg) renderWorkspaces(layoutMsg);
+  }
+
+  // gitDot builds the circle in front of a workspace name.
+  //
+  // It is the row's focus marker and its git-sync indicator in one glyph, which
+  // works because the two use different channels of it: the SHAPE says whether
+  // the keyboard is here (● / ○, as it always has), and the COLOUR says whether
+  // this checkout is level with its remote's main or master. See the CSS for
+  // why the colours are the ones they are.
+  //
+  // The dot is nested inside the name span rather than being a sibling of it,
+  // and the space between them is an ordinary text space. Both details are
+  // deliberate: the row is a flex box with a 6px gap, so a sibling dot would
+  // suddenly sit a gap away from the name it belongs to, and the name span
+  // stays the row's first child — which is what every other reader of these
+  // rows (the drag reorder, the rename, the hover card) already assumes.
+  //
+  // A workspace with no entry in the rollup gets no colour class and so
+  // inherits the row's own colour. That is the majority state, not an error
+  // case: a workspace that is not a git checkout, one whose repository has no
+  // remote, one living on another host, and one the first sweep has not reached
+  // yet all land here, and none of them is a fact worth a colour.
+  function gitDot(w) {
+    const dot = document.createElement("span");
+    const g = wsGit.get(w.id);
+    dot.className = "ws-dot" + (g && g.sync ? " git-" + g.sync : "");
+    dot.textContent = w.active ? "●" : "○";
+    const sync = gitSyncText(g);
+    // Two sentences, because the dot means two things and a user who has just
+    // noticed it has no way to know which one changed. The focus half is said
+    // first since it is the older meaning and the one the shape carries.
+    dot.title = (w.active ? "current workspace" : "not the current workspace")
+      + (sync ? " · " + sync : "");
+    return dot;
+  }
+
+  // gitSyncText spells out one rollup entry, for the dot's tooltip and for the
+  // hover card's Git row — one wording, so the card cannot drift from the
+  // tooltip it replaces while it is up (see muteTitles).
+  function gitSyncText(g) {
+    if (!g || !g.sync) return "";
+    const where = (g.branch || "main") + " vs " + (g.remote || "origin");
+    if (g.sync === "behind") return where + ": the remote has commits you do not — pull";
+    if (g.sync === "ahead") {
+      const n = g.ahead || 0;
+      return where + ": " + (n ? (n === 1 ? "1 commit" : n + " commits") : "commits")
+        + " to push";
+    }
+    return where + ": in sync";
+  }
+
   // tabMarker: the highest-attention agent state among a tab's panes, as a
   // colored dot on the tab (cats's bell/activity markers; the rollup's tab
   // field keys the grouping — tab bar rows are the active workspace's tabs).
@@ -458,7 +518,8 @@
         const li = document.createElement("li");
         li.className = "ws" + (w.active ? " active" : "") + (w.locked ? " locked" : "") + (w.asleep ? " asleep" : "");
         const name = document.createElement("span");
-        name.textContent = (w.active ? "● " : "○ ") + w.name;
+        name.appendChild(gitDot(w));
+        name.appendChild(document.createTextNode(" " + w.name));
         li.appendChild(name);
         // The flag rides closest of all, ahead even of the lock: it is the one
         // mark in the row the user put there by hand, and its whole job is to

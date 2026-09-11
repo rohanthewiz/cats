@@ -167,6 +167,8 @@ type (
 	WorkspaceCreateParams    = wire.WorkspaceCreateParams
 	WorkspaceCreateResult    = wire.WorkspaceCreateResult
 	WorkspaceEntry           = wire.WorkspaceEntry
+	WorkspaceGit             = wire.WorkspaceGit
+	WorkspaceGitInfo         = wire.WorkspaceGitInfo
 	WorkspaceInfo            = wire.WorkspaceInfo
 	WorkspaceListResult      = wire.WorkspaceListResult
 	WorkspaceParams          = wire.WorkspaceParams
@@ -276,6 +278,9 @@ const (
 	DirLeft               = wire.DirLeft
 	DirRight              = wire.DirRight
 	DirUp                 = wire.DirUp
+	GitAhead              = wire.GitAhead
+	GitBehind             = wire.GitBehind
+	GitSynced             = wire.GitSynced
 	KeyDown               = wire.KeyDown
 	KeyRepeat             = wire.KeyRepeat
 	KeyUp                 = wire.KeyUp
@@ -329,6 +334,7 @@ const (
 	MsgUpdateReady        = wire.MsgUpdateReady
 	MsgUsage              = wire.MsgUsage
 	MsgWelcome            = wire.MsgWelcome
+	MsgWorkspaceGit       = wire.MsgWorkspaceGit
 	NotifyKindAttention   = wire.NotifyKindAttention
 	NotifyKindFinished    = wire.NotifyKindFinished
 	NotifyKindInfo        = wire.NotifyKindInfo
@@ -383,6 +389,7 @@ var (
 	NewTheme            = wire.NewTheme
 	NewTitle            = wire.NewTitle
 	NewUpdateReady      = wire.NewUpdateReady
+	NewWorkspaceGit     = wire.NewWorkspaceGit
 	NewUsage            = wire.NewUsage
 	NewWelcome          = wire.NewWelcome
 	NotifyKindOK        = wire.NotifyKindOK
