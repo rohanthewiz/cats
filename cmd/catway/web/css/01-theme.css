@@ -39,7 +39,14 @@
        agent-state dot one span over. Each is its own token, so a theme that
        wants to can tune them individually. */
     --flag-followup:var(--err); --flag-question:var(--warn); --flag-star:#f2c14e;
-    --flag-warn:#e0955e; --flag-done:var(--ok); --flag-note:var(--muted);
+    --flag-warn:#e0955e; --flag-done:var(--ok);
+    /* The note used to be var(--muted), and at 12px the dimmest token in the
+       theme made the one kind with no urgency look like a rendering artefact
+       rather than a mark somebody set. Lifted to a neutral a step above
+       --muted: legible on the panel surface, still visibly the quiet kind
+       beside the red follow-up and the amber question, and greenish enough
+       not to be mistaken for --flag-custom's near-white. */
+    --flag-note:#c3d0c6;
     /* A glyph the user invented has no meaning this palette knows, so it takes
        plain foreground rather than borrowing a named kind's colour. */
     --flag-custom:var(--fg-soft);

@@ -229,7 +229,7 @@ catctl unflag 7
 ```
 
 The kind is one of six names — `followup` ⚑, `question` ?, `star` ★, `warn` ⚠,
-`done` ✓, `note` ✎ — or any single glyph you invent. The two shapes are kept
+`done` ✓, `note` ▤ — or any single glyph you invent. The two shapes are kept
 apart on purpose: a bare word has to be a name we know, so a mistyped `folloup`
 is refused instead of quietly becoming a flag that reads "folloup". The note is
 optional and gets folded to one line.

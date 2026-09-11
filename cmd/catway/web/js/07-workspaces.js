@@ -249,7 +249,7 @@
     { kind: "star", glyph: "★", label: "important", meaning: "worth finding again" },
     { kind: "warn", glyph: "⚠", label: "problem", meaning: "something is wrong here" },
     { kind: "done", glyph: "✓", label: "done", meaning: "handled — nothing left to do" },
-    { kind: "note", glyph: "✎", label: "note", meaning: "just a note" },
+    { kind: "note", glyph: "▤", label: "note", meaning: "just a note" },
   ];
   const FLAG_BY_KIND = new Map(FLAG_DEFS.map((d) => [d.kind, d]));
 

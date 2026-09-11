@@ -200,7 +200,7 @@ func pad(s string, w int) string {
 //     glyph) would be measured as several columns.
 //   - two — emoji and the CJK/fullwidth blocks, the characters a terminal draws
 //     double-wide.
-//   - one — everything else, which is every named kind's glyph (⚑ ? ★ ⚠ ✓ ✎;
+//   - one — everything else, which is every named kind's glyph (⚑ ? ★ ⚠ ✓ ▤;
 //     all "ambiguous width", drawn single-wide in the terminals cats runs in)
 //     and all of the ASCII the other columns are made of.
 func dispWidth(s string) int {

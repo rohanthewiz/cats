@@ -535,7 +535,7 @@ renders the word "folloup":
 | `star` | ★ | worth finding again |
 | `warn` | ⚠ | something is wrong here |
 | `done` | ✓ | handled — nothing left to do |
-| `note` | ✎ | just a note |
+| `note` | ▤ | just a note |
 
 A custom glyph is at most 8 code points (enough for a ZWJ emoji sequence) and may
 contain no whitespace or control characters. The note is sanitized rather than

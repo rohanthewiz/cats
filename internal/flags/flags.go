@@ -50,7 +50,7 @@ const (
 	KindStar     Kind = "star"     // ★ gold   — important, worth finding again
 	KindWarn     Kind = "warn"     // ⚠ orange — something is wrong here
 	KindDone     Kind = "done"     // ✓ green  — handled, nothing left to do
-	KindNote     Kind = "note"     // ✎ muted  — just a note
+	KindNote     Kind = "note"     // ▤ neutral — just a note
 )
 
 // Def describes one named kind for the clients that draw it and the CLI that
@@ -72,7 +72,15 @@ var defs = []Def{
 	{KindStar, "★", "important", "worth finding again"},
 	{KindWarn, "⚠", "problem", "something is wrong here"},
 	{KindDone, "✓", "done", "handled — nothing left to do"},
-	{KindNote, "✎", "note", "just a note"},
+	// The note is a ruled page (U+25A4), not the pencil it used to be: a pencil
+	// is the *rename* affordance in the pane chrome and the help sheet, so the
+	// same shape was saying two different things one column apart. A notepad or
+	// scroll emoji says "note" more plainly still, but every mark here is a text
+	// glyph the client tints per kind — an emoji carries its own colour and
+	// measures two terminal columns, so it would drop out of the colour scheme
+	// and push catctl's listing a column off. This stays in the BMP with the
+	// rest of them.
+	{KindNote, "▤", "note", "just a note"},
 }
 
 // byKind indexes defs for Lookup. Built once; the vocabulary is a compile-time
