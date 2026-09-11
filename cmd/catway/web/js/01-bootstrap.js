@@ -115,7 +115,7 @@
   function savePaneCollapsed() {
     try { localStorage.setItem(PGRP_KEY, JSON.stringify([...paneCollapsed])); } catch (e) { /* not persisted */ }
   }
-  // Is the "more workspaces…" shelf at the foot of the Panes section open? That
+  // Is the "more panes…" shelf at the foot of the Panes section open? That
   // shelf holds the workspaces with nothing running in them (renderPaneList), and
   // it is a flag rather than another id in the set above for one reason: it
   // defaults the other way. A set of collapsed ids says "everything is open until

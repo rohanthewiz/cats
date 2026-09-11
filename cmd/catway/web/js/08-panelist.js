@@ -63,7 +63,7 @@
     }
 
     // Two shelves, by whether the workspace is doing anything: the ones with work
-    // in them stay up top, and the rest fold behind a single "more workspaces…"
+    // in them stay up top, and the rest fold behind a single "more panes…"
     // row at the foot of the section. The inventory arrives in the session's
     // workspace order, which is the order the *Workspaces* section wants — a list
     // you reorder by hand and then read positionally — but Panes is read by
@@ -155,39 +155,46 @@
   // group. It is built as a .wsgrp because it does a group header's job at the
   // tier above — it names what is behind it, counts it, and folds it with the
   // same caret — and it is set in italics so a list of workspace names is never
-  // mistaken for holding one called "more workspaces".
+  // mistaken for holding one called "more panes".
   //
   //   PANES              ⊞ ⊟ ▼
   //     ● cats   2 agents / 4 panes     the current workspace, pinned
   //       cats:p2  build   claude
   //     api      1 agent / 3 panes      still working
   //   ─────────────────────────────
-  //     more workspaces…  3 workspaces / 7 panes  ▶
+  //     more panes…                 7  ▶
   //
-  // The tally is the bare number of workspaces behind the row. Not agents: every
-  // workspace here is here precisely because it has none, so that column would be
-  // zeroes. Not "2 workspaces / 3 panes" either — the noun is already in the
-  // label this rides, and spelled out twice the row outgrows a sidebar that goes
-  // down to 150px wide, which is the same trade the Workspaces heading makes with
-  // its own folded count. The words are in the tooltip for anyone the digit
-  // doesn't reach. It rides both states for the reason the group rollups do —
-  // shut, it stands in for what is hidden; open, it saves counting headers.
+  // The label says panes, not workspaces, because panes are what this section
+  // lists and what opening the shelf gives you. The workspace headers behind it
+  // are how those panes are *organized* — the same grouping the rows above use —
+  // not a different kind of thing the row leads to, and a section of panes whose
+  // last row offers "more workspaces" reads as a door out of the section.
+  //
+  // The tally follows the label: the bare number of panes hidden behind the row.
+  // Not agents — every workspace here is here precisely because it has none, so
+  // that column would be zeroes. Not "7 panes in 3 workspaces" either: the noun
+  // is already in the label this rides, and spelled out twice the row outgrows a
+  // sidebar that goes down to 150px wide, which is the same trade the Workspaces
+  // heading makes with its own folded count. The words, and the workspace count
+  // the digit no longer carries, are in the tooltip for anyone the digit doesn't
+  // reach. It rides both states for the reason the group rollups do — shut, it
+  // stands in for what is hidden; open, it saves counting rows.
   function paneMoreEl(cold, sep) {
     const li = document.createElement("li");
     li.className = "wsgrp more" + (sep ? " sep" : "");
     const name = document.createElement("span");
-    name.textContent = "more workspaces…";
+    name.textContent = "more panes…";
     li.appendChild(name);
     const panesN = cold.reduce((t, g) => t + g.rows.length, 0);
     const s = document.createElement("span");
     s.className = "gsum";
-    s.textContent = String(cold.length);
+    s.textContent = String(panesN);
     li.appendChild(s);
     const car = document.createElement("span");
     car.className = "car"; car.textContent = paneMoreOpen ? "▼" : "▶";
     li.appendChild(car);
-    li.title = (paneMoreOpen ? "hide " : "show ") + nOf(cold.length, "workspace")
-      + " with no agent running (" + nOf(panesN, "pane") + ")";
+    li.title = (paneMoreOpen ? "hide " : "show ") + nOf(panesN, "pane")
+      + " in " + nOf(cold.length, "workspace") + " with no agent running";
     // On the press, for the same reason every other fold in this list is: the row
     // is rebuilt on every rollup and title push, and a press that a rebuild
     // interrupts never becomes a click.
@@ -268,8 +275,8 @@
   // once. They act on the groups the last render drew, so a workspace that no
   // longer has panes doesn't linger in the collapsed set.
   //
-  // The "more workspaces…" shelf moves with them. ⊞ means "show me everything in
-  // this section", and a shelf still holding half the session's workspaces shut
+  // The "more panes…" shelf moves with them. ⊞ means "show me everything in
+  // this section", and a shelf still holding half the session's panes shut
   // would make that a lie; ⊟ means the reverse, and leaving the shelf hanging
   // open over a list of folded headers is the same lie the other way round.
   (function initPaneHeadingCtl() {
