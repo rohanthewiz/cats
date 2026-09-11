@@ -288,63 +288,104 @@
   // the user invents — falls through to the text path below, which is the reason
   // this is a lookup and not a branch: the two halves of the vocabulary still
   // share one code path, and a missing icon is a miss, not a special case.
+  // drawIcon builds one icon from a list of [d, attrs] paths. Both icons below
+  // are a handful of filled shapes over a 16-unit grid and nothing else, so the
+  // builder is a table and the entries stay readable as drawings rather than as
+  // thirty lines of setAttribute each.
+  function drawIcon(paths) {
+    const svg = document.createElementNS(SVGNS, "svg");
+    svg.setAttribute("class", "ficon");
+    svg.setAttribute("viewBox", "0 0 16 16");
+    for (const [d, attrs] of paths) {
+      const el = document.createElementNS(SVGNS, "path");
+      el.setAttribute("d", d);
+      for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+      svg.appendChild(el);
+    }
+    return svg;
+  }
+
+  // FLAG_ICONS: real icons for named kinds, drawn where a row has the room for
+  // them. The vocabulary's glyph is documented as the *fallback* rendering (see
+  // internal/flags: "a client with a real icon for the kind may use it instead"),
+  // and this is the client that has one — the sidebar already draws the lock, the
+  // moon and the paw print as SVGs beside the mark, so a kind whose meaning is a
+  // *thing* can be that thing instead of a character approximating it.
+  //
+  // Only kinds whose glyph was losing the argument need an entry. Everything not
+  // listed here — the star, the question mark, the warning and every custom glyph
+  // the user invents — falls through to the text path below, which is the reason
+  // this is a lookup and not a branch: the two halves of the vocabulary still
+  // share one code path, and a missing icon is a miss, not a special case.
+  //
+  // Two rules both entries follow, learned the expensive way on the note:
+  //
+  //   - FILLED, not stroked. A stroked drawing at 13px turns every one of its
+  //     lines into the same 1px grey, and the icon averages out to a smudge the
+  //     size of a character. Solid fields are what survive being small — the
+  //     same lesson the paw print's toe pads record a hundred lines up. The one
+  //     stroke that earns its place is the flag's staff, below.
+  //   - OWN COLOURS, not currentColor. Unlike the lock, the moon and the paw,
+  //     these do not follow their --flag-* token or a theme that retunes it.
+  //     That is the cost of a mark being a picture of a thing rather than a
+  //     tinted silhouette, and both entries pay it on purpose.
   const FLAG_ICONS = {
+    // A flag on a staff, which is what the ⚑ glyph was always trying to be and
+    // could not be at 12px of text weight.
+    //
+    // The field waves: its top and bottom edges are mirrored cubics, so the
+    // cloth reads as hanging from the staff rather than as a red rectangle
+    // parked beside a line. That wave is the whole reason this shape is legible
+    // as a flag at 14px, where a straight-edged field is just a block.
+    //
+    // The staff is the single stroke in either icon. It is the thinnest element
+    // here — 1.5 units, about 1.3px at render size — and it is kept because
+    // without it the field alone reads as a ribbon or a banner, and because the
+    // ⚑ that catctl and every menu still print has one.
+    //
+    //     ┃▅▅▅▅▅▀▀▀
+    //     ┃████████   field, hanging from the staff
+    //     ┃▀▀▅▅▅▅▅
+    //     ┃
+    //     ┃           staff runs the full height, so the mark has the same
+    //     ┃           optical centre as the glyphs in the rows above it
+    followup: () => drawIcon([
+      ["M4.3 2.1v12.1", { fill: "none", stroke: "#b9c2ba", "stroke-width": "1.5",
+        "stroke-linecap": "round" }],
+      ["M5.3 3c2.3-1.2 4.1.9 6.4-.3v6.1c-2.3 1.2-4.1-.9-6.4.3z", { fill: "#e05c5c" }],
+    ]),
+
     // A sticky note: one solid field with a turned-up corner and three rules.
-    //
-    // Two departures from every other mark in the sidebar, both deliberate.
-    //
-    // It is FILLED, not stroked. The stroked page it replaced was correct and
-    // unreadable: at 13px its outline, its dog-ear and its rules were all the
-    // same 1px grey line, so the whole icon averaged out to a smudge the size of
-    // a character. A solid field has no such problem — it is the one shape that
-    // survives being small, which is the same lesson the paw print's toe pads
-    // already record a hundred lines up.
-    //
-    // It carries its OWN COLOURS rather than currentColor, so unlike the lock,
-    // the moon and the paw it does not follow --flag-note (or a theme that
-    // retunes it). That is the cost of the mark being a picture of a thing
-    // instead of a tinted silhouette, and it is the point: a note is the kind
-    // with no urgency, so it loses every contest for attention that colour
-    // alone decides. Being the one *drawn* mark in the column is how it gets
-    // noticed without claiming to be more important than a follow-up.
     //
     // The yellow sits a step warmer and deeper than the ★ important flag
     // (#f2c14e) and the todo paw (--todo #f0dfa0), which are the two things
     // nearest it in both hue and row position. Hue alone would not separate
     // them; shape does — a filled rectangle against a star and a paw print.
     //
+    // It being the quiet kind is not a reason to draw it faintly. A note has no
+    // urgency, so it loses every contest for attention that colour alone
+    // decides; being *drawn* is how it gets noticed without claiming to outrank
+    // a follow-up, which is a claim colour would have made for it.
+    //
     //     ┌────────┐
     //     │ ▬▬▬▬▬▬ │   three rules, the last short, so the field
     //     │ ▬▬▬▬▬▬ │   reads as written-on rather than as a swatch
     //     │ ▬▬▬  ╱▓│
     //     └─────┘▓▓┘   corner turned up, in the shade the fold casts
-    note() {
-      const svg = document.createElementNS(SVGNS, "svg");
-      svg.setAttribute("class", "fnote");
-      svg.setAttribute("viewBox", "0 0 16 16");
-      // path() is local rather than shared: this is the only icon in the file,
-      // and four calls do not earn a helper anyone else has to go read.
-      const path = (d, attrs) => {
-        const el = document.createElementNS(SVGNS, "path");
-        el.setAttribute("d", d);
-        for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
-        svg.appendChild(el);
-      };
+    note: () => drawIcon([
       // The note itself, with the bottom-right corner cut away for the fold.
-      path("M2.8 3.3a1.1 1.1 0 0 1 1.1-1.1h8.2a1.1 1.1 0 0 1 1.1 1.1v6.5" +
-        "L9.1 13.9H3.9a1.1 1.1 0 0 1-1.1-1.1z", { fill: "#f2d45f" });
+      ["M2.8 3.3a1.1 1.1 0 0 1 1.1-1.1h8.2a1.1 1.1 0 0 1 1.1 1.1v6.5" +
+        "L9.1 13.9H3.9a1.1 1.1 0 0 1-1.1-1.1z", { fill: "#f2d45f" }],
       // The turned-up corner: the triangle the cut leaves, in a darker tone so
       // it reads as the back of the sheet catching shade rather than as a bite
       // taken out of the mark.
-      path("M13.2 9.8H10.2a1.1 1.1 0 0 0-1.1 1.1v3z", { fill: "#cfa92f" });
+      ["M13.2 9.8H10.2a1.1 1.1 0 0 0-1.1 1.1v3z", { fill: "#cfa92f" }],
       // The writing. Dark enough to hold against the field at 14px — a lighter
       // rule would vanish into the yellow — and the last one short, which is
       // what reads as writing that stopped rather than as a hatch pattern.
-      for (const d of ["M5 5.5h6", "M5 7.7h6", "M5 9.9h3.2"]) {
-        path(d, { stroke: "#9c7f22", "stroke-width": "1", "stroke-linecap": "round" });
-      }
-      return svg;
-    },
+      ...["M5 5.5h6", "M5 7.7h6", "M5 9.9h3.2"].map((d) =>
+        [d, { fill: "none", stroke: "#9c7f22", "stroke-width": "1", "stroke-linecap": "round" }]),
+    ]),
   };
 
   // flagMark is the mark itself: the kind's icon where there is one, its glyph
@@ -357,10 +398,10 @@
   //
   // The class carries the kind so the CSS can colour it; an unknown kind gets
   // fk-custom, which takes the default ink rather than borrowing some named
-  // kind's meaning-by-colour. An icon may ignore that colour — the note does,
-  // because it is drawn artwork rather than a silhouette — but the class goes
-  // on regardless, so a kind that later swaps a tinted icon in gets its colour
-  // without touching this function.
+  // kind's meaning-by-colour. An icon may ignore that colour — both of the ones
+  // in FLAG_ICONS do, being drawn artwork rather than silhouettes — but the
+  // class goes on regardless, so a kind that later swaps a tinted icon in gets
+  // its colour without touching this function.
   function flagMark(f) {
     if (!f) return null;
     const s = document.createElement("span");
