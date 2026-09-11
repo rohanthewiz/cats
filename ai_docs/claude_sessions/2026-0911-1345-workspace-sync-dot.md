@@ -1,9 +1,13 @@
 # The workspace dot takes over, and says whether the repo is still current
 
+*Two passes: the dot itself over local checkouts, then the same answer for
+workspaces whose checkout lives on another machine.*
+
 Session: https://claude.ai/code/session_01DcxG4ANNKTGJiVUz8QVot5
 Date: 2026-09-11
 Repo: `~/projs/go/cats` (branch `main`)
-Commit: `19da315`
+Commits: `19da315` (the dot, local workspaces), `cbece0c` (remote workspaces
+via cathost)
 
 ## Request
 
@@ -15,6 +19,10 @@ Commit: `19da315`
 > - Blue (same blue we use to indicate an agent is done) when we have commit to push
 > - Green when we are completely in-sync
 > Pool every 2 mins
+
+and, once the first half landed:
+
+> Now do the same for remote workspaces via cathost
 
 ## What the dot was
 
@@ -134,24 +142,118 @@ resolvable at all.
 
 Timeouts: 10s local, 30s network.
 
-## The sweep — cmd/catway/gitsync.go
+## Where the question is asked
 
-Three hops, because the two ends have opposite requirements: the session may
-only be read on the loop goroutine, the resolution may only happen off it.
+A directory is only meaningful on the machine that holds it, so the question
+goes to that machine — the same argument that moved branch resolution onto the
+daemons in protocol v3. A workspace pinned to devbox names a path in devbox's
+filesystem, and answering it in catway reports on whatever local directory
+happens to share the name. For a monorepo checked out at the same place on both
+boxes that is a *plausible and completely wrong* answer, which is worse than
+none.
+
+The first commit skipped remote workspaces for exactly that reason and left it
+open. The second closed it.
+
+### The seam: request_git_sync
+
+```
+request_git_sync  {id, dir}     ->  git_sync_result  {id, status}
+```
+
+Behind a `git_sync` capability, so it is **additive**: the feature list exists
+precisely because `NegotiateVersion` refuses a peer newer than the local build,
+so bumping the protocol to announce one new request would be rejected by every
+already-deployed daemon one version behind. A daemon that does not advertise it
+is simply never asked.
+
+Same shape as `request_worktree`, with each of its properties needing a stronger
+justification:
+
+| | worktree | git sync |
+|---|---|---|
+| off the dispatch goroutine | `git worktree add` takes seconds to minutes | `ls-remote` waits on someone else's forge, to a 30s timeout |
+| id-correlated, not ordered | git finishes in its own order | one remote is reachable, the next is not |
+| failure is a result, not an event | the dialog shows git's stderr | *no* error field at all — see below |
+
+**No error field.** Not a repository, no remote, unreachable, git missing — all
+of them are the zero `Status`, which the sidebar draws as an uncoloured dot. An
+`Error` event would put a toast in somebody's browser every two minutes for a
+machine that is merely asleep.
+
+**No subscription.** The daemon holds no state. catway asks again on its own
+schedule, and an abandoned sweep costs the daemon nothing beyond the answers
+already in flight.
+
+### The local host is asked too
+
+Once a daemon can answer, it answers for *every* host including the local one —
+one code path, one environment doing the resolving. This follows
+`runWorktreeOp`, which already prefers the daemon for the local host, and
+`gitbranch.go`, where a v3 local cathost resolves its own panes' branches.
+
+The in-process `gitsync.Resolve` survives as the fallback for the local machine
+when its cathost cannot answer (an older build, or not connected yet). For any
+other host there is nothing that could stand in, so the workspace is left out.
+
+## The sweep — cmd/catway/gitsync.go
 
 ```
 runWorkspaceGit    own goroutine, 10s start delay, 2-minute ticker
-  -> o.post        onto the loop: gather (ws id, dir) for LOCAL workspaces
-  -> go            off again: bounded 4-at-a-time fan-out, gitsync.Resolve
-  -> o.post        back on: store, and broadcast only if something changed
+  -> o.post        onto the loop: the session is read here and nowhere else
+     gitSyncPlan   split into "ask the host" and "do it here"
+  |-> d.send       one request_git_sync per remote target, id-correlated
+  |                  ... each answers on its own schedule via pendingReqs
+  \-> go           the local fallback batch, bounded 4-at-a-time, off the loop
+  -> o.post        every answer lands back on the loop as a collect()
+     apply         when the LAST one is in: store, broadcast if it moved
 ```
 
-The change check is what makes the steady state free: a session where nobody has
-pushed resolves to the same states forever, and re-sending an identical list
-every two minutes would re-render every workspace row for nothing.
+The hops are forced: the session may only be read on the loop goroutine, and
+neither git nor a daemon round trip may happen on it.
 
-`wsGitBusy` stops a slow sweep stacking on the next tick — with an unreachable
-remote a sweep can take the full network timeout per workspace.
+### Converging two transports
+
+A sweep's answers now arrive from two places on two schedules, which is what
+`gitSweep` is for:
+
+```go
+type gitSweep struct {
+    gen         uint64          // drops answers from an abandoned pass
+    outstanding int             // decided up front, only ever decremented
+    results     []gitSyncResult
+}
+```
+
+Waiting for all of them rather than applying each arrival keeps one sweep to one
+broadcast. Applying incrementally would be *correct* — the change check would
+still suppress no-op rows — but at startup, when every workspace changes at
+once, it would send one full rollup per workspace to every window.
+
+`gen` is the guard against a late reply from a pass that was abandoned: the two
+describe different sets of workspaces, and folding a stale answer in would
+decrement the wrong counter and end the new sweep early.
+
+### The failure modes came free
+
+Remote requests ride the existing `pendingReqs` machinery — the same one read,
+capture and the worktree commands use — so:
+
+- a host that **drops** mid-sweep is failed through `flushPendingFor`
+- a daemon that **never answers** is failed by the registered timer
+  (`gitSyncTimeout` 60s, chosen to clear gitsync's own 30s network budget so
+  catway never fails a request the daemon is still going to answer, and to stay
+  comfortably under the 2-minute interval so a lost reply cannot stall the next
+  pass)
+
+Either way the sweep gets its answer — an Unknown one — and cannot be left
+waiting on a reply that is not coming. `gitSyncResponder` folds both into the
+zero `Status` rather than surfacing them: there is no user waiting on a
+background poll.
+
+A sweep already in flight is left to finish rather than stacked on. With an
+unreachable remote one pass can outlast the interval, and starting a second
+would double the load on exactly the host that is already not answering.
 
 ### Which workspaces are asked about
 
@@ -159,17 +261,27 @@ remote a sweep can take the full network timeout per workspace.
   from, so the dot and the label always describe the same checkout. No fallback
   to the daemon's own cwd, which would paint every identity-less row with the
   state of wherever catway happened to be started.
-- **Remote-host workspaces are skipped**, not guessed at. Their path names a
-  directory on *that* machine; for a monorepo checked out in the same place on
-  both boxes, resolving it here gives a plausible and completely wrong answer.
-  (`o.workspaceHostOwns(ws, localHostID)` — the same check `paneCwd` makes.)
 - **Asleep and locked are included.** Neither says anything about the
   repository, and a workspace put to bed is exactly the one most likely to have
   gone stale while nobody was looking.
+- **Nobody able to answer means left out**: no start directory, a host that is
+  down, or one too old for the capability. Left out means the dot goes back to
+  uncoloured, which is the honest rendering of "we cannot currently find out" —
+  the alternative is a colour that stops tracking reality the moment a link
+  drops.
 
 A workspace that *stops* having an answer drops its colour rather than keeping
 the last one: a stale "in sync" is the single reading that would actively
 mislead, since it's the one that says "go ahead".
+
+### A host coming back asks at once
+
+Every sweep a host was down for skipped its workspaces. Without a nudge on the
+completed handshake, a machine reconnecting would leave its rows blank for up to
+two minutes for no visible reason — so `startWorkspaceGitSweep` is called from
+the same post that turns the roster's dot green. Free when there is nothing to
+do: a sweep in flight is left alone, and a session with no workspace on that
+host plans nothing.
 
 ## The wire: ws_git
 
@@ -190,6 +302,10 @@ state on every keystroke that splits a pane.
 Sent whole. Only workspaces that *have* an answer are listed — absent is the
 uncoloured state, which is also what an old client (or a client of an old
 server) leaves every row in. Also sent on connect, gated on non-empty.
+
+The browser cannot tell a local row from a remote one, and should not: `w2` on
+devbox carries a state exactly like `w1` here. The only difference is which
+machine produced it.
 
 `branch` and `remote` ride along because neither is safe to assume: a tree still
 on master, or one whose main pushes to a fork, would otherwise report a state
@@ -218,17 +334,27 @@ the user cannot account for. The tooltip says them out loud —
   configured remote / linked worktree / packed refs / four unknown paths /
   unreachable remote / cancelled context.
 - `cmd/catway/gitsync_test.go` — the sweep's own logic with answers injected, so
-  no test forks git: targeting rules, cache pruning, forgetting a lost answer,
-  busy-flag clearing, session-order rollup.
+  no test forks git. Planning: no directory, local fallback, remote routed to
+  its host with the path untouched, a host that cannot answer skipped without
+  taking the local workspaces with it, the local host preferred once it can
+  answer. The round trip against a pipe daemon, including a host that drops
+  mid-sweep (the sweep must clear, and the stale colour must go). Collection:
+  waiting for every answer, ignoring a stale generation, not stacking sweeps.
+  Caching, pruning, session-order rollup, and the reconnect nudge.
+- `internal/orchestration/handshake_test.go` — a real handshake and round trip:
+  the capability is advertised, the request dispatches, the id echoes, the
+  status decodes. It asserts the *Unknown* answer deliberately — a case needing
+  a reachable forge would be a test that fails on an aeroplane, and the state
+  machine is already pinned against real remotes in `internal/gitsync`.
 - `cmd/catway/web/jstest/wsdot.test.mjs` — both channels pinned independently,
   every focus × sync combination, including the focused-row-keeps-its-colour
   case the CSS specificity note exists for.
 
 ## Verification
 
-`make fmt-check vet build test jstest` clean; `-race` clean on
-`cmd/catway`, `internal/gitsync`, `wire`. Smoke-resolved this repo and
-`cats-todo` live: both `synced`, ~600ms each; `/tmp` correctly `unknown` in
+`make fmt-check vet build test jstest` clean; `-race` clean on `cmd/catway`,
+`internal/orchestration`, `internal/gitsync`, `wire`. Smoke-resolved this repo
+and `cats-todo` live: both `synced`, ~600ms each; `/tmp` correctly `unknown` in
 32ms.
 
 Two `internal/inputenc` failures in `make test-ghostty` are pre-existing
@@ -236,8 +362,14 @@ Two `internal/inputenc` failures in `make test-ghostty` are pre-existing
 
 ## Open
 
-- **Remote workspaces get no dot.** Doing it properly means asking their
-  cathost, the way `pane_branch` does — a protocol addition, not something the
-  local sweep can fake.
+- **Both machines need the new build.** The capability is advertised by the
+  cathost, so a remote workspace stays uncoloured until *that* box is running a
+  build with `git_sync` in its feature list. Nothing breaks in the meantime —
+  the workspace is simply not asked about — but it is the thing to check first
+  if a devbox row stays blank.
 - The MacApp bundle needs reinstalling to pick this up; `make binaries` built
   into `bin/`, but the installed app is still the old build.
+- A workspace's dot still reports the *trunk*, never the branch the workspace is
+  actually on. That is deliberate — the pane header already says which branch a
+  directory is on, and the dot is about the shared mainline — but it means a
+  long-lived feature branch shows its project's staleness, not its own.
