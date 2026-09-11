@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/rohanthewiz/cats/internal/filexfer"
+	"github.com/rohanthewiz/cats/internal/gitsync"
 	"github.com/rohanthewiz/cats/internal/hostmeter"
 	"github.com/rohanthewiz/cats/internal/pathpick"
 	"github.com/rohanthewiz/cats/internal/terminal"
@@ -95,6 +96,12 @@ const (
 	MsgRequestBlock    MessageType = "request_block"
 	MsgRequestListDir  MessageType = "request_list_dir"
 	MsgRequestWorktree MessageType = "request_worktree"
+	// MsgRequestGitSync asks whether a checkout on the daemon's own machine is
+	// level with its remote. Its own request rather than a field on anything
+	// existing because it is addressed to a DIRECTORY, not to a pane: a
+	// workspace's sync state is a fact about the project, and it has to be
+	// answerable for a workspace that is asleep and has no pane at all.
+	MsgRequestGitSync MessageType = "request_git_sync"
 	// MsgRequestFile asks for one file operation on the daemon's own disk —
 	// stat, a ranged read, a ranged write.
 	MsgRequestFile  MessageType = "request_file"
@@ -125,6 +132,7 @@ const (
 	MsgBlockResult    MessageType = "block_result"
 	MsgDirListing     MessageType = "dir_listing"
 	MsgWorktreeResult MessageType = "worktree_result"
+	MsgGitSyncResult  MessageType = "git_sync_result"
 	MsgFileResult     MessageType = "file_result"
 	MsgHookReport     MessageType = "hook_report"
 	MsgControlOpen    MessageType = "control_open"
@@ -170,6 +178,14 @@ const (
 	// on a filesystem, so a checkout behind a pane on another box can only be
 	// listed, created or removed by that box.
 	FeatureWorktree = "worktree"
+	// FeatureGitSync: the daemon can answer "is this checkout level with its
+	// remote" for a directory on its own filesystem (MsgRequestGitSync →
+	// MsgGitSyncResult). It is the only way a workspace on another machine can
+	// carry a sync state at all, for the reason host-side branch resolution
+	// exists: the workspace's path names a directory on THAT filesystem, and a
+	// monorepo checked out at the same place on both boxes would otherwise
+	// produce a plausible and completely wrong answer here.
+	FeatureGitSync = "git_sync"
 	// FeatureHookRelay: the daemon runs a hook-report socket on its own machine
 	// and relays what arrives there to the client (MsgHookReport →
 	// MsgHookReply). Advertised as a name AND as a path — Welcome.HookSocket is
@@ -468,6 +484,30 @@ func NewRequestWorktree(id uint64, req worktree.OpRequest) RequestWorktree {
 	return RequestWorktree{Type: MsgRequestWorktree, ID: id, Req: req}
 }
 
+// RequestGitSync asks the daemon whether Dir's trunk branch is level with its
+// remote, and GitSyncResult answers it. Dir is a path on the DAEMON's
+// filesystem — the whole point of the round trip.
+//
+// ID is an explicit correlation handle, for RequestWorktree's reason and then
+// some: the answer involves a network round trip from the daemon to a forge, so
+// two directories asked about in one order routinely answer in the other. A
+// repository whose remote is unreachable takes the full timeout while the one
+// asked about after it answers in half a second.
+//
+// The client polls on its own schedule and sends one of these per workspace per
+// sweep, so a daemon may see several at once. That is deliberate: the daemon is
+// stateless here, holds no subscription, and a sweep that is abandoned costs it
+// nothing beyond the answers already in flight.
+type RequestGitSync struct {
+	Type MessageType `json:"type"`
+	ID   uint64      `json:"id"`
+	Dir  string      `json:"dir"`
+}
+
+func NewRequestGitSync(id uint64, dir string) RequestGitSync {
+	return RequestGitSync{Type: MsgRequestGitSync, ID: id, Dir: dir}
+}
+
 // The control relay carries the client's control API to a socket on the
 // daemon's machine, so in-pane tooling there can drive the session.
 //
@@ -623,7 +663,8 @@ func NewWelcomeAt(version int, errMsg string, panes []uint32) Welcome {
 // cannot alter the daemon's advertisement by holding onto it.
 func Features() []string {
 	return []string{FeaturePing, FeatureHostStats, FeatureListDir, FeatureWorktree,
-		FeatureHookRelay, FeatureControlRelay, FeatureCommandLedger, FeatureFileTransfer}
+		FeatureGitSync, FeatureHookRelay, FeatureControlRelay, FeatureCommandLedger,
+		FeatureFileTransfer}
 }
 
 type PaneFrame struct {
@@ -1031,6 +1072,26 @@ type WorktreeResult struct {
 
 func NewWorktreeResult(id uint64, res worktree.OpResult) WorktreeResult {
 	return WorktreeResult{Type: MsgWorktreeResult, ID: id, Result: res}
+}
+
+// GitSyncResult answers a RequestGitSync, echoing its ID. The payload is the
+// shared gitsync.Status rather than a wire-local copy, for the reason
+// RequestWorktree carries worktree.OpRequest: both ends would otherwise hold
+// their own idea of what the states are, and the one that drifted would be the
+// one nobody was looking at.
+//
+// There is no error field. Every failure — not a repository, no remote,
+// unreachable, git missing — is already the zero Status, which is exactly what
+// the client draws as "nothing to say". An Error event would turn a repository
+// the user cannot reach into a toast in somebody's browser every two minutes.
+type GitSyncResult struct {
+	Type   MessageType    `json:"type"`
+	ID     uint64         `json:"id"`
+	Status gitsync.Status `json:"status"`
+}
+
+func NewGitSyncResult(id uint64, st gitsync.Status) GitSyncResult {
+	return GitSyncResult{Type: MsgGitSyncResult, ID: id, Status: st}
 }
 
 // RequestFile asks the daemon to run one file operation on ITS filesystem, and

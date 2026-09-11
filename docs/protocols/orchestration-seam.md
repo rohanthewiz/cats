@@ -85,6 +85,7 @@ without racing the daemon's own post-hello replay. Unknown pane ids are ignored.
 | `request_command_marks` | `on` | turn shell-integration scanning on or off for this connection. Capability: `command_ledger` |
 | `request_list_dir` | `pane_id`, `dir`, `base`, `recents`, `live` | list a directory **on the daemon's filesystem**; answered with `dir_listing`. Capability: `list_dir` |
 | `request_worktree` | `id`, `req` (`op`, `cwd`, `path`, `branch`, `root`, `force`) | run one git-worktree operation **on the daemon's machine**; answered with `worktree_result` carrying the same `id`. Capability: `worktree` |
+| `request_git_sync` | `id`, `dir` | is `dir`'s trunk branch level with its remote, **on the daemon's machine**; answered with `git_sync_result` carrying the same `id`. Capability: `git_sync` |
 | `request_file` | `id`, `req` (`op`, `path`, `base`, `offset`, `length`, `data`, `more`, `mode`, `overwrite`) | stat, read a slice of, or write a slice of a file **on the daemon's filesystem**; answered with `file_result` carrying the same `id`. Capability: `file_transfer` |
 | `hook_reply` | `id`, `payload` | the answer to a `hook_report`, written back to the waiting hook client verbatim |
 | `control_reply` | `id`, `payload` | bytes from the orchestrator's control server, written to the relayed client verbatim |
@@ -113,6 +114,7 @@ without racing the daemon's own post-hello replay. Unknown pane ids are ignored.
 | `block_result` | `id`, `found`, `start_row`, `end_row`, `top_row`, `text` | reply to `request_block`. `found:false` for a block whose rows have been discarded — never a row number that now points at other output |
 | `command_end` | `pane_id`, `exit`, `duration_ms` | it finished. `exit` is **absent** when the shell reported none — deliberately distinct from `0` |
 | `dir_listing` | `pane_id`, `listing` | reply to `request_list_dir`, one per request. A path that does not resolve is `exists:false` with a reason, not an error event |
+| `git_sync_result` | `id`, `status` | reply to `request_git_sync`, matched by `id` rather than by order — the answer ends in a network round trip to a forge, so two directories asked about in one order routinely answer in the other. `status` is a `gitsync.Status` (`state` of `synced` / `ahead` / `behind`, plus the `branch` and `remote` compared and, for `ahead`, a count). There is no error field: every failure is already the zero status, which is what the sidebar draws as "nothing to say" |
 | `worktree_result` | `id`, `result` | reply to `request_worktree`, matched by `id` rather than by order — git runs off the dispatch goroutine, so two operations finish in whichever order git finishes them. A git failure is `result.error` (with `result.dirty` for the escalation), not an error event |
 | `file_result` | `id`, `result` | reply to `request_file`, matched by `id` rather than by order — a transfer is a loop of independent chunks, so several are outstanding at once and each finishes when its disk does. A filesystem failure is `result.error`, not an error event |
 | `hook_report` | `id`, `payload` | one agent hook request that arrived on the daemon's own hook socket, forwarded **verbatim**. Capability: `hook_relay` |
@@ -163,10 +165,50 @@ reads correctly as "the base protocol only".
 | `host_stats` | `request_host_stats` / `host_stats` | the sidebar's per-host meters — see below |
 | `list_dir` | `request_list_dir` / `dir_listing` | the start-path picker completing a path on another machine — see below |
 | `worktree` | `request_worktree` / `worktree_result` | the git-worktree dialogs acting on another machine's checkouts — see below |
+| `git_sync` | `request_git_sync` / `git_sync_result` | the sidebar's workspace sync dot, for a workspace whose checkout is on this machine — see below |
 | `hook_relay` | `hook_report` / `hook_reply`, plus `welcome.hook_socket` | agent hook reports from panes on this machine — see below |
 | `control_relay` | `control_open` / `control_data` / `control_reply` / `control_close`, plus `welcome.control_socket` | the orchestrator's control API, for in-pane tooling on this machine — see below |
 | `command_ledger` | `request_command_marks` / `command_start` / `command_end` | the command history, read out of this machine's panes — see below |
 | `file_transfer` | `request_file` / `file_result` | `file.stat` / `file.get` / `file.put` and `catctl cp` reaching this machine's disk — see below |
+
+### Workspace git sync
+
+`request_git_sync` is the worktree principle once more, applied to a *question*
+rather than an operation. The sidebar's workspace dot says whether a checkout is
+level with its remote, and a workspace pinned to another machine names a path in
+that machine's filesystem — so answering it in the orchestrator would report on
+whatever local directory happens to share the name. For a monorepo checked out
+at the same place on both boxes that is a plausible and completely wrong answer,
+which is worse than none.
+
+So the daemon that owns the directory answers. `dir` travels as the workspace's
+own start directory and is not expanded or canonicalised on the way — it is
+already a path in the answering machine's terms.
+
+The daemon runs `internal/gitsync` off its dispatch goroutine, for a stronger
+reason than the worktree request: the answer ends in `git ls-remote` against a
+forge, which on an unreachable remote runs to that package's own network
+timeout. Answering on the reader would freeze every terminal on that machine for
+as long as somebody else's git server takes to not answer.
+
+Three properties follow from it being a poll rather than a command:
+
+* **`id`, not order** — like the worktree request, and more so: one remote is
+  reachable and the next is not, so completion order says nothing about request
+  order.
+* **No error field.** Not a repository, no remote, unreachable, git not
+  installed — all of them are the zero `Status`, which the sidebar draws as an
+  uncoloured dot. An error event would put a toast in somebody's browser every
+  two minutes for a machine that is merely asleep.
+* **No subscription.** The daemon holds no state; the orchestrator asks again on
+  its own schedule (every two minutes, plus once when a host finishes its
+  handshake, so a machine coming back lights its rows up rather than waiting out
+  the poll). A sweep that is abandoned costs the daemon nothing beyond the
+  answers already in flight.
+
+A host that cannot answer — too old, or down — means its workspaces are left out
+of the sweep entirely and their dots go uncoloured. That is deliberate: the
+alternative is a colour that stops tracking reality the moment a link drops.
 
 ### Liveness
 

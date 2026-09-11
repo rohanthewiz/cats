@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rohanthewiz/cats/internal/gitsync"
 	"github.com/rohanthewiz/cats/internal/worktree"
 )
 
@@ -504,6 +505,78 @@ func TestListDirReportsAMissingPathWithoutFailing(t *testing.T) {
 	}
 	if dl.Listing.Exists || !strings.Contains(dl.Listing.Error, "no such directory") {
 		t.Fatalf("listing = %+v, want exists=false with a reason", dl.Listing)
+	}
+}
+
+// A git-sync check is answered by the machine whose disk holds the checkout,
+// for the reason host-side branch resolution exists: the directory in the
+// request is a path on THIS filesystem, and it is the only filesystem that can
+// say anything true about it.
+//
+// The fixture is a repository with no remote, which resolves to the zero Status
+// — the "nothing to say" answer. That is deliberately the assertion: what is
+// being pinned here is the round trip (feature advertised, request dispatched,
+// id echoed, status decoded), and a case that needed a reachable forge would be
+// a test that fails on an aeroplane. The state machine itself is pinned against
+// real remotes in internal/gitsync.
+func TestGitSyncAnswersFromTheDaemonsFilesystem(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	c := dialHost(t, nil)
+	w := handshake(t, c, NewHello())
+	if !slices.Contains(w.Features, FeatureGitSync) {
+		t.Fatalf("welcome features = %v, want %q among them", w.Features, FeatureGitSync)
+	}
+
+	repo := t.TempDir()
+	for _, args := range [][]string{{"init", "-q", "-b", "main"}, {"commit", "-q", "-m", "x", "--allow-empty"}} {
+		cmd := exec.Command("git", append([]string{"-C", repo}, args...)...)
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=cats", "GIT_AUTHOR_EMAIL=cats@example.invalid",
+			"GIT_COMMITTER_NAME=cats", "GIT_COMMITTER_EMAIL=cats@example.invalid")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+
+	if err := WriteMessage(c, NewRequestGitSync(11, repo)); err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	typ, payload := readEvent(t, c)
+	if typ != MsgGitSyncResult {
+		t.Fatalf("answer = %q, want git_sync_result", typ)
+	}
+	var res GitSyncResult
+	if err := json.Unmarshal(payload, &res); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	// The id is the correlation handle and cannot be replaced by order: the
+	// answer involves a network round trip from this machine, so two directories
+	// asked about in one order routinely answer in the other.
+	if res.ID != 11 {
+		t.Fatalf("reply id = %d, want the request's 11", res.ID)
+	}
+	if res.Status.State != gitsync.Unknown {
+		t.Fatalf("state = %q, want unknown for a repository with no remote", res.Status.State)
+	}
+
+	// A directory that is not a repository at all answers the same way, over the
+	// same round trip — no error event, because "nothing to say" is not a fault
+	// and a toast every two minutes would be.
+	if err := WriteMessage(c, NewRequestGitSync(12, t.TempDir())); err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	typ, payload = readEvent(t, c)
+	if typ != MsgGitSyncResult {
+		t.Fatalf("answer = %q, want git_sync_result", typ)
+	}
+	var plain GitSyncResult
+	if err := json.Unmarshal(payload, &plain); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if plain.ID != 12 || plain.Status.State != gitsync.Unknown {
+		t.Fatalf("result = %+v, want id 12 and an unknown state", plain)
 	}
 }
 

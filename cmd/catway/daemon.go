@@ -799,6 +799,16 @@ func (d *daemon) session(conn net.Conn) error {
 	d.setControlSocket(w.ControlSocket)
 	d.o.post(func() {
 		d.o.broadcastHosts() // the roster's dot goes green
+		// The workspaces this machine owns were skipped by every sweep it was
+		// down for — nothing here could answer for a directory on its
+		// filesystem — so their dots have been uncoloured. Asking now, rather
+		// than waiting out the poll, is the difference between a host coming
+		// back and its rows lighting up, and a host coming back and its rows
+		// staying blank for up to two minutes for no visible reason.
+		//
+		// Free when there is nothing to do: a sweep already in flight is left
+		// alone, and a session with no workspace on this host plans nothing.
+		d.o.startWorkspaceGitSweep()
 		// The event fires HERE, on the completed handshake, rather than in
 		// HostAttach: that command answers before a packet has been sent, and
 		// what a subscriber (or a runbook trigger) needs to know is when the
@@ -956,6 +966,16 @@ func (d *daemon) dispatch(mt orchestration.MessageType, payload []byte) {
 		// off its dispatch goroutine, so a listing asked for second can answer
 		// first, and the id is what keeps the two answers apart.
 		o.post(func() { o.resolvePending(hostKey(d.id, ev.ID), ev.Result) })
+	case orchestration.MsgGitSyncResult:
+		var ev orchestration.GitSyncResult
+		if err := json.Unmarshal(payload, &ev); err != nil {
+			return
+		}
+		// Matched on (host, id) like a worktree result, and for the same reason
+		// squared: this daemon answers sync checks off its dispatch goroutine
+		// AND each answer waits on a network round trip of its own, so the order
+		// they come back in says nothing at all about the order they were asked.
+		o.post(func() { o.resolvePending(gitSyncKey(d.id, ev.ID), ev.Status) })
 	case orchestration.MsgFileResult:
 		var ev orchestration.FileResult
 		if err := json.Unmarshal(payload, &ev); err != nil {

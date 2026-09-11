@@ -225,6 +225,9 @@ type orch struct {
 	// matched on the host it came back from as well as the id), and never
 	// persisted: an id means nothing beyond the life of the request.
 	nextWorktreeReq uint64
+	// nextGitSyncReq allocates the ids for the workspace sync sweep's round
+	// trips, on the same terms: monotonic across hosts, never persisted.
+	nextGitSyncReq uint64
 	// waiters holds active pane.wait_for_output waiters per pane; each matches the
 	// pane's live output stream (plus a one-shot seed of the current screen) and
 	// resolves on a match, its own timeout, or the pane exiting. waiterCheck marks
@@ -318,11 +321,19 @@ type orch struct {
 	// session, and it must not be persisted into a snapshot that a restart
 	// would then restore as if it were still true.
 	wsGit map[string]browserproto.WorkspaceGitInfo
-	// wsGitBusy is set while a sweep is in flight, so a slow network round trip
-	// cannot stack sweeps on top of each other — with an unreachable remote the
-	// poll takes up to gitsync's remote timeout per workspace, which is longer
-	// than the interval for a session holding several of them.
-	wsGitBusy bool
+	// wsGitSweep is the pass in flight, nil when idle. A sweep's answers arrive
+	// from two places on two schedules — a batch from the local worker, one
+	// message per remote workspace — so it carries the count still outstanding
+	// as well as what has landed; see cmd/catway/gitsync.go.
+	//
+	// Non-nil also means "do not start another". With an unreachable remote one
+	// pass can outlast the two-minute interval, and starting a second would
+	// double the load on exactly the host that is already not answering.
+	wsGitSweep *gitSweep
+	// wsGitGen numbers the sweeps, so a reply from an abandoned one is dropped
+	// rather than folded into its successor — the two describe different sets of
+	// workspaces, and a late answer would otherwise decrement the wrong counter.
+	wsGitGen uint64
 	// hostStats is each remote cathost's last reported reading of the machine
 	// it runs on, keyed by host id (hoststats.go). Kept beside the poll's
 	// reading rather than inside it because the two arrive on completely
@@ -489,6 +500,7 @@ const (
 	reqWorktree                 // worktree.* on any host → worktree_result
 	reqBlock                    // ledger.output / ledger.jump → block_result
 	reqFile                     // file.stat / file.get / file.put → file_result
+	reqGitSync                  // the workspace sync sweep on any host → git_sync_result
 )
 
 // label names the command for user-facing errors ("<label> timed out").
@@ -504,6 +516,8 @@ func (k reqKind) label() string {
 		return "block lookup"
 	case reqFile:
 		return "file transfer"
+	case reqGitSync:
+		return "git sync check"
 	}
 	return "read"
 }
@@ -520,6 +534,8 @@ func (k reqKind) timeout() time.Duration {
 		return worktreeTimeout
 	case reqFile:
 		return fileTimeout
+	case reqGitSync:
+		return gitSyncTimeout
 	}
 	return reqTimeout
 }
@@ -554,6 +570,14 @@ func hostKey(host string, id uint64) reqKey {
 // once and the daemon answers each when its disk does.
 func fileKey(host string, id uint64) reqKey {
 	return reqKey{kind: reqFile, id: id, host: host}
+}
+
+// gitSyncKey is the key for one workspace's sync check. Id-correlated like a
+// worktree request and for a stronger reason: the daemon's answer ends in a
+// network round trip to a forge, so two directories asked about in one order
+// routinely answer in the other — one remote is reachable and the other is not.
+func gitSyncKey(host string, id uint64) reqKey {
+	return reqKey{kind: reqGitSync, id: id, host: host}
 }
 
 // blockKey is the key for a block lookup. Id-correlated like a worktree request
@@ -599,6 +623,13 @@ const (
 	// filexfer.MaxChunk — a request that has not been answered in half a minute
 	// is a lost one, and a `catctl cp` loop is better told so than left hanging.
 	fileTimeout = 30 * time.Second
+	// gitSyncTimeout is the backstop for one workspace's sync check. It has to
+	// clear the daemon's own budget — gitsync waits up to 30s on the network
+	// before giving up, plus its local commands — or a repository behind a
+	// black-holing forge would be failed here while the daemon was still going
+	// to answer it. Comfortably under the two-minute sweep interval, so a lost
+	// reply cannot stall the next pass.
+	gitSyncTimeout = 60 * time.Second
 )
 
 // modelSpawner satisfies workspace.PaneSpawner without touching the daemon: the
