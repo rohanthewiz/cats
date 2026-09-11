@@ -276,19 +276,103 @@
     return s;
   }
 
-  // flagMark is the mark itself: the glyph in the kind's colour, carrying the
-  // note in its tooltip. Text rather than an SVG (where the lock and the paw
-  // print are drawn) for the reason the vocabulary is one field — a custom glyph
-  // has no SVG to draw, so a text mark is the only shape both halves can share.
+  // FLAG_ICONS: real icons for named kinds, drawn where a row has the room for
+  // them. The vocabulary's glyph is documented as the *fallback* rendering (see
+  // internal/flags: "a client with a real icon for the kind may use it instead"),
+  // and this is the client that has one — the sidebar already draws the lock, the
+  // moon and the paw print as SVGs beside the mark, so a kind whose meaning is a
+  // *thing* can be that thing instead of a character approximating it.
+  //
+  // Only kinds whose glyph was losing the argument need an entry. Everything not
+  // listed here — the flag, the star, the question mark, and every custom glyph
+  // the user invents — falls through to the text path below, which is the reason
+  // this is a lookup and not a branch: the two halves of the vocabulary still
+  // share one code path, and a missing icon is a miss, not a special case.
+  const FLAG_ICONS = {
+    // A sticky note: one solid field with a turned-up corner and three rules.
+    //
+    // Two departures from every other mark in the sidebar, both deliberate.
+    //
+    // It is FILLED, not stroked. The stroked page it replaced was correct and
+    // unreadable: at 13px its outline, its dog-ear and its rules were all the
+    // same 1px grey line, so the whole icon averaged out to a smudge the size of
+    // a character. A solid field has no such problem — it is the one shape that
+    // survives being small, which is the same lesson the paw print's toe pads
+    // already record a hundred lines up.
+    //
+    // It carries its OWN COLOURS rather than currentColor, so unlike the lock,
+    // the moon and the paw it does not follow --flag-note (or a theme that
+    // retunes it). That is the cost of the mark being a picture of a thing
+    // instead of a tinted silhouette, and it is the point: a note is the kind
+    // with no urgency, so it loses every contest for attention that colour
+    // alone decides. Being the one *drawn* mark in the column is how it gets
+    // noticed without claiming to be more important than a follow-up.
+    //
+    // The yellow sits a step warmer and deeper than the ★ important flag
+    // (#f2c14e) and the todo paw (--todo #f0dfa0), which are the two things
+    // nearest it in both hue and row position. Hue alone would not separate
+    // them; shape does — a filled rectangle against a star and a paw print.
+    //
+    //     ┌────────┐
+    //     │ ▬▬▬▬▬▬ │   three rules, the last short, so the field
+    //     │ ▬▬▬▬▬▬ │   reads as written-on rather than as a swatch
+    //     │ ▬▬▬  ╱▓│
+    //     └─────┘▓▓┘   corner turned up, in the shade the fold casts
+    note() {
+      const svg = document.createElementNS(SVGNS, "svg");
+      svg.setAttribute("class", "fnote");
+      svg.setAttribute("viewBox", "0 0 16 16");
+      // path() is local rather than shared: this is the only icon in the file,
+      // and four calls do not earn a helper anyone else has to go read.
+      const path = (d, attrs) => {
+        const el = document.createElementNS(SVGNS, "path");
+        el.setAttribute("d", d);
+        for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+        svg.appendChild(el);
+      };
+      // The note itself, with the bottom-right corner cut away for the fold.
+      path("M2.8 3.3a1.1 1.1 0 0 1 1.1-1.1h8.2a1.1 1.1 0 0 1 1.1 1.1v6.5" +
+        "L9.1 13.9H3.9a1.1 1.1 0 0 1-1.1-1.1z", { fill: "#f2d45f" });
+      // The turned-up corner: the triangle the cut leaves, in a darker tone so
+      // it reads as the back of the sheet catching shade rather than as a bite
+      // taken out of the mark.
+      path("M13.2 9.8H10.2a1.1 1.1 0 0 0-1.1 1.1v3z", { fill: "#cfa92f" });
+      // The writing. Dark enough to hold against the field at 14px — a lighter
+      // rule would vanish into the yellow — and the last one short, which is
+      // what reads as writing that stopped rather than as a hatch pattern.
+      for (const d of ["M5 5.5h6", "M5 7.7h6", "M5 9.9h3.2"]) {
+        path(d, { stroke: "#9c7f22", "stroke-width": "1", "stroke-linecap": "round" });
+      }
+      return svg;
+    },
+  };
+
+  // flagMark is the mark itself: the kind's icon where there is one, its glyph
+  // otherwise, in the kind's colour and carrying the note in its tooltip. The
+  // text path is the one both halves of the vocabulary share — a custom glyph is
+  // a character the user typed, and there is no icon to look up for it — so an
+  // icon is an upgrade over the fallback, never a replacement for it. Every
+  // *string* context (menus, toasts, the pane header chip, tooltips) keeps using
+  // flagGlyph, which is why the glyph has to stay legible on its own.
   //
   // The class carries the kind so the CSS can colour it; an unknown kind gets
   // fk-custom, which takes the default ink rather than borrowing some named
-  // kind's meaning-by-colour.
+  // kind's meaning-by-colour. An icon may ignore that colour — the note does,
+  // because it is drawn artwork rather than a silhouette — but the class goes
+  // on regardless, so a kind that later swaps a tinted icon in gets its colour
+  // without touching this function.
   function flagMark(f) {
     if (!f) return null;
     const s = document.createElement("span");
-    s.className = "flag-mark " + (FLAG_BY_KIND.has(f.kind) ? "fk-" + f.kind : "fk-custom");
-    s.textContent = flagGlyph(f);
+    const named = FLAG_BY_KIND.has(f.kind);
+    s.className = "flag-mark " + (named ? "fk-" + f.kind : "fk-custom");
+    const icon = named && FLAG_ICONS[f.kind];
+    if (icon) {
+      s.classList.add("flag-icon");
+      s.appendChild(icon());
+    } else {
+      s.textContent = flagGlyph(f);
+    }
     s.title = flagTitle(f);
     return s;
   }

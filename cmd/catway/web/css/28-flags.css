@@ -14,6 +14,22 @@
      a column of rows. */
   .flag-mark { font-weight:700; }
 
+  /* A kind drawn as an icon rather than a character (FLAG_ICONS in
+     07-workspaces.js). The span stops being a text box, so it has to lay the
+     icon out itself; the icon takes the kind's colour through currentColor,
+     exactly as the lock and paw marks beside it do.
+
+     14px, matching the paw print rather than the 12px padlock: this icon carries
+     three rules and a folded corner inside its field, and a pixel either way is
+     the difference between reading them and reading a yellow tile.
+
+     The note icon brings its own colours (it is drawn artwork, not a tinted
+     silhouette), so it takes no colour from .fk-note — that rule stays for the
+     kinds still drawn as text, and for whatever this kind is drawn as next. */
+  .flag-mark.flag-icon { display:inline-flex; align-items:center; }
+  .flag-mark .fnote { width:calc(14px * var(--sb-scale)); height:calc(14px * var(--sb-scale));
+    display:block; }
+
   /* The named kinds. An unknown kind — a glyph the user invented — falls to
      fk-custom, which takes plain foreground rather than borrowing some named
      kind's meaning-by-colour. */

@@ -74,12 +74,17 @@ var defs = []Def{
 	{KindDone, "✓", "done", "handled — nothing left to do"},
 	// The note is a ruled page (U+25A4), not the pencil it used to be: a pencil
 	// is the *rename* affordance in the pane chrome and the help sheet, so the
-	// same shape was saying two different things one column apart. A notepad or
-	// scroll emoji says "note" more plainly still, but every mark here is a text
-	// glyph the client tints per kind — an emoji carries its own colour and
-	// measures two terminal columns, so it would drop out of the colour scheme
-	// and push catctl's listing a column off. This stays in the BMP with the
-	// rest of them.
+	// same shape was saying two different things one column apart.
+	//
+	// A notepad emoji would say "note" more plainly, and this is the wrong place
+	// to say it: these glyphs are the text fallback, and they are what catctl
+	// lays out in fixed columns and what every menu, toast and tooltip
+	// interpolates into a string. An emoji carries its own colour (so it ignores
+	// the client's per-kind tinting) and measures two terminal columns (so it
+	// pushes catctl's listing off). A client with room for a real icon draws one
+	// instead — the browser sidebar draws this kind as a colour sticky-note SVG,
+	// beside the padlock and paw print it already drew — which is exactly the
+	// split this field's doc comment describes.
 	{KindNote, "▤", "note", "just a note"},
 }
 

@@ -537,6 +537,11 @@ renders the word "folloup":
 | `done` | ✓ | handled — nothing left to do |
 | `note` | ▤ | just a note |
 
+The glyph column is the *fallback* rendering, and the one the CLI lays out in its
+columns. A client with a real icon for a named kind may draw that instead — the
+browser sidebar draws `note` as a page icon — but every client must be able to
+fall back to the glyph, because a custom kind has nothing else to draw.
+
 A custom glyph is at most 8 code points (enough for a ZWJ emoji sequence) and may
 contain no whitespace or control characters. The note is sanitized rather than
 refused — it is prose someone typed — but it comes back single-line and capped at
