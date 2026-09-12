@@ -219,21 +219,31 @@
   }
 
   // flagMenuItems is the whole flag vocabulary as a menu: one row per named
-  // kind, then the dialog that covers a note and a custom glyph, then the two
-  // rows that only make sense once something is flagged.
+  // kind, then (unless the caller hoists it out, see opts below) the dialog that
+  // covers a note and a custom glyph, then the two rows that only make sense
+  // once something is flagged.
   //
   // Picking a kind is one click and keeps whatever note is already there — the
   // common motion is "mark this, I'll come back", and making that cost a dialog
   // would mean it doesn't get used. The note has its own row for when it is the
   // point.
-  function flagMenuItems(target) {
+  //
+  // opts.noteRow drops that "flag with a note…" row from the submenu for callers
+  // that carry it as a sibling of the flag row instead (the workspace menu does;
+  // see wsMenuItems). The rows that only make sense once something is flagged
+  // stay in the submenu either way, since they are about the flag already there
+  // rather than about setting one.
+  function flagMenuItems(target, opts) {
     const cur = target.flag;
+    const noteRow = !opts || opts.noteRow !== false;
     const items = FLAG_DEFS.map((d) => ({
       icon: { text: d.glyph, cls: "fk-" + d.kind },
       label: d.label + (cur && cur.kind === d.kind ? "  (current)" : ""),
       fn: () => sendFlag(target, d.kind, cur ? cur.note : ""),
     }));
-    items.push("-", { label: "flag with a note…", fn: () => openFlagDialog(target) });
+    // One separator at most, and only when something follows it.
+    if (noteRow || cur) items.push("-");
+    if (noteRow) items.push({ label: "flag with a note…", fn: () => openFlagDialog(target) });
     if (cur) {
       items.push({ label: "edit note…", fn: () => editFlagNote(target) });
       items.push({ label: "clear flag", fn: () => sendFlag(target, "", "") });
@@ -248,12 +258,17 @@
   function wsMenuItems(w) {
     return [
       { head: "Workspace" },
-      // The three that address the workspace ITSELF come first — make one, name
-      // one, mark one — since those are the rows reached most often and the
-      // ones a reader scans for. Everything below changes the workspace's state.
+      // The rows that address the workspace ITSELF come first — make one, name
+      // one, mark one (bare or with a note) — since those are reached most often
+      // and are what a reader scans for. Everything below changes its state.
       { label: "new…", fn: newWorkspace },
       { label: "rename…", fn: () => renameWorkspace(w) },
-      { label: flagRowLabel(flagOf(w)), sub: flagMenuItems(wsFlagTarget(w)) },
+      { label: flagRowLabel(flagOf(w)), sub: flagMenuItems(wsFlagTarget(w), { noteRow: false }) },
+      // The annotated flag reads as a peer of "flag…" rather than as the last
+      // row of its submenu: both set a flag on this workspace, one straight from
+      // the vocabulary and one through the dialog, so they sit together at the
+      // same level instead of one hiding inside the other.
+      { label: "flag with a note…", fn: () => openFlagDialog(wsFlagTarget(w)) },
       // A second window on this workspace, leaving the current one where it is.
       // Two windows on ONE workspace mirror each other; the useful shape is one
       // window per project, which is why this sits on the row rather than on
