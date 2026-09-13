@@ -744,9 +744,17 @@
     // the whole list means the section is meant to be one line, and a fold that
     // leaves a row behind hasn't folded. The way in is still the context menu and
     // the palette, both of which reach newWorkspace without this row.
+    //
+    // When the list is split it takes the same rule the shelf headers draw between
+    // shelves. Without it the row sits directly under the last shelf and, worse,
+    // directly under that shelf's header whenever the shelf is folded, so
+    // "+ workspace" read as an action of ASLEEP (or LOCKED) rather than of the
+    // section. The rule closes off the last shelf the way each header closes off
+    // the one above it. A flat list has no shelves to be mistaken for, so it
+    // stays undivided.
     if (!flatFolded) {
       const add = document.createElement("li");
-      add.className = "add"; add.textContent = "+ workspace"; add.title = "new workspace";
+      add.className = "add" + (split ? " sep" : ""); add.textContent = "+ workspace"; add.title = "new workspace";
       pressActivate(add, () => newWorkspace()); // rebuilt with the rows above it
       wsListEl.appendChild(add);
     }

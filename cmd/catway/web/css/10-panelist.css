@@ -31,7 +31,10 @@
      its own copy: a fold header is a fold header wherever it appears. */
   #pane-list li.wsgrp, #ws-list li.wsgrp { color:var(--ws-heading); font-size:calc(11px * var(--sb-scale)); text-transform:uppercase;
     letter-spacing:.5px; cursor:pointer; font-weight:600; }
-  #pane-list li.wsgrp.sep, #ws-list li.wsgrp.sep { border-top:1px solid var(--line); margin-top:5px; padding-top:7px; }
+  /* #ws-list li.add.sep: the "+ workspace" row under a split list shares the
+     shelf divider, so it reads as the section's action and not the last shelf's
+     (see renderWorkspaces). One rule, so the two lines can't drift apart. */
+  #pane-list li.wsgrp.sep, #ws-list li.wsgrp.sep, #ws-list li.add.sep { border-top:1px solid var(--line); margin-top:5px; padding-top:7px; }
   #pane-list li.wsgrp:hover, #ws-list li.wsgrp:hover { background:var(--panel2); color:var(--fg-soft); }
   /* The rollup sits ahead of the caret and the pair is pushed to the right edge. */
   #pane-list li.wsgrp .gsum, #pane-list li.wsgrp .car,
