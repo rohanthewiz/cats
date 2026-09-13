@@ -26,11 +26,20 @@ func builtins() []Theme {
 				// a greenish brown that separates them from both the green
 				// headings above and the muted pane rows below.
 				"ws-heading": "#a09a62",
-				// The pane header's git branch takes the same warm tan: it is
-				// the same kind of secondary label, and sharing the tone keeps
-				// the strip to three hues (green handle, tan branch, yellow
-				// agent) instead of four.
-				"branch": "#a09a62",
+				// The pane header's git branch is orange, not the tan it once
+				// shared with ws-heading: it is the field a glance hunts for on
+				// a wall of near-identical headers, so it takes the one hue on
+				// the strip nothing else claims. Same value as the stylesheet's
+				// :root fallback — this map, not that block, is what actually
+				// paints the page, so the two have to move together.
+				//
+				// Every built-in below authors its own branch for the same
+				// reason: the derivation (branch ← ws-heading) would hand each
+				// of them its tan heading back. The orange is tuned per palette
+				// — kept off each theme's accent/todo/warn so it stays its own
+				// field, and driven dark on the light themes to hold ≥4.5:1
+				// against their pale --chrome strip.
+				"branch": "#ea9a4e",
 				"todo":   "#f0dfa0", "ok": "#6ac47a", "warn": "#e0b64e", "err": "#e57373",
 				"done": "#00ccf5",
 				// The six agent identity hues, hand-picked rather than derived:
@@ -68,6 +77,7 @@ func builtins() []Theme {
 				"panel": "#313335", "panel2": "#3c3f41", "line": "#45494b", "muted": "#8c8c8c",
 				"chrome": "#3c3f41", "chrome-focus": "#4e5254", "heading": "#ffc66b",
 				"ws-heading": "#a89a68", // the editor's olive annotation color, dimmed
+				"branch":     "#f0a35e", // lighter than the #cc7832 accent so the handle and branch don't merge
 				"todo":       "#bbb529", "ok": "#629755", "warn": "#ffc66b", "err": "#ff6b68",
 				"done": "#6897bb", "accent-fg": "#2b1d0e",
 			},
@@ -79,6 +89,7 @@ func builtins() []Theme {
 				"panel": "#16161e", "panel2": "#1f2335", "line": "#292e42", "muted": "#565f89",
 				"chrome": "#1f2335", "chrome-focus": "#33467c", "heading": "#bb9af7",
 				"ws-heading": "#a89372", // the palette's one warm tone, taken down to a sign-lit tan
+				"branch":     "#f5a05a", // the palette's orange, a shade off the #ff9e64 todo mark
 				"todo":       "#ff9e64", "ok": "#9ece6a", "warn": "#e0af68", "err": "#f7768e",
 				"done": "#7dcfff", "accent-fg": "#15161e", "fg-soft": "#a9b1d6",
 			},
@@ -90,6 +101,7 @@ func builtins() []Theme {
 				"panel": "#073642", "panel2": "#0a4652", "line": "#12454f", "muted": "#586e75",
 				"chrome": "#0a4652", "chrome-focus": "#0f5666", "heading": "#2aa198",
 				"ws-heading": "#b09a55", // solarized yellow, softened toward the base tones
+				"branch":     "#e07a3c", // solarized orange lifted: #cb4b16 itself is too dim on base02
 				"todo":       "#cb4b16", "ok": "#859900", "warn": "#b58900", "err": "#dc322f",
 				"done": "#6c71c4", "accent-fg": "#fdf6e3", "fg-strong": "#eee8d5",
 			},
@@ -103,7 +115,10 @@ func builtins() []Theme {
 				// Light theme: the earth tone has to go dark, not dim, to stay a
 				// heading on paper — solarized yellow driven down to olive brown.
 				"ws-heading": "#6f5f2a",
-				"todo":       "#b58900", "ok": "#859900", "warn": "#b58900", "err": "#dc322f",
+				// Solarized orange taken dark enough (~4.5:1 on #e4ddc8) to read
+				// bold on a 19px strip; the true #cb4b16 lands near 3.4:1.
+				"branch": "#a8420f",
+				"todo":   "#b58900", "ok": "#859900", "warn": "#b58900", "err": "#dc322f",
 				"done": "#6c71c4", "accent-fg": "#fdf6e3",
 				"fg-strong": "#073642", "fg-bright": "#002b36",
 				"err-bg": "#f6d7cd", "err-fg": "#a4321f",
@@ -118,6 +133,7 @@ func builtins() []Theme {
 				"panel": "#262019", "panel2": "#2e2620", "line": "#3e342a", "muted": "#a89a80",
 				"chrome": "#2e2620", "chrome-focus": "#4a3d30", "heading": "#d4915e",
 				"ws-heading": "#a8845c", // the ember heading, one step back from the fire
+				"branch":     "#f28b3a", // redder and hotter than the amber accent/warn it sits among
 				"todo":       "#f0d090", "ok": "#a8c080", "warn": "#e8b04e", "err": "#e57360",
 				"done": "#7ec8c0", "accent-fg": "#201505",
 			},
@@ -130,6 +146,7 @@ func builtins() []Theme {
 				"panel": "#2e3440", "panel2": "#3b4252", "line": "#434c5e", "muted": "#7b88a1",
 				"chrome": "#3b4252", "chrome-focus": "#4c566a", "heading": "#81a1c1",
 				"ws-heading": "#ab9683", // driftwood: the aurora orange pulled most of the way to gray
+				"branch":     "#e8a060", // the aurora orange brightened past the #d08770 todo mark
 				"todo":       "#d08770", "ok": "#a3be8c", "warn": "#ebcb8b", "err": "#bf616a",
 				"done": "#b48ead", "accent-fg": "#16242a",
 			},
@@ -143,6 +160,7 @@ func builtins() []Theme {
 				"panel": "#14141c", "panel2": "#1b1b26", "line": "#2c2c3c", "muted": "#7a7a95",
 				"chrome": "#1b1b26", "chrome-focus": "#2a2a44", "heading": "#ff2d95",
 				"ws-heading": "#b39a4e", // the other CRT phosphor: amber, at rest
+				"branch":     "#ff7a1a", // neon orange, halfway between the warn amber and the err red
 				"todo":       "#ffe14d", "ok": "#5fe86a", "warn": "#ffb020", "err": "#ff3860",
 				"done": "#00e5ff", "accent-fg": "#041008",
 			},
@@ -156,6 +174,7 @@ func builtins() []Theme {
 				"panel": "#171526", "panel2": "#1e1b30", "line": "#302b48", "muted": "#8580a8",
 				"chrome": "#1e1b30", "chrome-focus": "#35305a", "heading": "#f694ff",
 				"ws-heading": "#a8936f", // sodium streetlight under the neon
+				"branch":     "#ff8c42", // orange neon sign, clear of the #ffb454 warn and #ff6767 err
 				"todo":       "#ffe073", "ok": "#5df0a6", "warn": "#ffb454", "err": "#ff6767",
 				"done": "#82e2ff", "accent-fg": "#140a24",
 			},
@@ -171,7 +190,10 @@ func builtins() []Theme {
 				// Light theme: dark olive brown, the ledger amber taken down far
 				// enough to hold a heading against the near-white panel.
 				"ws-heading": "#6f6a4e",
-				"todo":       "#9a6700", "ok": "#1e8e5a", "warn": "#b07800", "err": "#cc3d3d",
+				// Burnt orange, dark enough (~4.7:1 on #e4e7ed) for the light
+				// strip and redder than the #b07800 warn amber.
+				"branch": "#a8480c",
+				"todo":   "#9a6700", "ok": "#1e8e5a", "warn": "#b07800", "err": "#cc3d3d",
 				"done": "#0e8a9e", "accent-fg": "#ffffff",
 				"fg-strong": "#14181f", "fg-bright": "#000000",
 				"err-bg": "#f5dada", "err-fg": "#a02c2c",

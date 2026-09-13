@@ -68,9 +68,10 @@ var requiredKeys = []string{"bg", "fg", "muted", "line", "accent", "ok", "warn",
 //	    └─ accent-fg                            ├─ chrome-fg-dim
 //	 line ── chrome-focus                       ├─ term-fg
 //	                                            └─ hover/scroll-thumb-idle (α)
-//	muted ── ws-heading ── branch
+//	muted ── ws-heading ─┬─ branch   (sparse themes only; built-ins author an orange)
+//	                     └─ agent-3
 //	 accent ─ heading · accent-dim(α) · done · sel-fill(α) · cm-cursor(α) · scroll-thumb(α)
-//	 agent-1..6 ← accent · done · branch · heading · ok · todo (the palette's own hues)
+//	 agent-1..6 ← accent · done · ws-heading · heading · ok · todo (the palette's own hues)
 var derivations = []struct {
 	key   string
 	from  string
@@ -87,10 +88,13 @@ var derivations = []struct {
 	// heading, so a theme that doesn't author one falls back to plain muted
 	// label text — which is what those rows were before they were themeable.
 	{"ws-heading", "muted", 0},
-	// The git branch in a pane header, one more tier of secondary label. It
-	// follows ws-heading (and so, for a theme that authors neither, muted)
-	// because both are the same kind of thing: a warm counterweight to the
-	// accent, naming where something lives rather than what it is doing.
+	// The git branch in a pane header. Every built-in authors it as an orange of
+	// its own (see builtin.go) so it stands out from the rest of the strip. This
+	// fallback only reaches a sparse user theme that leaves it out. It still
+	// follows ws-heading (and so muted) because a derivation can only copy a key
+	// the theme already has, and no required key is reliably orange: warn is
+	// the header's agent colour and err its dead-pane colour, and either would
+	// make the branch look like one of those states.
 	{"branch", "ws-heading", 0},
 	{"accent-dim", "accent", 0.45},
 	{"accent-fg", "bg", 0},
@@ -113,7 +117,12 @@ var derivations = []struct {
 	// heading/branch/todo/done so those are resolved by the time they're read.
 	{"agent-1", "accent", 0},
 	{"agent-2", "done", 0},
-	{"agent-3", "branch", 0},
+	// agent-3 reads ws-heading rather than branch: it was derived from branch
+	// when branch was a copy of the tan heading, and pointing it at the heading
+	// directly keeps every sparse theme's agent-3 exactly as it was. Following
+	// branch would turn it orange too, landing it on top of the orange todo mark
+	// that agent-6 copies in tokyo-night and cool-blue.
+	{"agent-3", "ws-heading", 0},
 	{"agent-4", "heading", 0},
 	{"agent-5", "ok", 0},
 	{"agent-6", "todo", 0},
