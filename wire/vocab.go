@@ -264,9 +264,11 @@ const (
 //
 // It exists because the name ↔ params ↔ result mapping otherwise lives only in
 // the Dispatch switch and the doc comments below — readable, but not walkable by
-// a program. As data it can generate a client: cmd/catgen-dart emits the mobile
-// app's typed call sites from this table, so a command added here arrives on the
-// phone as a typed method rather than a hand-written string and a map literal.
+// a program. As data it is walked: CommandNames is derived from it, and
+// vocab_test.go checks every entry against the rest of the vocabulary. It was
+// also a generator's input — cmd/catgen-dart emitted the Flutter phone's typed
+// call sites from it — until 5add396; cats-mobile is Go now and imports this
+// package, so its call sites are these types directly.
 //
 // Params and Result hold a ZERO VALUE of the struct (SplitParams{}), not a
 // reflect.Type — the table stays readable at the call site and a generator takes
@@ -636,8 +638,8 @@ type CycleParams struct {
 // reasons. Flat keeps the shape identical to the `locked` / `host` fields
 // beside it, so a client reads one more optional scalar rather than learning a
 // sub-object; embedded means the documentation, the JSON keys and the
-// conversion live in exactly one place, and cmd/catgen-dart still flattens it
-// onto each class while offering the group back as a `flagInfo` getter.
+// conversion live in exactly one place. A Go client gets the group back without
+// asking: the embedded FlagInfo is itself a field of every struct that carries it.
 //
 // All three are omitempty, so an unflagged subject — which is nearly all of
 // them — costs nothing on the wire.
@@ -1320,9 +1322,11 @@ type HostInfo struct {
 	Label     string `json:"label"`
 	Connected bool   `json:"connected"`
 	AddrKind  string `json:"addr_kind,omitempty"`
-	// Default is "is_default" on the wire, not "default": generated clients bind
-	// each key to an identifier, and `default` is a reserved word in Dart (see
-	// cmd/catgen-dart, which refuses it rather than silently mangling the name).
+	// Default is "is_default" on the wire, not "default". The name comes from the
+	// generated Dart client (cmd/catgen-dart, removed in 5add396), which bound
+	// each key to an identifier, and `default` is reserved in Dart. It stays
+	// because the key is the contract: renaming it breaks every client that
+	// reads it, for no gain now.
 	Default bool `json:"is_default,omitempty"`
 	// Local marks the host that is this catway's own machine — the synthesized
 	// "local" host reached over server.cathost_socket. It is not derivable from

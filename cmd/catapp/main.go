@@ -182,6 +182,12 @@ func bootLocal(m *winManager, cfg appConfig) {
 		startUIWatch(len(cfg.Windows))
 		m.restore(cfg.Windows)
 	})
+
+	// From here an exit nobody asked for is answered with a restart rather than
+	// a blank window (restart.go). The overlay's "Restart catway" reaches this
+	// backend through activeBackend.
+	activeBackend.Store(b)
+	go b.superviseCatway(windowBackendUI{})
 }
 
 // runRemote is the thin-client path: no local daemons, just windows pointed at

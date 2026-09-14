@@ -56,8 +56,9 @@ fallback only for the local host.
   not a new subsystem.
 - Storage rule for anything durable added here: `github.com/rohanthewiz/bytdb` unless
   stated otherwise (user's global preference), not a hand-rolled JSONL file.
-- Wire-struct changes ⇒ regen `cmd/catgen-dart/testdata/golden`, then cats-mobile per
-  memory (which is **still owed** from slice 1 phases 6 and 8 — cats must be pushed first).
+- Wire-struct changes ⇒ cats-mobile per memory (which is **still owed** from slice 1
+  phases 6 and 8 — cats must be pushed first). There is no golden to regenerate any more:
+  `cmd/catgen-dart` went in `5add396`, and the phone imports `wire` by go.mod pin.
 
 ## Key decisions
 
@@ -810,10 +811,9 @@ in the extras plan rather than as one phase here.
 
 ## Verification
 
-- Every phase: `make test` and `make test-ghostty`; regen catgen-dart goldens whenever
-  `internal/app`, `browserproto` or `orchestration` wire structs change and
-  `go test ./cmd/catgen-dart`; `TestCommandSpecsRouted` for each new command; then
-  cats-mobile per memory.
+- Every phase: `make test` and `make test-ghostty`; `TestCommandSpecsRouted` for each new
+  command; then cats-mobile per memory. (The catgen-dart golden regen that used to sit
+  here went with `cmd/catgen-dart` in `5add396`.)
 - Phases 1–2 are the only ones with an outbound and an inbound network surface: both get a
   live run against a real ntfy topic, and Phase 2's refusals (spent token, expired token,
   dead pane, actions disabled) are each exercised by hand as well as in tests.

@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -22,11 +23,86 @@ import (
 // The launcher spawns both wired to a private socket, waits for the catway to
 // accept TCP, points the webview at it, and reaps them when the window closes.
 type backend struct {
+	// mu guards the two process slots and stopped. The catway slot is replaced
+	// while the app runs (restart.go), and stop reads both from whichever
+	// goroutine a quit arrives on.
+	mu      sync.Mutex
 	cathost *daemonProc
 	catway  *daemonProc
+	// stopped is set, and quit closed, by the first stop. After it nothing is
+	// launched (launch refuses), and the supervisor and any backoff it is
+	// sleeping through return.
+	stopped bool
+	quit    chan struct{}
+
 	addr    string   // 127.0.0.1:<port> the catway serves
 	socket  string   // $TMPDIR unix socket the two daemons share (cathost seam)
 	sockets []string // every $TMPDIR socket we point the daemons at, for cleanup
+
+	// log is the kept daemon log the daemons' output and the supervisor's notes
+	// go to; daemonLog in the app, a temp file in tests.
+	log *rotatingLog
+
+	// catwayPath and catwayArgs are how catway was first started. A restart is
+	// the same launch again — same port, same sockets — which is what lets the
+	// page and cathost pick the new process up without being told anything.
+	catwayPath string
+	catwayArgs []string
+	// ready is the check a started catway must pass: it accepts TCP on addr,
+	// or has failed by exiting first. A test swaps in its own.
+	ready func(*daemonProc) error
+	// restarts and retry belong to the supervisor (restart.go): the budget of
+	// automatic restarts, and the overlay's "Restart catway" (buffer 1, so a
+	// request is never lost and a double click is one request).
+	restarts restartBudget
+	retry    chan struct{}
+}
+
+// launch starts a daemon into one of the backend's slots, unless the backend has
+// been stopped. The check and the assignment share the lock with stop, so a quit
+// either sees the new process (and stops it) or prevents it — never neither,
+// which is how a daemon launched during a quit used to be orphaned.
+func (b *backend) launch(slot **daemonProc, path string, args ...string) (*daemonProc, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.stopped {
+		return nil, errBackendStopped
+	}
+	p, err := startDaemon(b.log, path, args...)
+	if err != nil {
+		return nil, err
+	}
+	*slot = p
+	return p, nil
+}
+
+func (b *backend) currentCatway() *daemonProc {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.catway
+}
+
+func (b *backend) isStopped() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.stopped
+}
+
+// cathostExited reports whether cathost has exited. A backend with no cathost
+// (a test) reports false.
+func (b *backend) cathostExited() bool {
+	b.mu.Lock()
+	th := b.cathost
+	b.mu.Unlock()
+	if th == nil {
+		return false
+	}
+	select {
+	case <-th.done:
+		return true
+	default:
+		return false
+	}
 }
 
 // startBackend launches cathost then catway, both wired to a private $TMPDIR
@@ -67,10 +143,15 @@ func startBackend() (*backend, error) {
 	ctlSock := socketPath("ctl")
 	hookSock := socketPath("hooks")
 	b := &backend{
-		addr:    fmt.Sprintf("127.0.0.1:%d", port),
-		socket:  thSock,
-		sockets: []string{thSock, ctlSock, hookSock},
+		addr:     fmt.Sprintf("127.0.0.1:%d", port),
+		socket:   thSock,
+		sockets:  []string{thSock, ctlSock, hookSock},
+		log:      daemonLog,
+		quit:     make(chan struct{}),
+		retry:    make(chan struct{}, 1),
+		restarts: newRestartBudget(),
 	}
+	b.ready = func(p *daemonProc) error { return waitReadyOrExit(b.addr, catwayReadyTimeout, p) }
 	boot.okDetail(portStep, b.addr)
 
 	// Register the teardown BEFORE anything is spawned. Startup now runs on a
@@ -85,25 +166,26 @@ func startBackend() (*backend, error) {
 	// Setpgid detaches each daemon into its own process group so a stray signal
 	// to the launcher's group (e.g. Ctrl-C in a dev terminal) doesn't pre-empt
 	// our orderly teardown; we signal each process explicitly on quit.
-	b.cathost, err = startDaemon(daemonLog, thPath, "-persistent", "-socket", thSock)
+	th, err := b.launch(&b.cathost, thPath, "-persistent", "-socket", thSock)
 	if err != nil {
 		err = fmt.Errorf("start cathost: %w", err)
 		boot.fail(thStep, err)
 		return nil, err
 	}
-	boot.okDetail(thStep, fmt.Sprintf("pid %d on %s", b.cathost.pid(), thSock))
+	boot.okDetail(thStep, fmt.Sprintf("pid %d on %s", th.pid(), thSock))
 
 	gwStep := boot.begin("starting catway")
-	b.catway, err = startDaemon(daemonLog, gwPath,
-		"--addr", b.addr, "--auth", "none",
-		"--socket", thSock, "--control-socket", ctlSock, "--hook-socket", hookSock)
+	b.catwayPath = gwPath
+	b.catwayArgs = []string{"--addr", b.addr, "--auth", "none",
+		"--socket", thSock, "--control-socket", ctlSock, "--hook-socket", hookSock}
+	gw, err := b.launch(&b.catway, b.catwayPath, b.catwayArgs...)
 	if err != nil {
 		b.stop()
 		err = fmt.Errorf("start catway: %w", err)
 		boot.fail(gwStep, err)
 		return nil, err
 	}
-	boot.okDetail(gwStep, fmt.Sprintf("pid %d", b.catway.pid()))
+	boot.okDetail(gwStep, fmt.Sprintf("pid %d", gw.pid()))
 
 	// The catway serves HTTP as soon as it binds — it dials cathost lazily with
 	// its own retry (cmd/catway/daemon.go) — so a successful TCP dial is a
@@ -113,9 +195,10 @@ func startBackend() (*backend, error) {
 	// clock ticking in the startup window tells the user the launch has not
 	// died. Whatever the catway writes while we wait is tapped into the log
 	// beside it (see command), so a retry loop against a stale cathost socket
-	// is readable rather than merely slow.
+	// is readable rather than merely slow. A catway that exits instead fails the
+	// step at once, with its exit status, rather than after the full timeout.
 	readyStep := boot.begin("waiting for the catway to accept connections")
-	if err := waitReady(b.addr, 10*time.Second); err != nil {
+	if err := b.ready(gw); err != nil {
 		b.stop()
 		boot.fail(readyStep, err)
 		return nil, err
@@ -185,8 +268,9 @@ const (
 // daemonProc is one supervised daemon and the watcher that reaps it.
 //
 // The watcher exists so an exit is noticed when it happens rather than at quit:
-// catway dying mid-session leaves a blank window, and before this nothing
-// recorded that it had died, let alone how. stopping separates that from the
+// before it, a catway dying mid-session left a blank window and nothing recorded
+// that it had died, let alone how. The exit is logged here; the restart is
+// restart.go's, which waits on done. stopping separates all of that from the
 // exits we cause ourselves, which are not news.
 type daemonProc struct {
 	name     string
@@ -218,10 +302,7 @@ func (p *daemonProc) watch() {
 	if p.stopping.Load() {
 		return
 	}
-	how := "exited"
-	if st := p.cmd.ProcessState; st != nil {
-		how = st.String() // "exit status 2", "signal: killed"
-	}
+	how := p.exitStatus()
 	// A clean exit is still unexpected here (catctl server.stop, cathost's idle
 	// timeout), but it is a choice someone made rather than a failure.
 	level := dlog.LevelError
@@ -229,6 +310,15 @@ func (p *daemonProc) watch() {
 		level = dlog.LevelWarn
 	}
 	p.log.note(level, "%s (pid %d) exited while the app was running: %s", p.name, p.pid(), how)
+}
+
+// exitStatus describes how the daemon ended: "exit status 2", "signal: killed".
+// Meaningful once done is closed (cmd.Wait sets ProcessState).
+func (p *daemonProc) exitStatus() string {
+	if st := p.cmd.ProcessState; st != nil {
+		return st.String()
+	}
+	return "exited"
 }
 
 // stop asks the daemon to exit and makes sure it does: SIGTERM, then SIGKILL
@@ -276,10 +366,21 @@ func daemonDir() string {
 // Each is SIGTERMed and, past its grace, SIGKILLed (daemonProc.stop). cathost is
 // persistent, so a future "keep sessions alive in the background" option could
 // skip stopping it; for now a window close reaps both to avoid orphaned daemons.
-// Safe to call on a partially-started backend.
+// Safe to call on a partially-started backend, and more than once.
+//
+// quit is closed before either daemon is signalled, and under the same lock
+// launch takes: the supervisor then reads every exit from here on as ours, and
+// cannot slip a replacement catway in behind the one being stopped.
 func (b *backend) stop() {
-	b.catway.stop(catwayStopGrace)
-	b.cathost.stop(cathostStopGrace)
+	b.mu.Lock()
+	if !b.stopped {
+		b.stopped = true
+		close(b.quit)
+	}
+	gw, th := b.catway, b.cathost
+	b.mu.Unlock()
+	gw.stop(catwayStopGrace)
+	th.stop(cathostStopGrace)
 	// The daemons unlink their own sockets on a clean exit; remove any stragglers
 	// as a backstop (a daemon that had to be SIGKILLed never got to).
 	for _, s := range b.sockets {
@@ -373,6 +474,17 @@ func socketPath(role string) string {
 // mirroring the dial-retry backoff the catway uses for the cathost socket
 // (cmd/catway/daemon.go): start at 50ms, double, cap at 500ms.
 func waitReady(addr string, timeout time.Duration) error {
+	return waitReadyOrExit(addr, timeout, nil)
+}
+
+// waitReadyOrExit is waitReady that also gives up when p exits: a catway that
+// has died is never going to accept, and waiting out the timeout would only hide
+// why. nil p watches no process.
+func waitReadyOrExit(addr string, timeout time.Duration, p *daemonProc) error {
+	var exited <-chan struct{} // nil never fires
+	if p != nil {
+		exited = p.done
+	}
 	deadline := time.Now().Add(timeout)
 	backoff := 50 * time.Millisecond
 	for {
@@ -384,7 +496,11 @@ func waitReady(addr string, timeout time.Duration) error {
 		if time.Now().After(deadline) {
 			return fmt.Errorf("catway did not become ready at %s within %s: %w", addr, timeout, err)
 		}
-		time.Sleep(backoff)
+		select {
+		case <-exited:
+			return fmt.Errorf("%s exited before it accepted connections at %s: %s", p.name, addr, p.exitStatus())
+		case <-time.After(backoff):
+		}
 		if backoff < 500*time.Millisecond {
 			backoff *= 2
 		}

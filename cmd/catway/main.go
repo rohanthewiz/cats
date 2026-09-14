@@ -379,7 +379,7 @@ func main() {
 	if tlsOn {
 		scheme = "https"
 	}
-	log.Printf("catway: serving at %s://localhost%s (cathost socket %s)", scheme, eff.Addr, eff.CathostSocket)
+	log.Printf("catway: serving at %s (cathost socket %s)", serveURL(scheme, eff.Addr), eff.CathostSocket)
 	if len(hosts) > 1 {
 		// Only worth a line when there is something to say: with one host the
 		// socket is already in the line above.

@@ -118,6 +118,7 @@ static NSString *const kBridgeJS =
     @"window.catsConnect = (u,l) => window.webkit.messageHandlers.catsApp.postMessage({op:'connect',url:String(u),label:String(l||'')});\n"
     @"window.catsForget  = (u)   => window.webkit.messageHandlers.catsApp.postMessage({op:'forget',url:String(u)});\n"
     @"window.catsCancel  = ()    => window.webkit.messageHandlers.catsApp.postMessage({op:'cancel'});\n"
+    @"window.catsRestartBackend = () => window.webkit.messageHandlers.catsApp.postMessage({op:'restart'});\n"
     @"window.catsBoot = (p,d) => window.webkit.messageHandlers.catsBoot.postMessage({phase:String(p),detail:String(d||'')});\n";
 
 static WKWebViewConfiguration *catsConfig(CatsWindowController *owner) {
@@ -223,7 +224,8 @@ static WKWebViewConfiguration *catsConfig(CatsWindowController *owner) {
 
 // The two fire-and-forget bridges share one handler, told apart by name:
 // catsApp is the connect form's callbacks (the form navigates as a result of
-// what Go does, not of a return value), and catsBoot is the page reporting how
+// what Go does, not of a return value) plus the backend overlay's restart
+// button, and catsBoot is the page reporting how
 // far its own startup has got.
 - (void)userContentController:(WKUserContentController *)ucc
       didReceiveScriptMessage:(WKScriptMessage *)message {
@@ -441,6 +443,21 @@ void catsZoomKeyWindow(int delta) {
                 [wc.web evaluateJavaScript:js completionHandler:nil];
                 return;
             }
+        }
+    }
+}
+
+// catsEvalAll runs a script in every window's page — the backend overlay, which
+// has to reach every window, not just the front one, because every window is
+// equally disconnected when catway is down.
+void catsEvalAll(const char *cJS) {
+    @autoreleasepool {
+        NSString *js = [NSString stringWithUTF8String:cJS];
+        if (!js) {
+            return;
+        }
+        for (CatsWindowController *wc in gWindows) {
+            [wc.web evaluateJavaScript:js completionHandler:nil];
         }
     }
 }

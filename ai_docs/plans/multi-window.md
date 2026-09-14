@@ -82,8 +82,8 @@ Mac app the windows to use it.
   (any browser) gets multi-window for the price of `window.open`.
 - **Tests that are the template:** `cmd/catway/multiclient_test.go` (two connections,
   viewer semantics, census), `focus_test.go` (Focus reports), `catctl probe`'s op script
-  for headless protocol runs. Wire-struct changes ⇒ regen `cmd/catgen-dart/testdata/golden`
-  and then cats-mobile per memory.
+  for headless protocol runs. Wire-struct changes ⇒ cats-mobile per memory (a `cats` pin
+  bump; `cmd/catgen-dart` and its golden went in `5add396`).
 
 ## Key decisions
 
@@ -343,9 +343,9 @@ Each is independent and none is needed for the feature to be true.
 
 ## Verification
 
-- Every phase: `make test` and `make test-ghostty`; regen catgen-dart goldens on any
-  `browserproto` wire change and `go test ./cmd/catgen-dart`; `TestCommandSpecsRouted`
-  and the new view-routing test for the dispatcher; then cats-mobile per memory.
+- Every phase: `make test` and `make test-ghostty`; `TestCommandSpecsRouted`
+  and the new view-routing test for the dispatcher; then cats-mobile per memory
+  (the catgen-dart golden regen went with `cmd/catgen-dart` in `5add396`).
 - Phase 1 is the one with an invariant worth a soak: run catway with two browser windows
   on two workspaces and a phone viewer for a working session, and watch for the two silent
   wrongs the multiclient tests exist for — a frame landing in the wrong window, or a

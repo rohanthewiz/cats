@@ -12,6 +12,7 @@ void  catsOpenWindow(const char *url, double x, double y, double w, double h);
 void  catsOpenHTMLWindow(const char *html, const char *title);
 void  catsShowHTMLInKeyWindow(const char *html, const char *title);
 void  catsNavigateAll(const char *url, const char *title);
+void  catsEvalAll(const char *js);
 void  catsZoomKeyWindow(int delta);
 void  catsSetWindowTitle(const char *title);
 char *catsWindowsJSON(void);
@@ -303,6 +304,15 @@ func (m *winManager) navigateAll(u, title string) {
 	C.catsNavigateAll(cURL, cTitle)
 }
 
+// evalAll runs a script in every window's page. The backend overlay
+// (backenddown.go) goes in this way rather than through showHTML, so each window
+// keeps its URL — and with it the workspace the restore list reads off it.
+func (m *winManager) evalAll(js string) {
+	cJS := C.CString(js)
+	defer C.free(unsafe.Pointer(cJS))
+	C.catsEvalAll(cJS)
+}
+
 // --- cgo exports (called from window_darwin.m) ---------------------------------
 
 // catappNewWindow is the Window menu's New Window (⌘N) and the Dock-icon
@@ -372,11 +382,19 @@ func catappClipRead() *C.char {
 //
 //export catappConnectForm
 func catappConnectForm(cOp, cURL, cLabel *C.char) {
+	op := C.GoString(cOp)
+	// The backend overlay's button shares this bridge. It is the one op that
+	// belongs to local mode, where there is no remote runtime, so it is routed
+	// before that check.
+	if op == "restart" {
+		requestBackendRestart()
+		return
+	}
 	r := activeRemote
 	if r == nil {
 		return
 	}
-	switch C.GoString(cOp) {
+	switch op {
 	case "connect":
 		r.connect(C.GoString(cURL), C.GoString(cLabel))
 	case "forget":

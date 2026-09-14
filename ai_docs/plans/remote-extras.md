@@ -66,7 +66,8 @@ too, and are small next to any of the above.
 
 ## Verification
 
-Same as the other two plans: `make test` and `make test-ghostty`; regen
-`cmd/catgen-dart/testdata/golden` whenever `internal/app`, `browserproto` or
-`orchestration` wire structs change, then cats-mobile per memory;
+Same as the other two plans: `make test` and `make test-ghostty`; cats-mobile per
+memory whenever `internal/app`, `browserproto` or `orchestration` wire structs change
+(a `cats` pin bump — the catgen-dart golden regen went with `cmd/catgen-dart` in
+`5add396`);
 `TestCommandSpecsRouted` for each new command.

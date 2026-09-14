@@ -42,9 +42,9 @@ port-forward is needed. Single-host users must see zero change with zero config 
   respawns with `SpawnSpec{PaneID,Cwd:wsnap.IdentityCwd,PublicPaneID}`.
 - `internal/persist`: `Version=1`, additive `omitempty` fields, no migrations (how `PaneCwds`
   and `PaneAgents` were added). Same style here.
-- Wire-struct changes ⇒ regen `cmd/catgen-dart/testdata/golden` (`go run ./cmd/catgen-dart -out
-  cmd/catgen-dart/testdata/golden`) then copy to `../cats-mobile/packages/catsproto/lib/src/generated`
-  (see memory: cats-mobile regen flow). New §7 command = const + `commandSpecs` + `Dispatch`
+- Wire-struct changes ⇒ nothing to regenerate since `5add396`: `cmd/catgen-dart` and its
+  golden are gone, and cats-mobile imports `wire` directly (bump its `cats` pin once cats is
+  pushed). New §7 command = const + `commandSpecs` + `Dispatch`
   case (`TestCommandSpecsRouted`).
 - Reusable: `internal/gwtls.EnsureSelfSigned/Fingerprint`, `internal/gwauth` bearer/pair helpers.
 - Tests that hardcode one daemon: `cmd/catway/persist_test.go` (`pipeDaemon`, `o.daemon.setConn`),
@@ -706,7 +706,7 @@ catgen-dart goldens regenerated (`WorktreeListResult.host`); **cats-mobile has n
 been regenerated** — that needs cats pushed first (see memory: cats-mobile regen flow).
 
 ## Verification
-- Every phase: `make test` and `make test-ghostty` (`-tags ghostty ./...`); regen catgen-dart goldens whenever `internal/app`, `browserproto`, or `orchestration` wire structs change and `go test ./cmd/catgen-dart`; `TestCommandSpecsRouted` for each new command; then cats-mobile regen per memory.
+- Every phase: `make test` and `make test-ghostty` (`-tags ghostty ./...`); `TestCommandSpecsRouted` for each new command; then bump cats-mobile's `cats` pin. (The catgen-dart golden regen went with `cmd/catgen-dart` in `5add396`.)
 - Phase 1: byte-identical `session.json`/`history.json`; all existing catway tests unchanged in intent.
 - Phase 2/3 (`/run`-driven): two `cathost -persistent -socket /tmp/a.sock|/tmp/b.sock`, config two hosts → roster shows both; split a pane onto B beside an A pane; kill B → only B's panes toast/lose stream, A keeps streaming; restart catway → per-host reconcile adopts survivors; `catctl hosts`; `ssh -L` unix forward to a real remote box.
 - Phase 4: wrong fingerprint/token/old version rejected with a clear log line; v2 cathost on unix still works; a create with a catway-only cwd lands in the remote `$HOME` with an error toast, not a dead pane; branch badge appears for remote panes.
