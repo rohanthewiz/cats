@@ -36,11 +36,12 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"log"
 	"net/http"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/rohanthewiz/cats/internal/dlog"
 )
 
 const (
@@ -338,7 +339,7 @@ func (b *Bridge) logOnce(reason string) {
 	b.logged[reason] = true
 	b.mu.Unlock()
 	if !seen {
-		log.Printf("catway: push notification failed (%s)", reason)
+		dlog.Warnf("catway: push notification failed (%s)", reason)
 	}
 }
 

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rohanthewiz/cats/internal/dlog"
 	"github.com/rohanthewiz/cats/internal/integration"
 )
 
@@ -136,7 +137,7 @@ func serveHooks(o *orch, socket string) (cleanup func(), err error) {
 		return nil, err
 	}
 	if err := os.Chmod(socket, 0o600); err != nil {
-		log.Printf("catway: hook socket chmod: %v", err)
+		dlog.Warnf("catway: hook socket chmod: %v", err)
 	}
 	go func() {
 		for {
@@ -325,7 +326,7 @@ func (o *orch) applyHookReportFrom(method string, p hookReportParams, fromHost s
 		// Reported as "not found" rather than "not yours": the relaying host has
 		// no business learning which panes exist elsewhere in the session, and
 		// from where the hook sits the two are the same answer.
-		log.Printf("catway: host %s reported agent state for pane %s, which is not on it — ignored",
+		dlog.Warnf("catway: host %s reported agent state for pane %s, which is not on it — ignored",
 			fromHost, p.PaneID)
 		return &hookError{Code: "pane_not_found", Message: fmt.Sprintf("pane %s not found", p.PaneID)}
 	}

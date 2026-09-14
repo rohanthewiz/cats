@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"os"
 	"os/exec"
@@ -22,6 +21,7 @@ import (
 	"time"
 
 	"github.com/rohanthewiz/cats/internal/browserproto"
+	"github.com/rohanthewiz/cats/internal/dlog"
 	"github.com/rohanthewiz/cats/internal/hostmeter"
 )
 
@@ -962,7 +962,7 @@ func logUsageOnce(reason string) {
 		return
 	}
 	usageLogged[reason] = true
-	log.Printf("catway: account usage unavailable (%s) — showing local estimate", reason)
+	dlog.Warnf("catway: account usage unavailable (%s) — showing local estimate", reason)
 }
 
 // sortedMinutes is test support: the bucket keys in order.

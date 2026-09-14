@@ -5,9 +5,9 @@ package main
 import (
 	"bytes"
 	"io"
-	"log"
 	"sync"
 
+	"github.com/rohanthewiz/cats/internal/dlog"
 	"github.com/rohanthewiz/cats/internal/orchestration"
 )
 
@@ -163,7 +163,7 @@ func (o *orch) openControlRelay(d *daemon, id uint64) {
 		// The control API is switched off on this catway, so there is nothing to
 		// relay. One switch, not two: an operator who disabled the socket did
 		// not mean "except from other machines".
-		log.Printf("catway: refused a control-relay connection from host %s (the control API is disabled here)", d.id)
+		dlog.Warnf("catway: refused a control-relay connection from host %s (the control API is disabled here)", d.id)
 		d.send(orchestration.NewControlClose(id))
 		return
 	}
@@ -172,7 +172,7 @@ func (o *orch) openControlRelay(d *daemon, id uint64) {
 		// failure: somebody on that machine tried to drive this session, and
 		// whether that is an operator who forgot the flag or something worse,
 		// the one thing that helps is a line saying it happened.
-		log.Printf("catway: refused a control-relay connection from host %s (control_relay is off for it)", d.id)
+		dlog.Warnf("catway: refused a control-relay connection from host %s (control_relay is off for it)", d.id)
 		d.send(orchestration.NewControlClose(id))
 		return
 	}

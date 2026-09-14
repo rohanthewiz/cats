@@ -4,12 +4,12 @@ import (
 	"bufio"
 	"encoding/json"
 	"io"
-	"log"
 	"net"
 	"sync"
 	"time"
 
 	"github.com/rohanthewiz/cats/internal/app"
+	"github.com/rohanthewiz/cats/internal/dlog"
 )
 
 // Dispatch runs one §7 command from the control API. An implementation decodes
@@ -77,7 +77,7 @@ func (s *Server) ServeConn(conn io.ReadWriteCloser) {
 		return
 	}
 	if err := writeMessage(conn, s.handle(req)); err != nil {
-		log.Printf("ctlproto: write response: %v", err)
+		dlog.Warnf("ctlproto: write response: %v", err)
 	}
 }
 

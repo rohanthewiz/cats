@@ -5,13 +5,13 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/rohanthewiz/cats/internal/app"
+	"github.com/rohanthewiz/cats/internal/dlog"
 	"github.com/rohanthewiz/cats/internal/runbook"
 )
 
@@ -430,7 +430,7 @@ func (o *orch) advanceRunbook(run *runbookRun) {
 			// here because the corruption would be silent and would look like a
 			// runbook bug rather than a dispatcher one.
 			if answered {
-				log.Printf("catway: runbook %s step %d (%s) answered twice; ignoring the second",
+				dlog.Warnf("catway: runbook %s step %d (%s) answered twice; ignoring the second",
 					run.rb.Name, run.i+1, step.Run)
 				return
 			}
@@ -554,7 +554,7 @@ func (o *orch) finishRunbook(run *runbookRun) {
 
 	idx, msg := firstFailure(run.steps)
 	if run.failed {
-		log.Printf("catway: runbook %s (%s) failed at step %d: %s", run.rb.Name, run.source, idx, msg)
+		dlog.Warnf("catway: runbook %s (%s) failed at step %d: %s", run.rb.Name, run.source, idx, msg)
 	}
 	if run.r != nil {
 		run.r.OK(app.RunbookRunResult{Name: run.rb.Name, Steps: run.steps, Failed: run.failed})

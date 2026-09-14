@@ -12,6 +12,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/rohanthewiz/cats/internal/dlog"
 )
 
 // The hook relay: a socket on the DAEMON's machine that carries agent hook
@@ -100,14 +102,14 @@ func (h *Host) startHookRelay() {
 	_ = os.Remove(path) // a path this process just derived; nothing else owns it
 	ln, err := net.Listen("unix", path)
 	if err != nil {
-		log.Printf("cathost: hook relay unavailable (%v) — remote panes will report no agent state", err)
+		dlog.Warnf("cathost: hook relay unavailable (%v) — remote panes will report no agent state", err)
 		return
 	}
 	// Owner-only, like the orchestrator's own hook socket: the hooks run as this
 	// user and the path IS the capability. Anything that can open it can move an
 	// agent's state on the orchestrator's model.
 	if err := os.Chmod(path, 0o600); err != nil {
-		log.Printf("cathost: hook relay chmod: %v", err)
+		dlog.Warnf("cathost: hook relay chmod: %v", err)
 	}
 	h.relayMu.Lock()
 	h.relaySock, h.relayLn = path, ln
@@ -229,7 +231,7 @@ func (h *Host) deliverHookReply(c HookReply) {
 func (h *Host) attached() bool {
 	h.connMu.Lock()
 	defer h.connMu.Unlock()
-	return h.out != nil
+	return h.box != nil
 }
 
 // readLimitedLine reads one newline-terminated request, bounded by max. A

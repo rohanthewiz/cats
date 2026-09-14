@@ -17,7 +17,9 @@ import (
 	"time"
 
 	"github.com/creack/pty"
+
 	"github.com/rohanthewiz/cats/internal/detect"
+	"github.com/rohanthewiz/cats/internal/dlog"
 	"github.com/rohanthewiz/cats/internal/filexfer"
 	"github.com/rohanthewiz/cats/internal/gitbranch"
 	"github.com/rohanthewiz/cats/internal/gitsync"
@@ -311,19 +313,31 @@ type Host struct {
 	mu    sync.Mutex
 	panes map[uint32]*pane
 
-	// connMu guards the currently-attached client's outbound sink. out is nil when
+	// OutboxBudget is how many bytes of encoded events may wait for an attached
+	// client before cathost gives up on it (see emit). Zero selects
+	// DefaultOutboxBudget; a field so tests can shrink it.
+	OutboxBudget int
+
+	// connMu guards the currently-attached client's outbound sink. box is nil when
 	// no client is attached (emit drops); sessDone is closed when the current
-	// attachment ends, so an in-flight emit on the old channel unblocks.
+	// attachment ends.
+	//
+	// The sink is an Outbox, not a channel. It used to be a 256-slot channel, and
+	// a send to a full channel parks the sender: the session reader (answering a
+	// request) and every pane's readPump (a title, a cwd, streamed output) all
+	// emit, so a client that stopped reading stopped cathost reading ptys too —
+	// which is how an agent that only wanted to print ended up blocked in
+	// write() on a full pty during the 2026-09-13 freeze. Push never blocks, so
+	// nothing that emits can be parked by a slow client; a client that falls
+	// past the budget is dropped instead, and resyncs when it reconnects.
 	connMu   sync.Mutex
-	out      chan any
+	box      *Outbox
 	sessDone chan struct{}
-	// sessEnd is the current attachment's context — done the moment either half
-	// of the session gives up, in particular when the writer's write stalls out.
-	// sessDone alone is not enough: it closes only after the READER has left its
-	// loop, and the reader may itself be parked in emit waiting for room in out,
-	// room that only the writer (now gone) would ever make. Selecting on both is
-	// what lets a dead writer release every emitter, the reader included.
-	sessEnd <-chan struct{}
+	// sessCancel ends the current attachment from outside its own goroutines —
+	// emit calls it when the client falls past the budget. Captured together
+	// with box under connMu, so a late emit can only ever end the session whose
+	// outbox it was pushing to.
+	sessCancel context.CancelFunc
 
 	closed     chan struct{} // closed by Stop; pumps/emit bail on it
 	closedOnce sync.Once
@@ -398,20 +412,22 @@ func (h *Host) Attach(ctx context.Context, conn io.ReadWriteCloser) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	out := make(chan any, 256)
+	box := NewOutbox(h.OutboxBudget)
 	sessDone := make(chan struct{})
 	h.connMu.Lock()
-	h.out = out
+	h.box = box
 	h.sessDone = sessDone
-	h.sessEnd = ctx.Done()
+	h.sessCancel = cancel
 	h.connMu.Unlock()
 	h.disarmIdle()
 
 	// Close the connection on ctx cancellation so a blocked read unblocks and the
-	// session ends on daemon shutdown, not just on a client EOF.
+	// session ends on daemon shutdown, not just on a client EOF. Closing the
+	// outbox too releases a writer that is idle in Take rather than in a write.
 	go func() {
 		select {
 		case <-ctx.Done():
+			box.Close()
 			conn.Close()
 		case <-sessDone:
 		}
@@ -422,38 +438,37 @@ func (h *Host) Attach(ctx context.Context, conn io.ReadWriteCloser) error {
 	var writeErr error
 	var wg sync.WaitGroup
 	wg.Add(1)
-	go func() { // writer: drain outbound events to the connection
+	go func() { // writer: drain the outbox to the connection, in order
 		defer wg.Done()
+		// Whatever ends the writer ends the session. Take returns nil when the
+		// outbox was closed (detach, shutdown, a client past the budget) or when
+		// a draining outbox has been emptied — the refused-hello path, where the
+		// welcome explaining the refusal is now on the wire and the connection
+		// can go. cancel closes the conn, which unblocks the reader.
+		defer cancel()
 		// Every write is bounded. A client that stops reading (a catway whose
-		// own loop is jammed) would otherwise park this writer forever; out
-		// fills, and every emitter — the reader and each pane's pty pump among
-		// them — parks behind it. On failure, cancel closes conn and ends
-		// sessEnd, which releases all of them. Panes keep running.
+		// own loop is jammed) would otherwise park this writer forever. Nobody
+		// waits on the writer any more, so a parked writer no longer freezes
+		// emitters — but it would still hold the session open, and with it the
+		// serial accept loop that a restarted catway is queued behind.
 		w := NewStallWriter(conn, h.WriteStallTimeout)
 		for {
-			select {
-			case <-ctx.Done():
+			batch := box.Take()
+			if batch == nil {
 				return
-			case <-sessDone:
-				return
-			case ev := <-out:
-				if _, end := ev.(endSession); end {
-					// Everything queued ahead of the sentinel is on the wire by
-					// now, so the rejection welcome has been delivered; cancel
-					// closes the connection, which unblocks the reader.
-					cancel()
-					return
-				}
-				if err := WriteMessage(w, ev); err != nil {
+			}
+			for _, frame := range batch {
+				if _, err := w.Write(frame); err != nil {
 					// Only a stall is worth reporting as the reason. A client
 					// that simply hung up fails this write too, and that is an
 					// ordinary disconnect, not something to log as an error.
 					if errors.Is(err, os.ErrDeadlineExceeded) {
 						writeErr = err
 					}
-					cancel()
+					box.Close()
 					return
 				}
+				box.Sent(len(frame))
 			}
 		}
 	}()
@@ -478,13 +493,15 @@ func (h *Host) Attach(ctx context.Context, conn io.ReadWriteCloser) error {
 		}
 	}
 
-	// Detach: stop routing events to this connection (new emits drop), then unblock
-	// any in-flight emit/writer on the old channel. Panes are left running.
+	// Detach: stop routing events to this connection (new emits drop), then end
+	// the writer — closing the outbox drops whatever the departed client never
+	// read. Panes are left running.
 	h.connMu.Lock()
-	h.out = nil
+	h.box = nil
 	h.sessDone = nil
-	h.sessEnd = nil
+	h.sessCancel = nil
 	h.connMu.Unlock()
+	box.Close()
 	// The subscription belongs to the connection that asked for it. Left
 	// running, a persistent daemon would go on sampling (and, on darwin, keep an
 	// iostat alive) for a client that has gone.
@@ -1489,6 +1506,10 @@ func (h *Host) requestText(c RequestText) error {
 }
 
 func (h *Host) flushDirty() {
+	// Dirty flags survive a skipped tick, so holding back loses nothing.
+	if h.clientBacklogged() {
+		return
+	}
 	h.mu.Lock()
 	ps := make([]*pane, 0, len(h.panes))
 	for _, p := range h.panes {
@@ -1582,24 +1603,71 @@ func (h *Host) removePane(id uint32) *pane {
 	return p
 }
 
-// emit routes an event to the currently-attached client. When no client is
-// attached (out == nil) the event is dropped: panes keep running and the next
-// client gets a full resync, so a dropped frame/cwd/title costs nothing. sessDone
-// unblocks an emit that races a detach on the old channel; sessEnd unblocks one
-// whose session's writer has already given up, before the detach can happen.
+// emit routes an event to the currently-attached client, and never blocks.
+//
+// When no client is attached (box == nil) the event is dropped: panes keep
+// running and the next client gets a full resync, so a dropped frame/cwd/title
+// costs nothing. An emit that races a detach finds the old outbox closed and is
+// dropped the same way.
+//
+// The event is encoded here, on the emitter's goroutine, rather than on the
+// writer's: the bytes are then fixed at the moment of the emit, whatever the
+// emitter goes on to do with the value, and the budget can count real bytes.
+//
+// Two ways the client is dropped rather than served:
+//   - the backlog passes the budget. A peer that far behind has stopped
+//     reading; keeping its connection would only grow the queue.
+//   - an event cannot be encoded (a frame over MaxFrameSize). Silently skipping
+//     it would leave the client's screen diverged from the pane with nothing to
+//     correct it, while a reconnect starts from a full resync.
 func (h *Host) emit(ev any) {
 	h.connMu.Lock()
-	out, sessDone, sessEnd := h.out, h.sessDone, h.sessEnd
+	box, cancel := h.box, h.sessCancel
 	h.connMu.Unlock()
-	if out == nil {
+	if box == nil {
 		return
 	}
-	select {
-	case out <- ev:
-	case <-sessDone:
-	case <-sessEnd:
-	case <-h.closed:
+	if _, end := ev.(endSession); end {
+		// The refused-hello sentinel: let the writer flush what is queued (the
+		// welcome that says why), and end the session when it has.
+		box.CloseWhenDrained()
+		return
 	}
+	frame, err := EncodeMessage(ev)
+	if err != nil {
+		dlog.Errorf("cathost: dropping the client: %v", err)
+		box.Close()
+		cancel()
+		return
+	}
+	if errors.Is(box.Push(frame), ErrOutboxFull) {
+		dlog.Warnf("cathost: client is more than %d MiB behind on reads — dropping it (panes preserved)",
+			box.Budget()>>20)
+		box.Close()
+		cancel()
+	}
+}
+
+// flushBackpressure is the backlog, in bytes, above which the flusher skips a
+// tick instead of taking frames.
+//
+// Frames are the one kind of output that can wait without losing anything: a
+// pane that stays dirty is simply diffed against its last-taken snapshot on the
+// next tick, so ten skipped ticks cost one larger frame, not ten stale ones.
+// Holding them back is what the blocking channel used to do implicitly — a slow
+// but live client (a remote catway on a thin link) got fewer, fresher frames —
+// and without it a slow link would queue stale screens up to the budget and be
+// dropped. 1 MiB is several full-screen frames of headroom, far above anything
+// a local socket accumulates, and far below the budget.
+const flushBackpressure = 1 << 20
+
+// clientBacklogged reports whether the attached client is behind enough that
+// the flusher should hold frames back (see flushBackpressure).
+func (h *Host) clientBacklogged() bool {
+	h.connMu.Lock()
+	box := h.box
+	h.connMu.Unlock()
+	return box != nil && box.Queued() > flushBackpressure
 }
 
 // --- working directory + branch -------------------------------------------

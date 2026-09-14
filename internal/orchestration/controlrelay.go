@@ -13,6 +13,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/rohanthewiz/cats/internal/dlog"
 )
 
 // The control relay: a socket on the DAEMON's machine carrying the
@@ -103,14 +105,14 @@ func (h *Host) startControlRelay() {
 	_ = os.Remove(path)
 	ln, err := net.Listen("unix", path)
 	if err != nil {
-		log.Printf("cathost: control relay unavailable (%v) — in-pane catctl here will have nothing to dial", err)
+		dlog.Warnf("cathost: control relay unavailable (%v) — in-pane catctl here will have nothing to dial", err)
 		return
 	}
 	// Owner-only. This is the same boundary the orchestrator's own control
 	// socket keeps, and it has to be: anything that can open this can run every
 	// command the session has, on every host it holds.
 	if err := os.Chmod(path, 0o600); err != nil {
-		log.Printf("cathost: control relay chmod: %v", err)
+		dlog.Warnf("cathost: control relay chmod: %v", err)
 	}
 	h.ctlMu.Lock()
 	h.ctlSock, h.ctlLn = path, ln

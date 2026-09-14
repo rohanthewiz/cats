@@ -4,6 +4,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/rohanthewiz/cats/internal/app"
 	"github.com/rohanthewiz/cats/internal/ctlproto"
+	"github.com/rohanthewiz/cats/internal/dlog"
 )
 
 // The local control API is the second front-end onto the §7 command table (the
@@ -103,7 +105,7 @@ func serveControl(o *orch, socket string) (cleanup func(), err error) {
 		return nil, err
 	}
 	if err := os.Chmod(socket, 0o600); err != nil {
-		log.Printf("catway: control socket chmod: %v", err)
+		dlog.Warnf("catway: control socket chmod: %v", err)
 	}
 	srv := ctlproto.NewServer(o.controlDispatch, controlTimeout, "catway")
 	srv.SetStreamDispatch(o.controlStream) // events.subscribe
@@ -113,8 +115,11 @@ func serveControl(o *orch, socket string) (cleanup func(), err error) {
 	// is what makes "no local control API" mean "no relayed one either".
 	o.control = srv
 	go func() {
-		if err := srv.Serve(l); err != nil {
-			log.Printf("catway: control server stopped: %v", err)
+		// The cleanup below closes the listener on every graceful shutdown, and
+		// Serve reports that as an error like any other. Only an accept that
+		// failed on its own is worth an ERROR in the kept log.
+		if err := srv.Serve(l); err != nil && !errors.Is(err, net.ErrClosed) {
+			dlog.Errorf("catway: control server stopped: %v", err)
 		}
 	}()
 	log.Printf("catway: control API listening on %s", socket)

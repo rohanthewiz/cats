@@ -72,6 +72,7 @@ import (
 	"github.com/rohanthewiz/cats/internal/app"
 	"github.com/rohanthewiz/cats/internal/config"
 	"github.com/rohanthewiz/cats/internal/ctlproto"
+	"github.com/rohanthewiz/cats/internal/dlog"
 	"github.com/rohanthewiz/cats/internal/gwauth"
 	"github.com/rohanthewiz/cats/internal/gwtls"
 	"github.com/rohanthewiz/cats/internal/layout"
@@ -112,11 +113,11 @@ func main() {
 	// flags, so an unset flag never masks a config value with its default.
 	cfg, cfgPath, err := config.Load(*configPath)
 	if err != nil {
-		log.Fatalf("catway: %v", err)
+		dlog.Fatalf("catway: %v", err)
 	}
 	effTTL, err := cfg.Server.TTL()
 	if err != nil {
-		log.Fatalf("catway: %v", err) // Load already validated, but be explicit
+		dlog.Fatalf("catway: %v", err) // Load already validated, but be explicit
 	}
 	eff := cfg.Server
 	set := map[string]bool{}
@@ -172,7 +173,7 @@ func main() {
 		effPush.URL, effPush.Enabled = *pushURL, *pushURL != ""
 	}
 	if err := effPush.Validate(); err != nil {
-		log.Fatalf("catway: push.%v", err)
+		dlog.Fatalf("catway: push.%v", err)
 	}
 
 	// The base page: markup from the web package's element components, with its
@@ -190,7 +191,7 @@ func main() {
 	hosts := cfg.EffectiveHosts(eff.CathostSocket)
 	o, err := buildOrch(hosts, spawnRoot(), effPersist)
 	if err != nil {
-		log.Fatalf("catway: %v", err)
+		dlog.Fatalf("catway: %v", err)
 	}
 	// Wire the config-driven served page: baseHTML + cfgPath let server.reload_config
 	// re-render it; the initial render is stored for the "/" handler to serve.
@@ -245,9 +246,9 @@ func main() {
 				dir = persist.DefaultDir()
 			}
 			if err := os.MkdirAll(dir, 0o700); err != nil {
-				log.Printf("catway: command ledger disabled (%v)", err)
+				dlog.Warnf("catway: command ledger disabled (%v)", err)
 			} else if l, err := ledger.Open(filepath.Join(dir, "ledger.db"), cfg.Ledger.Retention); err != nil {
-				log.Printf("catway: command ledger disabled (%v)", err)
+				dlog.Warnf("catway: command ledger disabled (%v)", err)
 			} else {
 				o.ledger = l
 				log.Printf("catway: command ledger at %s (%d records)",
@@ -271,7 +272,7 @@ func main() {
 	o.controlSocket = ctlproto.ResolveSocket(eff.ControlSocket)
 	controlCleanup, err := serveControl(o, o.controlSocket)
 	if err != nil {
-		log.Printf("catway: control API disabled: %v", err)
+		dlog.Warnf("catway: control API disabled: %v", err)
 		o.controlSocket = "" // don't point panes at a socket nobody serves
 		controlCleanup = func() {}
 	}
@@ -282,7 +283,7 @@ func main() {
 	o.hookSocket = eff.HookSocket
 	hooksCleanup, err := serveHooks(o, eff.HookSocket)
 	if err != nil {
-		log.Printf("catway: hook-report API disabled: %v", err)
+		dlog.Warnf("catway: hook-report API disabled: %v", err)
 		o.hookSocket = "" // don't point panes at a socket nobody serves
 		hooksCleanup = func() {}
 	}
@@ -301,15 +302,12 @@ func main() {
 
 	// A clean quit (Ctrl-C / SIGTERM) routes through the same graceful path as
 	// server.stop: save the model, run the bounded final scrollback capture,
-	// then exit. A second signal force-quits.
-	sigc := make(chan os.Signal, 1)
+	// then exit. A second signal force-quits, and so does the deadline — see
+	// handleSignals for why neither may wait on the loop. Buffered for two so a
+	// quick second signal is not dropped while the first is being handled.
+	sigc := make(chan os.Signal, 2)
 	signal.Notify(sigc, os.Interrupt, syscall.SIGTERM)
-	go func() {
-		<-sigc
-		o.post(func() { o.Shutdown() })
-		<-sigc
-		os.Exit(1)
-	}()
+	go handleSignals(sigc, o.post, o.Shutdown, os.Exit, shutdownDeadline)
 
 	go o.run() // the orchestrator event loop (sole state owner)
 	// One dial loop per host: each reconnects on its own schedule, so a host
@@ -337,7 +335,7 @@ func main() {
 	if tlsOn {
 		cert, keyPath, err := resolveTLS(eff.TLS.Cert, eff.TLS.Key, eff.TLS.SANs)
 		if err != nil {
-			log.Fatalf("catway: tls: %v", err)
+			dlog.Fatalf("catway: tls: %v", err)
 		}
 		certPath = cert
 		tlsCfg = rweb.TLSCfg{UseTLS: true, TLSAddr: eff.Addr, CertFile: certPath, KeyFile: keyPath}
@@ -346,7 +344,7 @@ func main() {
 	// Auth: build the guard unless explicitly disabled.
 	guard, err := buildGuard(eff.Auth, *password, effTTL, tlsOn, eff.AllowedOrigins)
 	if err != nil {
-		log.Fatalf("catway: auth: %v", err)
+		dlog.Fatalf("catway: auth: %v", err)
 	}
 	// Device pairing (catctl pair) needs the guard's authenticator plus the URL
 	// and certificate pin a phone will dial, so it can only be assembled once
@@ -394,7 +392,7 @@ func main() {
 		}
 	}
 	if err := s.Run(); err != nil {
-		log.Fatalf("catway: %v", err)
+		dlog.Fatalf("catway: %v", err)
 	}
 	// rweb installs its own SIGINT/SIGTERM handler and returns nil from Run on a
 	// signal. The signal goroutine above got the same signal and is driving the
@@ -429,7 +427,7 @@ func spawnRoot() string {
 // left exactly as saved (a bad remote path is cathost's fallback to handle).
 func healStartDirs(sess *app.Session, root string, hosts []config.Host) {
 	if cwd := startdir.Usable(sess.Cwd(), root); cwd != sess.Cwd() {
-		log.Printf("catway: restored session cwd %q unusable, using %q", sess.Cwd(), cwd)
+		dlog.Warnf("catway: restored session cwd %q unusable, using %q", sess.Cwd(), cwd)
 		sess.SetCwd(cwd)
 	}
 	for _, ws := range sess.Workspaces() {
@@ -497,7 +495,7 @@ func buildOrch(hosts []config.Host, cwd string, pc config.Persistence) (*orch, e
 		dir = persist.DefaultDir()
 	}
 	if dir == "" {
-		log.Printf("catway: persistence disabled — no resolvable state dir")
+		dlog.Warnf("catway: persistence disabled — no resolvable state dir")
 		return newOrchHosts(hosts, cwd)
 	}
 	sessionPath, historyPath := persist.SessionPath(dir), persist.HistoryPath(dir)
@@ -510,10 +508,10 @@ func buildOrch(hosts []config.Host, cwd string, pc config.Persistence) (*orch, e
 	case errors.Is(err, fs.ErrNotExist):
 		// first run — start fresh, silently
 	case err != nil:
-		log.Printf("catway: session state unusable, starting fresh: %v", err)
+		dlog.Warnf("catway: session state unusable, starting fresh: %v", err)
 	default:
 		if sess, err = app.RestoreSession(modelSpawner{}, snap); err != nil {
-			log.Printf("catway: session restore failed, starting fresh: %v", err)
+			dlog.Errorf("catway: session restore failed, starting fresh: %v", err)
 			sess = nil
 		} else {
 			healStartDirs(sess, cwd, hosts)
@@ -545,7 +543,7 @@ func buildOrch(hosts []config.Host, cwd string, pc config.Persistence) (*orch, e
 		o.seeds = seeds
 		o.capturedHist = maps.Clone(seeds) // partial sweeps must not wipe other panes' seeds
 	} else if !errors.Is(err, fs.ErrNotExist) {
-		log.Printf("catway: history state unusable, skipping scrollback seeds: %v", err)
+		dlog.Warnf("catway: history state unusable, skipping scrollback seeds: %v", err)
 	}
 	// Agent resume (resume.go): validate the saved session refs, plan each
 	// cold-start pane's resume argv, and drop the saved scrollback of every
@@ -569,7 +567,7 @@ func buildOrch(hosts []config.Host, cwd string, pc config.Persistence) (*orch, e
 func buildGuard(mode, password string, ttl time.Duration, tlsOn bool, allowedOrigins []string) (*authGuard, error) {
 	switch mode {
 	case "none":
-		log.Printf("catway: WARNING auth disabled (--auth none) — anyone who can reach the listen address can drive your terminals")
+		dlog.Warnf("catway: auth disabled (--auth none) — anyone who can reach the listen address can drive your terminals")
 		return nil, nil
 	case "password":
 		secret, generated, err := resolveSecret(password)
@@ -636,7 +634,7 @@ func resolveTLS(certFlag, keyFlag string, sans []string) (certPath, keyPath stri
 		// covered; silence here reads as "done" and the trust warning that
 		// follows would look like a bug in the SAN handling.
 		if len(sans) > 0 {
-			log.Printf("catway: ignoring tls.sans %v — they only apply to the auto-generated certificate, "+
+			dlog.Warnf("catway: ignoring tls.sans %v — they only apply to the auto-generated certificate, "+
 				"and --tls-cert/--tls-key were supplied", sans)
 		}
 		return certFlag, keyFlag, nil

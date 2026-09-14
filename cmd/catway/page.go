@@ -2,13 +2,13 @@ package main
 
 import (
 	"encoding/json"
-	"log"
 	"os"
 	"sort"
 	"strings"
 
 	"github.com/rohanthewiz/cats/internal/buildinfo"
 	"github.com/rohanthewiz/cats/internal/config"
+	"github.com/rohanthewiz/cats/internal/dlog"
 	"github.com/rohanthewiz/cats/internal/theme"
 )
 
@@ -48,11 +48,11 @@ func renderPage(base []byte, cfg config.Config) []byte {
 func resolveTheme(cfg config.Config) theme.Theme {
 	themes, warns := theme.Registry()
 	for _, w := range warns {
-		log.Printf("catway: theme: %v", w)
+		dlog.Warnf("catway: theme: %v", w)
 	}
 	t, ok := theme.Resolve(cfg.Theme.Name, cfg.Theme.Colors, themes)
 	if !ok {
-		log.Printf("catway: theme %q not found — using %q", cfg.Theme.Name, t.Name)
+		dlog.Warnf("catway: theme %q not found — using %q", cfg.Theme.Name, t.Name)
 	}
 	// Font precedence: explicit config override > the theme's own > default.
 	if cfg.Theme.Font != "" {

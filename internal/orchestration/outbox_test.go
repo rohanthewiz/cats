@@ -1,6 +1,4 @@
-//go:build ghostty
-
-package main
+package orchestration
 
 import (
 	"errors"
@@ -11,34 +9,37 @@ import (
 // Frames come out in the order they went in, across wakes, and the budget is
 // released only once the writer reports them written.
 func TestOutboxKeepsOrderAndAccountsForTheBacklog(t *testing.T) {
-	b := newOutbox(10)
+	b := NewOutbox(10)
 	for _, f := range []string{"ab", "cd", "ef"} {
-		if err := b.push([]byte(f)); err != nil {
+		if err := b.Push([]byte(f)); err != nil {
 			t.Fatalf("push %q: %v", f, err)
 		}
 	}
-	batch := b.take()
+	batch := b.Take()
 	if len(batch) != 3 || string(batch[0]) != "ab" || string(batch[2]) != "ef" {
 		t.Fatalf("take = %q, want [ab cd ef] in order", batch)
 	}
 	// 6 bytes are taken but not written, so they still count: 6 + 5 > 10.
-	if err := b.push([]byte("ghijk")); !errors.Is(err, errOutboxFull) {
-		t.Fatalf("push past the budget = %v, want errOutboxFull", err)
+	if got := b.Queued(); got != 6 {
+		t.Fatalf("Queued with a batch in flight = %d, want 6", got)
 	}
-	b.sent(6)
-	if err := b.push([]byte("ghijk")); err != nil {
+	if err := b.Push([]byte("ghijk")); !errors.Is(err, ErrOutboxFull) {
+		t.Fatalf("push past the budget = %v, want ErrOutboxFull", err)
+	}
+	b.Sent(6)
+	if err := b.Push([]byte("ghijk")); err != nil {
 		t.Fatalf("push after the writer caught up: %v", err)
 	}
 }
 
-// push never blocks — the property the orchestrator loop depends on — even with
-// no writer taking anything and far more frames than any channel buffer.
+// Push never blocks — the property every producer depends on — even with no
+// writer taking anything and far more frames than any channel buffer.
 func TestOutboxPushNeverBlocks(t *testing.T) {
-	b := newOutbox(0)
+	b := NewOutbox(0)
 	done := make(chan struct{})
 	go func() {
 		for range 100_000 {
-			_ = b.push([]byte("x"))
+			_ = b.Push([]byte("x"))
 		}
 		close(done)
 	}()
@@ -49,13 +50,13 @@ func TestOutboxPushNeverBlocks(t *testing.T) {
 	}
 }
 
-// close drops the backlog, refuses more, and releases a writer waiting in take.
+// Close drops the backlog, refuses more, and releases a writer waiting in Take.
 func TestOutboxCloseReleasesAWaitingWriter(t *testing.T) {
-	b := newOutbox(0)
+	b := NewOutbox(0)
 	got := make(chan [][]byte, 1)
-	go func() { got <- b.take() }()
-	time.Sleep(10 * time.Millisecond) // let take start waiting
-	b.close()
+	go func() { got <- b.Take() }()
+	time.Sleep(10 * time.Millisecond) // let Take start waiting
+	b.Close()
 	select {
 	case batch := <-got:
 		if batch != nil {
@@ -64,33 +65,33 @@ func TestOutboxCloseReleasesAWaitingWriter(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("close did not release a writer waiting in take")
 	}
-	if err := b.push([]byte("x")); !errors.Is(err, errOutboxClosed) {
-		t.Fatalf("push after close = %v, want errOutboxClosed", err)
+	if err := b.Push([]byte("x")); !errors.Is(err, ErrOutboxClosed) {
+		t.Fatalf("push after close = %v, want ErrOutboxClosed", err)
 	}
-	b.close() // idempotent
+	b.Close() // idempotent
 }
 
-// closeWhenDrained hands over what is already queued, refuses anything new,
+// CloseWhenDrained hands over what is already queued, refuses anything new,
 // and then ends — including for a writer that was idle when it was called.
 func TestOutboxCloseWhenDrainedFlushesThenEnds(t *testing.T) {
-	b := newOutbox(0)
-	_ = b.push([]byte("close_pane"))
-	b.closeWhenDrained()
-	if err := b.push([]byte("late")); !errors.Is(err, errOutboxClosed) {
-		t.Fatalf("push while draining = %v, want errOutboxClosed", err)
+	b := NewOutbox(0)
+	_ = b.Push([]byte("close_pane"))
+	b.CloseWhenDrained()
+	if err := b.Push([]byte("late")); !errors.Is(err, ErrOutboxClosed) {
+		t.Fatalf("push while draining = %v, want ErrOutboxClosed", err)
 	}
-	if batch := b.take(); len(batch) != 1 || string(batch[0]) != "close_pane" {
+	if batch := b.Take(); len(batch) != 1 || string(batch[0]) != "close_pane" {
 		t.Fatalf("take while draining = %q, want the queued frame", batch)
 	}
-	if b.take() != nil || !b.isClosed() {
+	if b.Take() != nil || !b.IsClosed() {
 		t.Fatal("a drained outbox should close once its last frame is taken")
 	}
 
-	idle := newOutbox(0)
+	idle := NewOutbox(0)
 	got := make(chan [][]byte, 1)
-	go func() { got <- idle.take() }()
+	go func() { got <- idle.Take() }()
 	time.Sleep(10 * time.Millisecond)
-	idle.closeWhenDrained()
+	idle.CloseWhenDrained()
 	select {
 	case batch := <-got:
 		if batch != nil {

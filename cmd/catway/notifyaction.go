@@ -3,7 +3,6 @@
 package main
 
 import (
-	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -12,6 +11,7 @@ import (
 
 	"github.com/rohanthewiz/cats/internal/app"
 	"github.com/rohanthewiz/cats/internal/browserproto"
+	"github.com/rohanthewiz/cats/internal/dlog"
 	"github.com/rohanthewiz/cats/internal/promptopts"
 	"github.com/rohanthewiz/cats/internal/push"
 )
@@ -242,4 +242,4 @@ func (f funcResponder) Fail(msg string)  { f.fn(nil, msg) }
 // to one line without the token: a stale phone notification is the ordinary way
 // to produce one, and logging the credential would put it in a file that
 // outlives it.
-func logRefusedAction(reason string) { log.Printf("catway: notification action refused (%s)", reason) }
+func logRefusedAction(reason string) { dlog.Warnf("catway: notification action refused (%s)", reason) }

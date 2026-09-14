@@ -9,6 +9,7 @@ import (
 
 	"github.com/rohanthewiz/cats/internal/browserproto"
 	"github.com/rohanthewiz/cats/internal/config"
+	"github.com/rohanthewiz/cats/internal/dlog"
 	"github.com/rohanthewiz/cats/internal/layout"
 )
 
@@ -60,7 +61,7 @@ const (
 func reapAfterFromConfig(p config.Panes) time.Duration {
 	d, err := p.ReapExitedAfter()
 	if err != nil {
-		log.Printf("catway: panes.%v — using %s", err, defaultExitedPaneTTL)
+		dlog.Warnf("catway: panes.%v — using %s", err, defaultExitedPaneTTL)
 		return defaultExitedPaneTTL
 	}
 	return d
@@ -168,7 +169,7 @@ const (
 func autocloseAfterFromConfig(p config.Panes) time.Duration {
 	d, err := p.AutocloseExitedAfter()
 	if err != nil {
-		log.Printf("catway: panes.%v — using %s", err, defaultAutocloseTTL)
+		dlog.Warnf("catway: panes.%v — using %s", err, defaultAutocloseTTL)
 		return defaultAutocloseTTL
 	}
 	return d
@@ -254,7 +255,7 @@ func (o *orch) fireAutoclose(pid uint32) {
 		// countdown). Leave the corpse and its exit stamp alone: the reaper
 		// still owns it, and the clients' countdown simply ends without the
 		// pane going away.
-		log.Printf("catway: pane %d auto-close refused: %v", pid, err)
+		dlog.Warnf("catway: pane %d auto-close refused: %v", pid, err)
 		return
 	}
 	delete(o.capturedHist, pid) // the corpse's scrollback seed goes with it

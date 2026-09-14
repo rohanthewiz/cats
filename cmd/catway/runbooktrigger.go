@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/rohanthewiz/cats/internal/browserproto"
+	"github.com/rohanthewiz/cats/internal/dlog"
 	"github.com/rohanthewiz/cats/internal/runbook"
 )
 
@@ -243,7 +244,7 @@ func (o *orch) reserveRunbook(rb *runbook.Runbook, clause int, event string, pay
 		// the log line names the run that tripped it and the next event does not
 		// have to arrive for the brake to be on.
 		rt.suspended[rb.Name] = now.Add(triggerSuspension)
-		log.Printf("catway: runbook %s hit %d trigger starts in %s; its triggers are suspended until %s",
+		dlog.Warnf("catway: runbook %s hit %d trigger starts in %s; its triggers are suspended until %s",
 			rb.Name, maxTriggerStarts, triggerRateWindow, now.Add(triggerSuspension).Format(time.TimeOnly))
 	}
 	rt.reserved = append(rt.reserved, reservedRun{book: rb, event: event, payload: payload})
@@ -433,7 +434,7 @@ func (o *orch) releaseRunbookSlot(name string) {
 		// Unreachable: every start claims and every finish releases once. Guarded
 		// because a double release would drift inFlight negative and silently
 		// raise the concurrency cap.
-		log.Printf("catway: runbook %s released a slot it did not hold", name)
+		dlog.Errorf("catway: runbook %s released a slot it did not hold", name)
 		return
 	}
 	delete(rt.running, name)

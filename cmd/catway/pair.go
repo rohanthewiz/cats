@@ -10,6 +10,7 @@ import (
 
 	"github.com/rohanthewiz/cats/internal/app"
 	"github.com/rohanthewiz/cats/internal/ctlproto"
+	"github.com/rohanthewiz/cats/internal/dlog"
 	"github.com/rohanthewiz/cats/internal/gwauth"
 	"github.com/rohanthewiz/cats/internal/gwtls"
 )
@@ -96,7 +97,7 @@ func buildPairing(guard *authGuard, addr, certPath string) *pairing {
 		scheme = "https"
 		fp, err := gwtls.Fingerprint(certPath)
 		if err != nil {
-			log.Printf("catway: pairing will not carry a certificate pin: %v", err)
+			dlog.Warnf("catway: pairing will not carry a certificate pin: %v", err)
 		} else {
 			fingerprint = fp
 		}

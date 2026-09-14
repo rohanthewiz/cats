@@ -35,7 +35,7 @@ func TestDaemonSendDropsAPeerThatStopsReading(t *testing.T) {
 	// is what starts the redial.
 	pollUntil(t, func() bool {
 		_, err := client.Write([]byte("x"))
-		return err != nil && box.isClosed()
+		return err != nil && box.IsClosed()
 	})
 }
 
@@ -104,7 +104,7 @@ func TestStuckWriterLeavesTheLoopAndWatchdogFree(t *testing.T) {
 	if d.sendPing(client) {
 		t.Fatal("a probe past the timeout must end the probe loop")
 	}
-	pollUntil(t, box.isClosed)
+	pollUntil(t, box.IsClosed)
 	if !d.takeStalled() {
 		t.Fatal("the stall was not recorded; the roster would blame our own close")
 	}
@@ -123,7 +123,7 @@ func TestBackloggedConnectionIsDropped(t *testing.T) {
 	for i := range 1000 {
 		d.send(orchestration.NewPing(uint64(i)))
 	}
-	pollUntil(t, box.isClosed)
+	pollUntil(t, box.IsClosed)
 	if _, err := client.Write([]byte("x")); err == nil {
 		t.Fatal("a connection past the budget should have been closed")
 	}

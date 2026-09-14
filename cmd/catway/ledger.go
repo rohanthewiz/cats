@@ -3,11 +3,11 @@
 package main
 
 import (
-	"log"
 	"time"
 
 	"github.com/rohanthewiz/cats/internal/app"
 	"github.com/rohanthewiz/cats/internal/browserproto"
+	"github.com/rohanthewiz/cats/internal/dlog"
 	"github.com/rohanthewiz/cats/internal/layout"
 	"github.com/rohanthewiz/cats/internal/ledger"
 	"github.com/rohanthewiz/cats/internal/orchestration"
@@ -162,7 +162,7 @@ func (o *orch) logLedgerOnce(reason string) {
 		return
 	}
 	o.ledgerLogged[reason] = true
-	log.Printf("catway: ledger write failed (%s)", reason)
+	dlog.Errorf("catway: ledger write failed (%s)", reason)
 }
 
 // LedgerList implements app.Backend: answer a history query.

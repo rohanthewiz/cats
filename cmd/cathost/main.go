@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"github.com/rohanthewiz/cats/internal/detect"
+	"github.com/rohanthewiz/cats/internal/dlog"
 	"github.com/rohanthewiz/cats/internal/orchestration"
 	"github.com/rohanthewiz/cats/internal/persist"
 )
@@ -82,14 +83,14 @@ func main() {
 	if *tokenFile != "" {
 		var err error
 		if token, err = readToken(*tokenFile); err != nil {
-			fmt.Fprintln(os.Stderr, "cathost:", err)
+			dlog.Errorf("cathost: %v", err)
 			os.Exit(1)
 		}
 	}
 
 	ln, desc, cleanup, err := openListener(addr, *tlsDir, *tlsSAN, token != "")
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "cathost:", err)
+		dlog.Errorf("cathost: %v", err)
 		os.Exit(1)
 	}
 	defer cleanup()
@@ -101,7 +102,7 @@ func main() {
 	}
 	if err != nil {
 		cleanup() // os.Exit skips the defer
-		fmt.Fprintln(os.Stderr, "cathost:", err)
+		dlog.Errorf("cathost: %v", err)
 		os.Exit(1)
 	}
 }
@@ -139,7 +140,7 @@ func run(ln net.Listener, desc, token string, exitOnDisconnect bool, hookSocket,
 			h.HookSocketPath = hookSocket
 			h.ControlSocketPath = controlSocket
 			if err := h.Serve(ctx, conn); err != nil {
-				log.Printf("session ended: %v", err)
+				dlog.Warnf("session ended: %v", err)
 			} else {
 				log.Printf("client disconnected")
 			}
@@ -176,7 +177,21 @@ func runPersistent(ln net.Listener, desc, token string, idleTimeout time.Duratio
 	// us unless we ignore it. (The orchestrator also spawns us with setsid to detach,
 	// but ignoring SIGHUP is the portable backstop and covers a hand-launched daemon.)
 	// We still honor explicit SIGINT/SIGTERM as a shutdown.
-	signal.Ignore(syscall.SIGHUP)
+	//
+	// Caught and discarded, NOT signal.Ignore. An ignored signal stays ignored
+	// across fork and exec, so Ignore handed SIG_IGN for SIGHUP to every process
+	// spawned in a pane. A program that relies on the default disposition to die
+	// with its terminal then never did: when a killed cathost closed its pty
+	// masters on 2026-09-13, five cats-todo instances (a TUI whose input library
+	// also swallows the tty's EOF) lived on as orphans on dead ttys. A caught
+	// signal is reset to the default by exec, so panes start with the ordinary
+	// disposition while this process still survives the hangup.
+	hup := make(chan os.Signal, 1)
+	signal.Notify(hup, syscall.SIGHUP)
+	go func() {
+		for range hup {
+		}
+	}()
 	ctx, stop := signal.NotifyContext(context.Background(),
 		syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -222,7 +237,7 @@ func runPersistent(ln net.Listener, desc, token string, idleTimeout time.Duratio
 		// Serial Attach is the single-writer guarantee: a second client waits in the
 		// accept backlog until the current one detaches. Panes survive the gap.
 		if err := h.Attach(ctx, conn); err != nil {
-			log.Printf("session ended: %v", err)
+			dlog.Warnf("session ended: %v", err)
 		} else {
 			log.Printf("client disconnected (panes preserved)")
 		}

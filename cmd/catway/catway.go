@@ -18,6 +18,7 @@ import (
 	"github.com/rohanthewiz/cats/internal/browserproto"
 	"github.com/rohanthewiz/cats/internal/config"
 	"github.com/rohanthewiz/cats/internal/ctlproto"
+	"github.com/rohanthewiz/cats/internal/dlog"
 	"github.com/rohanthewiz/cats/internal/flags"
 	"github.com/rohanthewiz/cats/internal/hostmeter"
 	"github.com/rohanthewiz/cats/internal/inputenc"
@@ -1048,7 +1049,7 @@ func (o *orch) paneHostID(pid uint32) string {
 		return o.defaultHost
 	}
 	if o.hosts[id] == nil {
-		log.Printf("catway: pane %d names unknown host %q — using %s", pid, id, o.defaultHost)
+		dlog.Warnf("catway: pane %d names unknown host %q — using %s", pid, id, o.defaultHost)
 		return o.defaultHost
 	}
 	return id
@@ -1178,7 +1179,7 @@ func (o *orch) syncDaemon() {
 		if o.panes[pid] == nil {
 			enc, err := inputenc.New()
 			if err != nil {
-				log.Printf("catway: encoder: %v", err)
+				dlog.Errorf("catway: encoder: %v", err)
 				continue
 			}
 			o.panes[pid] = &paneRuntime{id: pid, enc: enc}
@@ -2332,7 +2333,7 @@ func (o *orch) ReloadConfig() error {
 	}
 	cfg, path, err := config.Load(o.cfgPath)
 	if err != nil {
-		log.Printf("catway: server.reload_config failed: %v", err)
+		dlog.Warnf("catway: server.reload_config failed: %v", err)
 		return err
 	}
 	o.cfg = cfg // keep config.get / config.set working from the reloaded state
@@ -2346,7 +2347,7 @@ func (o *orch) ReloadConfig() error {
 	// all-or-nothing guarantee applyHostRoster gives host.attach, scoped to the
 	// hosts: section rather than to the whole file.
 	if err := o.applyHostRoster(cfg.Hosts); err != nil {
-		log.Printf("catway: server.reload_config: hosts: %v (keeping the running roster)", err)
+		dlog.Warnf("catway: server.reload_config: hosts: %v (keeping the running roster)", err)
 		return err
 	}
 	log.Printf("catway: reloaded config from %s — theme and hosts applied live, keybindings apply to new page loads; other server settings need a restart", path)
@@ -2375,7 +2376,7 @@ func (o *orch) Shutdown() {
 func (o *orch) broadcast(m any) {
 	b, err := browserproto.Marshal(m)
 	if err != nil {
-		log.Printf("catway: marshal broadcast: %v", err)
+		dlog.Errorf("catway: marshal broadcast: %v", err)
 		return
 	}
 	for c := range o.conns {
@@ -2386,7 +2387,7 @@ func (o *orch) broadcast(m any) {
 func (o *orch) send(c *client, m any) {
 	b, err := browserproto.Marshal(m)
 	if err != nil {
-		log.Printf("catway: marshal: %v", err)
+		dlog.Errorf("catway: marshal: %v", err)
 		return
 	}
 	o.enqueue(c, b)
@@ -2502,7 +2503,7 @@ func (o *orch) enqueue(c *client, b []byte) {
 	select {
 	case c.out <- b:
 	default:
-		log.Printf("catway: dropping slow browser connection")
+		dlog.Warnf("catway: dropping slow browser connection")
 		o.dropConn(c)
 	}
 }
@@ -2800,7 +2801,7 @@ func (o *orch) serve(ws *rweb.WSConn) error {
 		up, err := browserproto.DecodeUp(m.Data)
 		if err != nil {
 			if !errors.Is(err, browserproto.ErrUnknownType) {
-				log.Printf("catway: bad up message: %v", err)
+				dlog.Warnf("catway: bad up message: %v", err)
 			}
 			continue // spec §1: unknown types are dropped
 		}
@@ -2975,7 +2976,7 @@ func (o *orch) handleUp(c *client, up any) {
 			return
 		}
 		if b, err := rt.enc.Key(*m); err != nil {
-			log.Printf("catway: key encode: %v", err)
+			dlog.Warnf("catway: key encode: %v", err)
 		} else if len(b) > 0 {
 			o.hostOf(rt).send(orchestration.NewInput(rt.id, b))
 		}
@@ -2987,7 +2988,7 @@ func (o *orch) handleUp(c *client, up any) {
 		}
 		b, err := rt.enc.Mouse(*m)
 		if err != nil {
-			log.Printf("catway: mouse encode: %v", err)
+			dlog.Warnf("catway: mouse encode: %v", err)
 			return
 		}
 		switch {
@@ -3003,7 +3004,7 @@ func (o *orch) handleUp(c *client, up any) {
 			return
 		}
 		if b, err := rt.enc.Paste(m.Data); err != nil {
-			log.Printf("catway: paste encode: %v", err)
+			dlog.Warnf("catway: paste encode: %v", err)
 		} else if len(b) > 0 {
 			o.hostOf(rt).send(orchestration.NewInput(rt.id, b))
 		}

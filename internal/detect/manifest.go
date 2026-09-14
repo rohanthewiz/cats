@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"unicode"
+
+	"github.com/rohanthewiz/cats/internal/dlog"
 )
 
 //go:embed manifests/*.json
@@ -200,7 +202,7 @@ func loadManifests(remoteRoot string) map[string]*compiledManifest {
 		}
 		rm, err := parseRemoteManifest(id, data)
 		if err != nil {
-			log.Printf("detect: ignoring remote manifest for %s: %v", id, err)
+			dlog.Warnf("detect: ignoring remote manifest for %s: %v", id, err)
 			continue
 		}
 		if base, ok := embedded[id]; ok {
@@ -213,7 +215,7 @@ func loadManifests(remoteRoot string) map[string]*compiledManifest {
 		}
 		cm, err := compileManifest(rm)
 		if err != nil {
-			log.Printf("detect: ignoring remote manifest for %s: %v", id, err)
+			dlog.Warnf("detect: ignoring remote manifest for %s: %v", id, err)
 			continue
 		}
 		m[id] = cm

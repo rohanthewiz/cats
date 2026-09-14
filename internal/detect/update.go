@@ -27,6 +27,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/pelletier/go-toml/v2"
+
+	"github.com/rohanthewiz/cats/internal/dlog"
 )
 
 // EngineVersion is the rules-engine version this package implements (cats's
@@ -87,12 +89,12 @@ type UpdateOutput struct {
 func AutoUpdate(stateDir string) {
 	out, err := CheckAndUpdate(stateDir, CatalogURL())
 	if err != nil {
-		log.Printf("detect: manifest update failed: %v", err)
+		dlog.Warnf("detect: manifest update failed: %v", err)
 		st := loadStatus(stateDir)
 		st.LastCheckUnix = time.Now().Unix()
 		st.LastResult = "failed: " + err.Error()
 		if err := saveStatus(stateDir, st); err != nil {
-			log.Printf("detect: save manifest update status: %v", err)
+			dlog.Warnf("detect: save manifest update status: %v", err)
 		}
 		return
 	}
@@ -150,7 +152,7 @@ func CheckAndUpdate(stateDir, url string) (UpdateOutput, error) {
 		}
 		switch {
 		case err != nil:
-			log.Printf("detect: manifest update failed for %s: %v", entry.id, err)
+			dlog.Warnf("detect: manifest update failed for %s: %v", entry.id, err)
 			status.Agents[entry.id] = AgentRemoteStatus{
 				CachedVersion:   cachedRemoteVersionString(stateDir, entry.id),
 				LastCheckedUnix: checkTime,
@@ -175,7 +177,7 @@ func CheckAndUpdate(stateDir, url string) (UpdateOutput, error) {
 	}
 
 	if err := saveStatus(stateDir, status); err != nil {
-		log.Printf("detect: save manifest update status: %v", err)
+		dlog.Warnf("detect: save manifest update status: %v", err)
 		status.LastResult = "failed_to_save_status: " + err.Error()
 	}
 	return UpdateOutput{Updated: updated, Status: status}, nil
@@ -515,7 +517,7 @@ func loadStatus(stateDir string) UpdateStatus {
 		return st
 	}
 	if err := json.Unmarshal(data, &st); err != nil {
-		log.Printf("detect: unreadable manifest update status: %v", err)
+		dlog.Warnf("detect: unreadable manifest update status: %v", err)
 		return UpdateStatus{Agents: map[string]AgentRemoteStatus{}}
 	}
 	if st.Agents == nil {

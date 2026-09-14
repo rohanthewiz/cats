@@ -21,6 +21,7 @@ import (
 	"github.com/rohanthewiz/cats/internal/app"
 	"github.com/rohanthewiz/cats/internal/browserproto"
 	"github.com/rohanthewiz/cats/internal/config"
+	"github.com/rohanthewiz/cats/internal/dlog"
 	"github.com/rohanthewiz/cats/internal/orchestration"
 	"github.com/rohanthewiz/cats/internal/terminal"
 )
@@ -85,13 +86,13 @@ type daemon struct {
 	// nothing that asks about this host (the roster, connected(), the ping
 	// watchdog) can queue behind a stuck write. See outbox for the cycle this
 	// breaks.
-	outbox *outbox
+	outbox *orchestration.Outbox
 	// writeStall bounds each write to this host (orchestration.NewStallWriter).
 	// Zero means orchestration.DefaultWriteStallTimeout; a field only so tests
 	// can shorten or lengthen it.
 	writeStall time.Duration
 	// writeBudget is the backlog, in bytes, past which the connection is dropped.
-	// Zero means defaultOutboxBudget; a field only so tests can shrink it.
+	// Zero means orchestration.DefaultOutboxBudget; a field only so tests can shrink it.
 	writeBudget int
 	// peerVersion is the negotiated protocol version this cathost's welcome
 	// agreed to, 0 while disconnected. It is what decides who resolves a pane's
@@ -345,10 +346,10 @@ func (d *daemon) send(m any) {
 	}
 	frame, err := orchestration.EncodeMessage(m)
 	if err != nil {
-		log.Printf("catway: daemon write: %v", err)
+		dlog.Errorf("catway: daemon write: %v", err)
 		return
 	}
-	if errors.Is(box.push(frame), errOutboxFull) {
+	if errors.Is(box.Push(frame), orchestration.ErrOutboxFull) {
 		d.dropBackloggedConn(conn, box)
 	}
 }
@@ -358,10 +359,10 @@ func (d *daemon) send(m any) {
 // almost certainly parked in a write, and only a close gets it out before the
 // stall bound would. conn and box are the ones captured together, so a
 // reconnect that has already replaced them is never touched.
-func (d *daemon) dropBackloggedConn(conn net.Conn, box *outbox) {
-	log.Printf("catway: cathost %s is more than %d MiB behind on writes — closing the connection",
-		d.name(), box.budget>>20)
-	box.close()
+func (d *daemon) dropBackloggedConn(conn net.Conn, box *orchestration.Outbox) {
+	dlog.Warnf("catway: cathost %s is more than %d MiB behind on writes — closing the connection",
+		d.name(), box.Budget()>>20)
+	box.Close()
 	_ = conn.Close()
 }
 
@@ -373,7 +374,7 @@ func (d *daemon) dropBackloggedConn(conn net.Conn, box *outbox) {
 // write may have left part of a frame on the wire, and an outbox that closed or
 // drained means the connection is being abandoned anyway. Closing is also what
 // fails the pump's read, which drives the redial.
-func (d *daemon) writePump(conn net.Conn, box *outbox) {
+func (d *daemon) writePump(conn net.Conn, box *orchestration.Outbox) {
 	defer conn.Close()
 	stall := d.writeStall
 	if stall == 0 {
@@ -381,7 +382,7 @@ func (d *daemon) writePump(conn net.Conn, box *outbox) {
 	}
 	w := orchestration.NewStallWriter(conn, stall)
 	for {
-		batch := box.take()
+		batch := box.Take()
 		if batch == nil {
 			return
 		}
@@ -390,13 +391,13 @@ func (d *daemon) writePump(conn net.Conn, box *outbox) {
 				// An outbox someone else closed means they also closed the conn
 				// (setConn, stop, the watchdog, the budget): this error is the
 				// echo of that, not news.
-				if !box.isClosed() {
-					log.Printf("catway: daemon write: %v", err)
+				if !box.IsClosed() {
+					dlog.Warnf("catway: daemon write: %v", err)
 				}
-				box.close()
+				box.Close()
 				return
 			}
-			box.sent(len(frame))
+			box.Sent(len(frame))
 		}
 	}
 }
@@ -413,12 +414,12 @@ func (d *daemon) setConn(c net.Conn) {
 		// After mu is released: close takes the outbox's own lock, and keeping the
 		// two locks unnested means no order between them ever has to be kept.
 		if old != nil {
-			old.close()
+			old.Close()
 		}
 	}()
 	d.conn = c
 	if c != nil {
-		d.outbox = newOutbox(d.writeBudget)
+		d.outbox = orchestration.NewOutbox(d.writeBudget)
 		go d.writePump(c, d.outbox)
 	}
 	if c == nil {
@@ -489,7 +490,7 @@ func (d *daemon) stop() {
 		// flushes them and then closes the connection itself, which unblocks the
 		// pump's read; run() then sees stopped. No wait here — this runs on the
 		// loop — and the flush is bounded by the writer's stall timeout.
-		box.closeWhenDrained()
+		box.CloseWhenDrained()
 	} else if conn != nil {
 		_ = conn.Close() // unblocks the pump's read; run() then sees stopped
 	}
@@ -675,7 +676,7 @@ func (d *daemon) sendPing(conn net.Conn) bool {
 	if !d.pingSince.IsZero() && time.Since(d.pingSince) > hostPingTimeout {
 		d.stalled = true // so the roster names the silence, not our own Close
 		d.mu.Unlock()
-		log.Printf("catway: cathost %s answered no ping in %s — closing the connection", d.name(), hostPingTimeout)
+		dlog.Warnf("catway: cathost %s answered no ping in %s — closing the connection", d.name(), hostPingTimeout)
 		// Close rather than mark: the pump is blocked on a read of this socket,
 		// and closing is what unblocks it into the ordinary disconnect path —
 		// the pending flush, the toast and the redial all happen exactly as they
@@ -706,10 +707,10 @@ func (d *daemon) sendPing(conn net.Conn) bool {
 	if err != nil {
 		return false
 	}
-	switch err := box.push(frame); {
+	switch err := box.Push(frame); {
 	case err == nil:
 		return true
-	case errors.Is(err, errOutboxFull):
+	case errors.Is(err, orchestration.ErrOutboxFull):
 		d.dropBackloggedConn(conn, box)
 	}
 	return false // closed or dropped: this session's probe loop is over
@@ -782,9 +783,22 @@ func (d *daemon) authToken() (string, error) {
 	return tok, nil
 }
 
+// dialOutageWarnAfter is how long a host may stay unreachable before run logs a
+// warning about it. Long enough to ride out a daemon that is still starting or
+// restarting (a few refused dials), short enough to be the first line in the
+// kept log when a host has really gone.
+const dialOutageWarnAfter = 10 * time.Second
+
 // run dials this host forever, with backoff.
 func (d *daemon) run() {
 	backoff := time.Second
+	// outageStart is when the current run of failed dials began (zero while
+	// connected). Each retry is routine output — one refused dial is normal while
+	// a daemon is still coming up — but a host that stays unreachable is worth a
+	// warning, once per outage rather than once per retry, so a long outage
+	// cannot flood the kept log a line every five seconds.
+	var outageStart time.Time
+	outageWarned := false
 	for {
 		if d.stopping() {
 			return
@@ -792,6 +806,13 @@ func (d *daemon) run() {
 		conn, err := d.dial()
 		if err != nil {
 			log.Printf("catway: cathost dial (%s): %v (retrying in %s)", d.name(), err, backoff)
+			if outageStart.IsZero() {
+				outageStart = time.Now()
+			} else if !outageWarned && time.Since(outageStart) >= dialOutageWarnAfter {
+				dlog.Warnf("catway: cathost %s unreachable for %s: %v (still retrying)",
+					d.name(), time.Since(outageStart).Round(time.Second), err)
+				outageWarned = true
+			}
 			d.setLastErr(err)
 			// The roster carries connectivity, so a host that never came up must
 			// still refresh it: the failure is the only news there is about a
@@ -810,9 +831,10 @@ func (d *daemon) run() {
 			continue
 		}
 		backoff = time.Second
+		outageStart, outageWarned = time.Time{}, false
 		err = d.session(conn)
 		if err != nil {
-			log.Printf("catway: cathost session (%s): %v", d.name(), err)
+			dlog.Warnf("catway: cathost session (%s): %v", d.name(), err)
 		}
 		_ = conn.Close()
 		if d.stopping() {
@@ -1320,7 +1342,7 @@ func (d *daemon) dispatch(mt orchestration.MessageType, payload []byte) {
 		if err := json.Unmarshal(payload, &ev); err != nil {
 			return
 		}
-		log.Printf("catway: daemon error (pane %d): %s", ev.PaneID, ev.Message)
+		dlog.Warnf("catway: daemon error (pane %d): %s", ev.PaneID, ev.Message)
 		o.post(func() { o.broadcast(browserproto.NewError(ev.PaneID, ev.Message)) })
 	}
 }

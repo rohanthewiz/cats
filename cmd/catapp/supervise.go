@@ -9,9 +9,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync/atomic"
 	"syscall"
 	"time"
 
+	"github.com/rohanthewiz/cats/internal/dlog"
 	"github.com/rohanthewiz/cats/internal/startdir"
 )
 
@@ -20,8 +22,8 @@ import (
 // The launcher spawns both wired to a private socket, waits for the catway to
 // accept TCP, points the webview at it, and reaps them when the window closes.
 type backend struct {
-	cathost *exec.Cmd
-	catway  *exec.Cmd
+	cathost *daemonProc
+	catway  *daemonProc
 	addr    string   // 127.0.0.1:<port> the catway serves
 	socket  string   // $TMPDIR unix socket the two daemons share (cathost seam)
 	sockets []string // every $TMPDIR socket we point the daemons at, for cleanup
@@ -83,25 +85,25 @@ func startBackend() (*backend, error) {
 	// Setpgid detaches each daemon into its own process group so a stray signal
 	// to the launcher's group (e.g. Ctrl-C in a dev terminal) doesn't pre-empt
 	// our orderly teardown; we signal each process explicitly on quit.
-	b.cathost = command(thPath, "-persistent", "-socket", thSock)
-	if err := b.cathost.Start(); err != nil {
+	b.cathost, err = startDaemon(daemonLog, thPath, "-persistent", "-socket", thSock)
+	if err != nil {
 		err = fmt.Errorf("start cathost: %w", err)
 		boot.fail(thStep, err)
 		return nil, err
 	}
-	boot.okDetail(thStep, fmt.Sprintf("pid %d on %s", b.cathost.Process.Pid, thSock))
+	boot.okDetail(thStep, fmt.Sprintf("pid %d on %s", b.cathost.pid(), thSock))
 
 	gwStep := boot.begin("starting catway")
-	b.catway = command(gwPath,
+	b.catway, err = startDaemon(daemonLog, gwPath,
 		"--addr", b.addr, "--auth", "none",
 		"--socket", thSock, "--control-socket", ctlSock, "--hook-socket", hookSock)
-	if err := b.catway.Start(); err != nil {
+	if err != nil {
 		b.stop()
 		err = fmt.Errorf("start catway: %w", err)
 		boot.fail(gwStep, err)
 		return nil, err
 	}
-	boot.okDetail(gwStep, fmt.Sprintf("pid %d", b.catway.Process.Pid))
+	boot.okDetail(gwStep, fmt.Sprintf("pid %d", b.catway.pid()))
 
 	// The catway serves HTTP as soon as it binds — it dials cathost lazily with
 	// its own retry (cmd/catway/daemon.go) — so a successful TCP dial is a
@@ -131,17 +133,132 @@ func startBackend() (*backend, error) {
 // the line lands under the step that is waiting on it. The tap stops recording
 // the moment startup finishes (bootTap.Write), so the rest of the session's
 // logging costs a boolean.
-func command(path string, args ...string) *exec.Cmd {
+//
+// And it is tapped into l, the kept daemon log (daemonlog.go), which is the
+// only one of the three that lasts past startup and past the session.
+func command(l *rotatingLog, path string, args ...string) *exec.Cmd {
 	c := exec.Command(path, args...)
 	name := filepath.Base(path)
 	// One tap per stream rather than one shared: they are written by different
 	// goroutines, and a shared partial-line buffer would interleave them into
 	// nonsense.
-	c.Stdout = io.MultiWriter(os.Stdout, newBootTap(name))
-	c.Stderr = io.MultiWriter(os.Stderr, newBootTap(name))
+	//
+	// Our own stdio is wrapped best-effort. io.MultiWriter stops at the first
+	// writer that fails, and exec's copy loop stops with it; a launcher whose
+	// terminal has gone (a dev shell closed under it) would then stop draining
+	// the daemon's pipe, the pipe would fill, and the daemon would block on its
+	// next log line — mid-operation, holding whatever it held. The taps are
+	// first for the same reason.
+	c.Stdout = io.MultiWriter(newBootTap(name), newDaemonTap(name, c, l), bestEffort{os.Stdout})
+	c.Stderr = io.MultiWriter(newBootTap(name), newDaemonTap(name, c, l), bestEffort{os.Stderr})
 	c.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	c.Dir = daemonDir()
+	// Wait returns once the daemon has exited AND its output pipes have closed.
+	// A grandchild that inherited them (a helper the daemon spawned) could hold
+	// them open indefinitely, which would hide the daemon's exit from the
+	// watcher; WaitDelay caps that.
+	c.WaitDelay = 2 * time.Second
 	return c
+}
+
+// bestEffort is a writer that never fails, for output nobody may be reading.
+type bestEffort struct{ w io.Writer }
+
+func (b bestEffort) Write(p []byte) (int, error) {
+	_, _ = b.w.Write(p)
+	return len(p), nil
+}
+
+// Stop grace periods. catway's covers its own graceful shutdown with room to
+// spare (it exits by itself within shutdownDeadline, 3s, even when its loop is
+// jammed — cmd/catway/signals.go), so reaching SIGKILL means something beyond
+// that. cathost has no final save and exits as soon as its panes are torn down.
+const (
+	catwayStopGrace  = 5 * time.Second
+	cathostStopGrace = 3 * time.Second
+	// daemonKillWait is how long to wait for the reap after SIGKILL, which the
+	// kernel delivers unconditionally; running out of it means an unkillable
+	// process (stuck in the kernel), about which nothing more can be done.
+	daemonKillWait = 2 * time.Second
+)
+
+// daemonProc is one supervised daemon and the watcher that reaps it.
+//
+// The watcher exists so an exit is noticed when it happens rather than at quit:
+// catway dying mid-session leaves a blank window, and before this nothing
+// recorded that it had died, let alone how. stopping separates that from the
+// exits we cause ourselves, which are not news.
+type daemonProc struct {
+	name     string
+	cmd      *exec.Cmd
+	log      *rotatingLog
+	done     chan struct{} // closed once cmd.Wait has returned
+	stopping atomic.Bool   // set before we signal it; an exit after this was asked for
+}
+
+// startDaemon starts a daemon and its watcher.
+func startDaemon(l *rotatingLog, path string, args ...string) (*daemonProc, error) {
+	c := command(l, path, args...)
+	if err := c.Start(); err != nil {
+		return nil, err
+	}
+	p := &daemonProc{name: filepath.Base(path), cmd: c, log: l, done: make(chan struct{})}
+	go p.watch()
+	return p, nil
+}
+
+func (p *daemonProc) pid() int { return p.cmd.Process.Pid }
+
+// watch reaps the daemon and reports an exit nobody asked for. cmd.Wait (not
+// Process.Wait) so the output copiers have finished first: a crash report is
+// then fully in the log before the line saying the process died.
+func (p *daemonProc) watch() {
+	_ = p.cmd.Wait()
+	defer close(p.done)
+	if p.stopping.Load() {
+		return
+	}
+	how := "exited"
+	if st := p.cmd.ProcessState; st != nil {
+		how = st.String() // "exit status 2", "signal: killed"
+	}
+	// A clean exit is still unexpected here (catctl server.stop, cathost's idle
+	// timeout), but it is a choice someone made rather than a failure.
+	level := dlog.LevelError
+	if st := p.cmd.ProcessState; st != nil && st.Success() {
+		level = dlog.LevelWarn
+	}
+	p.log.note(level, "%s (pid %d) exited while the app was running: %s", p.name, p.pid(), how)
+}
+
+// stop asks the daemon to exit and makes sure it does: SIGTERM, then SIGKILL
+// once grace runs out. Safe on nil (a daemon never started).
+//
+// It used to SIGTERM and give up after the wait, leaving the process to "the
+// OS at exit" — which does nothing to a child. On 2026-09-13 that left a
+// cathost whose session was wedged running for good: reparented to launchd,
+// still holding every pane (two agents among them), its socket file already
+// removed and its listener closed, so nothing could ever reach it, and its
+// stdio pipes pointing at a launcher that had exited. An orphan like that is
+// worse than a killed daemon in every way, so the escalation is unconditional.
+func (p *daemonProc) stop(grace time.Duration) {
+	if p == nil {
+		return
+	}
+	p.stopping.Store(true)
+	_ = p.cmd.Process.Signal(syscall.SIGTERM)
+	select {
+	case <-p.done:
+		return
+	case <-time.After(grace):
+	}
+	p.log.note(dlog.LevelWarn, "%s (pid %d) did not exit within %s of SIGTERM — sending SIGKILL", p.name, p.pid(), grace)
+	_ = p.cmd.Process.Kill()
+	select {
+	case <-p.done:
+	case <-time.After(daemonKillWait):
+		p.log.note(dlog.LevelError, "%s (pid %d) still running %s after SIGKILL", p.name, p.pid(), daemonKillWait)
+	}
 }
 
 // daemonDir is the working directory the daemons run in. Launched from Finder
@@ -154,36 +271,19 @@ func daemonDir() string {
 	return startdir.Usable(cwd) // "" (nothing usable) inherits ours
 }
 
-// stop tears the backend down in reverse order: SIGTERM the catway (it saves
-// session state and exits within its own short grace window), wait briefly, then
-// SIGTERM cathost. cathost is persistent, so a future "keep sessions alive in
-// the background" option could skip signalling it; for now a window close reaps
-// both to avoid orphaned daemons. Safe to call on a partially-started backend.
+// stop tears the backend down in reverse order: stop the catway (it saves
+// session state and exits within its own short grace window), then cathost.
+// Each is SIGTERMed and, past its grace, SIGKILLed (daemonProc.stop). cathost is
+// persistent, so a future "keep sessions alive in the background" option could
+// skip stopping it; for now a window close reaps both to avoid orphaned daemons.
+// Safe to call on a partially-started backend.
 func (b *backend) stop() {
-	if b.catway != nil && b.catway.Process != nil {
-		_ = b.catway.Process.Signal(syscall.SIGTERM)
-		waitOrTimeout(b.catway, 3*time.Second)
-	}
-	if b.cathost != nil && b.cathost.Process != nil {
-		_ = b.cathost.Process.Signal(syscall.SIGTERM)
-		waitOrTimeout(b.cathost, 3*time.Second)
-	}
+	b.catway.stop(catwayStopGrace)
+	b.cathost.stop(cathostStopGrace)
 	// The daemons unlink their own sockets on a clean exit; remove any stragglers
-	// as a backstop (e.g. a daemon that was SIGKILLed by the OS at app exit).
+	// as a backstop (a daemon that had to be SIGKILLed never got to).
 	for _, s := range b.sockets {
 		_ = os.Remove(s)
-	}
-}
-
-// waitOrTimeout reaps a signalled child, giving up (leaving it to the OS at
-// process exit) if it doesn't die within d. Reaping avoids leaving zombies while
-// the launcher is still running.
-func waitOrTimeout(c *exec.Cmd, d time.Duration) {
-	done := make(chan struct{})
-	go func() { _, _ = c.Process.Wait(); close(done) }()
-	select {
-	case <-done:
-	case <-time.After(d):
 	}
 }
 

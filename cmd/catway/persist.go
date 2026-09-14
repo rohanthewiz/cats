@@ -3,10 +3,10 @@
 package main
 
 import (
-	"log"
 	"time"
 
 	"github.com/rohanthewiz/cats/internal/browserproto"
+	"github.com/rohanthewiz/cats/internal/dlog"
 	"github.com/rohanthewiz/cats/internal/orchestration"
 	"github.com/rohanthewiz/cats/internal/persist"
 	"github.com/rohanthewiz/cats/internal/terminal"
@@ -94,7 +94,7 @@ func (o *orch) saveNow() {
 		}
 	}
 	if err := persist.SaveSession(o.sessionPath, o.session.Snapshot(), cwds, agents); err != nil {
-		log.Printf("catway: save session state: %v", err)
+		dlog.Errorf("catway: save session state: %v", err)
 	}
 }
 
@@ -199,7 +199,7 @@ func (o *orch) histSaveNow() {
 		}
 	}
 	if err := persist.SaveHistory(o.historyPath, out); err != nil {
-		log.Printf("catway: save history state: %v", err)
+		dlog.Errorf("catway: save history state: %v", err)
 	}
 }
 

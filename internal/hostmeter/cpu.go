@@ -3,7 +3,6 @@ package hostmeter
 import (
 	"bufio"
 	"fmt"
-	"log"
 	"os"
 	"os/exec"
 	"runtime"
@@ -11,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/rohanthewiz/cats/internal/dlog"
 )
 
 // How hard the machine is working, as the third row of the sidebar's HOST
@@ -213,7 +214,7 @@ func (c *Sampler) runDarwin() {
 				if err != nil {
 					reason = "iostat: " + err.Error()
 				}
-				log.Printf("hostmeter: host CPU unavailable (%s) — the sidebar drops the row", reason)
+				dlog.Warnf("hostmeter: host CPU unavailable (%s) — the sidebar drops the row", reason)
 				return
 			}
 		}
@@ -343,7 +344,7 @@ func (c *Sampler) runLinux() {
 			prevBusy, prevTotal, have = busy, total, true
 		}
 		if fails >= cpuMaxRestarts {
-			log.Printf("hostmeter: host CPU unavailable (/proc/stat unreadable) — the sidebar drops the row")
+			dlog.Warnf("hostmeter: host CPU unavailable (/proc/stat unreadable) — the sidebar drops the row")
 			return
 		}
 		select {
