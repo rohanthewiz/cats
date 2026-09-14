@@ -77,7 +77,19 @@ type daemon struct {
 	token     string
 	tokenFile string
 
-	mu sync.Mutex // serializes writes; guards conn, peerVersion, lastErr, stopped and label
+	mu sync.Mutex // guards conn, peerVersion, lastErr, stopped and label; never held across I/O
+	// wmu serializes writes to conn, and is deliberately not mu. A write blocks
+	// for as long as the peer declines to read. When one lock did both jobs, a
+	// stuck write held mu too, so everything that merely asks about this host —
+	// the roster, connected(), and the ping watchdog whose whole job is noticing
+	// a stuck link — queued behind the write it was meant to break.
+	//
+	// Lock order where both are held: wmu, then mu.
+	wmu sync.Mutex
+	// writeStall bounds each write to this host (orchestration.NewStallWriter).
+	// Zero means orchestration.DefaultWriteStallTimeout; it is a field only so
+	// tests can shorten or lengthen it.
+	writeStall time.Duration
 	// peerVersion is the negotiated protocol version this cathost's welcome
 	// agreed to, 0 while disconnected. It is what decides who resolves a pane's
 	// git branch: a v3 daemon does it itself (the cwd is on its filesystem), a
@@ -308,17 +320,40 @@ func (d *daemon) connected() bool {
 
 // send writes one command to the daemon. Disconnected sends are dropped —
 // reconcile replays the model when the connection comes back. Called from the
-// orchestrator loop (which owns the decision to send).
+// orchestrator loop (which owns the decision to send) and from hook-reply
+// goroutines.
+//
+// The conn is read under mu and written under wmu, so a peer that stops reading
+// stalls only other writers, never the readers of this daemon's state. A write
+// that fails — including one that made no progress for the stall timeout —
+// closes the connection: part of a frame may be on the wire, and the pump's
+// read failing is what drives the ordinary redial and reconcile.
 func (d *daemon) send(m any) {
 	d.mu.Lock()
-	defer d.mu.Unlock()
-	if d.conn == nil {
+	conn := d.conn
+	d.mu.Unlock()
+	if conn == nil {
 		return
 	}
-	if err := orchestration.WriteMessage(d.conn, m); err != nil {
+	d.wmu.Lock()
+	err := d.writeLocked(conn, m)
+	d.wmu.Unlock()
+	if err != nil {
 		log.Printf("catway: daemon write: %v", err)
-		_ = d.conn.Close() // the pump's read fails and triggers redial
+		// The conn captured above, not d.conn: if a reconnect has already swapped
+		// in a new connection, that one is healthy and must not be closed.
+		_ = conn.Close() // the pump's read fails and triggers redial
 	}
+}
+
+// writeLocked puts one message on conn, bounded by the stall timeout. The
+// caller holds wmu.
+func (d *daemon) writeLocked(conn net.Conn, m any) error {
+	stall := d.writeStall
+	if stall == 0 {
+		stall = orchestration.DefaultWriteStallTimeout
+	}
+	return orchestration.WriteMessage(orchestration.NewStallWriter(conn, stall), m)
 }
 
 func (d *daemon) setConn(c net.Conn) {
@@ -578,15 +613,35 @@ func (d *daemon) sendPing(conn net.Conn) bool {
 		_ = conn.Close()
 		return false
 	}
+	// The silence starts with the first unanswered probe ATTEMPT, not the first
+	// one written: a probe that cannot even reach the wire (below) is the
+	// strongest evidence of a stuck link there is, and must age like any other.
+	if d.pingSince.IsZero() {
+		d.pingSince = time.Now()
+	}
+	d.mu.Unlock()
+
+	// TryLock, not Lock: while another write holds the connection, this probe
+	// is skipped rather than queued. Queued, the probe loop would park behind
+	// the very write it exists to rescue and never reach the timeout check
+	// above again. Skipped, the next tick re-checks the clock and, once past
+	// the tolerance, closes the connection — which is what frees that write.
+	if !d.wmu.TryLock() {
+		return true
+	}
+	d.mu.Lock()
 	d.pingID++
 	id := d.pingID
 	d.pingAt = time.Now()
-	if d.pingSince.IsZero() {
-		d.pingSince = d.pingAt // the silence starts with the first unanswered probe
-	}
 	d.mu.Unlock()
-	if err := orchestration.WriteMessage(conn, orchestration.NewPing(id)); err != nil {
-		return false // the pump's read is about to fail too; it owns the reconnect
+	err := d.writeLocked(conn, orchestration.NewPing(id))
+	d.wmu.Unlock()
+	if err != nil {
+		// Closed here rather than left to the pump. A stalled write leaves part
+		// of a frame behind, and the pump may be parked somewhere other than a
+		// read of this socket, so waiting for its read to fail could be forever.
+		_ = conn.Close()
+		return false
 	}
 	return true
 }

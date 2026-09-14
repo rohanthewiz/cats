@@ -297,6 +297,11 @@ type Host struct {
 	// over the network — cathost refuses to open a tcp/tls listener without one.
 	RequireToken string
 
+	// WriteStallTimeout drops an attached client that accepts no bytes for this
+	// long (see DefaultWriteStallTimeout for why a write needs a bound at all).
+	// NewHost sets the default; zero disables the bound.
+	WriteStallTimeout time.Duration
+
 	// branchWake nudges the branch pump out of its sweep interval when a pane's
 	// cwd changes. Buffered depth 1 and sent non-blocking: the pump re-reads
 	// every pane anyway, so a nudge that arrives while one is already pending is
@@ -312,6 +317,13 @@ type Host struct {
 	connMu   sync.Mutex
 	out      chan any
 	sessDone chan struct{}
+	// sessEnd is the current attachment's context — done the moment either half
+	// of the session gives up, in particular when the writer's write stalls out.
+	// sessDone alone is not enough: it closes only after the READER has left its
+	// loop, and the reader may itself be parked in emit waiting for room in out,
+	// room that only the writer (now gone) would ever make. Selecting on both is
+	// what lets a dead writer release every emitter, the reader included.
+	sessEnd <-chan struct{}
 
 	closed     chan struct{} // closed by Stop; pumps/emit bail on it
 	closedOnce sync.Once
@@ -341,11 +353,12 @@ type Host struct {
 // NewHost creates an empty Host.
 func NewHost() *Host {
 	return &Host{
-		FlushInterval: DefaultFlushInterval,
-		panes:         make(map[uint32]*pane),
-		closed:        make(chan struct{}),
-		exit:          make(chan struct{}),
-		branchWake:    make(chan struct{}, 1),
+		FlushInterval:     DefaultFlushInterval,
+		WriteStallTimeout: DefaultWriteStallTimeout,
+		panes:             make(map[uint32]*pane),
+		closed:            make(chan struct{}),
+		exit:              make(chan struct{}),
+		branchWake:        make(chan struct{}, 1),
 	}
 }
 
@@ -390,6 +403,7 @@ func (h *Host) Attach(ctx context.Context, conn io.ReadWriteCloser) error {
 	h.connMu.Lock()
 	h.out = out
 	h.sessDone = sessDone
+	h.sessEnd = ctx.Done()
 	h.connMu.Unlock()
 	h.disarmIdle()
 
@@ -403,10 +417,19 @@ func (h *Host) Attach(ctx context.Context, conn io.ReadWriteCloser) error {
 		}
 	}()
 
+	// writeErr is set only for a stalled write, by the writer goroutine, and read
+	// only after wg.Wait — so it needs no lock.
+	var writeErr error
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() { // writer: drain outbound events to the connection
 		defer wg.Done()
+		// Every write is bounded. A client that stops reading (a catway whose
+		// own loop is jammed) would otherwise park this writer forever; out
+		// fills, and every emitter — the reader and each pane's pty pump among
+		// them — parks behind it. On failure, cancel closes conn and ends
+		// sessEnd, which releases all of them. Panes keep running.
+		w := NewStallWriter(conn, h.WriteStallTimeout)
 		for {
 			select {
 			case <-ctx.Done():
@@ -421,7 +444,13 @@ func (h *Host) Attach(ctx context.Context, conn io.ReadWriteCloser) error {
 					cancel()
 					return
 				}
-				if err := WriteMessage(conn, ev); err != nil {
+				if err := WriteMessage(w, ev); err != nil {
+					// Only a stall is worth reporting as the reason. A client
+					// that simply hung up fails this write too, and that is an
+					// ordinary disconnect, not something to log as an error.
+					if errors.Is(err, os.ErrDeadlineExceeded) {
+						writeErr = err
+					}
 					cancel()
 					return
 				}
@@ -454,6 +483,7 @@ func (h *Host) Attach(ctx context.Context, conn io.ReadWriteCloser) error {
 	h.connMu.Lock()
 	h.out = nil
 	h.sessDone = nil
+	h.sessEnd = nil
 	h.connMu.Unlock()
 	// The subscription belongs to the connection that asked for it. Left
 	// running, a persistent daemon would go on sampling (and, on darwin, keep an
@@ -466,6 +496,11 @@ func (h *Host) Attach(ctx context.Context, conn io.ReadWriteCloser) error {
 	h.armIdle()
 	if fatalErr != nil {
 		return fatalErr // why we hung up beats "connection closed" as the log line
+	}
+	// Likewise a writer that stalled out: the reader's error is only the echo of
+	// the close that followed it.
+	if writeErr != nil {
+		return writeErr
 	}
 	return readErr
 }
@@ -1550,10 +1585,11 @@ func (h *Host) removePane(id uint32) *pane {
 // emit routes an event to the currently-attached client. When no client is
 // attached (out == nil) the event is dropped: panes keep running and the next
 // client gets a full resync, so a dropped frame/cwd/title costs nothing. sessDone
-// unblocks an emit that races a detach on the old channel.
+// unblocks an emit that races a detach on the old channel; sessEnd unblocks one
+// whose session's writer has already given up, before the detach can happen.
 func (h *Host) emit(ev any) {
 	h.connMu.Lock()
-	out, sessDone := h.out, h.sessDone
+	out, sessDone, sessEnd := h.out, h.sessDone, h.sessEnd
 	h.connMu.Unlock()
 	if out == nil {
 		return
@@ -1561,6 +1597,7 @@ func (h *Host) emit(ev any) {
 	select {
 	case out <- ev:
 	case <-sessDone:
+	case <-sessEnd:
 	case <-h.closed:
 	}
 }
