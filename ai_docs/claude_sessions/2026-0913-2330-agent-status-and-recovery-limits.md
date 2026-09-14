@@ -3,7 +3,10 @@
 *A continuation of the write-deadlock session. An "is fable still running?"
 script found fable parked on a full pty. Checking the recovery plan against
 the build actually running then showed that restarting only catway cannot work:
-the installed cathost has the reader hang that fix 1 only just fixed.*
+the installed cathost has the reader hang that fix 1 only just fixed. The user
+rebuilt and relaunched. The old cathost survived the quit as an orphan still
+holding fable and opus, and was killed. Five cats-todo processes outlived their
+terminals and had to be stopped separately.*
 
 Session: https://claude.ai/code/session_012kHDH7fWkxr85jvxARw49y
 Date: 2026-09-13
@@ -158,7 +161,7 @@ Also:
 
 Nothing was killed.
 
-## Recovery, as it now stands
+## Recovery, as it happened
 
 The only way out ends cathost's panes. What that costs:
 
@@ -168,16 +171,64 @@ The only way out ends cathost's panes. What that costs:
 | opus (ced) | nothing; finished and pushed `3986bae` |
 | shells, cats-todo panes | running processes; layout and scrollback restore from the 22:08:33 save |
 
-Proposed order:
-1. Build and install Cats.app from `main` (`scripts/build-macapp.sh`) so the relaunch has all three fixes. Replacing the bundle doesn't affect the running process, which keeps its binaries mapped.
-2. The user quits and reopens Cats.app themselves.
-3. Resume agents with `claude --resume` where wanted.
+### 1. The user rebuilt and relaunched
 
-Step 1 was offered but not yet approved.
+The user ran `make macapp` and reinstalled, then quit and reopened Cats.app at
+23:30:12. Checks on the result:
+
+- `go version -m` on all four installed binaries: `vcs.revision=c430c9c…`, `vcs.modified=false`, so both fix commits are in.
+- The new processes: catapp 17080, cathost 17448 (socket `cats-th-17080.sock`), catway 17449.
+- `boot.log`: `restored session … (19 workspaces, 30 panes)`, `ui: server welcomed the client`, ready in 1.6s.
+- No unix socket had queued bytes.
+- The restore did **not** auto-resume any agent (19 `zsh` panes under 17448, no `claude`), so no second process ran the same conversation as the stuck originals.
+
+### 2. The old cathost survived the quit
+
+After the relaunch, pid 60148 (started Fri Sep 11 19:59:20) was still running:
+
+- **Orphaned:** its parent was pid 1.
+- **Still holding 22 processes:** fable, opus, 11 shells and 5 cats-todo.
+- **Unreachable:**
+  - Its socket file had been removed by the old catapp's `stop`.
+  - Its listener was closed, so nothing could ever reconnect.
+  - Its stdout/stderr were pipes whose reader, the old catapp, had exited. The next log line would likely have killed it with SIGPIPE, taking every pane with it.
+
+Why it survived: `backend.stop` (`cmd/catapp/supervise.go`) sends cathost
+SIGTERM and gives up after `waitOrTimeout(3s)`, leaving it to the OS. Cancelling
+the context closed the listener, but `Attach` was still hung behind the parked
+reader (the old build has no `sessEnd`), so `main` never returned.
+
+### 3. Killing it, with the user's approval
+
+1. **Identity checked first:** start time `Fri Sep 11 19:59:20 2026` and command `…/cathost -persistent -socket …/cats-th-59797.sock`, to rule out pid reuse.
+2. **Children recorded** (22 pids), then SIGKILL, since SIGTERM had already failed at quit.
+3. **17 of 22 children exited** when their pty masters closed, fable (95000) and opus (76685) among them.
+4. **5 cats-todo processes survived** (68470, 5026, 44860, 75097, 67098):
+   - reparented to pid 1;
+   - still holding their dead ttys (e.g. `/dev/ttys011`) and GPU shader-cache files under `dev.cats.app`;
+   - using 0.2–4.4% CPU each, about 12% in total.
+
+   Each was checked (parent pid 1, in the recorded child list, exact command) and sent SIGTERM. All five exited within 5s.
+5. **Final checks:**
+   - 0 of 22 recorded children running;
+   - no process with `59797` or `60148` in its command line;
+   - 0 open fds on the old `cats-th/ctl/hooks-59797` or `cats-hook/ctlrelay-60148` sockets.
+6. **The new app was untouched throughout:** 17080, 17448 and 17449 alive, `GET /` 200, no socket backlog.
+
+### Why cats-todo outlived its terminal
+
+When a pty master closes, the session's processes get SIGHUP, and their tty
+reads fail. Every other pane process (zsh, claude) exited. cats-todo is a
+Bubble Tea program (`launch.go`: `tea.NewProgram`), and its only
+`signal.Notify` in the local checkout (`transfercli.go`, at `4e4688d`) covers
+`os.Interrupt` and `SIGTERM`. It kept running with no terminal. Which of the two
+it ignored (the hangup, or the read errors on its input) was not pinned down.
 
 ## Next
 
-- **Recover Cats.** Build and install Cats.app from `main` (offered, awaiting a yes); the user quits and relaunches; resume fable and opus with `claude --resume` if wanted. A catway-only restart is **not possible** on the running `117ce96` build (see above).
+- **Resume the agents if wanted.** Run `claude --resume` in the new Cats' grmob pane (fable, whose work is pushed as `fb75a4b`) and ced pane (opus, finished). The old processes are gone; recovery is otherwise done.
+- **cats-todo doesn't exit when its terminal goes away** (fix in the cats-todo repo). Five instances survived their pane's pty closing, reparented to pid 1, and kept using CPU (about 12% combined) with dead ttys and GPU caches open. Its only `signal.Notify` covers SIGINT/SIGTERM. It should exit on SIGHUP and on EOF/EIO from its tty, which probably means checking how Bubble Tea's input reader reports read errors.
+- **catapp's quit can orphan a cathost.** `backend.stop` sends SIGTERM, waits 3s and gives up, leaving an orphan that holds every pane with no way to reconnect (listener closed, socket file removed) and stdio pipes to an exited parent. Fix 1 should let a jammed cathost exit now, but catapp should still SIGKILL after the timeout, or at least log that cathost didn't exit. It must not leave one running silently.
 - **Once relaunched, check that a catway-only restart now keeps panes.** With fix 1's `sessEnd`, a SIGKILLed catway should let cathost's `Attach` return and a new catway reconcile. This is the recovery path that was missing tonight, and it has only unit-test coverage (`TestAttachDropsAClientThatStopsReading`).
 - **Fix catway's SIGTERM path.** The handler posts `Shutdown` into the mailbox before it can see a second signal, so a jammed loop makes SIGTERM useless. Read the second signal first (or `select` on post vs signal), or run the exit on a timer independent of the loop.
 - **Fix 4: keep daemon logs.** catapp sends catway/cathost stdio to `/dev/null` after boot; write it to a rotating file beside `boot.log`. catapp also doesn't notice a catway exit.
