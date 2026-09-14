@@ -326,7 +326,9 @@ type PluginPane struct {
 	Tab       int    `json:"tab"`
 	// Plugin is the launcher's CATS_PLUGIN_ID ("rohanthewiz.cats-todo"): the
 	// row's identity and the key its group is cut on. Never a manifest name —
-	// catway does not read manifests.
+	// catway does not read manifests. An editor pane (editor.agents) started
+	// outside the plugin host has no launch id and carries its agent label
+	// ("ced") instead.
 	Plugin string `json:"plugin"`
 	// Title is the pane's live terminal title, the plugin's own word for what
 	// it is showing; "" before the program has set one.

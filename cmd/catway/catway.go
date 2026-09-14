@@ -1533,9 +1533,23 @@ func (o *orch) resyncPane(pid uint32) {
 // the agent, because the agent row is strictly the more informative of the two:
 // it says what the pane is doing right now, while the plugin row could only say
 // who started it.
+//
+// THE EDITOR IS THE EXCEPTION, and it runs the other way. An editor (ced)
+// reports over the hook API for two reasons that have nothing to do with being
+// a coding agent: its label is how pane.open_file finds the editor pane
+// (findEditorPane matches PaneMeta.Agent against editor.agents), and a blocked
+// question is how it reaches a phone. Neither needs an agent ROW — an editor
+// is a tool the user drives, not something taking turns that "idle 5m ago"
+// describes — so a pane whose effective agent is a configured editor is filed
+// with the plugins. The agent pair is left alone everywhere else (PaneMeta, the
+// pane header, pane_agent events, notifications), which is what keeps open_file
+// and pushes working; only this roster's classification changes. Its plugin id
+// is the launch's CATS_PLUGIN_ID when there is one ("rohanthewiz.ced") and the
+// agent label otherwise, so a ced typed into a shell is still a row.
 func (o *orch) agentsMsg() browserproto.Agents {
 	items := []browserproto.AgentItem{}
 	plugins := []browserproto.PluginPane{}
+	ed := o.EditorConfig()
 	for _, ws := range o.session.Workspaces() {
 		for _, tab := range ws.Tabs {
 			for _, id := range tab.Layout.PaneIDs() {
@@ -1544,12 +1558,17 @@ func (o *orch) agentsMsg() browserproto.Agents {
 					continue
 				}
 				agent, state := rt.effectiveAgent()
-				if agent == "" {
+				editor := ed.IsEditorAgent(agent)
+				if agent == "" || editor {
+					plug := panePlugin(tab, id)
+					if plug == "" && editor {
+						plug = agent
+					}
 					// A corpse is left out of both rosters: an exited plugin is
 					// no longer running anything, and its pane is either about
 					// to be reaped or sitting there with a red header that
 					// already says so.
-					if plug := panePlugin(tab, id); plug != "" && rt.exited == nil {
+					if plug != "" && rt.exited == nil {
 						pub, _ := o.session.PublicPaneID(id)
 						plugins = append(plugins, browserproto.PluginPane{
 							Pane: rt.id, Pub: pub, Workspace: ws.ID, Tab: tab.Number,
