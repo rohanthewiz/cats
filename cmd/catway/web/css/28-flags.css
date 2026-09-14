@@ -4,9 +4,11 @@
      where there is room for it); the header wears glyph + note inline, because
      that is the pane you are actually looking at.
 
-     Text rather than SVG, unlike the padlock and the paw print beside it — a
-     custom glyph is a character the user typed, and there is no SVG to draw for
-     it, so a text mark is the one shape both halves of the vocabulary share. */
+     In the sidebar every named kind is drawn as an SVG icon (FLAG_ICONS, the
+     .flag-icon rules below), like the padlock and the paw print beside it. The
+     text rules here remain the base the icons are an upgrade over: a custom
+     glyph is a character the user typed, and there is no SVG to draw for it, so
+     a text mark is still the one shape both halves of the vocabulary share. */
   .flag-mark { flex:0 0 auto; align-self:center; line-height:1;
     font-size:calc(12px * var(--sb-scale)); cursor:default; }
   /* A hair of extra weight: at 12px the difference between ⚑ and ⚠ is a few
@@ -20,13 +22,15 @@
 
      14px, matching the paw print rather than the 12px padlock: these icons
      carry detail inside their fields — three rules and a folded corner, a wave
-     and a staff — and a pixel either way is the difference between reading that
-     detail and reading a coloured tile.
+     and a staff, a ? in a bubble, a ! in a triangle, a tick in a disc, a
+     star's facets — and a pixel either way is the difference between reading
+     that detail and reading a coloured tile.
 
-     Both icons bring their own colours (they are drawn artwork, not tinted
-     silhouettes), so they take nothing from .fk-followup or .fk-note. Those
-     rules stay for the kinds still drawn as text, for the pane header's chip,
-     and for whatever these kinds are drawn as next. */
+     Every icon brings its own colours (they are drawn artwork, not tinted
+     silhouettes), so none of them takes anything from its .fk-* rule. Those
+     rules stay for the text path — the pane header's chip, the context menu's
+     leading glyph (which reuses the fk- class), a kind drawn as its glyph
+     until it has an icon — and for whatever these kinds are drawn as next. */
   .flag-mark.flag-icon { display:inline-flex; align-items:center; }
   .flag-mark .ficon { width:calc(14px * var(--sb-scale)); height:calc(14px * var(--sb-scale));
     display:block; }

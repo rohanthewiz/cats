@@ -276,20 +276,8 @@
     return s;
   }
 
-  // FLAG_ICONS: real icons for named kinds, drawn where a row has the room for
-  // them. The vocabulary's glyph is documented as the *fallback* rendering (see
-  // internal/flags: "a client with a real icon for the kind may use it instead"),
-  // and this is the client that has one — the sidebar already draws the lock, the
-  // moon and the paw print as SVGs beside the mark, so a kind whose meaning is a
-  // *thing* can be that thing instead of a character approximating it.
-  //
-  // Only kinds whose glyph was losing the argument need an entry. Everything not
-  // listed here — the flag, the star, the question mark, and every custom glyph
-  // the user invents — falls through to the text path below, which is the reason
-  // this is a lookup and not a branch: the two halves of the vocabulary still
-  // share one code path, and a missing icon is a miss, not a special case.
-  // drawIcon builds one icon from a list of [d, attrs] paths. Both icons below
-  // are a handful of filled shapes over a 16-unit grid and nothing else, so the
+  // drawIcon builds one icon from a list of [d, attrs] paths. Every icon below
+  // is a handful of filled shapes over a 16-unit grid and nothing else, so the
   // builder is a table and the entries stay readable as drawings rather than as
   // thirty lines of setAttribute each.
   function drawIcon(paths) {
@@ -312,23 +300,39 @@
   // moon and the paw print as SVGs beside the mark, so a kind whose meaning is a
   // *thing* can be that thing instead of a character approximating it.
   //
-  // Only kinds whose glyph was losing the argument need an entry. Everything not
-  // listed here — the star, the question mark, the warning and every custom glyph
-  // the user invents — falls through to the text path below, which is the reason
-  // this is a lookup and not a branch: the two halves of the vocabulary still
-  // share one code path, and a missing icon is a miss, not a special case.
+  // Every named kind has an entry, so the six read as one drawn set in the
+  // sidebar. What still falls through to the text path below is every custom
+  // glyph the user invents — there is no icon to look up for a character — and
+  // that is the reason this is a lookup and not a branch: the two halves of the
+  // vocabulary still share one code path, and a missing icon is a miss, not a
+  // special case. A kind added to FLAG_DEFS without a drawing here is not
+  // broken, only undrawn; it renders as its glyph until it gets one.
   //
-  // Two rules both entries follow, learned the expensive way on the note:
+  // Three rules every entry follows, the first two learned the expensive way on
+  // the note:
   //
   //   - FILLED, not stroked. A stroked drawing at 13px turns every one of its
   //     lines into the same 1px grey, and the icon averages out to a smudge the
   //     size of a character. Solid fields are what survive being small — the
-  //     same lesson the paw print's toe pads record a hundred lines up. The one
-  //     stroke that earns its place is the flag's staff, below.
+  //     same lesson the paw print's toe pads record a hundred lines up. A stroke
+  //     only appears as detail drawn ON a field (the note's rules, the ? and !
+  //     and ✓ marks), where it contrasts with the field rather than with the
+  //     row; the one stroke drawn against the row itself is the flag's staff.
   //   - OWN COLOURS, not currentColor. Unlike the lock, the moon and the paw,
   //     these do not follow their --flag-* token or a theme that retunes it.
   //     That is the cost of a mark being a picture of a thing rather than a
-  //     tinted silhouette, and both entries pay it on purpose.
+  //     tinted silhouette, and every entry pays it on purpose. Each field takes
+  //     the hex its kind's token resolves to in the default theme, so a kind's
+  //     icon and its tinted glyph in a menu (buildCtx's icon, the pane header's
+  //     chip) are still recognisably the same colour.
+  //   - DETAIL IN THE FIELD'S OWN DARK SHADE, never in white or the row's ink.
+  //     A light mark on a light field vanishes on a light theme's row and a
+  //     dark one survives both, and a shade of the field's own hue keeps each
+  //     icon one colour at a glance instead of a two-colour badge.
+  //
+  // Shapes are what separate the kinds, not hue: question, star and note are
+  // three neighbouring yellows (#e0b64e, #f2c14e, #f2d45f), and a bubble, a
+  // star and a sheet of paper are what keep them apart at 14px.
   const FLAG_ICONS = {
     // A flag on a staff, which is what the ⚑ glyph was always trying to be and
     // could not be at 12px of text weight.
@@ -338,7 +342,8 @@
     // parked beside a line. That wave is the whole reason this shape is legible
     // as a flag at 14px, where a straight-edged field is just a block.
     //
-    // The staff is the single stroke in either icon. It is the thinnest element
+    // The staff is the one stroke in the set drawn against the row rather than
+    // on top of a field. It is the thinnest element
     // here — 1.5 units, about 1.3px at render size — and it is kept because
     // without it the field alone reads as a ribbon or a banner, and because the
     // ⚑ that catctl and every menu still print has one.
@@ -353,6 +358,122 @@
       ["M4.3 2.1v12.1", { fill: "none", stroke: "#b9c2ba", "stroke-width": "1.5",
         "stroke-linecap": "round" }],
       ["M5.3 3c2.3-1.2 4.1.9 6.4-.3v6.1c-2.3 1.2-4.1-.9-6.4.3z", { fill: "#e05c5c" }],
+    ]),
+
+    // A speech bubble with a question mark in it: "waiting on an answer" is a
+    // conversation somebody has not replied to yet, and the bubble is what
+    // makes the ? read as asked-of-someone rather than as an unknown.
+    //
+    // The bubble is the field, in --warn's amber (#e0b64e) that --flag-question
+    // resolves to. It is taller than a bubble strictly needs to be, and the
+    // tail drops below it rather than eating into it, because the ? inside
+    // needs every unit of height: a hook, a stem and a separate dot are three
+    // parts in about 8px, and the gap between stem and dot is the first thing
+    // to close up if the bubble is squat.
+    //
+    //     ╭──────────╮
+    //     │   ╭─╮    │   hook: an arc over the top, curling back to centre
+    //     │     ╯    │   stem: a short tail down, stopping well above the dot
+    //     │     •    │   dot:  a filled disc, not a stroke, so it stays round
+    //     ╰─╮────────╯
+    //       ╰          tail, bottom-left, below the body
+    question: () => drawIcon([
+      // Body and tail in one outline: a rounded rectangle whose bottom edge
+      // detours down to a point, so there is no seam between them to alias.
+      ["M4.2 1.6h7.6a2.4 2.4 0 0 1 2.4 2.4v5a2.4 2.4 0 0 1-2.4 2.4H7.8" +
+        "L4.6 14.3v-2.9h-.4a2.4 2.4 0 0 1-2.4-2.4V4a2.4 2.4 0 0 1 2.4-2.4z",
+        { fill: "#e0b64e" }],
+      // The hook and stem, one stroke drawn on the field. Arc centre (8,5.1),
+      // radius 1.6; the stem ends at y≈7.8 so its round cap clears the dot.
+      ["M6.4 5.1a1.6 1.6 0 1 1 2.4 1.39c-.5.3-.8.62-.8 1.2v.1",
+        { fill: "none", stroke: "#5a3f0c", "stroke-width": "1.4",
+          "stroke-linecap": "round", "stroke-linejoin": "round" }],
+      // The dot, as a filled disc (two half-arcs) at (8,9.85).
+      ["M8 9.05a.8.8 0 1 1 0 1.6a.8.8 0 1 1 0-1.6z", { fill: "#5a3f0c" }],
+    ]),
+
+    // A five-pointed star, which is what ★ already is — the one kind whose
+    // glyph was never approximating its meaning. What drawing it buys is size
+    // and weight: the text ★ at 12px is a thin, font-dependent thing that sits
+    // low on the baseline, and this one fills the same 14px box as its
+    // neighbours and keeps its proportions in every font.
+    //
+    // Arms are a touch fatter than a geometric star (inner radius 0.42 of the
+    // outer, not 0.38), because a thin arm at 14px antialiases to a pale spike.
+    //
+    // The darker half-facets bevel it: every arm is split down its axis and the
+    // clockwise half takes the shade, which is the "lit from the top-left" look
+    // of a medal or a rating star. Unlike the two-tone pennant that was
+    // rejected for the follow-up, a merge costs nothing here — if the facets
+    // blend at small size the star is simply a slightly deeper gold, and it is
+    // still a star.
+    //
+    //          ▲
+    //     ◢████▓▓◣     each arm: left half #f2c14e, right half #d49a2a,
+    //      ◥██▓▓◤      meeting at the centre (8, 8.4)
+    //      ◢█▓ ▓▓◣
+    star: () => drawIcon([
+      // The star: outer radius 6.9, inner 2.9, centred at (8, 8.4) so its
+      // optical mass sits where the other icons' does — a star's arms put its
+      // weight below its geometric middle.
+      ["M8 1.5L9.7 6.05 14.56 6.27 10.76 9.3 12.06 13.98 8 11.3 3.94 13.98" +
+        " 5.24 9.3 1.44 6.27 6.3 6.05z", { fill: "#f2c14e" }],
+      // The shaded half of each arm: tip, the inner vertex clockwise of it, and
+      // the centre.
+      ["M8 1.5L9.7 6.05 8 8.4z M14.56 6.27L10.76 9.3 8 8.4z" +
+        " M12.06 13.98L8 11.3 8 8.4z M3.94 13.98L5.24 9.3 8 8.4z" +
+        " M1.44 6.27L6.3 6.05 8 8.4z", { fill: "#d49a2a" }],
+    ]),
+
+    // A warning triangle with an exclamation mark: the road sign, which is the
+    // one picture of "something is wrong here" nobody has to learn.
+    //
+    // The field is --flag-warn's orange (#e0955e). Its corners are rounded
+    // with a quadratic at each vertex rather than left sharp: a sharp apex at
+    // 14px antialiases to a faint point and the triangle reads as a trapezoid.
+    //
+    // The ! is a bar and a disc, spaced so the gap between them survives at
+    // render size — a ! whose dot touches its bar is an i or a line.
+    //
+    //         ╱╲
+    //        ╱┃ ╲      bar:  y 5.4–9.3, round-capped
+    //       ╱ ┃  ╲
+    //      ╱  •   ╲    dot:  a disc at (8, 11.75)
+    //     ╰────────╯
+    warn: () => drawIcon([
+      // Vertices (8,1.6), (14.6,13.6), (1.4,13.6); each curve starts and ends
+      // 1.3 units along the two edges that meet there, with the true vertex as
+      // its control point.
+      ["M7.37 2.74Q8 1.6 8.63 2.74L13.97 12.46Q14.6 13.6 13.3 13.6H2.7" +
+        "Q1.4 13.6 2.03 12.46z", { fill: "#e0955e" }],
+      ["M8 5.4v3.9", { fill: "none", stroke: "#4a2410", "stroke-width": "1.7",
+        "stroke-linecap": "round" }],
+      ["M8 10.85a.9.9 0 1 1 0 1.8a.9.9 0 1 1 0-1.8z", { fill: "#4a2410" }],
+    ]),
+
+    // A tick in a disc: the "settled" badge, in --ok's green (#6ac47a) that
+    // --flag-done resolves to.
+    //
+    // The disc is what makes it a mark rather than a glyph: a bare ✓ drawn at
+    // this size is two strokes against the row, exactly the kind of drawing
+    // the FILLED rule exists to avoid. It is also what separates it from the
+    // follow-up, the only other kind whose outline has no corners — a disc
+    // against a waving flag.
+    //
+    //       ╭────╮
+    //     ╭╯      ╰╮
+    //     │     ╱  │     short arm down-right, long arm up-right,
+    //     │ ╲ ╱    │     both round-capped and round-joined
+    //     ╰╮  ▾   ╭╯
+    //       ╰────╯
+    done: () => drawIcon([
+      // The disc, as two half-arcs: centre (8,8), radius 6.4.
+      ["M8 1.6a6.4 6.4 0 1 1 0 12.8a6.4 6.4 0 1 1 0-12.8z", { fill: "#6ac47a" }],
+      // The tick, 1.7 units thick so it holds as a shape rather than a hairline.
+      // Its elbow sits a little left of and below centre, the way a written
+      // tick's does, so the long arm has the room to rise.
+      ["M4.9 8.3l2.1 2.1 4.1-4.4", { fill: "none", stroke: "#1b4a26",
+        "stroke-width": "1.7", "stroke-linecap": "round", "stroke-linejoin": "round" }],
     ]),
 
     // A sticky note: one solid field with a turned-up corner and three rules.
@@ -398,8 +519,8 @@
   //
   // The class carries the kind so the CSS can colour it; an unknown kind gets
   // fk-custom, which takes the default ink rather than borrowing some named
-  // kind's meaning-by-colour. An icon may ignore that colour — both of the ones
-  // in FLAG_ICONS do, being drawn artwork rather than silhouettes — but the
+  // kind's meaning-by-colour. An icon may ignore that colour — every one in
+  // FLAG_ICONS does, being drawn artwork rather than silhouettes — but the
   // class goes on regardless, so a kind that later swaps a tinted icon in gets
   // its colour without touching this function.
   function flagMark(f) {
