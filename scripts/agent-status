@@ -1,0 +1,87 @@
+#!/bin/zsh
+# agent-status: is each Claude Code agent alive, working, waiting for input — or
+# stuck, unable to print?
+#
+# Usage: scripts/agent-status [pid ...]   (default: every running `claude`)
+#
+# Deliberately a standalone script and not a catctl command: the moment this is
+# needed is when Cats itself is wedged, and catctl talks to catway's control
+# socket, which hangs along with catway's loop. Everything here reads the OS
+# (ps, lsof, the pty) and the agent's own transcript, so it answers whatever
+# state Cats is in. Read-only: it signals nothing.
+#
+# The signals, in the order they are trustworthy:
+#   1. unread pty output (TIOCOUTQ) at the 1024-byte macOS cap → the process has
+#      filled its terminal and is blocked in write(); nothing it does will
+#      progress until something reads the pty (in Cats, cathost's pane pump).
+#   2. the transcript's last stop_reason: end_turn = finished, waiting on you;
+#      tool_use = mid-task. A transcript that has not moved in a long time is
+#      ambiguous on its own (a long tool run, a permission prompt, or signal 1).
+#   3. CPU and children, which separate "running a tool" from "parked".
+
+pids=("$@")
+if (( ${#pids} == 0 )); then
+  # Match on argv[0] as ps reports it, not with pgrep: pgrep matches the
+  # executable's own name, and Claude Code runs from a versioned binary (named
+  # for its version) that it launches as `claude`.
+  pids=(${(f)"$(ps -axo pid=,comm= | awk '{ n = $2; sub(".*/", "", n) } n == "claude" { print $1 }')"})
+fi
+if (( ${#pids} == 0 )); then
+  echo "no claude agents running"
+  exit 1
+fi
+
+rc=0
+for pid in $pids; do
+  if ! kill -0 $pid 2>/dev/null; then
+    echo "pid $pid: not running"
+    rc=1
+    continue
+  fi
+
+  # The agent's project transcript dir is derived from its cwd (/ and . → -).
+  cwd=$(lsof -a -p $pid -d cwd -Fn 2>/dev/null | sed -n 's/^n//p')
+  dir=~/.claude/projects/${${cwd//\//-}//./-}
+  transcript=$(ls -t $dir/*.jsonl 2>/dev/null | head -1)
+
+  ps -o pid=,etime=,time=,%cpu= -p $pid | read p etime cputime cpu
+  model=$(ps -ww -o command= -p $pid | sed -n 's/.*--model \([^ ]*\).*/\1/p')
+  # CATS_PANE_ID names the Cats pane (workspace:number, fixed at spawn — it goes
+  # stale if the tab is later moved, but it is the quickest way to find it).
+  pane=$(ps -E -ww -o command= -p $pid 2>/dev/null | grep -o 'CATS_PANE_ID=[^ ]*' | cut -d= -f2)
+  echo "${model:-claude}: running  pid=$pid  up=$etime  cpu=$cputime (${cpu}% now)  cwd=${cwd/#$HOME/~}${pane:+  pane=$pane}"
+  # sed rather than `xargs basename`: with two names basename treats the second
+  # as a suffix to strip.
+  echo "  children: $(pgrep -P $pid | xargs -I{} ps -o comm= -p {} 2>/dev/null | sed 's#.*/##' | tr '\n' ' ')"
+
+  if [[ -n $transcript ]]; then
+    age=$(( $(date +%s) - $(stat -f %m "$transcript") ))
+    last=$(jq -r 'select(.type=="assistant") | .message.stop_reason // "-"' "$transcript" 2>/dev/null | tail -1)
+    case $last in
+      end_turn) state="idle — finished its turn, waiting for input" ;;
+      tool_use) state="mid-task (tool call or reply in progress)" ;;
+      *)        state="unknown ($last)" ;;
+    esac
+    echo "  transcript: last write ${age}s ago → $state"
+  else
+    echo "  transcript: not found under $dir"
+  fi
+
+  # Opening the slave O_RDONLY|O_NOCTTY|O_NONBLOCK just to query it neither
+  # steals input nor makes it our controlling terminal. 0x40047473 is TIOCOUTQ
+  # on darwin.
+  tty=$(lsof -a -p $pid -d 1 -Fn 2>/dev/null | sed -n 's/^n//p')
+  if [[ $tty == /dev/tty* ]]; then
+    outq=$(python3 -c '
+import os, fcntl, struct, sys
+fd = os.open(sys.argv[1], os.O_RDONLY | os.O_NOCTTY | os.O_NONBLOCK)
+print(struct.unpack("i", fcntl.ioctl(fd, 0x40047473, b"\0\0\0\0"))[0])
+' $tty 2>/dev/null)
+    echo "  terminal: $tty  unread output: ${outq:-?} bytes"
+    if (( ${outq:-0} >= 1000 )); then
+      echo "  ⚠  STUCK — its terminal is not being read, so it is blocked printing and cannot progress"
+      rc=2
+    fi
+  fi
+done
+exit $rc
