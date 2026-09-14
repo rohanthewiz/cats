@@ -1362,6 +1362,28 @@ func WriteMessage(w io.Writer, m any) error {
 	return err
 }
 
+// EncodeMessage marshals m into one complete length-prefixed frame — header and
+// payload in a single slice, byte-for-byte what WriteMessage puts on the wire.
+//
+// It exists for a writer that must not do I/O where the message is built.
+// catway encodes on its orchestrator loop, the only goroutine allowed to read
+// the model's maps and slices that m may share, and hands the finished bytes to
+// a writer goroutine; marshalling later, on the writer, would race the loop's
+// next mutation of the same data.
+func EncodeMessage(m any) ([]byte, error) {
+	payload, err := json.Marshal(m)
+	if err != nil {
+		return nil, fmt.Errorf("orchestration: marshal: %w", err)
+	}
+	if len(payload) > MaxFrameSize {
+		return nil, fmt.Errorf("orchestration: message %d exceeds max %d", len(payload), MaxFrameSize)
+	}
+	frame := make([]byte, 4+len(payload))
+	binary.LittleEndian.PutUint32(frame[:4], uint32(len(payload)))
+	copy(frame[4:], payload)
+	return frame, nil
+}
+
 // ReadMessage reads one frame and returns its type plus the raw JSON payload.
 // Callers unmarshal the payload into the concrete message struct for that type.
 func ReadMessage(r io.Reader) (MessageType, []byte, error) {

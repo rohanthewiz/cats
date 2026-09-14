@@ -77,19 +77,22 @@ type daemon struct {
 	token     string
 	tokenFile string
 
-	mu sync.Mutex // guards conn, peerVersion, lastErr, stopped and label; never held across I/O
-	// wmu serializes writes to conn, and is deliberately not mu. A write blocks
-	// for as long as the peer declines to read. When one lock did both jobs, a
-	// stuck write held mu too, so everything that merely asks about this host —
-	// the roster, connected(), and the ping watchdog whose whole job is noticing
-	// a stuck link — queued behind the write it was meant to break.
-	//
-	// Lock order where both are held: wmu, then mu.
-	wmu sync.Mutex
+	mu sync.Mutex // guards conn, outbox, peerVersion, lastErr, stopped and label; never held across I/O
+	// outbox is the live connection's send queue, created with it in setConn and
+	// ended when that connection is replaced or stopped. Every write after the
+	// handshake goes through it to one writer goroutine (writePump), so no caller
+	// of send — the orchestrator loop above all — ever waits on the socket, and
+	// nothing that asks about this host (the roster, connected(), the ping
+	// watchdog) can queue behind a stuck write. See outbox for the cycle this
+	// breaks.
+	outbox *outbox
 	// writeStall bounds each write to this host (orchestration.NewStallWriter).
-	// Zero means orchestration.DefaultWriteStallTimeout; it is a field only so
-	// tests can shorten or lengthen it.
+	// Zero means orchestration.DefaultWriteStallTimeout; a field only so tests
+	// can shorten or lengthen it.
 	writeStall time.Duration
+	// writeBudget is the backlog, in bytes, past which the connection is dropped.
+	// Zero means defaultOutboxBudget; a field only so tests can shrink it.
+	writeBudget int
 	// peerVersion is the negotiated protocol version this cathost's welcome
 	// agreed to, 0 while disconnected. It is what decides who resolves a pane's
 	// git branch: a v3 daemon does it itself (the cwd is on its filesystem), a
@@ -323,42 +326,101 @@ func (d *daemon) connected() bool {
 // orchestrator loop (which owns the decision to send) and from hook-reply
 // goroutines.
 //
-// The conn is read under mu and written under wmu, so a peer that stops reading
-// stalls only other writers, never the readers of this daemon's state. A write
-// that fails — including one that made no progress for the stall timeout —
-// closes the connection: part of a frame may be on the wire, and the pump's
-// read failing is what drives the ordinary redial and reconcile.
+// send never touches the socket. It encodes m here, on the caller's goroutine —
+// for the loop, the only goroutine that may read the model data m can share —
+// and queues the frame for writePump. So it cannot block, whatever the peer is
+// doing. The queue is FIFO and fed from one conn's outbox, so messages keep the
+// order they were sent in.
+//
+// A message that cannot be encoded is logged and dropped; nothing reached the
+// wire, so the connection is left alone. A backlog past the budget drops the
+// connection, which the pump's failed read turns into the ordinary redial and
+// reconcile.
 func (d *daemon) send(m any) {
 	d.mu.Lock()
-	conn := d.conn
+	conn, box := d.conn, d.outbox
 	d.mu.Unlock()
-	if conn == nil {
-		return
+	if box == nil {
+		return // disconnected: skip the encode as well as the write
 	}
-	d.wmu.Lock()
-	err := d.writeLocked(conn, m)
-	d.wmu.Unlock()
+	frame, err := orchestration.EncodeMessage(m)
 	if err != nil {
 		log.Printf("catway: daemon write: %v", err)
-		// The conn captured above, not d.conn: if a reconnect has already swapped
-		// in a new connection, that one is healthy and must not be closed.
-		_ = conn.Close() // the pump's read fails and triggers redial
+		return
+	}
+	if errors.Is(box.push(frame), errOutboxFull) {
+		d.dropBackloggedConn(conn, box)
 	}
 }
 
-// writeLocked puts one message on conn, bounded by the stall timeout. The
-// caller holds wmu.
-func (d *daemon) writeLocked(conn net.Conn, m any) error {
+// dropBackloggedConn gives up on a connection whose writer has fallen past the
+// budget. The conn is closed directly, not left to writePump: the writer is
+// almost certainly parked in a write, and only a close gets it out before the
+// stall bound would. conn and box are the ones captured together, so a
+// reconnect that has already replaced them is never touched.
+func (d *daemon) dropBackloggedConn(conn net.Conn, box *outbox) {
+	log.Printf("catway: cathost %s is more than %d MiB behind on writes — closing the connection",
+		d.name(), box.budget>>20)
+	box.close()
+	_ = conn.Close()
+}
+
+// writePump is the only goroutine that writes to conn once the handshake is
+// done. It takes queued frames in order and writes each through the stall
+// bound. Started by setConn, one per connection.
+//
+// Whatever ends the pump ends the connection too (the deferred Close): a failed
+// write may have left part of a frame on the wire, and an outbox that closed or
+// drained means the connection is being abandoned anyway. Closing is also what
+// fails the pump's read, which drives the redial.
+func (d *daemon) writePump(conn net.Conn, box *outbox) {
+	defer conn.Close()
 	stall := d.writeStall
 	if stall == 0 {
 		stall = orchestration.DefaultWriteStallTimeout
 	}
-	return orchestration.WriteMessage(orchestration.NewStallWriter(conn, stall), m)
+	w := orchestration.NewStallWriter(conn, stall)
+	for {
+		batch := box.take()
+		if batch == nil {
+			return
+		}
+		for _, frame := range batch {
+			if _, err := w.Write(frame); err != nil {
+				// An outbox someone else closed means they also closed the conn
+				// (setConn, stop, the watchdog, the budget): this error is the
+				// echo of that, not news.
+				if !box.isClosed() {
+					log.Printf("catway: daemon write: %v", err)
+				}
+				box.close()
+				return
+			}
+			box.sent(len(frame))
+		}
+	}
 }
 
+// setConn installs a connection (after a completed handshake) or clears it
+// (after a session ended). A new connection gets a fresh outbox and its own
+// writer goroutine; the previous outbox, if any, is closed, which drops what it
+// still held — that connection is already dead — and ends its writer.
 func (d *daemon) setConn(c net.Conn) {
 	d.mu.Lock()
+	old := d.outbox
+	d.outbox = nil
+	defer func() {
+		// After mu is released: close takes the outbox's own lock, and keeping the
+		// two locks unnested means no order between them ever has to be kept.
+		if old != nil {
+			old.close()
+		}
+	}()
 	d.conn = c
+	if c != nil {
+		d.outbox = newOutbox(d.writeBudget)
+		go d.writePump(c, d.outbox)
+	}
 	if c == nil {
 		d.peerVersion = 0
 		// A latency reading belongs to the connection that produced it. Keeping
@@ -413,13 +475,22 @@ func (d *daemon) stop() {
 	}
 	d.stopped = true
 	close(d.quit)
-	conn := d.conn
+	conn, box := d.conn, d.outbox
 	d.conn = nil
+	d.outbox = nil
 	d.peerVersion = 0
 	d.features = nil
 	d.latency = 0
 	d.mu.Unlock()
-	if conn != nil {
+	if box != nil {
+		// Drained, not cut: a detach queues close_pane for this host's panes on
+		// the line before calling stop, and dropping those would leave the
+		// detached machine's shells running with nobody attached. The writer
+		// flushes them and then closes the connection itself, which unblocks the
+		// pump's read; run() then sees stopped. No wait here — this runs on the
+		// loop — and the flush is bounded by the writer's stall timeout.
+		box.closeWhenDrained()
+	} else if conn != nil {
 		_ = conn.Close() // unblocks the pump's read; run() then sees stopped
 	}
 }
@@ -613,37 +684,35 @@ func (d *daemon) sendPing(conn net.Conn) bool {
 		_ = conn.Close()
 		return false
 	}
-	// The silence starts with the first unanswered probe ATTEMPT, not the first
-	// one written: a probe that cannot even reach the wire (below) is the
-	// strongest evidence of a stuck link there is, and must age like any other.
-	if d.pingSince.IsZero() {
-		d.pingSince = time.Now()
-	}
-	d.mu.Unlock()
-
-	// TryLock, not Lock: while another write holds the connection, this probe
-	// is skipped rather than queued. Queued, the probe loop would park behind
-	// the very write it exists to rescue and never reach the timeout check
-	// above again. Skipped, the next tick re-checks the clock and, once past
-	// the tolerance, closes the connection — which is what frees that write.
-	if !d.wmu.TryLock() {
-		return true
-	}
-	d.mu.Lock()
 	d.pingID++
 	id := d.pingID
 	d.pingAt = time.Now()
+	if d.pingSince.IsZero() {
+		d.pingSince = d.pingAt // the silence starts with the first unanswered probe
+	}
+	box := d.outbox
 	d.mu.Unlock()
-	err := d.writeLocked(conn, orchestration.NewPing(id))
-	d.wmu.Unlock()
-	if err != nil {
-		// Closed here rather than left to the pump. A stalled write leaves part
-		// of a frame behind, and the pump may be parked somewhere other than a
-		// read of this socket, so waiting for its read to fail could be forever.
-		_ = conn.Close()
+
+	// Queued like every other message, never written here, so a writer stuck on
+	// a peer that stopped reading cannot park the probe loop: the probe goes into
+	// the queue, goes unanswered, and the check above closes the connection once
+	// the silence passes the tolerance — which is also what frees that writer.
+	// The latency measured therefore includes the queue, which is the delay a
+	// keystroke to this host actually sees.
+	if box == nil {
 		return false
 	}
-	return true
+	frame, err := orchestration.EncodeMessage(orchestration.NewPing(id))
+	if err != nil {
+		return false
+	}
+	switch err := box.push(frame); {
+	case err == nil:
+		return true
+	case errors.Is(err, errOutboxFull):
+		d.dropBackloggedConn(conn, box)
+	}
+	return false // closed or dropped: this session's probe loop is over
 }
 
 // notePong records the round trip for a pong, ignoring one that does not match
