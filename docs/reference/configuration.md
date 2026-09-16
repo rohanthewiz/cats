@@ -247,6 +247,33 @@ A cathost can also refuse from its own side with `cathost -control-socket -`,
 which is how a machine says it must never be able to drive a session whatever an
 orchestrator's config claims.
 
+## `peers`
+
+```yaml
+peers:
+  - id: home
+    label: "home mini-PC"                       # optional; defaults to the id
+    url: "https://mini.lan:8421"                # that cats' browser address
+    token_file: "~/.config/cats/peers/home.token"   # holds ITS CATS_PASSWORD
+    fingerprint: "dd7d9b31…"                    # its self-signed cert, from its startup log
+```
+
+A peer is another cats whose **backend** this one synchronizes with — see
+[peer sync](../subsystems/peer-sync.md) for what moves and on what terms. It is
+not a [host](#hosts): a host lends this catway its terminals; a peer is a
+second catway with workspaces, backlogs and plugins of its own.
+
+| Field | Meaning |
+|---|---|
+| `id` | how commands and the dialog name it (letters, digits, `.`, `_`, `-`) |
+| `url` | scheme, host and port only — the `/peer/v1/*` routes are appended. `https://` for another machine; `http://` is accepted only for loopback (this machine, or the local end of an `ssh -L` tunnel), because the token rides every request |
+| `token` / `token_file` | the peer catway's shared secret, presented as a bearer token. Prefer the file: the settings modal rewrites this config wholesale, so a literal secret here is one commit away from being published. One of the two, not both |
+| `fingerprint` | pins a self-signed certificate by SHA-256 — the value that catway prints at startup under `--tls`. Required in practice for a self-signed peer, since without a pin the standard chain check applies and fails |
+
+The block is live: `catctl attach-peer <id> <url> [token_file] [label...]` and
+`catctl detach-peer <id>` edit it and the running roster together, and
+`catctl reload` picks up a hand-edit. `catctl sync <peer> …` runs a sync.
+
 ## `persistence`
 
 ```yaml

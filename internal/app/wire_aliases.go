@@ -65,6 +65,13 @@ type (
 	PathListParams           = wire.PathListParams
 	PathListResult           = wire.PathListResult
 	PluginActionInfo         = wire.PluginActionInfo
+	PeerAttachParams         = wire.PeerAttachParams
+	PeerDetachParams         = wire.PeerDetachParams
+	PeerInfo                 = wire.PeerInfo
+	PeerListResult           = wire.PeerListResult
+	PeerSyncItem             = wire.PeerSyncItem
+	PeerSyncParams           = wire.PeerSyncParams
+	PeerSyncResult           = wire.PeerSyncResult
 	PluginInfo               = wire.PluginInfo
 	PluginListResult         = wire.PluginListResult
 	PluginUninstallParams    = wire.PluginUninstallParams
@@ -159,6 +166,10 @@ const (
 	CmdPaneSwapWith       = wire.CmdPaneSwapWith
 	CmdPaneZoom           = wire.CmdPaneZoom
 	CmdPathList           = wire.CmdPathList
+	CmdPeerAttach         = wire.CmdPeerAttach
+	CmdPeerDetach         = wire.CmdPeerDetach
+	CmdPeerList           = wire.CmdPeerList
+	CmdPeerSync           = wire.CmdPeerSync
 	CmdPluginList         = wire.CmdPluginList
 	CmdPluginUninstall    = wire.CmdPluginUninstall
 	CmdRead               = wire.CmdRead

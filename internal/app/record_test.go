@@ -213,6 +213,24 @@ var recordedParamClasses = map[string]map[string]string{
 		"force": ClassPlain,
 		"id":    ClassPlain,
 	},
+	"peer.sync": {
+		"direction":  ClassPlain,
+		"peer":       ClassPlain,
+		"plugins":    ClassPlain,
+		"todos":      ClassPlain,
+		"workspaces": ClassPlain,
+	},
+	"peer.attach": {
+		"fingerprint": ClassPlain,
+		"id":          ClassPlain,
+		"label":       ClassPlain,
+		"token":       ClassSecret,
+		"token_file":  ClassPlain,
+		"url":         ClassPlain,
+	},
+	"peer.detach": {
+		"id": ClassPlain,
+	},
 }
 
 // Every params field of every recorded command is accounted for above, and

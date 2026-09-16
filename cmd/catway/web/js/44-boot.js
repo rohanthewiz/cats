@@ -22,6 +22,7 @@
       { label: "keybinds", fn: openHelp },
       { label: "reload config", fn: () => sendCmd("server.reload_config", {}) },
       { label: "attach host…", fn: openAttachHostDialog },
+      { label: "peers / sync…", fn: openPeersDialog },
     ];
     if (updateInfo) items.push({ label: "update ready" + (updateInfo.version ? " — " + updateInfo.version : ""), fn: showUpdateBanner });
     items.push("-", { label: "stop server…", danger: true, fn: confirmStopServer });

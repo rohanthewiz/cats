@@ -278,6 +278,10 @@ func run() int {
 		// the output. `catctl output 3 12 | grep FAIL` only works if what comes
 		// out is the text.
 		printBlockOutput(resp)
+	case method == app.CmdPeerSync && resp.OK:
+		// A sync answers with a report, and the report's own rendering is the
+		// thing to read — the JSON behind it is for --json.
+		printPeerSync(resp)
 	default:
 		printResult(resp)
 	}
@@ -292,7 +296,36 @@ func run() int {
 	if method == app.CmdRunbookRun && runbookFailed(resp) {
 		return 1
 	}
+	// The same rule for a sync: the command succeeded (there is a report), but
+	// a report that says the peer could not be reached, or that something
+	// failed to apply, is not a success a script should build on.
+	if method == app.CmdPeerSync && peerSyncFailed(resp) {
+		return 1
+	}
 	return 0
+}
+
+// printPeerSync writes a peer.sync report as the lines the server rendered.
+func printPeerSync(resp ctlproto.Response) {
+	var data app.PeerSyncResult
+	if err := json.Unmarshal(resp.Data, &data); err != nil {
+		printResult(resp)
+		return
+	}
+	for _, line := range data.Lines {
+		fmt.Println(line)
+	}
+}
+
+// peerSyncFailed reports whether a peer.sync result says the sync did not
+// fully happen: it never ran (Error), or an item failed. Skipped items are not
+// failures — "no such folder here" is the report doing its job.
+func peerSyncFailed(resp ctlproto.Response) bool {
+	var data app.PeerSyncResult
+	if err := json.Unmarshal(resp.Data, &data); err != nil {
+		return false
+	}
+	return data.Error != "" || data.Failed > 0
 }
 
 // runbookFailed reports whether a runbook.run result says some step failed. An

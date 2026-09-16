@@ -44,6 +44,7 @@ const EnvVar = "CATS_CONFIG"
 type Config struct {
 	Server      Server      `yaml:"server"`
 	Hosts       []Host      `yaml:"hosts,omitempty"`
+	Peers       []Peer      `yaml:"peers,omitempty"`
 	Persistence Persistence `yaml:"persistence"`
 	Panes       Panes       `yaml:"panes"`
 	Theme       Theme       `yaml:"theme"`
@@ -586,6 +587,101 @@ func (s Server) TTL() (time.Duration, error) {
 	return d, nil
 }
 
+// --- peers --------------------------------------------------------------------
+
+// Peer is another catway whose backend this one can synchronize with
+// (peer.sync). A peer is NOT a host: a host is another machine's terminal
+// daemon attached to this catway, whereas a peer is a second catway that is a
+// source of truth of its own — its own workspaces, its own plugin set, its own
+// todo backlogs. Sync reconciles the two backends and reports what did not
+// carry across; nothing is ever deleted on either side.
+//
+// URL is the peer catway's browser address (https://box.lan:8421). The peer's
+// /peer/v1/* endpoints sit behind the same auth guard as everything else it
+// serves, so the credential is that catway's shared secret (its CATS_PASSWORD),
+// presented as a bearer token. Token/TokenFile hold it; TokenFile is the better
+// of the pair for the reason Host gives — the settings modal rewrites this file
+// wholesale, so a literal secret in it is one `git add` from being published.
+//
+// Fingerprint pins a self-signed certificate (the auto-generated one catway
+// serves under --tls) by its SHA-256, exactly as a tls:// host pins cathost's.
+// Without a pin the standard chain and hostname verification applies, which is
+// right for a peer fronted by a real certificate; an http:// URL is accepted
+// for a peer on the same machine or an ssh tunnel, and refused anywhere else
+// (see validatePeers), because it would send the secret in the clear.
+type Peer struct {
+	ID          string `yaml:"id"`
+	Label       string `yaml:"label,omitempty"` // display name; "" ⇒ the id
+	URL         string `yaml:"url"`
+	Token       string `yaml:"token,omitempty"`
+	TokenFile   string `yaml:"token_file,omitempty"`
+	Fingerprint string `yaml:"fingerprint,omitempty"` // pinned TLS cert SHA-256
+}
+
+// DisplayLabel is the peer's human name: its label, or its id when unlabelled.
+func (p Peer) DisplayLabel() string {
+	if p.Label != "" {
+		return p.Label
+	}
+	return p.ID
+}
+
+// validatePeers checks the peers: block. The rules mirror validateHosts where
+// the field is the same thing (id shape, one credential source), and add the
+// one that is peer-specific: a cleartext URL may only name this machine.
+func (c Config) validatePeers() error {
+	seen := make(map[string]bool, len(c.Peers))
+	for i, p := range c.Peers {
+		if p.ID == "" {
+			return fmt.Errorf("peers[%d]: id is required", i)
+		}
+		if !hostIDRe.MatchString(p.ID) {
+			return fmt.Errorf("peers[%d]: id %q: want letters, digits, '.', '_' or '-'", i, p.ID)
+		}
+		if seen[p.ID] {
+			return fmt.Errorf("peers: duplicate id %q", p.ID)
+		}
+		seen[p.ID] = true
+		if err := ValidatePeerURL(p.URL); err != nil {
+			return fmt.Errorf("peers.%s: %w", p.ID, err)
+		}
+		if p.Token != "" && p.TokenFile != "" {
+			return fmt.Errorf("peers.%s: set token or token_file, not both", p.ID)
+		}
+	}
+	return nil
+}
+
+// ValidatePeerURL is the shape check a peer URL must pass, exported so the
+// live peer.attach command refuses the same strings the file would. Only the
+// scheme and host are examined: http:// is confined to loopback, because the
+// bearer token rides every request and a cleartext hop off this machine is a
+// secret on the wire. A path is refused rather than ignored — the /peer/v1/*
+// routes are appended to the URL, so a trailing path would silently 404.
+func ValidatePeerURL(raw string) error {
+	if raw == "" {
+		return errors.New("url is required")
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("url %q: %w", raw, err)
+	}
+	if u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
+		return fmt.Errorf("url %q: want http(s)://host[:port]", raw)
+	}
+	if u.Path != "" && u.Path != "/" || u.RawQuery != "" || u.Fragment != "" {
+		return fmt.Errorf("url %q: no path, query or fragment — just the scheme, host and port", raw)
+	}
+	if u.Scheme == "http" {
+		host := u.Hostname()
+		ip := net.ParseIP(host)
+		if host != "localhost" && (ip == nil || !ip.IsLoopback()) {
+			return fmt.Errorf("url %q: http is cleartext, so it may only reach this machine — use https:// for another machine", raw)
+		}
+	}
+	return nil
+}
+
 // --- defaults ----------------------------------------------------------------
 
 // The default palette and font used to live here as defaultColors/defaultFont;
@@ -750,6 +846,9 @@ func (c Config) Validate() error {
 		return fmt.Errorf("server.tls.sans: %w", err)
 	}
 	if err := c.validateHosts(); err != nil {
+		return err
+	}
+	if err := c.validatePeers(); err != nil {
 		return err
 	}
 	if c.Persistence.HistoryLines < 0 {

@@ -526,3 +526,60 @@ func TestPushActionsRequireAnActionURL(t *testing.T) {
 		t.Fatalf("action_url checked while actions are off: %v", err)
 	}
 }
+
+func TestValidatePeers(t *testing.T) {
+	good := Default()
+	good.Peers = []Peer{
+		{ID: "home", URL: "https://mini.lan:8421", TokenFile: "~/x.token", Fingerprint: "ab"},
+		{ID: "tunnel", URL: "http://127.0.0.1:9421", Token: "t"},
+		{ID: "lh", URL: "http://localhost:9421"},
+	}
+	if err := good.Validate(); err != nil {
+		t.Fatalf("valid peers rejected: %v", err)
+	}
+	bad := []struct {
+		name string
+		p    Peer
+	}{
+		{"no id", Peer{URL: "https://x"}},
+		{"bad id", Peer{ID: "a b", URL: "https://x"}},
+		{"no url", Peer{ID: "a"}},
+		{"scheme", Peer{ID: "a", URL: "tls://x:1"}},
+		{"path", Peer{ID: "a", URL: "https://x:1/peer"}},
+		{"cleartext off-box", Peer{ID: "a", URL: "http://mini.lan:8421"}},
+		{"both creds", Peer{ID: "a", URL: "https://x", Token: "t", TokenFile: "f"}},
+	}
+	for _, c := range bad {
+		cfg := Default()
+		cfg.Peers = []Peer{c.p}
+		if err := cfg.Validate(); err == nil {
+			t.Errorf("%s: accepted %+v", c.name, c.p)
+		}
+	}
+	dup := Default()
+	dup.Peers = []Peer{{ID: "a", URL: "https://x"}, {ID: "a", URL: "https://y"}}
+	if err := dup.Validate(); err == nil {
+		t.Errorf("duplicate id accepted")
+	}
+}
+
+func TestParsePeersRoundTrip(t *testing.T) {
+	cfg, err := parse([]byte("peers:\n  - id: home\n    url: https://mini:8421\n    token_file: ~/t\n    label: Home\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Peers) != 1 || cfg.Peers[0].DisplayLabel() != "Home" || cfg.Peers[0].TokenFile != "~/t" {
+		t.Fatalf("peers %+v", cfg.Peers)
+	}
+	path := filepath.Join(t.TempDir(), "c.yaml")
+	if err := Save(path, cfg); err != nil {
+		t.Fatal(err)
+	}
+	back, _, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(back.Peers) != 1 || back.Peers[0] != cfg.Peers[0] {
+		t.Fatalf("round trip: %+v", back.Peers)
+	}
+}

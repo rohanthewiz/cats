@@ -322,6 +322,32 @@ catctl host.attach --params '{"id":"box","addr":"tls://box.lan:8422","token_file
 it, so they respawn as new shells on the default host. See
 [hosts](configuration.md#editing-the-roster-without-a-restart).
 
+Peers — another cats whose backend this one syncs with (see
+[peer sync](../subsystems/peer-sync.md)). The roster edits the config's
+`peers:` block live, like hosts:
+
+```bash
+catctl attach-peer home https://mini.lan:8421 ~/.config/cats/peers/home.token   # token file holds its CATS_PASSWORD
+catctl attach-peer home https://mini.lan:8421 ~/.config/cats/peers/home.token home mini-PC   # ...with a label
+catctl peers                                    # the roster
+catctl detach-peer home                         # forget it (nothing synced is undone)
+
+catctl sync home todos                          # merge backlogs both ways and print the report
+catctl sync home workspaces todos plugins       # everything, both ways
+catctl sync home all pull                       # only bring theirs here
+catctl sync home plugins push                   # only install mine there
+```
+
+Every category is a word you type — `catctl sync home` alone is a usage error,
+not "everything". The exit status is 1 when the peer could not be reached or an
+item **failed**; *skipped* items (no such folder here, a linked plugin, a
+conflicting row) are the report doing its job and leave it 0. The fingerprint
+goes through the raw form:
+
+```bash
+catctl peer.attach --params '{"id":"home","url":"https://mini.lan:8421","token_file":"~/.config/cats/peers/home.token","fingerprint":"dd7d9b31..."}'
+```
+
 Runbooks — a YAML file whose steps are §7 commands, run in order:
 
 ```bash

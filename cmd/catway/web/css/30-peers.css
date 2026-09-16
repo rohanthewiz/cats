@@ -1,0 +1,26 @@
+  /* ---- Peers dialogs ----
+     The roster reuses the palette list chrome the plugins dialog borrows (rows
+     with per-row action buttons); the sync dialog is a plain modal with three
+     checkbox rows and one select; the report is a palette list again, with
+     the status word in the row's kind slot and the reason in .sub. */
+  .modal.peers { width:620px; }
+  .modal.peers .row { cursor:default; }
+  .modal.peers-sync { width:520px; }
+  .modal.peers-sync label.check { display:flex; align-items:baseline; gap:8px; padding:6px 0; cursor:pointer; color:var(--fg); }
+  .modal.peers-sync label.check input { margin:0; }
+  .modal.peers-sync label.check .sub { color:var(--muted); font-size:11px; margin-left:auto; text-align:right; }
+  .modal.peers-sync .field { margin-top:10px; }
+  .modal.peers-sync select { width:100%; background:var(--panel); color:var(--fg); border:1px solid var(--line); border-radius:5px; padding:5px 8px; font:inherit; }
+  .modal .hint.warn { color:var(--warn); }
+  .modal .hint.err { color:var(--err); margin-bottom:8px; }
+  .modal.peers-report { width:720px; }
+  .modal.peers-report .body { padding:8px 14px; }
+  .modal.peers-report .side { color:var(--fg-strong); font-weight:600; font-size:12px; margin:8px 0 2px; }
+  .modal.peers-report .list { max-height:30vh; }
+  .modal.peers-report .row { cursor:default; }
+  .modal.peers-report .row .kind { width:60px; }
+  .modal.peers-report .row.synced .kind { color:var(--accent); }
+  .modal.peers-report .row.skipped .kind { color:var(--warn); }
+  .modal.peers-report .row.failed .kind { color:var(--err); }
+  .modal.peers-report .row .lbl { flex:none; max-width:45%; }
+  .modal.peers-report .row .sub { white-space:normal; }

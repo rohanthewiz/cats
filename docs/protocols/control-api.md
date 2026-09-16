@@ -673,6 +673,8 @@ new panes rather than a location.
 | `worktree.list` / `worktree.create` / `worktree.open` / `worktree.remove` | — |
 | `config.get` / `config.set` | — |
 | `host.attach` / `host.detach` | `attach-host <id> <addr> [label...]` / `detach-host <id> [force]` |
+| `peer.list` / `peer.sync` | `peers` / `sync <peer> [workspaces\|todos\|plugins\|all ...] [pull\|push\|both]` |
+| `peer.attach` / `peer.detach` | `attach-peer <id> <url> [token_file] [label...]` / `detach-peer <id>` |
 | `theme.list` / `theme.save` / `theme.delete` | — |
 | `plugin.list` / `plugin.uninstall` | — |
 | `path.list` | — |
@@ -709,6 +711,46 @@ catway can no longer reach.
 
 Git work runs **off** the orchestrator loop at both ends, so a slow
 `git worktree add` never stalls input on either machine.
+
+### Peers
+
+`peer.list` returns the configured peers (`{peers:[{id, label, url,
+fingerprint, has_token}]}`) — the config's `peers:` block, nothing about
+reachability. `peer.attach` (`{id, url, label, token, token_file,
+fingerprint}`) and `peer.detach` (`{id}`) edit that block and the running
+roster together and answer with the new list, the way the host pair does.
+
+`peer.sync` runs one sync and answers with the whole report. Params:
+
+```json
+{"peer":"home","workspaces":true,"todos":true,"plugins":false,"direction":"both"}
+```
+
+At least one category must be set; `direction` is `both` (default: pull the
+peer's state here, then push ours there), `pull` or `push`. The result:
+
+```json
+{"peer":"home","remote":"me@mini","direction":"both",
+ "items":[{"side":"here","kind":"todos","name":"global","status":"synced","detail":"3 added, 1 completed, 12 unchanged"},
+          {"side":"here","kind":"workspace","name":"scratch (/Users/me/tmp/scratch)","status":"skipped","detail":"no such folder on this machine"},
+          {"side":"peer","kind":"plugin","name":"rohanthewiz.ced","status":"unchanged","detail":"already installed"}],
+ "synced":1,"unchanged":1,"skipped":1,"failed":0,
+ "lines":["sync with home (me@mini) — both, todos", "here: 1 synced, …", "…"]}
+```
+
+`side` is `here` (applied by this catway, the pull half) or `peer` (applied by
+the other one, the push half — its own report, returned over the wire).
+`status` is `synced`, `unchanged`, `skipped` or `failed`; `skipped` is a fact
+about the machine (no equivalent folder, a linked plugin, a backlog row that
+differs on both sides and was kept), `failed` is an attempt that errored.
+`lines` is the same report rendered for a terminal — what `catctl sync`
+prints. A sync that could not run at all (peer unreachable, credential refused)
+still succeeds as a command: `error` is set, `items` is empty, because "could
+not connect" is the report. See [peer sync](../subsystems/peer-sync.md).
+
+The command is a long one — it waits on another machine, and a plugin install
+is a clone plus a build — and it is Recorded: a runbook that ends with "sync
+todos with home" is a reasonable runbook.
 
 ### File transfer
 

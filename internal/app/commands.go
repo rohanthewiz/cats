@@ -128,6 +128,16 @@ type Backend interface {
 	// itself is the daemon's own retry loop, not something to wait on here.
 	HostAttach(r Responder, p HostAttachParams)
 	HostDetach(r Responder, p HostDetachParams)
+
+	// The peer commands (peer.list / peer.sync / peer.attach / peer.detach).
+	// The roster lives in the backend's config, like the hosts', so the three
+	// roster calls resolve synchronously there. StartPeerSync is the long one:
+	// it talks to another machine and may run plugin installs, so it runs off
+	// the loop and resolves r later, like the plugin and worktree commands.
+	PeerList(r Responder)
+	StartPeerSync(r Responder, p PeerSyncParams)
+	PeerAttach(r Responder, p PeerAttachParams)
+	PeerDetach(r Responder, p PeerDetachParams)
 	// PaneMeta reports the runtime-side metadata for a pane — detected agent,
 	// live title, cwd — which the session's domain model cannot know. The
 	// dispatcher merges it into pane.list / pane.get results; an unknown pane
@@ -1614,6 +1624,67 @@ func (d *Dispatcher) dispatch(name string, dec ParamDecoder, r Responder) {
 			return
 		}
 		d.backend.HostDetach(r, p)
+
+	case CmdPeerList:
+		if !r.WantsReply() {
+			return // a list with nowhere to go is nothing
+		}
+		d.backend.PeerList(r)
+
+	case CmdPeerSync:
+		if !r.WantsReply() {
+			return // the report is the whole point; with no reply channel there is no sync worth running
+		}
+		var p PeerSyncParams
+		if err := dec.Decode(&p); err != nil {
+			bad(err)
+			return
+		}
+		// Shape checks only; whether the peer exists and answers is the
+		// backend's to say, in the report.
+		if p.Peer == "" {
+			r.Fail("peer.sync: peer is required")
+			return
+		}
+		if !p.Workspaces && !p.Todos && !p.Plugins {
+			r.Fail("peer.sync: nothing selected — set workspaces, todos and/or plugins")
+			return
+		}
+		switch p.Direction {
+		case "", "both", "pull", "push":
+		default:
+			r.Fail(fmt.Sprintf("peer.sync: direction %q: want both, pull or push", p.Direction))
+			return
+		}
+		d.backend.StartPeerSync(r, p) // async: the network round trips resolve r later
+
+	case CmdPeerAttach:
+		var p PeerAttachParams
+		if err := dec.Decode(&p); err != nil {
+			bad(err)
+			return
+		}
+		if p.ID == "" {
+			r.Fail("peer.attach: id is required")
+			return
+		}
+		if p.URL == "" {
+			r.Fail("peer.attach: url is required (https://host:port)")
+			return
+		}
+		d.backend.PeerAttach(r, p)
+
+	case CmdPeerDetach:
+		var p PeerDetachParams
+		if err := dec.Decode(&p); err != nil {
+			bad(err)
+			return
+		}
+		if p.ID == "" {
+			r.Fail("peer.detach: id is required")
+			return
+		}
+		d.backend.PeerDetach(r, p)
 
 	default:
 		r.Fail(fmt.Sprintf("command %q not supported yet (WS2 in progress)", name))

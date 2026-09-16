@@ -73,6 +73,43 @@ server:
 #                                         # CATS_CONTROL_SOCKET=- and catctl
 #                                         # says why.
 
+# Peers: other cats instances this one synchronizes its BACKEND with — the
+# state of record, not the screen. A peer is not a host: a host lends this
+# catway its terminals; a peer is a second catway with workspaces, todo
+# backlogs and plugins of its own. `catctl sync <peer> ...` (or the peers
+# dialog: gear menu › "peers / sync…") reconciles the two and prints a report
+# that includes everything that did NOT sync, and why:
+#
+#   workspaces   a workspace lands on the other side only where the SAME
+#                folder exists there (the home directory is translated, so
+#                /Users/me/projs/x on a Mac is /home/me/projs/x on Linux);
+#                otherwise it is reported as skipped. New ones arrive asleep.
+#   todos        cats-todo backlogs (<project>/.cats-todo/todos.json and the
+#                global one) are MERGED: rows the other side lacks are added,
+#                completion propagates, anything that differs is kept as it
+#                was on each side and reported as a conflict.
+#   plugins      what the other side has installed is installed here from the
+#                same source (git clone + build). Linked plugins cannot travel.
+#
+# Nothing is ever deleted or overwritten in any direction.
+#
+# url is the peer's browser address. The peer's /peer/v1/* endpoints sit behind
+# its ordinary auth, so the credential is THAT cats' shared secret (its
+# CATS_PASSWORD) — put it in token_file rather than here, because the settings
+# modal rewrites this file. fingerprint pins a self-signed certificate (the
+# SHA-256 catway prints at startup under --tls); an http:// url is only
+# accepted for this machine or an ssh tunnel.
+#
+# Live: `catctl attach-peer` / `detach-peer` edit this block and the running
+# roster; `catctl reload` picks up a hand-edit.
+#
+# peers:
+#   - id: home
+#     label: "home mini-PC"
+#     url: "https://mini.lan:8421"
+#     token_file: "~/.config/cats/peers/home.token"
+#     fingerprint: "dd7d9b31…"            # from that catway's startup log
+
 # Session persistence & restore: the workspace/tab/pane model survives a
 # catway restart, and scrollback seeds survive a cathost daemon loss.
 persistence:

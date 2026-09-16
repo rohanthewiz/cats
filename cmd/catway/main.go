@@ -371,6 +371,10 @@ func main() {
 	// URLs they are shown, and a GET that answered a prompt would be answered
 	// by whatever prefetched it.
 	s.Post(notifyActionPath+":token", o.handleNotifyAction)
+	// The peer-sync surface another catway dials (peers.go). Behind the guard
+	// like everything but the three public paths above: the credential is
+	// this catway's own secret, presented as a bearer token.
+	o.registerPeerRoutes(s)
 	s.WebSocket("/ws", func(ws *rweb.WSConn) error {
 		return o.serve(ws)
 	})

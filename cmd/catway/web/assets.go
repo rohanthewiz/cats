@@ -81,6 +81,7 @@ var cssFiles = []string{
 	"27-picker.css",     // the inline directory picker
 	"28-flags.css",      // user flags: the sidebar mark, the pane-header chip
 	"29-runbooks.css",   // RUNBOOKS rows and the heading's re-read control
+	"30-peers.css",      // peers roster, the sync dialog, the sync report
 }
 
 // jsFiles is the front-end, in evaluation order. Order matters twice: `const`
@@ -131,7 +132,8 @@ var jsFiles = []string{
 	"39-chat.js",       // the ACP chat side panel
 	"40-record.js",     // the macro recorder's toolbar indicator and its dialogs
 	"41-runbooks.js",   // RUNBOOKS: the runbook.list section, its run gate and menu
-	"42-boot.js",       // toolbar wiring, then the three calls that start the app
+	"43-peers.js",      // peers: the roster, the sync dialog and its report (peer.*)
+	"44-boot.js",       // toolbar wiring, then the three calls that start the app
 }
 
 // stylesheet and script are assembled once, at package init: the page is

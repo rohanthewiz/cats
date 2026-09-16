@@ -239,6 +239,18 @@ const (
 	CmdHostAttach = "host.attach"
 	CmdHostDetach = "host.detach"
 
+	// Peer commands: another catway this one synchronizes its backend with —
+	// workspaces (where the same folder exists), todo backlogs (merged) and
+	// plugins (re-installed from source). A peer is not a host: a host lends
+	// this catway its terminals, a peer is a second source of truth. peer.list
+	// reads the roster, peer.attach / peer.detach edit it (config's peers:
+	// block, like host.attach does hosts:), and peer.sync runs one sync and
+	// answers with the full report — including what did not sync, and why.
+	CmdPeerList   = "peer.list"
+	CmdPeerSync   = "peer.sync"
+	CmdPeerAttach = "peer.attach"
+	CmdPeerDetach = "peer.detach"
+
 	// Read-only query commands (§7): they return a snapshot of session state
 	// and mutate nothing, so the dispatcher answers them straight from the
 	// Session with no Backend effects.
@@ -469,6 +481,14 @@ var commandSpecs = []CommandSpec{
 	// reply instead of waiting for the hosts push that also follows.
 	{Name: CmdHostAttach, Params: HostAttachParams{}, Result: HostListResult{}, ParamsRequired: true, Recorded: true},
 	{Name: CmdHostDetach, Params: HostDetachParams{}, Result: HostListResult{}, ParamsRequired: true, Recorded: true},
+
+	// Peers. The roster writers echo the new roster like the host pair. peer.sync
+	// is Recorded: replaying "sync todos with home" does again what was done,
+	// and a runbook that ends with one is a reasonable thing to want.
+	{Name: CmdPeerList, Result: PeerListResult{}, ReplyRequired: true},
+	{Name: CmdPeerSync, Params: PeerSyncParams{}, Result: PeerSyncResult{}, ParamsRequired: true, ReplyRequired: true, Recorded: true},
+	{Name: CmdPeerAttach, Params: PeerAttachParams{}, Result: PeerListResult{}, ParamsRequired: true, Recorded: true},
+	{Name: CmdPeerDetach, Params: PeerDetachParams{}, Result: PeerListResult{}, ParamsRequired: true, Recorded: true},
 
 	// Read-only queries. They answer straight from the Session, so they are not
 	// reply-gated — a query with no reply channel is a cheap no-op rather than a
@@ -1400,6 +1420,91 @@ type HostAttachParams struct {
 type HostDetachParams struct {
 	ID    string `json:"id"`
 	Force bool   `json:"force,omitempty"`
+}
+
+// --- Peer params & results (§7, peers dialog / catctl sync) --------------------
+
+// PeerInfo is one configured peer as peer.list reports it. Nothing about
+// reachability: the roster is a config fact, and whether the machine answers
+// is learned by syncing with it (the report's first line says so).
+type PeerInfo struct {
+	ID          string `json:"id"`
+	Label       string `json:"label"`
+	URL         string `json:"url"`
+	Fingerprint string `json:"fingerprint,omitempty"`
+	// HasToken says a credential is configured (token or token_file), without
+	// saying which or what — a sync against a peer with none fails before the
+	// first request, and the dialog can say so up front.
+	HasToken bool `json:"has_token"`
+}
+
+// PeerListResult is CmdResult.Data for peer.list, peer.attach and peer.detach.
+type PeerListResult struct {
+	Peers []PeerInfo `json:"peers"`
+}
+
+// PeerSyncParams: peer.sync. Peer names a roster entry. The three booleans
+// are the categories to sync — at least one is required, and each is opt-in
+// so a todos-only sync never reads the plugins root. Direction is "both"
+// (default: pull the peer's state here, then push ours there), "pull" or
+// "push". Nothing is deleted in any direction; see PeerSyncResult.
+type PeerSyncParams struct {
+	Peer       string `json:"peer"`
+	Workspaces bool   `json:"workspaces,omitempty"`
+	Todos      bool   `json:"todos,omitempty"`
+	Plugins    bool   `json:"plugins,omitempty"`
+	Direction  string `json:"direction,omitempty"`
+}
+
+// PeerSyncItem is one line of a sync report: which side it happened on
+// ("here" or "peer"), what kind of thing ("workspace", "todos", "plugin"),
+// its name, what happened ("synced", "unchanged", "skipped", "failed") and
+// why. Skipped is the list the user reads: the folder that does not exist on
+// this machine, the plugin linked to a checkout over there, the backlog row
+// that differs on both sides and was kept as it was.
+type PeerSyncItem struct {
+	Side   string `json:"side"`
+	Kind   string `json:"kind"`
+	Name   string `json:"name"`
+	Status string `json:"status"`
+	Detail string `json:"detail,omitempty"`
+}
+
+// PeerSyncResult is CmdResult.Data for peer.sync: the whole report. Items is
+// the structured form; Lines is the same report rendered for a terminal, so
+// catctl and the dialog show one story. Error is set when the sync could not
+// run at all (unreachable, credential refused) — Items is then empty and the
+// command still succeeds, because "could not connect" IS the report.
+type PeerSyncResult struct {
+	Peer      string         `json:"peer"`
+	Remote    string         `json:"remote,omitempty"` // user@host of the peer, once it answered
+	Direction string         `json:"direction"`
+	Items     []PeerSyncItem `json:"items"`
+	Synced    int            `json:"synced"`
+	Unchanged int            `json:"unchanged"`
+	Skipped   int            `json:"skipped"`
+	Failed    int            `json:"failed"`
+	Lines     []string       `json:"lines"`
+	Error     string         `json:"error,omitempty"`
+}
+
+// PeerAttachParams: peer.attach — add a peers: entry and write the config.
+// URL is the peer catway's browser address; Token/TokenFile carry that
+// catway's shared secret (its CATS_PASSWORD), the same credential a headless
+// client presents to it; Fingerprint pins a self-signed certificate.
+type PeerAttachParams struct {
+	ID          string `json:"id"`
+	Label       string `json:"label,omitempty"`
+	URL         string `json:"url"`
+	Token       string `json:"token,omitempty" cats:"secret"`
+	TokenFile   string `json:"token_file,omitempty"`
+	Fingerprint string `json:"fingerprint,omitempty"`
+}
+
+// PeerDetachParams: peer.detach — remove a peers: entry. Nothing that was
+// synced is undone; the roster simply forgets the address.
+type PeerDetachParams struct {
+	ID string `json:"id"`
 }
 
 // --- Worktree params & results (§7, WS8 dialogs) ------------------------------

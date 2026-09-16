@@ -63,6 +63,8 @@ type fakeBackend struct {
 	lastThemeDelP  ThemeDeleteParams
 	lastPlgList    Responder
 	lastPlgUnins   Responder
+	lastPeerSync   Responder
+	lastPeerSyncP  PeerSyncParams
 	lastPlgUninP   PluginUninstallParams
 	lastPathList   Responder
 	lastPathP      PathListParams
@@ -302,6 +304,23 @@ func (b *fakeBackend) StartPluginUninstall(r Responder, p PluginUninstallParams)
 	b.rec("plgUninstall")
 	b.lastPlgUnins = r
 	b.lastPlgUninP = p
+}
+func (b *fakeBackend) PeerList(r Responder) {
+	b.rec("peerList")
+	r.OK(PeerListResult{Peers: []PeerInfo{}})
+}
+func (b *fakeBackend) StartPeerSync(r Responder, p PeerSyncParams) {
+	b.rec("peerSync")
+	b.lastPeerSync = r
+	b.lastPeerSyncP = p
+}
+func (b *fakeBackend) PeerAttach(r Responder, p PeerAttachParams) {
+	b.rec("peerAttach")
+	r.OK(PeerListResult{Peers: []PeerInfo{{ID: p.ID, URL: p.URL}}})
+}
+func (b *fakeBackend) PeerDetach(r Responder, p PeerDetachParams) {
+	b.rec("peerDetach")
+	r.OK(PeerListResult{Peers: []PeerInfo{}})
 }
 func (b *fakeBackend) StartPathList(r Responder, p PathListParams) {
 	b.rec("pathList")

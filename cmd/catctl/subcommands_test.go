@@ -320,3 +320,52 @@ func TestBuildRunbookVars(t *testing.T) {
 		t.Error("no name must be a usage error")
 	}
 }
+
+func TestBuildSync(t *testing.T) {
+	raw, err := buildSync([]string{"home", "todos", "ws", "push"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var p app.PeerSyncParams
+	if err := json.Unmarshal(raw, &p); err != nil {
+		t.Fatal(err)
+	}
+	if p.Peer != "home" || !p.Todos || !p.Workspaces || p.Plugins || p.Direction != "push" {
+		t.Fatalf("params %+v", p)
+	}
+	raw, _ = buildSync([]string{"home", "all"})
+	p = app.PeerSyncParams{}
+	json.Unmarshal(raw, &p)
+	if !(p.Workspaces && p.Todos && p.Plugins) || p.Direction != "" {
+		t.Fatalf("all: %+v", p)
+	}
+	for _, bad := range [][]string{{"home"}, {"home", "pull"}, {"home", "todos", "bogus"}, {"home", "todos", "pull", "push"}} {
+		if _, err := buildSync(bad); err == nil {
+			t.Errorf("%v accepted", bad)
+		}
+	}
+}
+
+func TestBuildAttachPeer(t *testing.T) {
+	var p app.PeerAttachParams
+	raw, err := buildAttachPeer([]string{"home", "https://mini:8421", "~/.config/cats/peers/home.token", "home", "mini"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	json.Unmarshal(raw, &p)
+	if p.ID != "home" || p.URL != "https://mini:8421" || p.TokenFile != "~/.config/cats/peers/home.token" || p.Label != "home mini" {
+		t.Fatalf("params %+v", p)
+	}
+	raw, _ = buildAttachPeer([]string{"home", "https://mini:8421", "just a label"})
+	p = app.PeerAttachParams{}
+	json.Unmarshal(raw, &p)
+	if p.TokenFile != "" || p.Label != "just a label" {
+		t.Fatalf("label-only: %+v", p)
+	}
+	if _, err := buildAttachPeer([]string{"home"}); err == nil {
+		t.Fatal("missing url accepted")
+	}
+	if _, err := buildDetachPeer([]string{}); err == nil {
+		t.Fatal("missing id accepted")
+	}
+}

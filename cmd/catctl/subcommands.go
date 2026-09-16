@@ -127,6 +127,11 @@ var subcommands = []subcommand{
 	{"attach-host", app.CmdHostAttach, "attach-host <id> <addr> [label...]", nil, "attach a cathost (addr: unix://path, tcp://host:port, tls://host:port)", buildAttachHost},
 	{"detach-host", app.CmdHostDetach, "detach-host <id> [force]", []argKind{argDetachHost}, "detach a cathost (force also re-homes its panes)", buildDetachHost},
 
+	{"peers", app.CmdPeerList, "peers", nil, "list the peer catways this one can sync with", noParams},
+	{"sync", app.CmdPeerSync, "sync <peer> [workspaces|todos|plugins|all ...] [pull|push|both]", nil, "sync workspaces, todo backlogs and/or plugins with a peer catway; prints the report", buildSync},
+	{"attach-peer", app.CmdPeerAttach, "attach-peer <id> <url> [token_file] [label...]", nil, "add a peer catway (url: https://host:port; token_file holds its CATS_PASSWORD)", buildAttachPeer},
+	{"detach-peer", app.CmdPeerDetach, "detach-peer <id>", nil, "forget a peer catway (nothing synced is undone)", buildDetachPeer},
+
 	// Notifications. The ergonomic verb is the plain one-liner a script wants
 	// at the end of a long build; anything with buttons goes through
 	// `catctl ui.notify --params …`, which is the shape a caller declaring
@@ -599,6 +604,76 @@ func buildDetachHost(args []string) (json.RawMessage, error) {
 		p.Force = true
 	}
 	return marshal(p)
+}
+
+// buildSync: sync <peer> [workspaces|todos|plugins|all ...] [pull|push|both].
+//
+// Every category is a word the caller types, and none is assumed: `catctl sync
+// home` with nothing else is a usage error rather than "everything", because
+// a sync installs plugins and writes backlogs, and the thing that does that
+// should be the thing that was asked for. `all` is the one-word spelling of
+// all three. The direction word may sit anywhere after the peer; both is the
+// default.
+func buildSync(args []string) (json.RawMessage, error) {
+	const synopsis = "sync <peer> [workspaces|todos|plugins|all ...] [pull|push|both]"
+	if len(args) < 2 {
+		return nil, usageErr{synopsis}
+	}
+	p := app.PeerSyncParams{Peer: args[0]}
+	for _, w := range args[1:] {
+		switch strings.ToLower(w) {
+		case "workspaces", "ws":
+			p.Workspaces = true
+		case "todos", "todo":
+			p.Todos = true
+		case "plugins", "plugin":
+			p.Plugins = true
+		case "all":
+			p.Workspaces, p.Todos, p.Plugins = true, true, true
+		case "pull", "push", "both":
+			if p.Direction != "" && p.Direction != strings.ToLower(w) {
+				return nil, usageErr{synopsis + " (one direction)"}
+			}
+			p.Direction = strings.ToLower(w)
+		default:
+			return nil, usageErr{synopsis}
+		}
+	}
+	if !p.Workspaces && !p.Todos && !p.Plugins {
+		return nil, usageErr{synopsis + " (name at least one category)"}
+	}
+	return marshal(p)
+}
+
+// buildAttachPeer: attach-peer <id> <url> [token_file] [label...].
+//
+// The third word is a token file when it looks like a path (starts with ~, /
+// or .), else the first word of the label — the same "a path announces itself"
+// rule the plugins dialog uses to tell a link from an install. A literal token
+// goes through the raw form only: it would otherwise land in the shell
+// history, which is exactly the leak token_file exists to avoid.
+func buildAttachPeer(args []string) (json.RawMessage, error) {
+	if len(args) < 2 {
+		return nil, usageErr{"attach-peer <id> <url> [token_file] [label...]"}
+	}
+	p := app.PeerAttachParams{ID: args[0], URL: args[1]}
+	rest := args[2:]
+	if len(rest) > 0 && (strings.HasPrefix(rest[0], "~") || strings.HasPrefix(rest[0], "/") || strings.HasPrefix(rest[0], ".")) {
+		p.TokenFile = rest[0]
+		rest = rest[1:]
+	}
+	if len(rest) > 0 {
+		p.Label = strings.Join(rest, " ")
+	}
+	return marshal(p)
+}
+
+// buildDetachPeer: detach-peer <id>.
+func buildDetachPeer(args []string) (json.RawMessage, error) {
+	if len(args) != 1 {
+		return nil, usageErr{"detach-peer <id>"}
+	}
+	return marshal(app.PeerDetachParams{ID: args[0]})
 }
 
 // buildRecord: record <start|stop|cancel|status> [name] [overwrite].

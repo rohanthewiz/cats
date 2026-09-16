@@ -25,6 +25,7 @@
       { label: "new worktree", fn: openNewWorktreeDialog },
       { label: "open worktree", fn: openWorktreeOpenDialog },
       { label: "plugins", fn: openPluginsDialog },
+      { label: "peers / sync…", fn: openPeersDialog },
       // The keyboard route into the recorder. Only the verb that applies is
       // offered: "start recording" while one is already running would fail on
       // the server (the recorder is one at a time), and a palette that lists

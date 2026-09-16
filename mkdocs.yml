@@ -98,6 +98,7 @@ nav:
       - Auth and TLS: subsystems/auth-and-tls.md
       - Plugins: subsystems/plugins.md
       - Git worktrees: subsystems/worktrees.md
+      - Peer sync: subsystems/peer-sync.md
   - Reference:
       - Configuration: reference/configuration.md
       - CLI: reference/cli.md
