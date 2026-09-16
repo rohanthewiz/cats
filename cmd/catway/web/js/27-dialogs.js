@@ -235,24 +235,37 @@
   // foreground job and the agent state); the client only says which mode.
   //
   // No confirm on clean: nothing busy is touched, and the result toast says
-  // exactly what went. Sleep confirms, since it closes every pane — but the
-  // refusal case (something still busy) is the server's, and its message
-  // names the panes in the way, so the dialog does not try to predict it.
+  // exactly what went. Sleep asks first, since it closes every pane, and that
+  // same prompt is where the agent mode is chosen — but the refusal case
+  // (something still busy) is the server’s, and its message names the panes
+  // in the way, so the dialog does not try to predict it.
   function cleanWorkspace(w, agents) {
     sendCmdAwait("workspace.clean", { id: w.id, agents: agents || "" }, (res) => {
       if (!res.ok) { toast("clean workspace: " + (res.error || "unknown")); return; }
       toast(cleanSummary(w, res.data));
     });
   }
-  function sleepWorkspace(w, agents) {
-    const parking = agents === "park";
-    dialogConfirm({
+  // One entry point, not one per mode: what to do with idle agents is a
+  // property of *this* sleep, not a second command, so it is asked inside the
+  // gate the user already has to pass rather than doubled into the menu above
+  // it. The choice field carries the same two values the server understands
+  // ("" and "park"), and each option says what it costs — the plain one can be
+  // refused, the parking one spends time writing the agents out.
+  function sleepWorkspace(w) {
+    const name = (w.name || w.id) + " (" + w.id + ")";
+    dialogFields({
       title: "sleep workspace",
-      message: "Put “" + (w.name || w.id) + "” (" + w.id + ") to sleep? Every pane closes; the workspace stays in the list "
-        + "with its name, flag and todos, and wakes with a fresh shell when you click it."
-        + (parking ? " Idle agents are parked and resumed on wake." : " It will refuse while an agent or a job is still running."),
-      confirmLabel: "sleep", danger: true,
-      onConfirm: () => sendCmdAwait("workspace.sleep", { id: w.id, agents: agents || "" }, (res) => {
+      fields: [{
+        label: "idle agents",
+        value: "",
+        choices: [
+          { value: "", label: "leave them — refuse if anything is still running" },
+          { value: "park", label: "park them — resume on wake" },
+        ],
+      }],
+      hint: "every pane closes · " + name + " keeps its name, flag and todos, and wakes with a fresh shell",
+      submitLabel: "sleep",
+      onSubmit: (agents) => sendCmdAwait("workspace.sleep", { id: w.id, agents: agents || "" }, (res) => {
         if (!res.ok) { toast("sleep workspace: " + (res.error || "unknown")); return; }
         toast(cleanSummary(w, res.data));
       }),

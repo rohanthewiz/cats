@@ -131,8 +131,9 @@
         { label: aw.locked ? "unlock workspace" : "lock workspace (no plugins or agents)", fn: () => toggleWorkspaceLock(aw) },
         { label: "clean workspace (close idle panes)", fn: () => cleanWorkspace(aw, "") },
         { label: "clean workspace, park idle agents", fn: () => cleanWorkspace(aw, "park") },
-        { label: "sleep workspace…", fn: () => sleepWorkspace(aw, "") },
-        { label: "sleep workspace, park idle agents…", fn: () => sleepWorkspace(aw, "park") },
+        // One row, like the context menu: the dialog it opens asks what to do
+        // with idle agents, so the palette does not carry a second entry for it.
+        { label: "sleep workspace…", fn: () => sleepWorkspace(aw) },
         { label: "flag workspace…", fn: () => openFlagDialog(wsFlagTarget(aw)) },
         { label: "close workspace…", fn: () => confirmCloseWorkspace(aw) },
       );

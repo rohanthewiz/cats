@@ -276,19 +276,18 @@
       { label: "open in new window", fn: () => openWindow(w.id) },
       { label: w.locked ? "unlock" : "lock", fn: () => toggleWorkspaceLock(w) },
       // The winding-down rows, in the order they escalate: clean drops idle
-      // panes, sleep parks the whole thing, close ends it. Clean and sleep are
-      // submenus for the one decision they need — what to do with idle agents:
-      // the plain entry leaves them, the second parks them for the wake. A
+      // panes, sleep parks the whole thing, close ends it. Clean is a submenu
+      // for the one decision it needs — what to do with idle agents: the plain
+      // entry leaves them, the second parks them. Sleep is a single row: it has
+      // the same decision, but it already opens a dialog on the way through, so
+      // the question is asked there instead of splitting the row in two. A
       // sleeping workspace offers the way back instead.
       ...(w.asleep ? [{ label: "wake", fn: () => wakeWorkspace(w) }] : [
         { label: "clean", sub: [
           { label: "close idle panes", fn: () => cleanWorkspace(w, "") },
           { label: "close idle panes, park idle agents", fn: () => cleanWorkspace(w, "park") },
         ] },
-        { label: "sleep…", sub: [
-          { label: "sleep (refuse if anything runs)", fn: () => sleepWorkspace(w, "") },
-          { label: "sleep, park idle agents", fn: () => sleepWorkspace(w, "park") },
-        ] },
+        { label: "sleep…", fn: () => sleepWorkspace(w) },
       ]),
       { label: "close…", danger: true, fn: () => confirmCloseWorkspace(w) },
       "-",
