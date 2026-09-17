@@ -54,6 +54,7 @@
         ["reorder tabs / workspaces", ["drag"]],
         ["rename pane / tab / workspace", ["double-click its title"]],
         ["scrollback", ["wheel", "drag the scrollbar"]],
+        ["bigger / smaller font", ["Ctrl+wheel", "pinch"]],
         ["back / forward (pane & workspace history)", ["back / forward buttons"]],
         ["launcher menu", ["⚙ at the right of the tab row"]],
       ]));

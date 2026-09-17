@@ -3,6 +3,9 @@
   // browser display preference, so it lives in localStorage rather than in the
   // session the server persists.
   const FONT_DEFAULT = 14, FONT_MIN = 9, FONT_MAX = 32, FONT_KEY = "cats.font_px";
+  // Ctrl+wheel travel per font step (px) — under one mouse notch, so a single
+  // click of the wheel is one point, while a trackpad has to move a little.
+  const FONT_WHEEL_PX = 40;
   let FONT_PX = FONT_DEFAULT;
   try {
     const stored = parseInt(localStorage.getItem(FONT_KEY), 10);
@@ -221,6 +224,32 @@
     sendMsg({ t: "resize", cols, rows });
     if (layoutMsg) applyLayout(layoutMsg);
     toast(`font ${px}px`);
+  }
+
+  // fontWheelStep turns a Ctrl+wheel delta into a whole font-size step, or 0
+  // while the wheel has not yet travelled far enough for one. It is the wheel
+  // twin of ⌘+ / ⌘-, and the ACCUMULATOR is the whole reason it is a function:
+  // a mouse wheel reports one notch as ~100px, but a trackpad — and a pinch,
+  // which browsers deliver as a ctrl-modified wheel — reports a stream of
+  // fractional deltas, and stepping a whole point per event would race the
+  // font through its range on a single gesture. Travel is summed on the
+  // pane's `zoomAcc` and one step is taken per FONT_WHEEL_PX of it. A change of
+  // direction resets the sum, so a reversal answers promptly rather than first
+  // paying back what the other direction banked. AT MOST ONE STEP PER EVENT,
+  // and the sum is cleared when it is taken: a mouse notch is ~100px, which is
+  // more than a step's worth, and it must mean one point — not two, and not
+  // one now and a second on the next tiny touch. `unit` is the delta's pixel
+  // size (1, or the cell height when the wheel reports lines). Wheel UP is a
+  // negative deltaY, and that is the direction that ENLARGES — pulling the
+  // content toward you, the browser's own zoom convention.
+  function fontWheelStep(p, deltaY, unit) {
+    const px = deltaY * unit;
+    if (!px) return 0;
+    if (Math.sign(px) !== Math.sign(p.zoomAcc || 0)) p.zoomAcc = 0;
+    p.zoomAcc = (p.zoomAcc || 0) + px;
+    if (Math.abs(p.zoomAcc) < FONT_WHEEL_PX) return 0;
+    p.zoomAcc = 0;
+    return px < 0 ? 1 : -1;
   }
 
   // Hook for the mac app's View menu. In a WKWebView, Cocoa resolves ⌘+/⌘-/⌘0

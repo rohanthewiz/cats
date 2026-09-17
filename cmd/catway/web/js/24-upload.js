@@ -168,6 +168,16 @@
     });
     p.canvas.addEventListener("wheel", (ev) => {
       ev.preventDefault();
+      // Ctrl+wheel scales the terminal type — ⌘+ / ⌘- on a wheel — instead
+      // of reaching the pane or the browser's page zoom (which preventDefault
+      // above already declines: the listener is non-passive for exactly this).
+      // Ctrl alone, so a ⌘- or Alt-modified wheel still scrolls; a trackpad
+      // pinch arrives as a ctrl-modified wheel too, so it zooms as well.
+      if (ev.ctrlKey && !ev.metaKey && !ev.altKey) {
+        const step = fontWheelStep(p, ev.deltaY, ev.deltaMode === 1 ? cellH : 1);
+        if (step) setFontSize(FONT_PX + step);
+        return;
+      }
       const lines = ev.deltaMode === 1 ? Math.round(ev.deltaY)
         : Math.sign(ev.deltaY) * Math.max(1, Math.round(Math.abs(ev.deltaY) / (cellH * (p.gs || 1))));
       if (!lines) return;

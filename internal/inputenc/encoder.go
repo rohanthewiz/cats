@@ -176,7 +176,7 @@ func (e *Encoder) Mouse(m browserproto.Mouse) ([]byte, error) {
 	}
 
 	ev := e.mouseEvent
-	ev.SetMods(keyMods(m.Mods))
+	ev.SetMods(mouseMods(m.Mods))
 	ev.SetPosition(libghostty.MousePosition{X: float32(m.X), Y: float32(m.Y)})
 
 	switch m.Kind {
@@ -226,7 +226,7 @@ func (e *Encoder) wheel(m browserproto.Mouse) ([]byte, error) {
 	}
 
 	ev := e.mouseEvent
-	ev.SetMods(keyMods(m.Mods))
+	ev.SetMods(mouseMods(m.Mods))
 	ev.SetPosition(libghostty.MousePosition{X: float32(m.X), Y: float32(m.Y)})
 	ev.SetAction(libghostty.MouseActionPress)
 
@@ -271,6 +271,9 @@ func (e *Encoder) Paste(text string) ([]byte, error) {
 	return libghostty.PasteEncode([]byte(text), e.modes.BracketedPaste)
 }
 
+// keyMods maps the browser's modifier byte onto libghostty's, one for one.
+// Super survives here because the KEY path can carry it: under the kitty
+// keyboard protocol a ⌘ chord reaches the pane as its own modifier bit.
 func keyMods(mods uint8) libghostty.Mods {
 	var out libghostty.Mods
 	if mods&browserproto.ModShift != 0 {
@@ -324,4 +327,28 @@ func mouseFormat(enc terminal.MouseEncoding) libghostty.MouseFormat {
 	default:
 		return libghostty.MouseFormatX10
 	}
+}
+
+// mouseMods is keyMods for pointer events, with ⌘ SPELLED AS CTRL+ALT.
+//
+// The mouse wire has no room for Super: an SGR (or X10/UTF-8) report has
+// exactly three modifier bits — shift 4, alt 8, ctrl 16 — and libghostty's
+// encoder (input/mouse_encode.zig) reads exactly those, so a Super flag set
+// on a mouse event is silently dropped and a ⌘+click arrives in the pane as
+// a plain click. There is no mouse-side equivalent of the kitty keyboard
+// protocol to extend it.
+//
+// Ctrl+Alt is the one spelling that is BOTH representable and free: ctrl
+// alone and alt alone are gestures programs already bind (a terminal
+// editor's go-to-definition, a multi-caret click), while ctrl+alt+click is
+// one nobody presses on purpose. A pane can therefore tell three modified
+// clicks apart — 16 ctrl, 8 alt, 24 ⌘ — instead of two, at the cost of a
+// genuine Ctrl+Alt+click being read as ⌘. Only the keyboard's real Super
+// stays distinct, which is why this is not folded into keyMods.
+func mouseMods(mods uint8) libghostty.Mods {
+	out := keyMods(mods) &^ libghostty.ModSuper
+	if mods&browserproto.ModMeta != 0 {
+		out |= libghostty.ModCtrl | libghostty.ModAlt
+	}
+	return out
 }

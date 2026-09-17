@@ -222,6 +222,11 @@ func TestMouseSGR(t *testing.T) {
 		{"middle down", sgr, mouse(browserproto.MouseDown, browserproto.BtnMiddle, 4, 8, 0), "\x1b[<1;5;9M"},
 		{"shift left down", sgr, mouse(browserproto.MouseDown, browserproto.BtnLeft, 4, 8, browserproto.ModShift), "\x1b[<4;5;9M"},
 		{"ctrl alt down", sgr, mouse(browserproto.MouseDown, browserproto.BtnLeft, 4, 8, browserproto.ModCtrl|browserproto.ModAlt), "\x1b[<24;5;9M"},
+		// ⌘ has no bit of its own on the mouse wire, so it is spelled as
+		// ctrl+alt (mouseMods) rather than dropped on the floor.
+		{"meta down is spelled ctrl alt", sgr, mouse(browserproto.MouseDown, browserproto.BtnLeft, 4, 8, browserproto.ModMeta), "\x1b[<24;5;9M"},
+		{"meta shift down keeps shift", sgr, mouse(browserproto.MouseDown, browserproto.BtnLeft, 4, 8, browserproto.ModMeta|browserproto.ModShift), "\x1b[<28;5;9M"},
+		{"meta up is spelled ctrl alt", sgr, mouse(browserproto.MouseUp, browserproto.BtnLeft, 4, 8, browserproto.ModMeta), "\x1b[<24;5;9m"},
 		{"move not reported in press-release", sgr, mouse(browserproto.MouseMove, browserproto.BtnNone, 4, 8, 0), ""},
 		{"drag in button-motion",
 			terminal.InputModes{MouseMode: terminal.MouseButtonMotion, MouseEncoding: terminal.MouseEncodingSGR},
