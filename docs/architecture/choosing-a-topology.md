@@ -44,7 +44,7 @@ flowchart TD
 | Needs Zig/ghostty toolchain | yes (for the bundle) | on Linux only | yes |
 | `catctl` runs on | the Mac | the **Linux host** | the Mac |
 | Clipboard | native pasteboard bridge | native pasteboard bridge | browser clipboard API |
-| Font zoom | native menu ⌘+ / ⌘- / ⌘0 | native menu | browser zoom |
+| Font zoom | native menu ⌘+ / ⌘- / ⌘0, Ctrl+wheel | native menu, Ctrl+wheel | ⌘+ / ⌘- / ⌘0 and Ctrl+wheel, intercepted by the page |
 | Sessions outlive the client | within a run | yes, independent of the laptop | yes |
 | Concurrent clients | one window | one window (plus browsers) | many |
 | Offline | fully | no | on the same machine, yes |

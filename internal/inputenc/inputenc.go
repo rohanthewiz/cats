@@ -14,6 +14,11 @@
 // report-alternates, report-all-keys, report-associated-text), xterm
 // modifyOtherKeys, and DECCKM are all encoded natively.
 //
+// One translation sits above ghostty's mouse encoder: a mouse report has no
+// bit for ⌘ (only shift/alt/ctrl), so mouseMods (encoder.go) spells a
+// ⌘-modified pointer event as ctrl+alt rather than dropping the modifier.
+// The keyboard path keeps the real super bit.
+//
 // This file is pure Go (builds untagged): the W3C KeyboardEvent.code mapping
 // and the alternate-scroll fallback (mode 1007), which is a policy above the
 // encoders — ghostty implements it in its Surface, not its encoder.

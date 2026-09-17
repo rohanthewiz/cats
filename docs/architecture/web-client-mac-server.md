@@ -199,5 +199,5 @@ Two non-browser front ends speak the same edges:
 | No bundle, no launcher — just two binaries | You manage the daemons yourself |
 | Any device with a browser is a client, including tablets and phones | Browser clipboard restrictions: no native pasteboard bridge, so OSC 52 copies depend on `navigator.clipboard` and its activation rules |
 | Multiple simultaneous views | Those views share one session — last resize wins, focus is global |
-| Trivial to script and probe headlessly | ⌘+/⌘- font zoom is the browser's, not the app's |
+| Trivial to script and probe headlessly | Font zoom (⌘+ / ⌘- / ⌘0, Ctrl+wheel) is the page's own handler, which has to win the keystroke from the browser; a browser that keeps the chord for itself zooms the page instead and blurs the canvas |
 | The Mac's own agents, keys and toolchains are right there | Serving on a LAN means doing the TLS and password work |

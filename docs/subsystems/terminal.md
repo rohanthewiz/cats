@@ -105,6 +105,38 @@ pure-Go encoders **and** their known kitty bits-2/8 degradation. The full protoc
 is now encoded natively: disambiguate, report-event-types, report-alternates,
 report-all-keys, report-associated-text.
 
+### Mouse modifiers
+
+A keystroke can carry all four modifiers to a pane — under the kitty keyboard
+protocol ⌘ arrives as its own "super" bit. A pointer event cannot. Every mouse
+report format (X10, UTF-8, SGR) has exactly three modifier bits — shift 4, alt 8,
+ctrl 16 — and ghostty's mouse encoder reads exactly those, so a super flag on a
+mouse event is silently dropped and a ⌘+click would reach the pane as a plain
+click. There is no mouse-side equivalent of the kitty protocol to extend it.
+
+So `inputenc.mouseMods` **spells ⌘ on a pointer event as ctrl+alt** (bits 8+16).
+That is the one combination that is both representable and free: ctrl alone and
+alt alone are gestures programs already bind (a terminal editor's go-to-definition,
+a multi-caret click), while ctrl+alt+click is one nobody presses on purpose. A pane
+can therefore tell three modified clicks apart instead of two:
+
+| Pressed in the browser | Button-code bits on the wire |
+|------------------------|------------------------------|
+| Ctrl+click | 16 |
+| Alt (Option)+click | 8 |
+| ⌘+click | 24 |
+| ⌘⇧+click | 28 (shift is kept) |
+
+The cost is that a genuine Ctrl+Alt+click is indistinguishable from ⌘+click. Only
+the mouse path is translated; `keyMods` keeps the keyboard's real super bit. An
+app that wants ⌘+click reads the ctrl+alt pair — ced's `isMetaClick` is the worked
+example.
+
+One modified wheel never reaches a pane at all: **Ctrl+wheel** (and a trackpad
+pinch, which browsers deliver as a ctrl-modified wheel) is claimed by the front
+end to scale the terminal font, the wheel twin of ⌘+ / ⌘-. A ⌘- or Alt-modified
+wheel still scrolls, and still carries its bits.
+
 ## Per-pane goroutines on `cathost`
 
 ```mermaid

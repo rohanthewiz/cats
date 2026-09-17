@@ -102,7 +102,7 @@ Input is **structured**; the browser never pre-encodes VT bytes.
 |-----|---------|
 | `init` | protocol version, grid size, device pixel ratio, cell pixel metrics |
 | `key` | W3C `KeyboardEvent.code` plus `.key`, a modifier bitmask, and the event kind. The server runs keybinding interception, then encodes from the pane's live modes |
-| `mouse` | kind, button, cell coordinates within a pane, modifier bitmask, and wheel deltas in lines. The browser converts pixels → cells with its own metrics; the server applies the pane's reported mouse encoding |
+| `mouse` | kind, button, cell coordinates within a pane, modifier bitmask, and wheel deltas in lines. The browser converts pixels → cells with its own metrics; the server applies the pane's reported mouse encoding. The bitmask carries ⌘ like a key does, but the mouse wire has no bit for it, so the server spells a ⌘-modified pointer event as **ctrl+alt** (see [Mouse modifiers](../subsystems/terminal.md#mouse-modifiers)) |
 | `paste` | plain text. The server applies bracketed-paste wrapping per the focused pane's mode |
 | `image` | a clipboard image paste (base64) |
 | `resize` | the new grid. The server relayouts, sends a fresh `layout`, and resizes panes over the seam |

@@ -137,6 +137,19 @@ equivalents before the WKWebView sees a keydown, so the page's own handler can
 never fire in a bundled app. If the menu items do nothing, the loaded page has no
 `window.catsAdjustFont` hook — you are on the connect form or a login page.
 
+Ctrl+wheel (or a trackpad pinch) over a pane is the same zoom on the wheel and is
+handled by the page in every mode, so it works in the app even where the menu
+route does not. One notch is one point; a trackpad has to travel a little before
+it steps.
+
+## ⌘+click reaches my program as Ctrl+Alt+click
+
+By design. A mouse report has no bit for ⌘ — only shift, alt and ctrl — so the
+server spells a ⌘-modified click, drag or wheel as ctrl+alt rather than dropping
+the modifier on the floor. Programs read the ctrl+alt pair as ⌘; a real
+Ctrl+Alt+click looks the same to them. See
+[Mouse modifiers](../subsystems/terminal.md#mouse-modifiers).
+
 ## WebSocket connects then immediately fails
 
 Three candidates, in order of likelihood:
