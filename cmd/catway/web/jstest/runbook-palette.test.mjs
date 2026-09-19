@@ -135,6 +135,9 @@ const { paletteCommands, fuzzyScore } = loadFns({
     "openHelp", "confirmStopServer", "setSidebarHidden", "sendCmd", "renamePane",
     "openFlagDialog", "paneFlagTarget", "enterCopyMode", "copyScrollback", "renameTab",
     "renameWorkspace", "toggleWorkspaceLock", "wsFlagTarget", "confirmCloseWorkspace",
+    // The palette's "peers / sync…" entry (43-peers.js) names this eagerly, in
+    // an object literal rather than inside an arrow, so it needs a binding.
+    "openPeersDialog",
   ],
 });
 

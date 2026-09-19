@@ -132,7 +132,8 @@ var jsFiles = []string{
 	"39-chat.js",       // the ACP chat side panel
 	"40-record.js",     // the macro recorder's toolbar indicator and its dialogs
 	"41-runbooks.js",   // RUNBOOKS: the runbook.list section, its run gate and menu
-	"43-peers.js",      // peers: the roster, the sync dialog and its report (peer.*)
+	"42-textsink.js",   // hidden textarea: dictation / IME / emoji text -> the focused pane
+	"43-peers.js",     // peers: the roster, the sync dialog and its report (peer.*)
 	"44-boot.js",       // toolbar wiring, then the three calls that start the app
 }
 

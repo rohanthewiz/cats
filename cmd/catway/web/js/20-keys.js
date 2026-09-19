@@ -76,6 +76,14 @@
     // text must never reach a PTY, and terminal shortcuts (⌘V paste-to-pane,
     // font sizing) must not fire mid-composition.
     if (chatEl.contains(document.activeElement)) return;
+    // A key pressed while the host is composing text (an IME picking a
+    // candidate, dictation's marked text) belongs to the composition, not to
+    // the pane: forwarding it would type the raw key into the PTY AND the
+    // preventDefault below would break the composition it was steering. The
+    // committed result arrives through the text sink instead (42-textsink.js).
+    // keyCode 229 is the legacy spelling of the same fact, still the only
+    // signal WebKit gives on the keydown that STARTS a composition.
+    if (e.isComposing || e.keyCode === 229) return;
     // An open dialog/menu/palette owns the keyboard: its own listeners handle
     // Enter/arrows, Escape falls through to here, and nothing reaches the PTY.
     if (uiOpen()) {
