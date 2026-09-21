@@ -32,10 +32,12 @@
   //
   // replaceState, not pushState: switching workspaces inside a window is not a
   // browser navigation, and filling the browser's back button with them would
-  // tear down the WebSocket on every step back. ⌘[ / ⌘] mean something better
-  // instead: cats-level navigation over the focus-location history (see the
-  // nav.back/forward handler in onKey), which walks panes and workspaces
-  // without ever reloading the page.
+  // tear down the WebSocket on every step back. ⌘[ / ⌘] and the mouse's
+  // back/forward buttons mean something better instead: cats-level navigation
+  // over the focus-location history (see the nav.back/forward handler in
+  // onKey), which walks panes and workspaces without ever reloading the page.
+  // The keyboard half of that pair yields to a kitty-protocol pane, so over an
+  // editor it is the mouse buttons that still reach this history.
   function syncWindowURL(msg) {
     let active = "";
     for (const w of msg.workspaces) if (w.active) active = w.id;

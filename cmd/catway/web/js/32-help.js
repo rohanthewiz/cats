@@ -25,7 +25,11 @@
       left.appendChild(helpSection("global", [
         ["command palette", ["⌘K", "Ctrl+Alt+K"]],
         ["hide / show the sidebar", ["⌘B", "Ctrl+Alt+B"]],
+        // The keyboard pair yields to an editor pane, where it walks that
+        // editor's own file history instead; the mouse buttons below never
+        // do, so cats' history is always one gesture away.
         ["back / forward (pane & workspace history)", ["⌘[", "⌘]", "Ctrl+Alt+[ / ]"]],
+        ["…over an editor pane, the editor's own back / forward", ["⌘[", "⌘]"]],
         ["paste", ["⌘V", "Ctrl+Shift+V*"]],
         ["bigger / smaller font", ["⌘+", "⌘-"]],
         ["reset font size", ["⌘0"]],
@@ -55,6 +59,8 @@
         ["rename pane / tab / workspace", ["double-click its title"]],
         ["scrollback", ["wheel", "drag the scrollbar"]],
         ["bigger / smaller font", ["Ctrl+wheel", "pinch"]],
+        // Unconditional, unlike the ⌘[ / ⌘] twins: an editor pane never
+        // takes these, so this is the gesture that always means cats'.
         ["back / forward (pane & workspace history)", ["back / forward buttons"]],
         ["launcher menu", ["⚙ at the right of the tab row"]],
       ]));

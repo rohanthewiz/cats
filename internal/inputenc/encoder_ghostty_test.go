@@ -163,6 +163,12 @@ func TestKeyKitty(t *testing.T) {
 		{"ctrl c", disambiguate, press("KeyC", "c", ctrl), "\x1b[99;5u"},
 		{"ctrl a", disambiguate, press("KeyA", "a", ctrl), "\x1b[97;5u"},
 		{"super a", disambiguate, press("KeyA", "a", meta), "\x1b[97;9u"},
+		// ⌘[ / ⌘] over a kitty-protocol pane: the front end forwards the
+		// chord as super on BOTH spellings (20-keys.js's bracket branch),
+		// and the editor on the other side reads it as its own back /
+		// forward. 91 and 93 are '[' and ']'.
+		{"super bracketleft", disambiguate, press("BracketLeft", "[", meta), "\x1b[91;9u"},
+		{"super bracketright", disambiguate, press("BracketRight", "]", meta), "\x1b[93;9u"},
 		{"ctrl enter", disambiguate, press("Enter", "Enter", ctrl), "\x1b[13;5u"},
 		{"plain a stays text", disambiguate, press("KeyA", "a", 0), "a"},
 		{"plain enter stays legacy", disambiguate, press("Enter", "Enter", 0), "\r"},

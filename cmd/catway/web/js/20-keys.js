@@ -63,12 +63,19 @@
   // there would eat the user's browser shortcut and send nothing in its
   // place. An app that turned the protocol on is an app with its own
   // keymap, which is exactly who this is for.
-  function cmdGoesToPane(e) {
-    if (!CMD_TO_PANE.has(e.code)) return false;
+  // focusedPaneKitty is that gate on its own, split out because ⌘[ / ⌘]
+  // ask the same question without belonging in the set above: those two
+  // are not handed down as typed, they are TRANSLATED, so they need the
+  // gate and not the set. See the bracket branch in onKey.
+  function focusedPaneKitty() {
     const id = focusedPaneId();
     if (id === null) return false;
     const p = panes.get(id);
     return !!(p && p.modes && p.modes.kitty);
+  }
+
+  function cmdGoesToPane(e) {
+    return CMD_TO_PANE.has(e.code) && focusedPaneKitty();
   }
 
   function onKey(e) {
@@ -113,11 +120,37 @@
     // reaching across panes, tabs and workspaces. The server owns the stack;
     // the page only names the direction. Shift is excluded so ⌘⇧[ / ⌘⇧]
     // (browser tab prev/next) stay with the browser.
-    if (e.type === "keydown" && !e.shiftKey &&
+    //
+    // UNLESS the focused pane asked for the kitty keyboard protocol, in
+    // which case the chord is the PANE's. "Go back" is a question about
+    // whatever you are reading, and inside an editor the nearer answer is
+    // the file position you came from, not the pane you came from — an
+    // app with its own keymap is exactly who the CMD_TO_PANE gate exists
+    // for. Nothing is lost: cats' own history is still on the mouse's
+    // back/forward buttons (below), which are deliberately NOT handed
+    // down, so both histories stay reachable without leaving the keyboard
+    // ambiguous. A legacy pane keeps the old behaviour whole.
+    //
+    // Forwarded as SUPER on BOTH spellings (mods 8, not mods(e)) — the
+    // ⌘←/⌘→ translation's rule one branch down. The pane is promised one
+    // spelling of the chord, so Ctrl+Alt+[ on Linux reaches the binding
+    // ⌘[ reaches on a Mac rather than a ctrl+alt chord nothing has bound.
+    // That is also why these two are not in CMD_TO_PANE: that set is for
+    // chords handed down verbatim, and the tail below sends mods(e).
+    if (!e.shiftKey &&
         (e.code === "BracketLeft" || e.code === "BracketRight") &&
         ((e.metaKey && !e.ctrlKey) || (e.ctrlKey && e.altKey))) {
       e.preventDefault();
-      sendCmd(e.code === "BracketLeft" ? "nav.back" : "nav.forward", {});
+      if (focusedPaneKitty()) {
+        if (e.type === "keydown") clearStaleSelections();
+        sendMsg({ t: "key", code: e.code,
+                  key: e.code === "BracketLeft" ? "[" : "]", mods: 8,
+                  kind: e.type === "keyup" ? "u" : (e.repeat ? "r" : "d") });
+        return;
+      }
+      if (e.type === "keydown") {
+        sendCmd(e.code === "BracketLeft" ? "nav.back" : "nav.forward", {});
+      }
       return;
     }
     const isV = e.key === "v" || e.key === "V";
@@ -180,12 +213,22 @@
   window.addEventListener("keydown", onKey);
   window.addEventListener("keyup", onKey);
 
-  // The mouse's back/forward buttons (4/5, ev.button 3/4) mirror ⌘[ / ⌘]:
-  // cats-level navigation, wherever on the page they are pressed. Capture
-  // phase + preventDefault on mousedown is what stops the browser from
-  // driving its own history instead (which would tear down the WebSocket);
-  // the auxclick suppressor covers browsers that navigate on that event.
-  // The pane mouse path never sees these buttons (attachMouse drops >2).
+  // The mouse's back/forward buttons (4/5, ev.button 3/4) are cats-level
+  // navigation, wherever on the page they are pressed — and they are now
+  // the UNCONDITIONAL half of that pair: ⌘[ / ⌘] yield to a kitty-protocol
+  // pane (see the bracket branch in onKey), these never do. That is what
+  // keeps both histories reachable while an editor holds the keyboard,
+  // and it costs nothing to give up, because these buttons could not be
+  // handed down even if we wanted to: the wire has no encoding for a
+  // button above 2 (wire/up.go's BtnLeft/Middle/Right) and the terminal
+  // side would not decode one — an SGR report for X11 button 8 collapses
+  // into a plain left click in the decoders that read it.
+  //
+  // Capture phase + preventDefault on mousedown is what stops the browser
+  // from driving its own history instead (which would tear down the
+  // WebSocket); the auxclick suppressor covers browsers that navigate on
+  // that event. The pane mouse path never sees these buttons (attachMouse
+  // drops >2).
   window.addEventListener("mousedown", (ev) => {
     if (ev.button !== 3 && ev.button !== 4) return;
     ev.preventDefault(); ev.stopPropagation();
