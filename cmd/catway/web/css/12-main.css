@@ -146,6 +146,10 @@
   .pane .chrome .ctl button:hover { background:var(--hover); color:var(--fg-bright); }
   .pane.focused .chrome .ctl button { color:var(--chrome-fg-dim); }
   .pane .chrome .ctl button.close:hover { background:var(--err); color:var(--fg-bright); }
-  .pane canvas { position:absolute; display:block; }
+  /* The pane draws (and owns) its own selection wash; the browser's native
+     selection must stay out of it. Without this, a right-click — or any press
+     the JS lets through without preventDefault — makes Chrome highlight the
+     whole canvas as a selected element, washing the terminal blue. */
+  .pane canvas { position:absolute; display:block; user-select:none; -webkit-user-select:none; }
   .pane.focused canvas { outline:1px solid var(--accent-dim); outline-offset:-1px; }
 

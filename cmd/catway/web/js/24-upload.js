@@ -136,8 +136,13 @@
         // No capture: left-drag originates a browser-local selection (§7 read);
         // Alt makes it a rectangular block. A plain click (no drag) is resolved on
         // mouseup — hyperlink follow, per α.
-        if (ev.button !== 0) return;
+        // Middle/right press starts nothing here, but it is still swallowed:
+        // left to the browser it begins a native selection of the canvas
+        // element (the whole pane flashes blue) before contextmenu fires.
+        // Cancelling mousedown does not cancel contextmenu, so the pane menu
+        // still opens.
         ev.preventDefault();
+        if (ev.button !== 0) return;
         const [x, y] = cellOf(p, ev);
         p.sel = { anchor: { x, y }, cursor: { x, y }, rect: ev.altKey, moved: false };
         scheduleDraw(p);
