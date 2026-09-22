@@ -94,5 +94,5 @@ edited live by `peer.attach` / `peer.detach` (`catctl attach-peer` /
 `detach-peer`, or the peers dialog's *add…* / *forget*). A sync is
 `peer.sync` — `catctl sync <peer> [workspaces|todos|plugins|all] [pull|push|both]`,
 or gear menu › *peers / sync…*, or the palette. See the
-[CLI reference](../reference/cli.md#peers) and the
+[CLI reference](../reference/cli.md#verbs) and the
 [control API](../protocols/control-api.md#peers).

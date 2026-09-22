@@ -490,7 +490,7 @@ The switch is read per event rather than at startup, so `catctl reload` takes
 effect on the next thing that happens in the session.
 
 Running a runbook is an ordinary command (`runbook.run`), so there is nothing to
-switch on. A runbook that declares [`on:`](../protocols/control-api.md#triggers--on)
+switch on. A runbook that declares [`on:`](../protocols/control-api.md#triggers-on)
 is different: it runs steps nobody typed, so there has to be one place that stops
 all of it at once — a runaway, a shared machine, a session where somebody wants
 to read a runbook before it starts acting.

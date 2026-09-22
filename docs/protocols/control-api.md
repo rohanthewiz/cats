@@ -1355,7 +1355,7 @@ to be slow, so the server sizes its per-request backstop off the run's own limit
 below that would answer "command timed out" while the run carried on changing the
 session.
 
-#### Triggers — `on:`
+#### Triggers (`on:`)
 
 A runbook may declare the events that run it, and then nobody has to ask:
 
