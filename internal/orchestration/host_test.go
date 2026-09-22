@@ -999,3 +999,98 @@ func TestHostIdleTimeoutExits(t *testing.T) {
 		t.Fatal("idle timeout did not fire")
 	}
 }
+
+// TestHostStuckPaneDoesNotStallOthers is the 2026-09-22 freeze: a pane whose
+// child never reads stdin, flooded with wheel reports and keys, must not block
+// the dispatch goroutine — so a second pane's input still echoes promptly.
+// Before paneinput.go, dispatch wrote to the stuck pane's PTY itself and parked
+// the moment the kernel buffer filled, taking every other pane with it.
+func TestHostStuckPaneDoesNotStallOthers(t *testing.T) {
+	c := startTestHost(t)
+
+	stuck := NewCreatePane(1, 40, 5)
+	// Raw mode, like any full-screen child (ced is one): a canonical-mode tty
+	// discards input past its line limit instead of blocking the writer, so a
+	// cooked child would never reproduce the stall. Then hold the PTY and never
+	// read it. The marker says raw mode is in effect; flooding before it would
+	// race the stty and land in the cooked tty that swallows it.
+	stuck.Command = "/bin/sh"
+	stuck.Args = []string{"-c", "stty raw -echo; printf RAWREADY; exec sleep 30"}
+	if err := WriteMessage(c, stuck); err != nil {
+		t.Fatalf("create stuck pane: %v", err)
+	}
+	live := NewCreatePane(2, 40, 5)
+	live.Command = "/bin/cat"
+	if err := WriteMessage(c, live); err != nil {
+		t.Fatalf("create live pane: %v", err)
+	}
+
+	// Drain events concurrently: the flood must not be blocked on the test
+	// failing to read, and the echo check below watches this stream.
+	ready, echoed := make(chan struct{}), make(chan struct{})
+	go func() {
+		sawReady := false
+		for {
+			typ, payload, err := ReadMessage(c)
+			if err != nil {
+				return
+			}
+			if typ != MsgPaneFrame {
+				continue
+			}
+			var pf PaneFrame
+			if json.Unmarshal(payload, &pf) != nil {
+				continue
+			}
+			text := frameText(pf.Frame)
+			if pf.PaneID == 1 && !sawReady && strings.Contains(text, "RAWREADY") {
+				sawReady = true
+				close(ready)
+			}
+			if pf.PaneID == 2 && strings.Contains(text, "pong") {
+				close(echoed)
+				return
+			}
+		}
+	}()
+	select {
+	case <-ready:
+	case <-time.After(5 * time.Second):
+		t.Fatal("stuck pane never reported raw mode")
+	}
+
+	// Far more than any PTY buffer holds: ~200KB of keys (lossless) and a
+	// free-spinning wheel's worth of notches (droppable).
+	flooded := make(chan error, 1)
+	go func() {
+		keys := []byte(strings.Repeat("x", 4096))
+		wheel := []byte(strings.Repeat("\x1b[<65;10;3M", 8))
+		for range 50 {
+			if err := WriteMessage(c, NewInput(1, keys)); err != nil {
+				flooded <- err
+				return
+			}
+			for range 40 {
+				if err := WriteMessage(c, NewInput(1, wheel)); err != nil {
+					flooded <- err
+					return
+				}
+			}
+		}
+		flooded <- WriteMessage(c, NewInput(2, []byte("pong\r")))
+	}()
+
+	select {
+	case err := <-flooded:
+		if err != nil {
+			t.Fatalf("flood: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("dispatch stalled behind the pane that is not reading its input")
+	}
+	select {
+	case <-echoed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("live pane never echoed while the stuck pane was flooded")
+	}
+}

@@ -144,16 +144,53 @@ type pane struct {
 	// agent does not inherit the previous process's progress.
 	progress atomic.Pointer[string]
 
-	// ptyMu serializes writes to the PTY master (user input + the emulator's
-	// query-response callback can both write).
+	// ptyMu serializes resizes of the PTY master. It no longer guards writes:
+	// those all go through input and are made by inputPump alone, and holding
+	// a lock across a write that can block is what let one pane stall the
+	// dispatch goroutine (see paneinput.go). TIOCSWINSZ is safe alongside a
+	// concurrent write, so a resize never waits on a child that is not reading.
 	ptyMu sync.Mutex
+
+	// input is this pane's queue of bytes bound for the PTY — user input and
+	// the emulator's query replies — drained by inputPump. Producers only ever
+	// append, so neither the dispatch goroutine nor readPump (holding emuMu)
+	// can block on a child that has stopped reading stdin.
+	input *paneInput
 }
 
+// writePTY queues b for the PTY without blocking. Wheel and buttonless-motion
+// reports may be discarded under backpressure (paneinput.go); anything else is
+// lossless, and an error means the pane is gone or its lossless backlog is
+// full.
 func (p *pane) writePTY(b []byte) error {
-	p.ptyMu.Lock()
-	defer p.ptyMu.Unlock()
-	_, err := p.ptmx.Write(b)
+	_, err := p.input.push(b)
 	return err
+}
+
+// inputPump is the pane's only PTY writer: it drains input, one coalesced write
+// per wake, until the pane closes. A write that blocks here blocks this pane
+// alone. A failed write ends the pump — the PTY is broken, and readPump will
+// observe the same failure and tear the pane down — and is reported once,
+// unless the pane is already closing (then the failure is just the close).
+func (h *Host) inputPump(p *pane) {
+	for {
+		b := p.input.take()
+		if b == nil {
+			return
+		}
+		_, err := p.ptmx.Write(b)
+		p.input.sent(len(b))
+		if err != nil {
+			p.emuMu.Lock()
+			closing := p.closed
+			p.emuMu.Unlock()
+			if !closing {
+				h.emit(NewError(p.id, "pty write: "+err.Error()))
+			}
+			p.input.close()
+			return
+		}
+	}
 }
 
 // childPid is the pane's own process — the shell whose cwd the working-directory
@@ -1006,7 +1043,10 @@ func (h *Host) createPane(c CreatePane) error {
 		return fmt.Errorf("start pty: %w", err)
 	}
 
-	p := &pane{id: c.PaneID, ptmx: ptmx, cmd: cmd}
+	// input exists before the emulator does: the emulator's query replies are
+	// queued through it, and the history seed below can already provoke one.
+	// Queued bytes simply wait for inputPump, started with the other pumps.
+	p := &pane{id: c.PaneID, ptmx: ptmx, cmd: cmd, input: newPaneInput(0)}
 	// Seed the pane's cwd with the directory it spawned in, so consumers (the
 	// browser tooltip, worktree anchoring, session persistence) have a pwd even
 	// when the shell never reports OSC 7. A real OSC 7 later overwrites this via
@@ -1022,6 +1062,7 @@ func (h *Host) createPane(c CreatePane) error {
 		_ = p.writePTY(d)
 	}))
 	if err != nil {
+		p.input.close()
 		_ = ptmx.Close()
 		_ = cmd.Process.Kill()
 		return fmt.Errorf("new emulator: %w", err)
@@ -1053,6 +1094,7 @@ func (h *Host) createPane(c CreatePane) error {
 
 	go h.readPump(p)
 	go h.detectPump(p)
+	go h.inputPump(p)
 	return nil
 }
 
@@ -1570,6 +1612,10 @@ func (h *Host) closePane(p *pane) {
 	p.emu.Close()
 	p.emuMu.Unlock()
 
+	// Queue first, then the PTY: closing the queue drops pending input and
+	// releases an idle inputPump, and closing the PTY fails a write it is
+	// blocked in, so the pump exits either way.
+	p.input.close()
 	_ = p.ptmx.Close()
 	if p.cmd.Process != nil {
 		_ = p.cmd.Process.Kill()
