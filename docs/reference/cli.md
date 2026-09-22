@@ -651,7 +651,7 @@ catctl plugin install rohanthewiz/cats-todo     # clone + build
 catctl plugin install <git-url> --ref v0.1.0    # pin a branch or tag
 catctl plugin link ./cats-todo                  # symlink a local checkout
 catctl plugin update <id>                        # re-fetch + rebuild
-catctl plugin list
+catctl plugin list                               # id, version, [type], kind, dir
 catctl plugin run <id>                           # launch in a new tab
 catctl plugin run <id> [action] --all            # ... in every workspace
 catctl plugin uninstall <id>

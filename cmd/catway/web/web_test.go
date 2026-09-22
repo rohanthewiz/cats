@@ -96,6 +96,7 @@ func TestMarkupCarriesTheIdsTheFrontEndResolves(t *testing.T) {
 		"sec-workspaces", "ws-hctl", "ws-list", "ws-count", "ws-global-todo",
 		"sec-panes", "pane-hctl", "pane-list",
 		"sec-agents", "agent-hctl", "agent-list",
+		"sec-plugins", "plug-hctl", "plugin-list",
 		"sec-runbooks", "rb-hctl", "rb-list",
 		"sec-history", "hist-hctl", "hist-list",
 		"statusbar", "palhint", "pluginsbtn", "chatbtn", "recbtn", "gear",
@@ -113,6 +114,7 @@ func TestMarkupCarriesTheIdsTheFrontEndResolves(t *testing.T) {
 	// assume id comes before hidden.
 	for _, c := range []struct{ tag, id, boolAttr string }{
 		{"section", "sec-hosts", "hidden"},    // stays hidden while the session has one host
+		{"section", "sec-plugins", "hidden"},  // stays hidden until a plugin pane is open
 		{"section", "sec-runbooks", "hidden"}, // stays hidden until the directory has files
 		{"section", "sec-history", "hidden"},  // stays hidden until the ledger has rows
 		{"button", "chat-stop", "disabled"},   // nothing to cancel until a turn is in flight

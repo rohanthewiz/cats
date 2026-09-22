@@ -28,6 +28,7 @@ import (
 	"strings"
 
 	toml "github.com/pelletier/go-toml/v2"
+	"github.com/rohanthewiz/cats/wire"
 )
 
 // ManifestName is the manifest file every plugin root must carry.
@@ -42,6 +43,13 @@ type Manifest struct {
 	Name        string `toml:"name"`
 	Version     string `toml:"version"`
 	Description string `toml:"description"`
+	// Type declares what kind of tool the plugin is (wire.PluginType*:
+	// "agent", "editor", "todos_mgr", "notes_mgr"). Optional: an undeclared
+	// type is a plain tool, which is what every plugin written before the key
+	// existed is. The host never branches on it — it rides the launch
+	// environment (TypeEnvVar) to catway, which records it on the pane, and
+	// that is where the sidebar and pane.list read it back.
+	Type string `toml:"type"`
 	// MinCatsVersion is carried for forward compatibility but not enforced —
 	// cats has no single server version constant yet; enforcing against the
 	// wrong number would be worse than not enforcing.
@@ -152,6 +160,9 @@ func (m Manifest) Validate() error {
 		return fmt.Errorf("invalid id %q (letters, digits, '.', '_', '-'; no leading dot or '..')", m.ID)
 	case m.Version == "":
 		return fmt.Errorf("missing version")
+	case !wire.ValidPluginType(m.Type):
+		return fmt.Errorf("invalid type %q (a lowercase word such as %q, %q, %q or %q)", m.Type,
+			wire.PluginTypeAgent, wire.PluginTypeEditor, wire.PluginTypeTodosMgr, wire.PluginTypeNotesMgr)
 	}
 	seen := map[string]bool{}
 	for i, a := range m.Actions {

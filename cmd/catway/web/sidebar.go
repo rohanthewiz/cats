@@ -2,7 +2,7 @@ package web
 
 import "github.com/rohanthewiz/element"
 
-// Sidebar is the left column: the wordmark, then the seven sections the
+// Sidebar is the left column: the wordmark, then the eight sections the
 // front-end fills in.
 //
 // Section order is the session's coordinate system, outermost first. Usage
@@ -16,8 +16,15 @@ import "github.com/rohanthewiz/element"
 // than inside it. Every section above it is a reading OF the session; a runbook
 // is a file on disk that does something TO one. So the column reads down
 // through the session's own structure (machine → workspace → tab → pane →
-// agent) and then leaves it for the two sections that are about acting: what
-// can be run, and then what already was.
+// agent → plugin) and then leaves it for the two sections that are about
+// acting: what can be run, and then what already was.
+//
+// Plugins sits directly under Agents because the two answer the same question,
+// "what have I got running", for two different kinds of thing. An agent takes
+// turns and has a state worth watching; a plugin (an editor, a backlog, a
+// notes app) is a tool the user drives and has none. They used to share one
+// section, split by a hairline, and that made an editor read as an agent.
+// Giving each kind its own heading makes the difference visible.
 //
 // Every section carries an id so its heading's fold arrow has something to hang
 // the .folded class on (initSectionFold in js/), and every heading carries an
@@ -55,6 +62,13 @@ func (Sidebar) Render(b *element.Builder) (x any) {
 		section(b, "sec-panes", "Panes", "pane-hctl", "pane-list", false),
 		nl(b, 2),
 		section(b, "sec-agents", "Agents", "agent-hctl", "agent-list", false, "none"),
+		nl(b, 2),
+		// Plugins is hidden until a plugin pane is open (renderAgents decides),
+		// like Hosts and Runbooks: a session that never ran a plugin sees the
+		// sidebar it always had. Its rows arrive in the agents rollup, split
+		// off by plugin type, so the two sections are always drawn from the
+		// same message and can never disagree about a pane.
+		section(b, "sec-plugins", "Plugins", "plug-hctl", "plugin-list", true),
 		nl(b, 2),
 		// Runbooks is hidden until the directory has something in it, like Hosts
 		// and History: an install that has never recorded a macro sees exactly

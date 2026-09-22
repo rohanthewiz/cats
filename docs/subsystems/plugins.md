@@ -80,6 +80,7 @@ id = "rohanthewiz.cats-todo"
 name = "cats-todo"
 version = "0.1.0"
 description = "Prompt backlog manager"
+type = "todos_mgr"                  # what kind of tool this is (see Plugin types)
 platforms = ["macos", "linux"]      # empty = everywhere; GOOS values also accepted
 
 [[build]]
@@ -103,6 +104,7 @@ zsh = "shell/cats-todo.zsh"         # sourced at shell startup (see Shell hooks)
 | Field | Notes |
 |-------|-------|
 | `id` | the directory name under the plugins root |
+| `type` | what kind of tool the plugin is — `agent`, `editor`, `todos_mgr`, `notes_mgr`; optional (see [Plugin types](#plugin-types)) |
 | `platforms` | limits where the plugin installs |
 | `min_cats_version` | carried for forward compatibility but **not enforced** — cats has no single server version constant yet, and enforcing against the wrong number would be worse than not enforcing |
 | `[[build]]` | commands run in the plugin root at install/link time (see [Build step environment](#build-step-environment)) |
@@ -118,6 +120,38 @@ them, so a separate server-run pane entrypoint has no meaning.
 
 `[[actions]]` may be omitted entirely for a plugin that only ships passive
 assets — the one current asset kind is UI themes (below).
+
+### Plugin types
+
+A plugin says what kind of tool it is with `type`. The main line is between
+an **LLM agent**, which takes turns, has a state worth watching and can be
+handed a prompt, and a **tool** the user drives, which has none of those. The
+narrower tool types let a client find the one it needs (cats-todo filing a note
+wants the notes manager) without knowing plugin ids in advance.
+
+| `type` | Kind | Sidebar section | Drop target | Example |
+|--------|------|-----------------|-------------|---------|
+| `agent` | LLM agent | AGENTS | yes | none yet; reserved so one can say so |
+| `editor` | tool | PLUGINS | no | ced |
+| `todos_mgr` | tool | PLUGINS | no | cats-todo |
+| `notes_mgr` | tool | PLUGINS | no | gonotes |
+| *(unset)* | tool | PLUGINS | no | any manifest written before the key |
+
+The key is optional, and any lowercase `snake_case` word validates, known or
+not. A type this build does not recognise is treated as unset. That way an
+older cats still installs a newer plugin instead of refusing it over one word,
+while a typo like `Todos-Mgr` is caught at install time.
+
+`editor.agents` in the cats config overrides the manifest. A pane whose agent
+label is listed there (`ced` by default) is typed `editor` however it was
+started, including a ced typed into a shell, which has no manifest. The
+reverse also works: a plugin that declares `editor` stays out of AGENTS even
+if its label was never added to the list.
+
+The type travels as `CATS_PLUGIN_TYPE` in the launch environment. catway saves
+it on the pane next to `CATS_PLUGIN_ID`, and reports it in two places: on each
+plugin row of the agents rollup, and as `plugin_type` in `pane.list` (see the
+[control API](../protocols/control-api.md)).
 
 ## Shell completion
 
@@ -309,6 +343,7 @@ id          = "you.cats-hello"     # also the install directory name
 name        = "Hello cats"
 version     = "0.1.0"
 description = "Renames its own pane, then lists every pane cats knows about"
+# type      = "notes_mgr"          # optional: agent, editor, todos_mgr, notes_mgr
 platforms   = ["macos", "linux"]   # omit for "everywhere"; GOOS names also work
 
 # Run once in the plugin root at install/link time. Usually a `go build`.
@@ -330,7 +365,8 @@ The plugin itself, using only what
 #!/bin/sh
 # Every cats pane exports CATS_PANE_ID and CATS_CONTROL_SOCKET.
 # A plugin pane also gets CATS_PLUGIN_ID and CATS_PLUGIN_DIR (find your own
-# assets there — no argv[0] games).
+# assets there — no argv[0] games), plus CATS_PLUGIN_TYPE when the manifest
+# declares a type.
 catctl rename-pane "$CATS_PANE_ID" "hello from $CATS_PLUGIN_ID"
 echo "my files live in $CATS_PLUGIN_DIR"
 catctl panes
@@ -485,33 +521,52 @@ must not depend on the plugin host being healthy.
 
 ### Where a running action shows up
 
-Every launch carries `CATS_PLUGIN_ID` in its spawn environment, and catway
-records that value on the pane it created — the env it was handed, not a manifest
-it read, so the server stays plugin-agnostic. The sidebar's **AGENTS** section
-uses it to list the panes a plugin is running, in their own block under the
-coding agents, one block per plugin, each closed by a hairline:
+Every launch carries `CATS_PLUGIN_ID`, and `CATS_PLUGIN_TYPE` when the manifest
+declares one, in its spawn environment. catway records both on the pane it
+created. It records the env it was handed, not a manifest it read, so the
+server stays plugin-agnostic. The sidebar lists the panes a plugin is running
+in one of two sections, chosen by type:
+
+- **PLUGINS**, directly below AGENTS, for every tool: editors, backlog and
+  notes managers, untyped plugins, and types this build does not know. The
+  section is hidden until a plugin pane is open.
+- **AGENTS**, as a block under the detected coding agents, for a plugin typed
+  `agent`.
+
+Each section groups rows one block per plugin, and closes each block with a
+hairline:
 
 ```
+AGENTS
 ● claude opus 5                       cats:p1 · 2m ago · idle
+PLUGINS
+● ced        main.go — ced                      editor · cats:p2
 ──────────────────────────────────────────────────────────────
-● cats-todo  todo: cats (3)                          cats:p4
+● cats-todo  todo: cats (3)                      todos · cats:p4
 ──────────────────────────────────────────────────────────────
 ```
 
-A plugin row names the plugin and, beside it, the pane's own terminal title —
-the plugin's one channel, and the reason cats-todo advertises its open count
-there. It carries no state dot colour and no age: a plugin is a program, not an
-agent taking turns, and there is nothing catway could report that would mean what
-"idle 5m ago" means on the row above. Clicking one reveals the pane, exactly as
-an agent row does; right-clicking reaches the same pane menu, so a plugin pane
-can be flagged like any other.
+A plugin row shows the plugin's name and, beside it, the pane's own terminal
+title. The title is the plugin's one channel, which is why cats-todo shows its
+open count there. The plugin's type goes before the pane handle (`_mgr` is
+dropped, so `todos_mgr` shows as `todos`). The dot has no state colour and the
+row has no age: a plugin is a program, not an agent taking turns, and catway
+has nothing to report that would mean what "idle 5m ago" means on an agent
+row. Clicking a row reveals the pane, as an agent row does, and right-clicking
+opens the same pane menu, so a plugin pane can be flagged like any other.
 
-The id is durable pane state (`PaneState.PluginID`), so the grouping survives a
-catway restart against a live cathost — where the pane is adopted with its plugin
-process still running. It is rewritten on every spawn rather than only set, so a
-pane that comes back as a plain shell (a cathost restart, with nothing to resume
-it) drops the claim instead of keeping it. An exited pane leaves the section: its
-red header already says what happened to it.
+An editor (every label in `editor.agents`) goes in PLUGINS even though it
+reports over the hook API as an agent. That reporting is only how
+`pane.open_file` finds it and how a blocked question reaches the phone. It is
+not a sign the editor is taking turns.
+
+The id and type are durable pane state (`PaneState.PluginID` and `PluginType`),
+so the grouping survives a catway restart against a live cathost, where the
+pane is adopted with its plugin process still running. Both are rewritten on
+every spawn rather than only set. A pane that comes back as a plain shell
+(after a cathost restart, with nothing to resume it) therefore drops the claim
+instead of keeping it. An exited pane leaves its section, because its red
+header already says what happened to it.
 
 ## Environment a plugin gets
 
@@ -519,6 +574,7 @@ red header already says what happened to it.
 |----------|---------|
 | `CATS_PLUGIN_ID` | which plugin is running |
 | `CATS_PLUGIN_DIR` | where its files live, so a binary finds its own assets without argv[0] games |
+| `CATS_PLUGIN_TYPE` | the manifest's declared [type](#plugin-types); absent when it declares none |
 | `CATS_PANE_ID` | the pane it is running in (every pane gets this) |
 | `CATS_CONTROL_SOCKET` | how to drive cats (every pane gets this) |
 | `CATS_ENV` | set to `1` in any cats pane |

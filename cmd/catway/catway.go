@@ -1340,7 +1340,15 @@ func (o *orch) createPane(rt *paneRuntime) {
 		// through here as a plain shell, and a stale id would leave the sidebar
 		// claiming a program that is no longer running. The env is read rather
 		// than a manifest parsed — catway stays plugin-agnostic.
-		if o.session.SetPanePlugin(layout.PaneID(rt.id), cp.Env[plugin.IDEnvVar]) {
+		//
+		// The type is recorded only alongside an id. CATS_PLUGIN_TYPE on its
+		// own would be a stray variable (a user's own env, a nested launch),
+		// not a claim that this pane is some plugin's.
+		plugID, plugType := cp.Env[plugin.IDEnvVar], ""
+		if plugID != "" {
+			plugType = cp.Env[plugin.TypeEnvVar]
+		}
+		if o.session.SetPanePlugin(layout.PaneID(rt.id), plugID, plugType) {
 			o.saveSoon()
 		}
 		if h, ok := o.seeds[rt.id]; ok {
@@ -1547,6 +1555,12 @@ func (o *orch) resyncPane(pid uint32) {
 // and pushes working; only this roster's classification changes. Its plugin id
 // is the launch's CATS_PLUGIN_ID when there is one ("rohanthewiz.ced") and the
 // agent label otherwise, so a ced typed into a shell is still a row.
+//
+// Every plugin pane carries its resolved type (EditorInfo.ResolvePluginType):
+// "editor" for an editor however it was started, the manifest's declared type
+// otherwise. The client splits the section on it — agent-typed plugins stay in
+// AGENTS, everything else moves to PLUGINS — so the split is one field read,
+// not a second copy of editor.agents in the browser.
 func (o *orch) agentsMsg() browserproto.Agents {
 	items := []browserproto.AgentItem{}
 	plugins := []browserproto.PluginPane{}
@@ -1559,9 +1573,9 @@ func (o *orch) agentsMsg() browserproto.Agents {
 					continue
 				}
 				agent, state := rt.effectiveAgent()
-				editor := ed.IsEditorAgent(agent)
+				plug, declared := panePlugin(tab, id)
+				typ, editor := ed.ResolvePluginType(agent, declared)
 				if agent == "" || editor {
-					plug := panePlugin(tab, id)
 					if plug == "" && editor {
 						plug = agent
 					}
@@ -1573,7 +1587,7 @@ func (o *orch) agentsMsg() browserproto.Agents {
 						pub, _ := o.session.PublicPaneID(id)
 						plugins = append(plugins, browserproto.PluginPane{
 							Pane: rt.id, Pub: pub, Workspace: ws.ID, Tab: tab.Number,
-							Plugin: plug, Title: rt.title,
+							Plugin: plug, Type: typ, Title: rt.title,
 							FlagInfo: app.NewFlagInfo(paneFlag(tab, id)),
 						})
 					}
@@ -1612,15 +1626,15 @@ func (o *orch) agentsMsg() browserproto.Agents {
 	return browserproto.NewAgents(items, plugins)
 }
 
-// panePlugin reads the plugin a pane was launched to run out of the tab holding
-// it — the same tab-in-hand shortcut paneFlag takes, for the same reason: the
-// walk above already has it, and Session.PanePlugin would rescan every
-// workspace to find it again.
-func panePlugin(tab *workspace.Tab, id layout.PaneID) string {
+// panePlugin reads the plugin a pane was launched to run, and that plugin's
+// declared type, out of the tab holding it — the same tab-in-hand shortcut
+// paneFlag takes, for the same reason: the walk above already has it, and
+// Session.PanePlugin would rescan every workspace to find it again.
+func panePlugin(tab *workspace.Tab, id layout.PaneID) (plugin, typ string) {
 	if st := tab.Panes[id]; st != nil {
-		return st.PluginID
+		return st.PluginID, st.PluginType
 	}
-	return ""
+	return "", ""
 }
 
 // paneFlag reads one pane's user flag out of the tab that holds it, nil when the
@@ -2305,12 +2319,21 @@ func (o *orch) PaneMeta(pane uint32) app.PaneMeta {
 	// client picks a target from, and "which machine will this run on" must be
 	// answerable without the client repeating catway's fallback rules.
 	meta := app.PaneMeta{Title: rt.title, Cwd: rt.cwd, Host: o.paneHostID(pane)}
-	if agent, state := rt.effectiveAgent(); agent != "" {
+	agent, state := rt.effectiveAgent()
+	if agent != "" {
 		// The model rides the agent: it is resolved from that agent's transcript
 		// (agentmodel.go), so reporting it for a pane with no agent would be
 		// reporting a leftover.
 		meta.Agent, meta.AgentState, meta.AgentModel = agent, state, rt.agentModel
 	}
+	// The plugin pair is resolved the same way the sidebar resolves it
+	// (agentsMsg), so pane.list and the sidebar always agree on what a pane
+	// is. The agent label stays in Agent either way: pane.open_file finds the
+	// editor by it. PluginType is how a client tells that editor from an
+	// agent it can hand a prompt to (PaneMeta.IsDropAgent).
+	var declared string
+	meta.Plugin, declared = o.session.PanePlugin(layout.PaneID(pane))
+	meta.PluginType, _ = o.EditorConfig().ResolvePluginType(agent, declared)
 	return meta
 }
 

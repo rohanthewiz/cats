@@ -159,7 +159,14 @@ func pluginList(args []string) int {
 		if p.Linked {
 			kind = "linked"
 		}
-		fmt.Printf("%s v%s (%s, %s)\n", p.ID, p.Version, kind, p.Dir)
+		// The type goes after the version in brackets, and only when the
+		// manifest declares one: an untyped plugin prints exactly the line it
+		// always has.
+		typ := ""
+		if p.Type != "" {
+			typ = " [" + p.Type + "]"
+		}
+		fmt.Printf("%s v%s%s (%s, %s)\n", p.ID, p.Version, typ, kind, p.Dir)
 		for _, a := range p.Actions {
 			fmt.Printf("  action %-12s %s\n", a.ID, a.Title)
 		}
@@ -217,10 +224,7 @@ func pluginRun(args []string, socket string) int {
 	}
 
 	argv := plugin.ActionArgv(inst, action)
-	env := map[string]string{
-		plugin.IDEnvVar:      inst.ID,
-		plugin.DirPathEnvVar: inst.Dir,
-	}
+	env := plugin.LaunchEnv(inst)
 	sock := ctlproto.ResolveSocket(socket)
 	if all {
 		return pluginRunAll(sock, argv, env)

@@ -287,30 +287,35 @@ func (s *Session) PaneFlag(id layout.PaneID) *flags.Flag {
 }
 
 // SetPanePlugin records (or clears, with "") which plugin's action a pane was
-// launched to run — the CATS_PLUGIN_ID its spawn environment carried. The
-// runtime calls this from the one place that decides a pane's child, so the
-// value is rewritten on every respawn: a pane that comes back as a plain shell
-// after a cathost restart loses the claim rather than keeping it.
+// launched to run and what kind of plugin it is — the CATS_PLUGIN_ID and
+// CATS_PLUGIN_TYPE its spawn environment carried. The runtime calls this from
+// the one place that decides a pane's child, so the values are rewritten on
+// every respawn: a pane that comes back as a plain shell after a cathost
+// restart loses the claim rather than keeping it.
 //
-// Reports whether the value actually changed, so the caller can skip the save
+// The two are set together, never one at a time, because the type means
+// nothing without the id it describes. A pane cannot be left with the type of a
+// plugin it no longer runs.
+//
+// Reports whether anything actually changed, so the caller can skip the save
 // on the overwhelmingly common no-op (every ordinary shell pane, every respawn
 // of the same plugin).
-func (s *Session) SetPanePlugin(id layout.PaneID, plugin string) bool {
+func (s *Session) SetPanePlugin(id layout.PaneID, plugin, typ string) bool {
 	st := s.paneState(id)
-	if st == nil || st.PluginID == plugin {
+	if st == nil || (st.PluginID == plugin && st.PluginType == typ) {
 		return false
 	}
-	st.PluginID = plugin
+	st.PluginID, st.PluginType = plugin, typ
 	return true
 }
 
-// PanePlugin returns the plugin a pane was launched to run ("" for an ordinary
-// pane, or an unknown one).
-func (s *Session) PanePlugin(id layout.PaneID) string {
+// PanePlugin returns the plugin a pane was launched to run and its declared
+// type ("", "" for an ordinary pane, or an unknown one).
+func (s *Session) PanePlugin(id layout.PaneID) (plugin, typ string) {
 	if st := s.paneState(id); st != nil {
-		return st.PluginID
+		return st.PluginID, st.PluginType
 	}
-	return ""
+	return "", ""
 }
 
 // PaneCustomName returns a pane's custom title and whether the pane exists.

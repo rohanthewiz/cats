@@ -612,10 +612,20 @@ w1  ⚠ problem    cats                 2h ago  flaky tests in here
 
 These are answered straight from the `Session` with no backend effects.
 `pane.list` / `pane.get` add one merge on top of it: each pane's runtime metadata
-(`PaneMeta` — `agent`, `agent_state`, `agent_model`, `title`, `cwd`, `host`)
-comes from the backend's per-pane cache, so a client sees the same arbitrated
-agent identity and live title the browser chrome shows, for every pane in the
-session rather than only the ones on screen. Every field is omitted when empty.
+(`PaneMeta` — `agent`, `agent_state`, `agent_model`, `title`, `cwd`, `host`,
+`plugin`, `plugin_type`) comes from the backend's per-pane cache, so a client
+sees the same arbitrated agent identity and live title the browser chrome shows,
+for every pane in the session rather than only the ones on screen. Every field
+is omitted when empty.
+
+`plugin` is the `CATS_PLUGIN_ID` the pane was launched with. `plugin_type` is
+the [plugin type](../subsystems/plugins.md#plugin-types) and is the field to
+read when deciding whether a pane is an agent that can take a prompt. An editor
+reports `agent: "ced"`, because that label is how `pane.open_file` finds it,
+together with `plugin_type: "editor"`. catway sets `editor` for every label in
+`editor.agents`, so a client never needs its own copy of that list. The rule,
+which Go clients can call as `wire.PaneMeta.IsDropAgent`, is: `agent` is set,
+and `plugin_type` is either empty or `agent`.
 `flag.list` gets the same merge for the panes it returns — see
 [Flags](#flags) — because a flag pinned to an agent is worth little in a listing
 that cannot say which agent it is on.
@@ -1101,7 +1111,7 @@ what the table offers; a runbook running a runbook is not bounded at all, and th
 recursion would surface as a wedged loop rather than as a mistake in a file.
 
 **From the browser**, the same two commands are the sidebar's **RUNBOOKS**
-section, below AGENTS. One row per file: `▸` and the name, `⚡` for a runbook
+section, below AGENTS and PLUGINS. One row per file: `▸` and the name, `⚡` for a runbook
 with an `on:` clause, and the step count. A click runs it — through a dialog
 first, because unlike every other clickable row in that column this one splits
 panes and types into shells with no undo. The dialog asks for the declared vars

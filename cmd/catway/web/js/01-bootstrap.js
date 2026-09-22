@@ -18,6 +18,8 @@
   const wsCountEl = document.getElementById("ws-count");
   const paneListEl = document.getElementById("pane-list");
   const agentListEl = document.getElementById("agent-list");
+  const pluginSecEl = document.getElementById("sec-plugins");
+  const pluginListEl = document.getElementById("plugin-list");
   const usageListEl = document.getElementById("usage-list");
   const hostSecEl = document.getElementById("sec-hosts");
   const hostListEl = document.getElementById("host-list");

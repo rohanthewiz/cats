@@ -1196,6 +1196,25 @@ type PaneMeta struct {
 	// the model stores an id that may be empty or stale, the backend knows which
 	// machine is actually holding the PTY.
 	Host string `json:"host,omitempty"`
+	// Plugin is the CATS_PLUGIN_ID the pane was launched with ("" for a pane
+	// no plugin started). PluginType is what kind of tool is running in it
+	// (PluginType*), and is the field a client reads to tell an agent it can
+	// hand a prompt to from a tool that only happens to report over the hook
+	// API: an editor pane carries Agent "ced" (pane.open_file finds it by that
+	// label) and PluginType "editor". The runtime sets "editor" for any pane
+	// whose agent label is in editor.agents, launched by a plugin or typed into
+	// a shell, so a client never has to copy that list.
+	Plugin     string `json:"plugin,omitempty"`
+	PluginType string `json:"plugin_type,omitempty"`
+}
+
+// IsDropAgent reports whether the pane runs an LLM agent that can take a
+// prompt: an agent is detected, and the pane is not a tool plugin that reports
+// over the hook API (an editor, a backlog manager). An unset PluginType counts
+// as an agent when an agent is detected, since that is every claude/codex pane
+// started from a shell — and every pane from a cats too old to send the field.
+func (m PaneMeta) IsDropAgent() bool {
+	return m.Agent != "" && (m.PluginType == "" || IsAgentPluginType(m.PluginType))
 }
 
 // TabCreateParams is the optional params block for tab.create. The zero value
@@ -1698,7 +1717,8 @@ type PluginActionInfo struct {
 // PluginInfo describes one installed plugin for plugin.list. Broken carries the
 // manifest load/validate error for an entry that exists on disk but cannot run
 // (the manifest fields are then empty apart from ID). Env is the identity
-// environment a launch must carry (CATS_PLUGIN_ID / CATS_PLUGIN_DIR) — included
+// environment a launch must carry (CATS_PLUGIN_ID / CATS_PLUGIN_DIR, plus
+// CATS_PLUGIN_TYPE when the manifest declares one) — included
 // per plugin so the front-end composes tab.create params without hard-coding
 // the env var names.
 type PluginInfo struct {
@@ -1706,6 +1726,7 @@ type PluginInfo struct {
 	Name        string             `json:"name,omitempty"`
 	Version     string             `json:"version,omitempty"`
 	Description string             `json:"description,omitempty"`
+	Type        string             `json:"type,omitempty"` // manifest's declared kind (PluginType*); "" when undeclared
 	Linked      bool               `json:"linked,omitempty"`
 	Dir         string             `json:"dir"`
 	Source      string             `json:"source,omitempty"`
@@ -1714,6 +1735,59 @@ type PluginInfo struct {
 	Actions     []PluginActionInfo `json:"actions,omitempty"`
 	Env         map[string]string  `json:"env,omitempty"`
 }
+
+// Plugin types — what kind of tool a plugin is, declared by its manifest's
+// `type` key and carried to wherever cats has to tell the kinds apart.
+//
+// The line that matters is agent vs everything else. An LLM agent takes turns:
+// it has a state worth watching (working / idle / blocked), it goes in the
+// sidebar's AGENTS section, and it is somewhere a prompt can be dropped. Every
+// other plugin is a tool the user drives — an editor, a backlog manager, a
+// notes app — and goes in PLUGINS, where there is no state to watch and nothing
+// to drop a prompt into. The finer types below "tool" are there so a client can
+// find the one it needs (cats-todo filing a note wants the notes manager, not
+// just "some plugin") without matching on plugin ids it cannot know in advance.
+//
+//	type         section   drop target   example
+//	──────────   ───────   ───────────   ─────────────
+//	agent        AGENTS    yes           (none yet)
+//	editor       PLUGINS   no            ced
+//	todos_mgr    PLUGINS   no            cats-todo
+//	notes_mgr    PLUGINS   no            gonotes
+//	"" (unset)   PLUGINS   no            any older manifest
+//
+// PluginTypeAgent has no plugin behind it yet. It is defined now so the day a
+// plugin ships an agent, its manifest has a word to say so with and every
+// client already routes it to AGENTS.
+//
+// Values are not a closed set on the wire: a manifest may name a type this
+// build does not know (see ValidPluginType), and a client must treat an
+// unknown type like "" — a plugin, not an agent. That keeps an older cats able
+// to install a newer plugin rather than refusing it over one word.
+const (
+	PluginTypeAgent    = "agent"
+	PluginTypeEditor   = "editor"
+	PluginTypeTodosMgr = "todos_mgr"
+	PluginTypeNotesMgr = "notes_mgr"
+)
+
+// pluginTypePattern bounds what a declared type may look like: a lowercase
+// snake_case word, the same shape as the ones above. It is checked at manifest
+// load, so a typo like "Todos-Mgr" is refused where its author can see it
+// instead of arriving as a type no client matches.
+var pluginTypePattern = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
+
+// ValidPluginType reports whether t is an acceptable manifest type: "" (none
+// declared) or a well-formed word. Any well-formed word passes, known or not —
+// see the forward-compatibility note on the PluginType constants.
+func ValidPluginType(t string) bool {
+	return t == "" || pluginTypePattern.MatchString(t)
+}
+
+// IsAgentPluginType reports whether a plugin of type t is an LLM agent — the
+// one question every consumer of a plugin type actually asks. Everything else,
+// the unset type and unknown ones included, is a tool.
+func IsAgentPluginType(t string) bool { return t == PluginTypeAgent }
 
 // PluginListResult is CmdResult.Data for plugin.list. Catctl is the server's
 // best resolution of the catctl binary (PATH first, then a sibling of the
@@ -2298,6 +2372,27 @@ func (e EditorInfo) IsEditorAgent(agent string) bool {
 		}
 	}
 	return false
+}
+
+// ResolvePluginType settles what kind of tool a pane is running, from the two
+// sources that can say so: the pane's agent label, checked against
+// editor.agents, and the type its plugin's manifest declared (recorded at
+// launch). editor reports whether the pane counts as an editor. That is the
+// fact that keeps its hook-reported agent out of the AGENTS roster.
+//
+// The config wins over the manifest. Listing a label in editor.agents is the
+// user saying "this is my editor", and it has to hold for a ced typed into a
+// shell, which has no manifest, and for a ced whose manifest predates the
+// type key. A manifest that declares "editor" is honoured too, so an editor
+// the user never added to the list still stays out of AGENTS. Any other
+// declared type passes through unchanged. A hook-reporting agent in a pane an
+// untyped or tool plugin launched remains an agent: that pane really is
+// running one, and its state is the most useful thing to show.
+func (e EditorInfo) ResolvePluginType(agent, declared string) (typ string, editor bool) {
+	if e.IsEditorAgent(agent) || declared == PluginTypeEditor {
+		return PluginTypeEditor, true
+	}
+	return declared, false
 }
 
 // uniqueActionIDs fills in an empty action id from its index and reports a

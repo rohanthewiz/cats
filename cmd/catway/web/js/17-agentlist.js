@@ -1,57 +1,83 @@
   // Agents has no groups to fold, so its heading carries the section arrow and
   // nothing else — the one control every section now has, in the one position it
   // is the same distance from every heading's right edge.
+  // Plugins takes the same single control, for the same reason.
   initSectionFold("sec-agents", "agent-hctl", "agents");
+  initSectionFold("sec-plugins", "plug-hctl", "plugins");
 
-  // The section is drawn in blocks, separated by hairlines: the coding agents
-  // first, then one block per plugin whose panes are open.
+  // One rollup feeds two sections. Agents take turns and have a state worth
+  // watching; plugins are tools the user drives. The rollup already keeps them
+  // in separate lists (items / plugins), and each plugin pane carries its type,
+  // so the split is one field read:
   //
+  //   AGENTS
   //   ● claude opus 5        cats:p1 · 2m ago · idle
   //   ● codex                cats:p3 · 9s ago · working
+  //   PLUGINS
+  //   ● ced        main.go — ced      editor · cats:p2
   //   ────────────────────────────────────────────────
-  //   ● cats-todo  todo: cats (3)                 cats:p4
-  //   ────────────────────────────────────────────────
-  //   ● gonotes    notes                          w2:p2
+  //   ● cats-todo  todo: cats (3)      todos · cats:p4
   //   ────────────────────────────────────────────────
   //
-  // Agents lead because they are the rows that change on their own: they carry
-  // the state, the age and the attention colour, and the section's whole reason
-  // to be glanced at is up there. A plugin pane is something the user started
-  // and will come back to on their own schedule — worth listing beside the
-  // agents (it is the same question, "what have I got running"), but not worth
-  // interleaving with rows that can go red while you read them.
+  // A plugin whose manifest declares type "agent" is the exception, and stays
+  // in AGENTS (as its own block under the detected agents, the way every plugin
+  // used to be drawn). It is what the user would look for there, even though
+  // its row has no state for cats to report.
   //
-  // The plugin blocks are cut on the rollup's grouping, which the server has
-  // already ordered by plugin id, so each plugin's panes stay together and the
-  // blocks keep their places between rollups. Every block gets a rule *under*
-  // it, the last one included: the rule reads as the block's own closing edge
-  // rather than as a join between two of them, which is what keeps a single
-  // plugin's block looking finished instead of cut off.
+  // The server has already ordered the plugin panes by plugin id, and a filter
+  // keeps that order, so each section can cut its blocks by walking its share
+  // once. Every block gets a rule *under* it, the last one included: the rule
+  // reads as the block's own closing edge rather than as a join between two of
+  // them, which is what keeps a single plugin's block looking finished instead
+  // of cut off.
   function renderAgents(items, plugins) {
     agentItems = items || [];
     const plugs = plugins || [];
+    const agentPlugs = plugs.filter(isAgentPlugin);
+    const toolPlugs = plugs.filter((p) => !isAgentPlugin(p));
     agentAttentionSweep(agentItems);
     if (layoutMsg) { renderWorkspaces(layoutMsg); renderTabbar(layoutMsg); } // ws badges + tab markers derive from the rollup
-    agentListEl.innerHTML = "";
-    if (!agentItems.length && !plugs.length) {
-      const li = document.createElement("li"); li.className = "empty"; li.textContent = "none";
-      agentListEl.appendChild(li); return;
-    }
     const foc = focusedPaneId();
-    for (const it of agentItems) agentListEl.appendChild(agentRow(it, foc));
-    // The rule closing the agent block is the same element as the one closing a
-    // plugin block, and it is drawn only when a plugin block follows: with no
-    // plugin panes open the section is exactly what it always was.
+
+    agentListEl.innerHTML = "";
+    if (!agentItems.length && !agentPlugs.length) {
+      const li = document.createElement("li"); li.className = "empty"; li.textContent = "none";
+      agentListEl.appendChild(li);
+    } else {
+      for (const it of agentItems) agentListEl.appendChild(agentRow(it, foc));
+      // The rule closing the agent block is drawn only when a plugin block
+      // follows it, so with no agent plugins the section is exactly what it
+      // always was.
+      appendPluginBlocks(agentListEl, agentPlugs, agentItems.length > 0, foc);
+    }
+
+    // PLUGINS hides rather than saying "none", like Hosts and Runbooks: it is
+    // a section most sessions have nothing in, and an always-empty heading is
+    // clutter. Nothing above it closes a block, so its first block draws no
+    // leading rule.
+    pluginListEl.innerHTML = "";
+    pluginSecEl.hidden = !toolPlugs.length;
+    appendPluginBlocks(pluginListEl, toolPlugs, false, foc);
+    refreshPaneList(); // pane rows take agent identity + state from the rollup
+  }
+
+  // isAgentPlugin reports whether a plugin pane belongs in AGENTS. It must
+  // match wire.IsAgentPluginType. Only the exact word "agent" counts, so an
+  // untyped plugin or a type this page does not know goes to PLUGINS: those
+  // are tools until they say otherwise.
+  function isAgentPlugin(p) { return p.type === "agent"; }
+
+  // appendPluginBlocks draws plugin rows into list, one block per plugin, each
+  // closed by a hairline. ruleFirst draws a rule above the first block too, to
+  // close the rows already in the list (the agents, in AGENTS).
+  function appendPluginBlocks(list, plugs, ruleFirst, foc) {
     let group = null;
     for (const p of plugs) {
-      // The rule above a block is the one closing the block before it, so the
-      // first plugin block draws one only when there are agent rows to close.
-      if (group === null ? agentItems.length : p.plugin !== group) agentListEl.appendChild(agentSep());
+      if (group === null ? ruleFirst : p.plugin !== group) list.appendChild(agentSep());
       group = p.plugin;
-      agentListEl.appendChild(pluginRow(p, foc));
+      list.appendChild(pluginRow(p, foc));
     }
-    if (group !== null) agentListEl.appendChild(agentSep());
-    refreshPaneList(); // pane rows take agent identity + state from the rollup
+    if (group !== null) list.appendChild(agentSep());
   }
 
   // agentSep is the hairline between blocks. An <li> rather than a border on the
@@ -162,10 +188,19 @@
     return i < 0 ? id : id.slice(i + 1);
   }
 
+  // pluginTypeLabel is the short word a plugin row shows for its type. The
+  // "_mgr" suffix is dropped: the section heading already says these are tools,
+  // and "todos" reads faster than "todos_mgr" in 10px type. An unknown type is
+  // shown as sent, so a plugin newer than this page still says what it is.
+  function pluginTypeLabel(t) {
+    if (!t) return "";
+    return t.endsWith("_mgr") ? t.slice(0, -4) : t;
+  }
+
   // pluginRow builds one plugin-pane row. Same three fields as an agent row,
   // filled with what a plugin can actually say:
   //
-  //   ● cats-todo  todo: cats (3)                          cats:p4
+  //   ● cats-todo  todo: cats (3)                  todos · cats:p4
   //
   // The identity is the plugin (hued like an agent's name, from the same six
   // slots — one colour per tool is the property being read, and a plugin is a
@@ -185,6 +220,7 @@
     li.dataset.pane = p.pane; // markFocusedAgent, as on an agent row
     li.dataset.ws = p.workspace; // ditto markLockedAgents
     li.dataset.plugin = p.plugin; // the untrimmed id the row's tooltip shows
+    li.dataset.ptype = p.type || ""; // the untrimmed type, for CSS/debug reach
     if (p.pane === foc) li.classList.add("focused");
     setAgentLocked(li, wsLocked(p.workspace));
     const dot = document.createElement("span"); dot.className = "adot st-unknown"; dot.textContent = "●";
@@ -201,7 +237,11 @@
     const af = flagMark(flagOf(p));
     if (af) name.appendChild(af);
     const meta = document.createElement("span"); meta.className = "ameta";
-    meta.textContent = paneRef(p.pub, p.pane);
+    // The type goes before the handle, where an agent row puts its age and
+    // state: it is the one thing a plugin row can say about what kind of
+    // thing is in the pane. An untyped plugin shows the handle alone.
+    const tl = pluginTypeLabel(p.type);
+    meta.textContent = (tl ? tl + " · " : "") + paneRef(p.pub, p.pane);
     li.appendChild(dot); li.appendChild(name); li.appendChild(meta);
     // Reveal and right-click behave exactly as they do on an agent row — the
     // row's job is the same, "take me to that pane" — including the lock's
@@ -223,10 +263,14 @@
   // A focus move arrives in the layout, not in the agents rollup, so the marked
   // row is retargeted in place — re-running renderAgents would rebuild the list
   // (and re-query the pane inventory) for a class change.
+  // Both sections are walked: a plugin row is marked the same way an agent row
+  // is, whichever of the two it landed in.
   function markFocusedAgent() {
     const foc = focusedPaneId();
-    for (const li of agentListEl.children) {
-      if (li.dataset.pane) li.classList.toggle("focused", li.dataset.pane === foc);
+    for (const list of [agentListEl, pluginListEl]) {
+      for (const li of list.children) {
+        if (li.dataset.pane) li.classList.toggle("focused", li.dataset.pane === foc);
+      }
     }
   }
 
@@ -254,8 +298,10 @@
   // that makes markFocusedAgent necessary — so the rows are re-marked in place
   // rather than rebuilt. Each row remembers its workspace id for exactly this.
   function markLockedAgents() {
-    for (const li of agentListEl.children) {
-      if (li.dataset.ws) setAgentLocked(li, wsLocked(li.dataset.ws));
+    for (const list of [agentListEl, pluginListEl]) {
+      for (const li of list.children) {
+        if (li.dataset.ws) setAgentLocked(li, wsLocked(li.dataset.ws));
+      }
     }
   }
 

@@ -35,6 +35,9 @@ type PaneSnapshot struct {
 	// most of them and all of them in a file written before plugin panes were
 	// recorded — so those restore byte-identically.
 	PluginID string `json:"plugin_id,omitempty"`
+	// PluginType is PaneState.PluginType, omitted when empty for the same
+	// byte-identical-restore reason as PluginID.
+	PluginType string `json:"plugin_type,omitempty"`
 }
 
 // TabSnapshot is a tab's durable state: identity, the layout tree with its
@@ -78,7 +81,7 @@ func (t *Tab) Snapshot() TabSnapshot {
 		// marshalled after the fact — and a flag edited in between must not
 		// rewrite what is being written out.
 		panes[id] = PaneSnapshot{CustomName: st.CustomName, Seen: st.Seen, HostID: st.HostID,
-			Flag: st.Flag.Clone(), PluginID: st.PluginID}
+			Flag: st.Flag.Clone(), PluginID: st.PluginID, PluginType: st.PluginType}
 	}
 	return TabSnapshot{
 		Number:     t.Number,
@@ -215,7 +218,7 @@ func restoreTab(s PaneSpawner, wsnap Snapshot, snap TabSnapshot) (*Tab, error) {
 			return nil, fmt.Errorf("tab %d: respawn pane %d: %w", snap.Number, id, err)
 		}
 		panes[id] = &PaneState{AttachedTerminalID: terminalID, Seen: ps.Seen, CustomName: ps.CustomName,
-			HostID: ps.HostID, Flag: ps.Flag.Clone(), PluginID: ps.PluginID}
+			HostID: ps.HostID, Flag: ps.Flag.Clone(), PluginID: ps.PluginID, PluginType: ps.PluginType}
 	}
 	return &Tab{
 		CustomName: snap.CustomName,

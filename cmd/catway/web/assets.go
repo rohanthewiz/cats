@@ -62,7 +62,7 @@ var cssFiles = []string{
 	"08-hosts.css",      // HOSTS rows
 	"09-history.css",    // HISTORY rows
 	"10-panelist.css",   // workspace-row host/window badges, then PANES rows and agent-state colors
-	"11-agentlist.css",  // AGENTS rows
+	"11-agentlist.css",  // AGENTS and PLUGINS rows
 	"12-main.css",       // #main grid, topbar, tabbar, the pane boxes and their headers
 	"13-statusbar.css",  // the toolbar buttons at the top right
 	"14-chat.css",       // the ACP chat side panel
@@ -107,7 +107,7 @@ var jsFiles = []string{
 	"14-hosts.js",      // the cathost roster and the lookups over it
 	"15-history.js",    // HISTORY: the command ledger
 	"16-hostdialog.js", // attach-host dialog, host menu, HOSTS rendering
-	"17-agentlist.js",  // AGENTS rendering, focus and lock marking
+	"17-agentlist.js",  // AGENTS + PLUGINS rendering, focus and lock marking
 	"18-render.js",     // canvas painting: cells, scrollbar, copy cursor, selection
 	"19-messages.js",   // inbound message dispatch and the send helpers
 	"20-keys.js",       // keyboard: modifiers, routing, the global keymap
@@ -133,7 +133,7 @@ var jsFiles = []string{
 	"40-record.js",     // the macro recorder's toolbar indicator and its dialogs
 	"41-runbooks.js",   // RUNBOOKS: the runbook.list section, its run gate and menu
 	"42-textsink.js",   // hidden textarea: dictation / IME / emoji text -> the focused pane
-	"43-peers.js",     // peers: the roster, the sync dialog and its report (peer.*)
+	"43-peers.js",      // peers: the roster, the sync dialog and its report (peer.*)
 	"44-boot.js",       // toolbar wiring, then the three calls that start the app
 }
 

@@ -52,10 +52,8 @@ func (o *orch) StartPluginList(r app.Responder) {
 			info.Name = p.Name
 			info.Version = p.Version
 			info.Description = p.Description
-			info.Env = map[string]string{
-				plugin.IDEnvVar:      p.ID,
-				plugin.DirPathEnvVar: p.Dir,
-			}
+			info.Type = p.Type
+			info.Env = plugin.LaunchEnv(p)
 			for _, a := range p.Actions {
 				info.Actions = append(info.Actions, app.PluginActionInfo{
 					ID:    a.ID,

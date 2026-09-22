@@ -214,11 +214,15 @@ const (
 // detected coding agent, and everything downstream of it — the workspace
 // badges, the tab-bar activity markers, the attention sweep that reopens a
 // folded sidebar — reads it as exactly that. Plugins is the roster of panes a
-// cats plugin's action was launched into (§ plugin host): they sit in the same
-// sidebar section because they are the other kind of long-lived thing a user
-// starts and comes back to, but they have no agent state to contribute and must
-// not be counted as if they had one. Keeping them in their own list is what
-// makes that structural rather than a filter every consumer has to remember.
+// cats plugin's action was launched into (§ plugin host), plus editor panes
+// however they were started. They travel in the same message because they are
+// the other kind of long-lived thing a user starts and comes back to, and one
+// rollup keeps the sidebar's two sections consistent with each other. But they
+// have no agent state to contribute and must not be counted as if they had
+// one. Keeping them in their own list is what makes that structural rather
+// than a filter every consumer has to remember. The client splits Plugins on
+// PluginPane.Type: agent-typed plugins join the AGENTS section, and the rest
+// fill PLUGINS.
 type Agents struct {
 	T     Type        `json:"t"`
 	Items []AgentItem `json:"items"`
@@ -313,8 +317,9 @@ func NewWorkspaceGit(items []WorkspaceGitInfo) WorkspaceGit {
 	return WorkspaceGit{T: MsgWorkspaceGit, Workspaces: items}
 }
 
-// PluginPane is one live pane running a plugin action — the sidebar's other
-// kind of AGENTS row. It carries no state and no age: a plugin is a program,
+// PluginPane is one live pane running a plugin action — a row in the sidebar's
+// PLUGINS section, or in AGENTS when its Type is PluginTypeAgent. It carries no
+// state and no age: a plugin is a program,
 // not an agent taking turns, so there is nothing the server could report that
 // would mean what "idle 5m ago" means on an agent row. What it carries instead
 // is Title, which is the channel a plugin actually speaks on (cats-todo
@@ -330,6 +335,12 @@ type PluginPane struct {
 	// outside the plugin host has no launch id and carries its agent label
 	// ("ced") instead.
 	Plugin string `json:"plugin"`
+	// Type is the plugin's declared kind (PluginType*), which decides the
+	// section the row lands in. The launch's CATS_PLUGIN_TYPE, except that an
+	// editor pane (editor.agents) is always "editor", whether or not its
+	// manifest says so and whether or not a plugin launched it — the config is
+	// what makes it an editor to cats. "" when the manifest declares none.
+	Type string `json:"type,omitempty"`
 	// Title is the pane's live terminal title, the plugin's own word for what
 	// it is showing; "" before the program has set one.
 	Title string `json:"title,omitempty"`

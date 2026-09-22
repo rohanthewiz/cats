@@ -695,9 +695,10 @@ func delegateCompletion(bc plugin.BinaryCompletion, words []string) []string {
 	// The same identity a launched action gets, so a completer can find its own
 	// assets. The cwd is inherited from the shell — a plugin like cats-todo
 	// completes against the project the user is standing in.
-	cmd.Env = append(os.Environ(),
-		plugin.IDEnvVar+"="+bc.Plugin.ID,
-		plugin.DirPathEnvVar+"="+bc.Plugin.Dir)
+	cmd.Env = os.Environ()
+	for k, v := range plugin.LaunchEnv(bc.Plugin) {
+		cmd.Env = append(cmd.Env, k+"="+v)
+	}
 	out := &cappedWriter{max: pluginMaxOutput}
 	cmd.Stdout = out
 	err := cmd.Run()

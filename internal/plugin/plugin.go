@@ -17,10 +17,32 @@ const DirEnvVar = "CATS_PLUGINS_DIR"
 // tab.create's env params, on top of the CATS_PANE_ID / CATS_CONTROL_SOCKET
 // every pane gets): which plugin is running and where its files live, so a
 // binary can find its own assets without argv[0] games.
+//
+// TypeEnvVar carries the manifest's declared type. It is set only when the
+// manifest declares one, so a pane's recorded type is "" exactly when the
+// plugin said nothing, not when some launcher forgot the variable.
 const (
 	IDEnvVar      = "CATS_PLUGIN_ID"
 	DirPathEnvVar = "CATS_PLUGIN_DIR"
+	TypeEnvVar    = "CATS_PLUGIN_TYPE"
 )
+
+// LaunchEnv is the identity environment a launch of p must carry. There are
+// three launchers: the browser (through plugin.list's Env), `catctl plugin
+// run`, and catctl's completion delegate. Building the map in one place is
+// what stops a new variable from reaching one launcher and not the others. A
+// missing CATS_PLUGIN_TYPE would silently file an editor with the tools it
+// happens to resemble, or an agent with the plugins.
+func LaunchEnv(p Installed) map[string]string {
+	env := map[string]string{
+		IDEnvVar:      p.ID,
+		DirPathEnvVar: p.Dir,
+	}
+	if p.Type != "" {
+		env[TypeEnvVar] = p.Type
+	}
+	return env
+}
 
 // sourceMetaName records install provenance inside an installed plugin's dir.
 // Dot-prefixed so List's entry scan (and the user's eye) skips it naturally;

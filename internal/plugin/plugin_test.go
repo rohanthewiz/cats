@@ -68,6 +68,8 @@ func TestManifestValidate(t *testing.T) {
 		{"dotdot id", func(m *Manifest) { m.ID = "a..b" }, "invalid id"},
 		{"leading dot id", func(m *Manifest) { m.ID = ".hidden" }, "invalid id"},
 		{"missing version", func(m *Manifest) { m.Version = "" }, "missing version"},
+		{"type not snake_case", func(m *Manifest) { m.Type = "Todos-Mgr" }, "invalid type"},
+		{"type with a space", func(m *Manifest) { m.Type = "notes mgr" }, "invalid type"},
 		{"empty action command", func(m *Manifest) { m.Actions[0].Command = nil }, "must name a program"},
 		{"dup action ids", func(m *Manifest) {
 			m.Actions = append(m.Actions, Action{ID: "a", Command: []string{"x"}})
@@ -729,5 +731,31 @@ func TestBinLinksRemovedForBrokenManifest(t *testing.T) {
 	}
 	if _, err := os.Lstat(filepath.Join(root, "acme.tool")); !os.IsNotExist(err) {
 		t.Fatal("plugin entry should be gone")
+	}
+}
+
+// A declared type is optional, and any well-formed word passes, known or not:
+// a newer plugin's type must not stop an older cats from installing it.
+func TestValidateAcceptsPluginTypes(t *testing.T) {
+	for _, typ := range []string{"", "agent", "editor", "todos_mgr", "notes_mgr", "dev_server"} {
+		m := Manifest{ID: "acme.demo", Version: "1.0", Type: typ}
+		if err := m.Validate(); err != nil {
+			t.Errorf("type %q rejected: %v", typ, err)
+		}
+	}
+}
+
+// LaunchEnv is the one map every launcher sends, so it is where the type has to
+// show up, and where an undeclared type has to stay absent rather than
+// arriving as an empty variable.
+func TestLaunchEnv(t *testing.T) {
+	p := Installed{Manifest: Manifest{ID: "rohanthewiz.cats-todo", Type: "todos_mgr"}, Dir: "/p/cats-todo"}
+	env := LaunchEnv(p)
+	if env[IDEnvVar] != "rohanthewiz.cats-todo" || env[DirPathEnvVar] != "/p/cats-todo" || env[TypeEnvVar] != "todos_mgr" {
+		t.Fatalf("launch env: %+v", env)
+	}
+	p.Type = ""
+	if _, ok := LaunchEnv(p)[TypeEnvVar]; ok {
+		t.Fatalf("an untyped plugin should not set %s", TypeEnvVar)
 	}
 }

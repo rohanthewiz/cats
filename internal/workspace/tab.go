@@ -53,6 +53,13 @@ type PaneState struct {
 	// pane respawned as a plain shell after a cathost restart clears it rather
 	// than keeping a claim that is no longer true.
 	PluginID string
+	// PluginType is the kind of plugin PluginID names (wire.PluginType*): the
+	// CATS_PLUGIN_TYPE the same launch carried, recorded by the same code and
+	// for the same reasons. It sits next to the id rather than being looked up
+	// from it because catway reads no manifests. Kept on the pane, the type
+	// is what decides after a restart whether the pane's row goes back
+	// in AGENTS or in PLUGINS. "" when the manifest declared none.
+	PluginType string
 }
 
 // NewPaneState returns a pane state attached to the given terminal, marked seen.

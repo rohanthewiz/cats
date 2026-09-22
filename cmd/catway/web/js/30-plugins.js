@@ -214,7 +214,10 @@
             row.appendChild(kind);
           }
           const lbl = document.createElement("span"); lbl.className = "lbl";
+          // The declared type sits in brackets after the version, as
+          // `catctl plugin list` prints it, and only when there is one.
           lbl.textContent = p.broken ? p.id : p.id + " v" + (p.version || "?") +
+            (p.type ? " [" + p.type + "]" : "") +
             (p.name && p.name !== p.id ? " — " + p.name : "");
           row.appendChild(lbl);
           // A linked row shows its checkout inline: for a local plugin *where*

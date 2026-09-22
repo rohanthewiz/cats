@@ -8,8 +8,8 @@
      it reports, it does not warn. */
   #ws-list li.ws .wswin { color:var(--muted); font-size:calc(10px * var(--sb-scale));
     flex:none; margin-left:4px; }
-  #pane-list li, #agent-list li { cursor:pointer; }
-  #pane-list li:hover, #agent-list li:hover { background:var(--panel2); }
+  #pane-list li, #agent-list li, #plugin-list li { cursor:pointer; }
+  #pane-list li:hover, #agent-list li:hover, #plugin-list li:hover { background:var(--panel2); }
   #pane-list li.focused { background:var(--chrome-focus); color:var(--fg-strong); }
   /* The list spans every workspace now, so it carries its own scroll — otherwise
      a session with a few tabs of panes pushes Agents off the sidebar. */
@@ -69,7 +69,7 @@
   #pane-list li.wsgrp.more .gsum, #pane-list li.wsgrp.more .car { flex:0 0 auto; }
   #pane-list .pub { color:var(--accent); }
   #pane-list .ttl { color:var(--muted); overflow:hidden; text-overflow:ellipsis; }
-  #pane-list .ag, #agent-list .aname { margin-left:auto; }
+  #pane-list .ag, #agent-list .aname, #plugin-list .aname { margin-left:auto; }
   .ag, .adot, .aname { font-size:calc(11px * var(--sb-scale)); }
   .st-working { color:var(--warn); } .st-blocked { color:var(--err); }
   .st-idle { color:var(--ok); } .st-unknown { color:var(--muted); }

@@ -1,8 +1,11 @@
-  #agent-list li { gap:6px; }
+  /* AGENTS and PLUGINS share every rule below. pluginRow builds the same row
+     whichever section it lands in, and the two sections are meant to read as
+     one list cut in two, not two differently styled things. */
+  :is(#agent-list, #plugin-list) li { gap:6px; }
   /* The agent sitting in the focused pane, highlighted the same way its pane row
      is — the two sections then read as one selection, not two. */
-  #agent-list li.focused { background:var(--chrome-focus); color:var(--fg-strong); }
-  #agent-list .aname { color:var(--fg-strong); margin-left:0; }
+  :is(#agent-list, #plugin-list) li.focused { background:var(--chrome-focus); color:var(--fg-strong); }
+  :is(#agent-list, #plugin-list) .aname { color:var(--fg-strong); margin-left:0; }
   /* The tool name carries its identity hue; the model beside it stays neutral,
      one step under the name. Both live inside .aname so the row's flex gap
      still sees a single item — the pair reads as one field ("ced main"), and
@@ -12,14 +15,14 @@
      claims weight and a background, and the age can go bold when it turns
      stale. A fourth emphasis channel here would be competing with three that
      already mean something. */
-  #agent-list .amodel { color:var(--fg-soft); }
+  :is(#agent-list, #plugin-list) .amodel { color:var(--fg-soft); }
   .ah1 { color:var(--agent-1); } .ah2 { color:var(--agent-2); }
   .ah3 { color:var(--agent-3); } .ah4 { color:var(--agent-4); }
   .ah5 { color:var(--agent-5); } .ah6 { color:var(--agent-6); }
-  #agent-list .ameta { color:var(--muted); font-size:calc(10px * var(--sb-scale)); margin-left:auto; }
+  :is(#agent-list, #plugin-list) .ameta { color:var(--muted); font-size:calc(10px * var(--sb-scale)); margin-left:auto; }
   /* Time since the last state change, dimmer than the state it precedes: the
      state is the fact, the age only qualifies how stale that fact is. */
-  #agent-list .aage { opacity:.75; }
+  :is(#agent-list, #plugin-list) .aage { opacity:.75; }
   /* ...until the fact the age qualifies is itself the news. An agent's prompt
      cache lives about an hour, so a settled state that has sat for 45 minutes is
      one whose next turn is about to be re-read from scratch. Past that mark the
@@ -31,22 +34,22 @@
      Both derive from theme colors so a light or high-contrast theme keeps them:
      the maroon is the theme's red pulled down toward a dark oxblood, with a
      literal fallback for engines without color-mix. */
-  #agent-list .aage.stale { opacity:1; }
-  #agent-list .aage.stale .anum { font-weight:700; }
-  #agent-list .aage.stale-idle { color:var(--warn); }
-  #agent-list .aage.stale-done { color:#b04a4a; }
-  #agent-list .aage.stale-done { color:color-mix(in srgb, var(--err) 65%, #6b0f10); }
+  :is(#agent-list, #plugin-list) .aage.stale { opacity:1; }
+  :is(#agent-list, #plugin-list) .aage.stale .anum { font-weight:700; }
+  :is(#agent-list, #plugin-list) .aage.stale-idle { color:var(--warn); }
+  :is(#agent-list, #plugin-list) .aage.stale-done { color:#b04a4a; }
+  :is(#agent-list, #plugin-list) .aage.stale-done { color:color-mix(in srgb, var(--err) 65%, #6b0f10); }
   /* An agent whose workspace is locked steps back the same way its workspace row
      does, and by the same amount: the two sections then agree at a glance about
      which work is set aside. Clicking it reveals nothing either — the row loses
      the pointer for the same reason the workspace row does, since revealing a
      pane *is* a workspace switch. */
-  #agent-list li.agent.wslocked { opacity:.5; cursor:default; }
+  :is(#agent-list, #plugin-list) li.agent.wslocked { opacity:.5; cursor:default; }
   /* Hovering restores it: whatever the row is dimmed for, the user is reading it
      now, and the state text is the smallest type in the sidebar. */
-  #agent-list li.agent.wslocked:hover { opacity:1; }
-  #agent-list li.empty { color:var(--muted); font-style:italic; cursor:default; }
-  #agent-list li.empty:hover { background:none; }
+  :is(#agent-list, #plugin-list) li.agent.wslocked:hover { opacity:1; }
+  :is(#agent-list, #plugin-list) li.empty { color:var(--muted); font-style:italic; cursor:default; }
+  :is(#agent-list, #plugin-list) li.empty:hover { background:none; }
 
   /* The rule closing each block of rows — the agents, then one block per plugin.
      A row of its own rather than a border on the neighbouring row: rows here
@@ -55,18 +58,18 @@
      starts where the text does and reads as belonging to the list rather than
      to the panel; zero height with the hairline as its top edge, and the same
      --line every other divider in the sidebar uses. Both row defaults
-     (#agent-list li) have to be taken back: a divider is not clickable and does
+     (:is(#agent-list, #plugin-list) li) have to be taken back: a divider is not clickable and does
      not light up. */
-  #agent-list li.sep { height:0; padding:0; margin:5px 8px; border-top:1px solid var(--line);
+  :is(#agent-list, #plugin-list) li.sep { height:0; padding:0; margin:5px 8px; border-top:1px solid var(--line);
     border-radius:0; cursor:default; }
-  #agent-list li.sep:hover { background:none; }
+  :is(#agent-list, #plugin-list) li.sep:hover { background:none; }
   /* A plugin row's title half is the pane's live terminal title, which is
      arbitrary text a program chose — it can be long, and it must not push the
      pane handle off the right edge. The name shrinks and ellipsizes; the handle
      never does. (Agent rows need neither: a trimmed model label is three words
      at most.) */
-  #agent-list li.plug .aname { min-width:0; overflow:hidden; text-overflow:ellipsis; }
-  #agent-list li.plug .ameta { flex:none; }
+  :is(#agent-list, #plugin-list) li.plug .aname { min-width:0; overflow:hidden; text-overflow:ellipsis; }
+  :is(#agent-list, #plugin-list) li.plug .ameta { flex:none; }
 
   /* The idle dot, pulled a step off full green. In AGENTS every settled agent
      shows one, so a column of saturated dots was the brightest thing in the
@@ -75,7 +78,7 @@
      weight against the panel and only loses chroma; both ends are theme tokens,
      so a light or high-contrast theme lands somewhere sensible too. The literal
      is the same mix precomputed against the dark theme, for engines without
-     color-mix. Scoped to #agent-list: the pane rows and the workspace rollup
+     color-mix. Scoped to :is(#agent-list, #plugin-list): the pane rows and the workspace rollup
      show one dot among others, where the full green still earns its place. */
-  #agent-list .adot.st-idle { color:#79be86; }
-  #agent-list .adot.st-idle { color:color-mix(in srgb, var(--ok) 70%, var(--muted)); }
+  :is(#agent-list, #plugin-list) .adot.st-idle { color:#79be86; }
+  :is(#agent-list, #plugin-list) .adot.st-idle { color:color-mix(in srgb, var(--ok) 70%, var(--muted)); }
