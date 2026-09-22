@@ -147,10 +147,10 @@ command. vet, `test -race` and the wasm build are clean.
   through the plugin host (`catctl plugin update` / relink first) so their
   panes pick up `CATS_PLUGIN_TYPE`. Check the row type labels and that
   AGENTS says "none" when only plugins are open.
-- Confirm the cats v0.2.3 release run (`35790848738`) attached all four
-  tarballs. Optionally copy the tag message into the GitHub release body
-  (`gh release edit v0.2.3 --notes-file`), since only generated notes
-  land there.
+- Optional: copy the v0.2.3 tag message into the GitHub release body
+  (`gh release edit v0.2.3 --notes-file`), since only generated notes land
+  there. The release itself is published: run `35790848738` was green on
+  all four platforms, and all four tarballs are attached.
 - ced: `TestThemeAfterSave_RepaintsLive` is flaky (~1 in 10): TempDir
   cleanup fails with `themes/` "directory not empty", which means something
   writes into it after the test ends. The assertion itself passes.
