@@ -318,6 +318,28 @@ func (s *Session) PanePlugin(id layout.PaneID) (plugin, typ string) {
 	return "", ""
 }
 
+// SetPaneExec records whether a pane was spawned to exec a command rather
+// than a shell (PaneState.ExecCmd). Like SetPanePlugin, the runtime calls it
+// from createPane on every spawn, so a respawn as a shell clears it. Reports
+// whether the value changed, so the caller saves only when something moved.
+func (s *Session) SetPaneExec(id layout.PaneID, exec bool) bool {
+	st := s.paneState(id)
+	if st == nil || st.ExecCmd == exec {
+		return false
+	}
+	st.ExecCmd = exec
+	return true
+}
+
+// PaneExec reports whether a pane was spawned to exec a command (false for a
+// shell pane, or an unknown one).
+func (s *Session) PaneExec(id layout.PaneID) bool {
+	if st := s.paneState(id); st != nil {
+		return st.ExecCmd
+	}
+	return false
+}
+
 // PaneCustomName returns a pane's custom title and whether the pane exists.
 func (s *Session) PaneCustomName(id layout.PaneID) (string, bool) {
 	if st := s.paneState(id); st != nil {

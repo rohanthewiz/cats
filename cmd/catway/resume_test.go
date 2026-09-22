@@ -8,6 +8,8 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/rohanthewiz/cats/internal/app"
+	"github.com/rohanthewiz/cats/internal/layout"
 	"github.com/rohanthewiz/cats/internal/orchestration"
 	"github.com/rohanthewiz/cats/internal/persist"
 )
@@ -295,4 +297,76 @@ func TestReconcileAdoptionDropsPlanKeepsRef(t *testing.T) {
 		}
 	})
 	<-check
+}
+
+// reconcile adoption: a pane the previous catway spawned to exec a command (a
+// plugin, an editor, a build) must still read as busy after a catway restart.
+// The runtime flag dies with catway, and adoption never passes through
+// createPane, so the flag comes back from the durable pane state. Otherwise the
+// pane reads as an idle shell, and "clean idle panes" closes live work.
+func TestReconcileAdoptionRestoresExecCmd(t *testing.T) {
+	o, err := newOrch(filepath.Join(t.TempDir(), "s.sock"), t.TempDir())
+	if err != nil {
+		t.Fatalf("newOrch: %v", err)
+	}
+	newPipeDaemon(t, o)
+	go o.run()
+
+	pid := uint32(o.session.AllPaneIDs()[0])
+	done := make(chan struct{})
+	o.post(func() {
+		// What a restarted catway starts from: the snapshot says the pane
+		// execs a command, and the fresh runtime knows nothing about it.
+		o.session.SetPaneExec(layout.PaneID(pid), true)
+		o.panes[pid].execCmd = false
+		close(done)
+	})
+	<-done
+
+	o.hosts[o.defaultHost].reconcile([]uint32{pid})
+
+	check := make(chan struct{})
+	o.post(func() {
+		defer close(check)
+		rt := o.panes[pid]
+		if rt == nil || !rt.execCmd {
+			t.Fatalf("adopted pane lost its exec flag: %+v", rt)
+		}
+		if act := o.PaneActivity(pid); !act.Known || !act.Busy {
+			t.Errorf("an adopted exec pane must read busy, got %+v", act)
+		}
+	})
+	<-check
+}
+
+// createPane writes the exec flag to the durable pane state on every spawn, and
+// clears it when the pane comes back as a shell (e.g. after a cathost restart
+// with nothing to resume), so a stale "busy" cannot outlive the program.
+func TestCreatePaneRecordsAndClearsExecCmd(t *testing.T) {
+	o, err := newOrch(filepath.Join(t.TempDir(), "s.sock"), t.TempDir())
+	if err != nil {
+		t.Fatalf("newOrch: %v", err)
+	}
+	pd := newPipeDaemon(t, o)
+	pid := layout.PaneID(o.session.AllPaneIDs()[0])
+	rt := o.panes[uint32(pid)]
+
+	rt.created = false
+	o.StageSpawn(uint32(pid), app.SpawnOverride{Command: []string{"ced"}})
+	synced := make(chan struct{})
+	go func() { o.createPane(rt); close(synced) }() // pipe writes block until the pump reads
+	pd.expect(t, orchestration.MsgCreatePane)
+	<-synced
+	if !rt.execCmd || !o.session.PaneExec(pid) {
+		t.Fatalf("exec spawn: runtime %v, durable %v", rt.execCmd, o.session.PaneExec(pid))
+	}
+
+	rt.created = false
+	synced = make(chan struct{})
+	go func() { o.createPane(rt); close(synced) }()
+	pd.expect(t, orchestration.MsgCreatePane)
+	<-synced
+	if rt.execCmd || o.session.PaneExec(pid) {
+		t.Fatalf("shell respawn kept the exec flag: runtime %v, durable %v", rt.execCmd, o.session.PaneExec(pid))
+	}
 }

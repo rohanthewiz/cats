@@ -22,6 +22,7 @@ import (
 	"github.com/rohanthewiz/cats/internal/browserproto"
 	"github.com/rohanthewiz/cats/internal/config"
 	"github.com/rohanthewiz/cats/internal/dlog"
+	"github.com/rohanthewiz/cats/internal/layout"
 	"github.com/rohanthewiz/cats/internal/orchestration"
 	"github.com/rohanthewiz/cats/internal/terminal"
 )
@@ -1026,6 +1027,13 @@ func (d *daemon) reconcile(alivePanes []uint32) {
 				delete(o.seeds, pid)
 				delete(o.restoredCwds, pid)
 				delete(o.resumePlans, pid)
+				// The child is whatever the previous catway spawned, so its
+				// runtime flags come from the durable record, not from a spawn
+				// that never happens here. Without this an adopted editor or
+				// build reads as an idle shell (PaneActivity), and cleaning
+				// idle panes closes it. job needs no restoring: the daemon
+				// replays pane_job with the rest of the pane's state.
+				rt.execCmd = o.session.PaneExec(layout.PaneID(pid))
 				if s, ok := o.restoredAgents[pid]; ok && rt.agentSession == nil {
 					rt.agentSession = &agentSessionRef{source: s.Source, agent: s.Agent, kind: s.Kind, value: s.Value}
 					delete(o.restoredAgents, pid)

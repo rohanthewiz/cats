@@ -1361,7 +1361,14 @@ func (o *orch) createPane(rt *paneRuntime) {
 	// What this pane runs is decided here and nowhere else, so this is where
 	// the busy test learns whether the child is a shell. A fresh PTY has no
 	// job until the daemon says so.
+	//
+	// The answer is also written to the pane's durable state, because the
+	// runtime does not survive catway: reconcile reads it back when a restarted
+	// catway adopts this pane, which never passes through here.
 	rt.execCmd = cp.Command != ""
+	if o.session.SetPaneExec(layout.PaneID(rt.id), rt.execCmd) {
+		o.saveSoon()
+	}
 	rt.job = false
 	// The pane is alive again, so nothing may still be treating it as a corpse.
 	// This path is reached for a pane the daemon no longer holds — a cold

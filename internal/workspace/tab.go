@@ -60,6 +60,19 @@ type PaneState struct {
 	// is what decides after a restart whether the pane's row goes back
 	// in AGENTS or in PLUGINS. "" when the manifest declared none.
 	PluginType string
+	// ExecCmd records that the pane was spawned to exec a command (a plugin,
+	// a resumed agent, a tab.create Command) rather than a shell. The runtime
+	// uses it for the "busy" half of a pane's activity. The daemon's job probe
+	// cannot see such a child: the exec'd program is the session leader, so
+	// there is no foreground process group other than it to report.
+	//
+	// Durable because the runtime's own copy dies with catway. A restarted
+	// catway adopts the surviving pane with a fresh runtime, and without this
+	// the pane would read as an idle shell. "Clean idle panes" would then
+	// close a live editor or build. The runtime rewrites it whenever it
+	// decides a pane's child (createPane), so a respawn as a plain shell
+	// clears it.
+	ExecCmd bool
 }
 
 // NewPaneState returns a pane state attached to the given terminal, marked seen.

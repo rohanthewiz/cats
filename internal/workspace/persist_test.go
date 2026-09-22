@@ -40,6 +40,10 @@ func buildWorkspace(t *testing.T) *Workspace {
 	// And a pane launched by a plugin: the id has to survive a restart, since
 	// catway can restart while the plugin's process keeps running under cathost.
 	ws.Tabs[0].Panes[ws.Tabs[0].RootPane].PluginID = "rohanthewiz.cats-todo"
+	ws.Tabs[0].Panes[ws.Tabs[0].RootPane].PluginType = "todos_mgr"
+	// ...which execs its program rather than a shell. The busy test cannot
+	// learn that from the daemon after a catway restart, only from here.
+	ws.Tabs[0].Panes[ws.Tabs[0].RootPane].ExecCmd = true
 	ws.Tabs[0].SetCustomName("build")
 	return ws
 }
@@ -91,6 +95,12 @@ func TestWorkspaceSnapshotRoundTrip(t *testing.T) {
 	}
 	if got := restored.Tabs[0].Panes[restored.Tabs[0].RootPane].PluginID; got != "rohanthewiz.cats-todo" {
 		t.Fatalf("pane plugin id: got %q", got)
+	}
+	if got := restored.Tabs[0].Panes[restored.Tabs[0].RootPane].PluginType; got != "todos_mgr" {
+		t.Fatalf("pane plugin type: got %q", got)
+	}
+	if !restored.Tabs[0].Panes[restored.Tabs[0].RootPane].ExecCmd {
+		t.Fatal("pane exec flag lost in the round trip")
 	}
 	if restored.ActiveTabIndex() != ws.ActiveTabIndex() {
 		t.Fatalf("active tab: got %d want %d", restored.ActiveTabIndex(), ws.ActiveTabIndex())
