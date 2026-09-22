@@ -1,7 +1,19 @@
-# Release: on a v* tag, build the shipped binaries (catway, cathost,
-# catctl — ghostty-tagged, static libghostty-vt linked in) per platform and
-# attach the tarballs to the GitHub release. CGO rules out cross-compiling
-# from one runner, so each platform builds its own.
+# Release: on a v* tag, create the GitHub release once, then build the
+# shipped binaries (catway, cathost, catctl — ghostty-tagged, static
+# libghostty-vt linked in) per platform and attach the tarballs to it. CGO
+# rules out cross-compiling from one runner, so each platform builds its own.
+#
+#   tag push ──▶ release (1 job: create, write the body once)
+#                   │
+#                   ├──▶ dist ubuntu-latest     ─┐
+#                   ├──▶ dist ubuntu-24.04-arm  ─┤  upload tarballs only;
+#                   ├──▶ dist macos-latest      ─┤  never touch the body
+#                   └──▶ dist macos-15-intel    ─┘
+#
+# The body is written by exactly one job. It used to be written by every
+# matrix job (generate_release_notes on each): v0.2.3 went out with the
+# generated notes four times over, because the action's update path appends
+# freshly generated notes to the existing body rather than keeping it.
 name: release
 
 on:
@@ -12,7 +24,36 @@ permissions:
   contents: write
 
 jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the previous tag, for the compare link
+      # checkout can leave a tag push's own tag as a lightweight ref, which
+      # drops its message. Re-fetch the tag object itself so
+      # release-notes.sh sees the annotation.
+      - run: git fetch --force origin "+${GITHUB_REF}:${GITHUB_REF}"
+      # The body is the annotated tag's message (scripts/release-notes.sh).
+      # The tag message is the changelog someone wrote; generated notes here
+      # only list the PRs, which is two in this repo's whole history. A tag
+      # with no message falls back to generated notes, so a quick tag still
+      # gets a body.
+      - id: notes
+        run: |
+          scripts/release-notes.sh "${GITHUB_REF_NAME}" > release-notes.md
+          if [ -s release-notes.md ]; then
+            echo "generate=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "generate=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: softprops/action-gh-release@v2
+        with:
+          body_path: release-notes.md
+          generate_release_notes: ${{ steps.notes.outputs.generate == 'true' }}
+
   dist:
+    needs: release
     strategy:
       fail-fast: false
       matrix:
@@ -42,21 +83,11 @@ jobs:
       - run: make vt
       - run: make test-ghostty
       - run: make dist
-      # An annotated tag's message does not become the release body — the API
-      # takes the two from different places, so releases cut before this went
-      # out with an empty body while the changelog sat in the tag object where
-      # only `git show` would find it. Asking GitHub to generate notes from the
-      # commits since the previous tag makes the release self-describing on its
-      # own, and a hand-written changelog can still be layered on afterwards
-      # with `gh release edit --notes-file`.
-      #
-      # Safe against the matrix: all three jobs run this step for the same tag,
-      # so whichever finishes first creates the release and generates the notes,
-      # and the other two take the update path. That path preserves the existing
-      # body when the step passes no `body` input (the action resolves
-      # `body = workflowBody || existingReleaseBody`), so the later two jobs
-      # attach their tarballs without blanking what the first one wrote.
+      # Upload only. The release job has already created the release and
+      # written its body, so this step takes the action's update path. It
+      # passes no body and no generate_release_notes, so nothing is appended
+      # (the append is what duplicated v0.2.3's notes) and nothing races:
+      # every matrix job finds the release already there.
       - uses: softprops/action-gh-release@v2
         with:
           files: dist/*.tar.gz
-          generate_release_notes: true

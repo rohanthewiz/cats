@@ -86,7 +86,25 @@ type = "todos_mgr"  ──▶  CATS_PLUGIN_TYPE  ──▶  PaneState.PluginType
   `$TMPDIR`.
 - **Tag v0.2.3.** The first product release since v0.2.1 (v0.2.2 only added
   the Intel build). 247 commits, and the annotated tag message summarises
-  them. Tagged after CI was fully green on `3b79d0d`.
+  them. Tagged after CI was fully green on `3b79d0d`. Published with all
+  four tarballs.
+- **Release body.** The published body was GitHub's generated notes four
+  times over. Every matrix job ran `action-gh-release` with
+  `generate_release_notes`, and the action's update path appends freshly
+  generated notes to the existing body (`src/github.ts`: `body = workflowBody
+  || existingReleaseBody`, then `body + "\n\n" + generated`). The comment in
+  `release.yml` claimed the body was preserved; it wasn't. Replaced by hand
+  with the tag message (hard wraps joined, one Full Changelog link).
+- **`release.yml` fix.** A new single `release` job creates the release and
+  writes the body once, from `scripts/release-notes.sh <tag>`: the annotated
+  tag message, with hard wraps joined (a release body renders newlines as
+  breaks), plus a compare link to the previous tag. A lightweight or empty
+  tag falls back to generated notes. The job re-fetches the tag ref, because
+  checkout can leave it lightweight. `dist` `needs: release` and only uploads
+  files: no body and no generate flag, so nothing appends and nothing races.
+  The script's output for v0.2.3 matches the hand-set body byte for byte
+  (apart from a trailing newline). A throwaway lightweight tag yields empty
+  output.
 
 **cats-todo** — `636999a`: bumped the cats pin to `61b4e6a`. `isDropAgent` =
 `p.IsDropAgent()` and not in `editorAgents`, with the list kept only as a
@@ -147,10 +165,12 @@ command. vet, `test -race` and the wasm build are clean.
   through the plugin host (`catctl plugin update` / relink first) so their
   panes pick up `CATS_PLUGIN_TYPE`. Check the row type labels and that
   AGENTS says "none" when only plugins are open.
-- Optional: copy the v0.2.3 tag message into the GitHub release body
-  (`gh release edit v0.2.3 --notes-file`), since only generated notes land
-  there. The release itself is published: run `35790848738` was green on
-  all four platforms, and all four tarballs are attached.
+- **Verify the fixed `release.yml` on the next cats tag.** It is only
+  checked locally: the script against v0.2.3, and the YAML parse. On the
+  next tag, confirm the `release` job runs before the four `dist` jobs, the
+  body is the tag message exactly once (not duplicated), and all four
+  tarballs attach. If `release-notes.sh` prints nothing for an annotated tag
+  on the runner, the tag re-fetch step is the suspect.
 - ced: `TestThemeAfterSave_RepaintsLive` is flaky (~1 in 10): TempDir
   cleanup fails with `themes/` "directory not empty", which means something
   writes into it after the test ends. The assertion itself passes.
