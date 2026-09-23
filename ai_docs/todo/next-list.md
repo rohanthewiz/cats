@@ -32,7 +32,7 @@ window were dated by grepping every session doc.
 - Open and Roadmap stay in ID order. New items append to the end of Open (or
   Roadmap, for future work) with the next ID.
 
-**Next ID:** N-026
+**Next ID:** N-027
 
 ## Open
 
@@ -161,6 +161,14 @@ window were dated by grepping every session doc.
   cats-todo: "Send info prompts to gonotes" (carried in cats-todo's own
   session docs) can now find the notes plugin by `plugin_type ==
   "notes_mgr"` in `pane.list` instead of by id.
+
+- **N-026** · raised `2026-0922-1857-next-list-seed-and-adopted-exec-panes` · value low
+  The manifest's "invalid type" error hint (`internal/plugin/manifest.go`,
+  `Validate`) lists `git` but not `http_client`. `06a67c3` added the
+  `http_client` type without touching the hint, and `272c134` (the `git` type)
+  was rebased onto it. Add `wire.PluginTypeHTTPClient` to the hint's
+  arguments, or build the list from one slice of known types so the next type
+  can't miss it.
 
 ## Roadmap
 

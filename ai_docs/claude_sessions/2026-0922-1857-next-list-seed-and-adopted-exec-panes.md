@@ -82,7 +82,7 @@ reinstalled.
 ## Next
 
 Seeded: `ai_docs/todo/next-list.md` (N-001…N-025; see §1).
-Closed: N-002. Declined: None. Raised: None.
+Closed: N-002. Declined: None. Raised: N-026 (the manifest type hint misses `http_client`).
 Deferred: None. Promoted: None.
 Updated: N-006 (the routine WARN lines, from the real log).
 Full list: `ai_docs/todo/next-list.md`.
