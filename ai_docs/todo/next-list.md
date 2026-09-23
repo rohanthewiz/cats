@@ -32,7 +32,7 @@ window were dated by grepping every session doc.
 - Open and Roadmap stay in ID order. New items append to the end of Open (or
   Roadmap, for future work) with the next ID.
 
-**Next ID:** N-031
+**Next ID:** N-034
 
 ## Open
 
@@ -66,6 +66,10 @@ window were dated by grepping every session doc.
     emoji, no seams at band edges, cursor never left behind), sparse diffs
     and the frame gate live (a background tab's agent keeps streaming, and
     switching to it shows its current screen at once).
+  - the settings screen in the app (`2026-0923-1443-settings-json-and-screen`): Cats › Settings… (⌘,)
+    opens it in the front window; the **app** tab lists the saved catways,
+    and renaming or forgetting one redraws the Connect menu at once; first
+    launch imports `app.json` into config.json's `app` section.
 
 - **N-003** · raised `2026-0905-1938-plugin-panes-in-the-agents-section` · value low
   A plugin started by hand from a shell (e.g. `cats-todo` typed at a prompt)
@@ -201,6 +205,21 @@ window were dated by grepping every session doc.
   tickers run while the page is hidden; the command palette re-renders its
   whole list on hover; the autoclose tick rebuilds the whole pane header every
   500 ms; each host pong re-renders every header.
+
+- **N-031** · raised `2026-0923-1443-settings-json-and-screen` · value low
+  `docs/reference/configuration.md` still shows every section example in YAML
+  (the keys are identical in JSON; the intro says so). Convert them to JSON,
+  and decide whether `config.example.yaml` stays as the commented reference.
+
+- **N-032** · raised `2026-0923-1443-settings-json-and-screen` · value low
+  ⌘+/⌘- and sidebar drags now write `ui` prefs via config.set, which is a
+  Recorded command, so zooming while a macro records captures a config.set
+  step. Skip ui-only config.set in the recorder, or don't persist while
+  recording.
+
+- **N-033** · raised `2026-0923-1443-settings-json-and-screen` · value low
+  Other open browsers don't pick up a `ui` pref (font size, sidebar width)
+  changed elsewhere until they reload; there is no broadcast for it.
 
 ## Roadmap
 
