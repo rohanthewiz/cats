@@ -7,7 +7,7 @@ import "testing"
 // be dropped into it.
 
 func TestValidPluginType(t *testing.T) {
-	for _, typ := range []string{"", PluginTypeAgent, PluginTypeEditor, PluginTypeTodosMgr, PluginTypeNotesMgr, PluginTypeHTTPClient, "dev_server"} {
+	for _, typ := range []string{"", PluginTypeAgent, PluginTypeEditor, PluginTypeTodosMgr, PluginTypeNotesMgr, PluginTypeHTTPClient, PluginTypeGit, "dev_server"} {
 		if !ValidPluginType(typ) {
 			t.Errorf("%q should be a valid plugin type", typ)
 		}

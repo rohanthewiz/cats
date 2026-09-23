@@ -104,7 +104,7 @@ zsh = "shell/cats-todo.zsh"         # sourced at shell startup (see Shell hooks)
 | Field | Notes |
 |-------|-------|
 | `id` | the directory name under the plugins root |
-| `type` | what kind of tool the plugin is — `agent`, `editor`, `todos_mgr`, `notes_mgr`, `http_client`; optional (see [Plugin types](#plugin-types)) |
+| `type` | what kind of tool the plugin is — `agent`, `editor`, `todos_mgr`, `notes_mgr`, `http_client`, `git`; optional (see [Plugin types](#plugin-types)) |
 | `platforms` | limits where the plugin installs |
 | `min_cats_version` | carried for forward compatibility but **not enforced** — cats has no single server version constant yet, and enforcing against the wrong number would be worse than not enforcing |
 | `[[build]]` | commands run in the plugin root at install/link time (see [Build step environment](#build-step-environment)) |
@@ -136,6 +136,7 @@ wants the notes manager) without knowing plugin ids in advance.
 | `todos_mgr` | tool | PLUGINS | no | cats-todo |
 | `notes_mgr` | tool | PLUGINS | no | gonotes |
 | `http_client` | tool | PLUGINS | no | roman |
+| `git` | tool | PLUGINS | no | cats-git |
 | *(unset)* | tool | PLUGINS | no | any manifest written before the key |
 
 The key is optional, and any lowercase `snake_case` word validates, known or
@@ -344,7 +345,7 @@ id          = "you.cats-hello"     # also the install directory name
 name        = "Hello cats"
 version     = "0.1.0"
 description = "Renames its own pane, then lists every pane cats knows about"
-# type      = "notes_mgr"          # optional: agent, editor, todos_mgr, notes_mgr, http_client
+# type      = "notes_mgr"          # optional: agent, editor, todos_mgr, notes_mgr, http_client, git
 platforms   = ["macos", "linux"]   # omit for "everywhere"; GOOS names also work
 
 # Run once in the plugin root at install/link time. Usually a `go build`.

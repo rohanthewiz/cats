@@ -44,7 +44,7 @@ type Manifest struct {
 	Version     string `toml:"version"`
 	Description string `toml:"description"`
 	// Type declares what kind of tool the plugin is (wire.PluginType*:
-	// "agent", "editor", "todos_mgr", "notes_mgr", "http_client"). Optional: an undeclared
+	// "agent", "editor", "todos_mgr", "notes_mgr", "http_client", "git"). Optional: an undeclared
 	// type is a plain tool, which is what every plugin written before the key
 	// existed is. The host never branches on it — it rides the launch
 	// environment (TypeEnvVar) to catway, which records it on the pane, and
@@ -161,8 +161,9 @@ func (m Manifest) Validate() error {
 	case m.Version == "":
 		return fmt.Errorf("missing version")
 	case !wire.ValidPluginType(m.Type):
-		return fmt.Errorf("invalid type %q (a lowercase word such as %q, %q, %q or %q)", m.Type,
-			wire.PluginTypeAgent, wire.PluginTypeEditor, wire.PluginTypeTodosMgr, wire.PluginTypeNotesMgr)
+		return fmt.Errorf("invalid type %q (a lowercase word such as %q, %q, %q, %q or %q)", m.Type,
+			wire.PluginTypeAgent, wire.PluginTypeEditor, wire.PluginTypeTodosMgr, wire.PluginTypeNotesMgr,
+			wire.PluginTypeGit)
 	}
 	seen := map[string]bool{}
 	for i, a := range m.Actions {

@@ -188,6 +188,7 @@ eq(world().fns.pluginTypeLabel("todos_mgr"), "todos", "pluginTypeLabel drops _mg
 eq(world().fns.pluginTypeLabel("http_client"), "http", "…and _client");
 eq(world().fns.pluginTypeLabel("client_tool"), "client_tool", "…only as a suffix");
 eq(world().fns.pluginTypeLabel("editor"), "editor", "…and leaves other types alone");
+eq(world().fns.pluginTypeLabel("git"), "git", "…including git (cats-git)");
 eq(world().fns.pluginTypeLabel(undefined), "", "…and says nothing for no type");
 eq(world().fns.pluginShort("rohanthewiz.cats-todo"), "cats-todo", "pluginShort drops the vendor prefix");
 eq(world().fns.pluginShort("cats-todo"), "cats-todo", "…and leaves a bare id alone");

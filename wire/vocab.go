@@ -1743,7 +1743,7 @@ type PluginInfo struct {
 // it has a state worth watching (working / idle / blocked), it goes in the
 // sidebar's AGENTS section, and it is somewhere a prompt can be dropped. Every
 // other plugin is a tool the user drives — an editor, a backlog manager, a
-// notes app — and goes in PLUGINS, where there is no state to watch and nothing
+// notes app, a git UI — and goes in PLUGINS, where there is no state to watch and nothing
 // to drop a prompt into. The finer types below "tool" are there so a client can
 // find the one it needs (cats-todo filing a note wants the notes manager, not
 // just "some plugin") without matching on plugin ids it cannot know in advance.
@@ -1755,6 +1755,7 @@ type PluginInfo struct {
 //	todos_mgr    PLUGINS   no            cats-todo
 //	notes_mgr    PLUGINS   no            gonotes
 //	http_client  PLUGINS   no            roman
+//	git          PLUGINS   no            cats-git
 //	"" (unset)   PLUGINS   no            any older manifest
 //
 // PluginTypeAgent has no plugin behind it yet. It is defined now so the day a
@@ -1774,6 +1775,9 @@ const (
 	// over {{field}} templates). Named for what it is to a client looking for
 	// one — "send this request somewhere" — not for roman specifically.
 	PluginTypeHTTPClient = "http_client"
+	// PluginTypeGit is a git UI (cats-git: ced's git panels as a standalone
+	// tool).
+	PluginTypeGit = "git"
 )
 
 // pluginTypePattern bounds what a declared type may look like: a lowercase
