@@ -15,7 +15,14 @@ const fullFallbackNum, fullFallbackDen = 3, 5
 // declares are what subsequent diff cells omit against, so they must stay
 // fixed until the next full frame. Not safe for concurrent use.
 type FrameTranslator struct {
-	pane         uint32
+	pane uint32
+	translatorState
+}
+
+// translatorState is everything a translation depends on besides the view.
+// Two translators of one pane in the same state turn the same view into the
+// same bytes, which is what lets ViewEncoder encode once for all of them.
+type translatorState struct {
 	defFg, defBg uint32
 	haveFull     bool
 	// shift: this connection applies PaneDiff.Shift (wire.FeaturePaneShift).
@@ -272,6 +279,48 @@ func (t *FrameTranslator) translateDiff(v *FrameView) *PaneDiff {
 
 // blankCell is what a browser fills a shift's vacated rows with.
 var blankCell = Cell{S: " "}
+
+// ViewEncoder encodes one FrameView for every connection showing the pane,
+// doing the work once per distinct translator state rather than once per
+// connection.
+//
+// Connections that have been streaming the pane together sit in the same
+// state (same def_fg/def_bg from the same last full frame, same features), so
+// in the common multi-window case — a desktop and a phone on one workspace —
+// every one after the first is a cache hit that costs a comparison and a
+// state copy. A connection in a different state (it just gained the pane and
+// needs a full frame) gets its own entry. Build one per view; not safe for
+// concurrent use.
+type ViewEncoder struct {
+	view    *FrameView
+	entries []encoded
+}
+
+type encoded struct {
+	before, after translatorState
+	b             []byte
+}
+
+func NewViewEncoder(v *FrameView) *ViewEncoder { return &ViewEncoder{view: v} }
+
+// Encode translates the view for t and returns the bytes to send, advancing t
+// exactly as TranslateView would have. The bytes are shared between the
+// connections that hit the same entry, so they must not be modified.
+func (e *ViewEncoder) Encode(t *FrameTranslator) ([]byte, error) {
+	for i := range e.entries {
+		if e.entries[i].before == t.translatorState {
+			t.translatorState = e.entries[i].after
+			return e.entries[i].b, nil
+		}
+	}
+	before := t.translatorState
+	b, err := MarshalFrame(t.TranslateView(e.view))
+	if err != nil {
+		return nil, err
+	}
+	e.entries = append(e.entries, encoded{before: before, after: t.translatorState, b: b})
+	return b, nil
+}
 
 // cellFrom translates a resolved β cell, zeroing (⇒ omitting) colors equal to
 // the frame defaults. β's link index becomes 1-based (0 = none).

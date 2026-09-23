@@ -1217,6 +1217,11 @@ func (d *daemon) dispatch(mt orchestration.MessageType, payload []byte) {
 			// on another workspace neither gets the frame nor advances its
 			// translator, so when it does switch to this pane it is handed a
 			// full frame (resyncViews) rather than a delta off a stale base.
+			//
+			// Encoded through one ViewEncoder: connections whose translators
+			// are in the same state share one encoding instead of each paying
+			// for its own.
+			enc := browserproto.NewViewEncoder(&view)
 			for c := range o.conns {
 				if !c.view.visible[ev.PaneID] {
 					continue
@@ -1232,8 +1237,7 @@ func (d *daemon) dispatch(mt orchestration.MessageType, payload []byte) {
 				// its translator reset, so it goes out whole: the catch-up
 				// has nothing left to do for it.
 				delete(c.stale, ev.PaneID)
-				msg := c.translator(ev.PaneID).TranslateView(&view)
-				if b, err := browserproto.Marshal(msg); err == nil {
+				if b, err := enc.Encode(c.translator(ev.PaneID)); err == nil {
 					o.enqueue(c, b)
 				}
 			}

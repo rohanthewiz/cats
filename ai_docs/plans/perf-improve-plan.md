@@ -210,13 +210,34 @@ side by side; the slow one gets base → current screen → diffs),
 
 ---
 
+## 5. Encode once per pane  (done)
+
+### Design
+- **Hand-written appender** (`browserproto/encode.go`, `MarshalFrame`) for
+  `pane_frame` and `pane_diff`: byte-for-byte what `encoding/json` produces
+  (field order, omitempty, HTML-safe escaping, nil slices as `null`), so
+  nothing downstream can tell. Everything else still goes through `Marshal`.
+- **One encoding per translator state** (`ViewEncoder`). A translation depends
+  only on the view and the translator's state (`def_fg/def_bg`, `haveFull`,
+  `shift`), so connections streaming a pane together share one encoding; a
+  connection that just gained the pane (needs a full frame) gets its own.
+- **Not moved off the loop.** With the appender a full frame costs ~0.1 ms,
+  and the cache wants one place that sees every connection; moving marshalling
+  to the writers would have meant a typed queue for a cost that is now small.
+
+### Result
+`BenchmarkMarshalFullFrame*` (200×50): 562 µs reflective → 100 µs appended.
+
+Tests: `TestMarshalFrameMatchesEncodingJSON` (2,000 random frames and diffs,
+byte equality, every escaping branch), `TestMarshalFrameFallsBack`,
+`TestViewEncoderSharesByState`.
+
+---
+
 ## Later (not started)
 
 3b. **Compression.** rweb v0.1.28 has no permessage-deflate; adding it shrinks
    terminal JSON 10–20×.
-5. **Encode once per pane, off the loop.** Marshal on the loop is per
-   connection; cache by (pane, frame seq, translator state) or move to the
-   reader goroutine. Hand-written appender instead of reflective JSON.
 6. **Snapshot cost.** ~3 cgo calls per cell; libghostty's per-row dirty tracking
    (`RenderState.Dirty`, row `Dirty`) is unused; `FrameFromSnapshot` runs under
    `emuMu`, stalling `feed`; per-tick allocation of the whole grid.

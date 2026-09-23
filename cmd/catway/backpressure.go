@@ -136,7 +136,7 @@ func (o *orch) catchUp(c *client) {
 			continue
 		}
 		msg := c.translator(pid).TranslateView(&view)
-		if b, err := browserproto.Marshal(msg); err == nil {
+		if b, err := browserproto.MarshalFrame(msg); err == nil {
 			o.enqueue(c, b)
 		}
 	}
