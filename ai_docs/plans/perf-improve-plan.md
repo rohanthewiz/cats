@@ -308,9 +308,46 @@ Tests: the autoclose jstest gained the in-place tick and the expiry re-render.
 
 ---
 
-## Later (not started)
+## 3b. Compression  (done — rweb v0.1.31)
 
-3b. **Compression.** rweb v0.1.28 has no permessage-deflate; adding it shrinks
-   terminal JSON 10–20×.
-8. **WebSocket write batching** in rweb (header + payload in one write; drain
-   the queue per wakeup).
+rweb gained permessage-deflate (RFC 7692) behind
+`s.WebSocketWithOptions(path, rweb.WSOptions{Compression: true}, …)`, which
+catway's `/ws` now uses. Server → client keeps the compressor's window across
+messages (context takeover); client → server is `client_no_context_takeover`.
+Offers asking for a smaller server window than `compress/flate` has are
+declined (the connection runs uncompressed). The size limit applies to the
+inflated message.
+
+Level 2 by default, not `BestSpeed`: Go's level 1 Huffman-codes any flush under
+128 bytes without matching and resets its history, so small diffs got nothing
+from context takeover. Measured on terminal JSON (small diffs / 120 KB full
+frames): level 1 3.4× / 7.2×, level 2 6.8× / 8.3× at the same speed, level 6
+7.7× / 11.2× at five times the cost on full frames. (The plan's 10–20× guess
+was for full frames at high levels; level 2 is the better trade for a live
+stream.)
+
+Checked end to end against Node 22's WebSocket (undici) and Chrome.
+
+## 8. WebSocket write batching  (done — rweb v0.1.31)
+
+- rweb assembles each frame (header, length, mask, payload) in one buffer and
+  writes it with one `Write`; it was two or three.
+- `WSConn.WriteMessages(type, msgs...)` puts several messages in one `Write`.
+  catway's writer drains what is already queued behind the message that woke
+  it (up to 64 messages / 1 MB, `drainQueued`) and sends them together.
+- Found on the way: rweb's `Close` and close-handshake reply wrote without the
+  write lock, so a close frame could interleave with a concurrent write. They
+  take it now.
+
+Tests: rweb `websocket_deflate_test.go` (offer parsing, round trips with and
+without context takeover, fragmented compressed messages, RSV rules, a
+decompression bomb, one write per frame for every length class, batches);
+catway `TestWriterBatchesWhatIsQueued`.
+
+---
+
+## Not verified
+
+None of §3–9 has been run in a live Cats.app: the β changes (shifts, the row
+cache, the builder, empty-frame suppression) need a NEW cathost as well as a
+new catway. See N-001.

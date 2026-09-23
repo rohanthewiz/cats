@@ -2768,9 +2768,21 @@ func (c *client) writeLoop(pingEvery time.Duration) {
 				_ = c.ws.Close(1000, "bye")
 				return
 			}
-			ok = c.write(rweb.TextMessage, b)
-			c.wrote(len(b))
-			if !ok {
+			// Take whatever else is already queued along with it, so a burst
+			// (a frame per visible pane on the same tick, chrome behind them)
+			// goes out as one write instead of one per message.
+			batch, closed := c.drainQueued(b)
+			sent := c.writeBatch(batch)
+			n := 0
+			for _, m := range batch {
+				n += len(m)
+			}
+			c.wrote(n)
+			if !sent {
+				return
+			}
+			if closed {
+				_ = c.ws.Close(1000, "bye")
 				return
 			}
 		case data := <-c.pong:
@@ -2785,6 +2797,50 @@ func (c *client) writeLoop(pingEvery time.Duration) {
 			}
 		}
 	}
+}
+
+// Batch bounds for drainQueued: enough to cover a tick's worth of frames and
+// chrome for a busy window, small enough that one batch never sits on the
+// socket much longer than a single large frame would.
+const (
+	maxWriteBatch      = 64
+	maxWriteBatchBytes = 1 << 20
+)
+
+// drainQueued returns first plus the messages already waiting behind it, up to
+// the batch bounds, without blocking. closed reports that the queue was
+// closed while draining — the goodbye comes after the batch.
+func (c *client) drainQueued(first []byte) (batch [][]byte, closed bool) {
+	batch = [][]byte{first}
+	size := len(first)
+	for len(batch) < maxWriteBatch && size < maxWriteBatchBytes {
+		select {
+		case b, ok := <-c.out:
+			if !ok {
+				return batch, true
+			}
+			batch = append(batch, b)
+			size += len(b)
+		default:
+			return batch, false
+		}
+	}
+	return batch, false
+}
+
+// writeBatch is write for several text messages at once: one WebSocket
+// message each, one write to the socket for all of them (rweb's
+// WriteMessages), under one fresh deadline.
+func (c *client) writeBatch(batch [][]byte) bool {
+	if len(batch) == 1 {
+		return c.write(rweb.TextMessage, batch[0])
+	}
+	_ = c.ws.SetWriteDeadline(time.Now().Add(wsWriteTimeout))
+	if err := c.ws.WriteMessages(rweb.TextMessage, batch...); err != nil {
+		c.o.post(func() { c.o.dropConn(c) })
+		return false
+	}
+	return true
 }
 
 // write sends one frame under a fresh deadline, asking the loop to drop this

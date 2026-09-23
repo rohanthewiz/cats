@@ -375,7 +375,13 @@ func main() {
 	// like everything but the three public paths above: the credential is
 	// this catway's own secret, presented as a bearer token.
 	o.registerPeerRoutes(s)
-	s.WebSocket("/ws", func(ws *rweb.WSConn) error {
+	// Compressed (permessage-deflate) with any client that offers it — every
+	// browser does. Terminal frames are repetitive JSON, and with the
+	// compressor's window carried from message to message a pane_diff
+	// shrinks ~7× and a full frame ~8×: the difference between a phone on
+	// cellular keeping up with a streaming agent and falling behind it. A
+	// client that offers nothing connects uncompressed, as before.
+	s.WebSocketWithOptions("/ws", rweb.WSOptions{Compression: true}, func(ws *rweb.WSConn) error {
 		return o.serve(ws)
 	})
 
