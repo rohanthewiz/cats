@@ -66,7 +66,7 @@ window were dated by grepping every session doc.
     emoji, no seams at band edges, cursor never left behind), sparse diffs
     and the frame gate live (a background tab's agent keeps streaming, and
     switching to it shows its current screen at once). And the second round
-    (`2026-0923-2100`): `cat` of a long file and a streaming agent scroll
+    (`2026-0923-1545`): `cat` of a long file and a streaming agent scroll
     smoothly (shifted diffs), a busy pane's typing echo stays snappy (row
     cache + frame builder), the WebSocket shows `permessage-deflate` in the
     devtools handshake, the command palette's hover, and an exited pane's
@@ -200,7 +200,7 @@ window were dated by grepping every session doc.
   Other open browsers don't pick up a `ui` pref (font size, sidebar width)
   changed elsewhere until they reload; there is no broadcast for it.
 
-- **N-034** · raised `2026-0923-2100-perf-shifts-builder-deflate` · value low
+- **N-034** · raised `2026-0923-1545-perf-shifts-builder-deflate` · value low
   cats-mobile does not list `pane_shift` in `Init.Features`, so a scrolling
   pane still reaches the phone as a full frame per tick (now compressed). Its
   grid (`internal/catsclient/grid.go`) would apply `PaneDiff.Shift` as the
@@ -242,25 +242,25 @@ Newest first. The unnumbered entries at the end were found done while seeding,
 so they are not carried.
 
 - **N-027** · raised `2026-0923-1437-perf-canvas-sparse-frames-and-frame-gate` ·
-  closed 2026-09-23, `2026-0923-2100-perf-shifts-builder-deflate` — Scrolling
+  closed 2026-09-23, `2026-0923-1545-perf-shifts-builder-deflate` — Scrolling
   output as a full frame per tick. Shifted diffs (`Frame.Shift`,
   `PaneDiff.Shift`, negotiated on both hops) and permessage-deflate (rweb
   v0.1.31). A one-line scroll on 200×50 is 2.2 KB instead of 133 KB, before
   compression. Plan §3, §3b.
 - **N-028** · raised `2026-0923-1437-perf-canvas-sparse-frames-and-frame-gate` ·
-  closed 2026-09-23, `2026-0923-2100-perf-shifts-builder-deflate` — Remaining
+  closed 2026-09-23, `2026-0923-1545-perf-shifts-builder-deflate` — Remaining
   frame-path costs. Row cache in the emulator and `FrameBuilder` (snapshot +
   diff for a one-cell change 1.4 ms → 40 µs, off `emuMu`), hand-written frame
   JSON shared per translator state (562 → 100 µs per full frame), empty frames
   suppressed, one socket write per frame and batches of queued frames. Plan
   §5–8.
 - **N-029** · raised `2026-0923-1437-perf-canvas-sparse-frames-and-frame-gate` ·
-  closed 2026-09-23, `2026-0923-2100-perf-shifts-builder-deflate` — Slow
+  closed 2026-09-23, `2026-0923-1545-perf-shifts-builder-deflate` — Slow
   browsers dropped at 512 queued messages. Frames are held back above 4 MB
   unwritten, and the current screen is sent from catway's grid below 1 MB.
   Plan §4.
 - **N-030** · raised `2026-0923-1437-perf-canvas-sparse-frames-and-frame-gate` ·
-  closed 2026-09-23, `2026-0923-2100-perf-shifts-builder-deflate` — Front-end
+  closed 2026-09-23, `2026-0923-1545-perf-shifts-builder-deflate` — Front-end
   leftovers: visibility-gated tickers, palette highlight without a rebuild,
   in-place countdown, host badges redrawn only when they can change. Plan §9.
 
