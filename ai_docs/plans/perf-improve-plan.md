@@ -43,7 +43,7 @@ for pixel, over random diffs) and the retargeted `TestPagePaintsBackgroundsBefor
 
 ---
 
-## 1. Sparse β diffs  (in progress)
+## 1. Sparse β diffs  (done)
 
 ### Problem
 `FrameFromSnapshot` emits every cell, marking unchanged ones `Skip`. catway
@@ -82,8 +82,17 @@ cells' contents are load-bearing — they cannot simply be blanked.
   struct whose first field is `type`, so a prefix scan (`{"type":"…"`) reads it,
   with the full unmarshal kept as the fallback.
 
-### Expected effect
-A one-cell echo: ~850 KB → ~100 B on the β hop; catway decode 12 ms → µs.
+### Result
+`TestSparseDiffIsSmall`: a one-cell diff on 200×50 plain text is 550,123 B
+dense (with the leaner cells; 850 KB before them) and 226 B sparse. catway's
+decode of it drops from ~12 ms to microseconds.
+
+Tests: `sparse_test.go` (Sparsify, lean cells, hello features, type peek,
+codec), `TestHostSparseFramesFollowTheHello` (ghostty: negotiated both ways),
+the replay property test run a second time down the sparse path through JSON,
+`TestGridRefusesWhatItCannotResolve`, and catway's `frames_test.go` (sparse
+diffs to a window, a reset translator served from the grid, stale grids refusing
+until a full frame).
 
 ---
 

@@ -357,6 +357,13 @@ func TestReplayReconstruction(t *testing.T) {
 	var prev *terminal.Snapshot
 	tr := NewFrameTranslator(9)
 	var rc recon
+	// The same sequence, a second time, down the sparse path catway takes with
+	// a daemon that honours ClientFeatureSparseFrames: diffs sparsified, sent
+	// through JSON (so the omitted fields are exercised), resolved against a
+	// Grid, and translated from the view. It must land on the same screen.
+	str := NewFrameTranslator(9)
+	var src recon
+	var sgrid Grid
 	var fold betaFold
 	fulls, diffs, linkSteps := 0, 0, 0
 
@@ -439,11 +446,101 @@ func TestReplayReconstruction(t *testing.T) {
 			t.Fatalf("step %d: cursor = %+v, want %+v", step, rc.cur, wantCur)
 		}
 
+		sf := orchestration.FrameFromSnapshot(snap, prev)
+		sf.Sparsify()
+		sf = viaWire(t, sf)
+		view, ok := sgrid.Apply(sf)
+		if !ok {
+			t.Fatalf("step %d: the grid refused a frame (sparse=%v full=%v)", step, sf.Sparse, sf.Full)
+		}
+		smsg := str.TranslateView(&view)
+		src.apply(t, smsg)
+		for i := range fold {
+			if src.cells[i] != fold[i] {
+				t.Fatalf("step %d sparse (%T): cell %d = %+v, want %+v", step, smsg, i, src.cells[i], fold[i])
+			}
+		}
+		if src.cur != rc.cur {
+			t.Fatalf("step %d sparse: cursor = %+v, want %+v", step, src.cur, rc.cur)
+		}
+
 		prev = snap
 	}
 
 	// The run must exercise all paths, or the property proves nothing.
 	if fulls < 3 || diffs < 3 || linkSteps < 2 {
 		t.Fatalf("weak coverage: %d fulls, %d diffs, %d link steps", fulls, diffs, linkSteps)
+	}
+}
+
+// viaWire sends a frame through the β JSON encoding and back, as catway
+// receives it.
+func viaWire(t *testing.T, f *orchestration.Frame) *orchestration.Frame {
+	t.Helper()
+	b, err := json.Marshal(orchestration.NewPaneFrame(1, f))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pf orchestration.PaneFrame
+	if err := json.Unmarshal(b, &pf); err != nil {
+		t.Fatal(err)
+	}
+	return pf.Frame
+}
+
+// The grid's refusals: a sparse diff is only ever applied to the exact frame
+// before it, and the only ways back from "missed one" are frames that carry
+// the whole grid.
+func TestGridRefusesWhatItCannotResolve(t *testing.T) {
+	cell := func(s string) orchestration.Cell {
+		return orchestration.Cell{Symbol: s, Fg: 0x02c8c8c8, Bg: 0x02000000}
+	}
+	full := &orchestration.Frame{Cols: 2, Rows: 1, Full: true, Cells: []orchestration.Cell{cell("a"), cell("b")}}
+	sparse := func(at int, s string) *orchestration.Frame {
+		return &orchestration.Frame{Cols: 2, Rows: 1, Sparse: true,
+			Runs: []orchestration.CellRun{{At: at, Cells: []orchestration.Cell{cell(s)}}}}
+	}
+
+	var g Grid
+	if _, ok := g.Apply(sparse(0, "x")); ok {
+		t.Fatal("a sparse diff applied to a grid that never had a full frame")
+	}
+	if _, ok := g.Apply(full); !ok {
+		t.Fatal("a full frame was refused")
+	}
+	v, ok := g.Apply(sparse(1, "y"))
+	if !ok || v.Cells[0].Symbol != "a" || v.Cells[1].Symbol != "y" || len(v.Changed) != 1 || v.Changed[0] != 1 {
+		t.Fatalf("sparse apply: ok=%v view=%+v", ok, v)
+	}
+
+	// A frame went by unapplied (the pane was off every viewport).
+	g.Invalidate()
+	if _, ok := g.Apply(sparse(0, "z")); ok {
+		t.Fatal("a sparse diff applied on top of a missed frame")
+	}
+	// A dense diff carries the whole grid, so it is a valid base on its own —
+	// which is what an older daemon sends.
+	dense := &orchestration.Frame{Cols: 2, Rows: 1, Cells: []orchestration.Cell{
+		{Symbol: "a", Skip: true, Fg: 0x02c8c8c8, Bg: 0x02000000}, cell("q"),
+	}}
+	if v, ok := g.Apply(dense); !ok || len(v.Changed) != 1 || v.Changed[0] != 1 {
+		t.Fatalf("dense diff: ok=%v view=%+v", ok, v)
+	}
+	if _, ok := g.Apply(sparse(0, "r")); !ok {
+		t.Fatal("a dense diff did not make the grid valid again")
+	}
+
+	// Disagreements about the grid refuse and invalidate rather than patch.
+	if _, ok := g.Apply(sparse(2, "!")); ok {
+		t.Fatal("a run past the end of the grid was applied")
+	}
+	if _, ok := g.Apply(sparse(0, "s")); ok {
+		t.Fatal("the grid stayed valid after an out-of-range run")
+	}
+	g.Apply(full)
+	resized := sparse(0, "t")
+	resized.Cols = 3
+	if _, ok := g.Apply(resized); ok {
+		t.Fatal("a sparse diff for other dimensions was applied")
 	}
 }

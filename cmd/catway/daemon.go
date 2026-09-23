@@ -912,7 +912,13 @@ func (d *daemon) session(conn net.Conn) error {
 	// pump blocks on a read that is *supposed* to be idle for minutes at a
 	// time, and the ping probe is what judges silence from there on.
 	_ = conn.SetDeadline(time.Now().Add(handshakeTimeout))
-	if err := orchestration.WriteMessage(conn, orchestration.NewHelloWithToken(tok)); err != nil {
+	// catway keeps each pane's grid (paneRuntime.grid), so it can take diff
+	// frames carrying only their changed cells. A daemon too old to know the
+	// feature ignores the field and keeps sending dense diffs, which the grid
+	// applies just the same.
+	hello := orchestration.NewHelloWithToken(tok)
+	hello.Features = []string{orchestration.ClientFeatureSparseFrames}
+	if err := orchestration.WriteMessage(conn, hello); err != nil {
 		return err
 	}
 	mt, payload, err := orchestration.ReadMessage(conn)
@@ -1016,6 +1022,12 @@ func (d *daemon) reconcile(alivePanes []uint32) {
 				continue // syncDaemon (in applyModel) creates missing runtimes
 			}
 			rt.created = alive[pid]
+			// Whatever this runtime's grid holds was built from the previous
+			// connection, which may have dropped frames on its way down; the
+			// daemon diffs against what it last TOOK, not what arrived. The
+			// welcome's replay sends every survivor a full frame, and until
+			// that lands a sparse diff must not be applied to a stale base.
+			rt.grid.Invalidate()
 			if alive[pid] {
 				// An adopted survivor keeps its live PTY, real scrollback, and
 				// real cwd — the restored seeds would be stale duplicates, and
@@ -1176,6 +1188,19 @@ func (d *daemon) dispatch(mt orchestration.MessageType, payload []byte) {
 			}
 			rt.histDirty = true // output since the last history capture (WS3)
 			if !o.visible[ev.PaneID] {
+				// Unapplied, so the grid no longer matches what the daemon will
+				// diff against next. The pane re-entering a viewport asks for a
+				// full frame (resyncViews), which makes it whole again.
+				rt.grid.Invalidate()
+				return
+			}
+			// Resolved once, against the pane's grid, and shared by every
+			// connection below. A sparse diff that cannot be resolved (the grid
+			// missed a frame) is dropped: the full frame that fixes it is
+			// already on its way, and a delta off the wrong base would paint a
+			// screen that nothing corrects.
+			view, ok := rt.grid.Apply(ev.Frame)
+			if !ok {
 				return
 			}
 			// One translation per connection that is SHOWING the pane. A window
@@ -1186,7 +1211,7 @@ func (d *daemon) dispatch(mt orchestration.MessageType, payload []byte) {
 				if !c.view.visible[ev.PaneID] {
 					continue
 				}
-				msg := c.translator(ev.PaneID).Translate(ev.Frame)
+				msg := c.translator(ev.PaneID).TranslateView(&view)
 				if b, err := browserproto.Marshal(msg); err == nil {
 					o.enqueue(c, b)
 				}

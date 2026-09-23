@@ -273,7 +273,8 @@ func (o *orch) rehomePane(pid uint32) {
 		return
 	}
 	rt.host = o.defaultHost
-	rt.created = false // syncDaemon spawns it on the new host
+	rt.created = false   // syncDaemon spawns it on the new host
+	rt.grid.Invalidate() // a new PTY on another machine: the old screen is not its base
 	// Restored state that was waiting for the old host would now be applied to
 	// the wrong filesystem: a saved cwd and an agent-resume argv both name paths
 	// on the machine we just let go of.

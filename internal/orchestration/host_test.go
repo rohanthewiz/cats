@@ -18,6 +18,13 @@ import (
 // the client end, with the Hello/Welcome handshake already done.
 func startTestHost(t *testing.T) net.Conn {
 	t.Helper()
+	return startTestHostHello(t, NewHello())
+}
+
+// startTestHostHello is startTestHost with a caller-chosen hello — for the
+// client features, which change what the daemon sends.
+func startTestHostHello(t *testing.T, hello Hello) net.Conn {
+	t.Helper()
 	serverEnd, clientEnd := net.Pipe()
 
 	h := NewHost()
@@ -34,7 +41,7 @@ func startTestHost(t *testing.T) net.Conn {
 	// Overall safety deadline so a stuck test fails instead of hanging.
 	_ = clientEnd.SetDeadline(time.Now().Add(15 * time.Second))
 
-	if err := WriteMessage(clientEnd, NewHello()); err != nil {
+	if err := WriteMessage(clientEnd, hello); err != nil {
 		t.Fatalf("send hello: %v", err)
 	}
 	typ, _ := readEvent(t, clientEnd)
@@ -1093,4 +1100,73 @@ func TestHostStuckPaneDoesNotStallOthers(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("live pane never echoed while the stuck pane was flooded")
 	}
+}
+
+// A client that advertises ClientFeatureSparseFrames gets diffs carrying only
+// their changed cells; one that does not keeps getting dense diffs. Either way
+// the first frame of a pane is full and dense — it is the receiver's base.
+func TestHostSparseFramesFollowTheHello(t *testing.T) {
+	run := func(t *testing.T, hello Hello) (fulls, dense, sparse int, sparseText string) {
+		c := startTestHostHello(t, hello)
+		cp := NewCreatePane(1, 40, 5)
+		cp.Command = "/bin/sh"
+		// Two bursts of output with a pause between, so the second lands in a
+		// diff against a frame that already holds the first.
+		cp.Args = []string{"-c", "printf AAAA; sleep 0.2; printf BBBB; sleep 0.2"}
+		if err := WriteMessage(c, cp); err != nil {
+			t.Fatalf("create_pane: %v", err)
+		}
+		for {
+			typ, payload := readEvent(t, c)
+			switch typ {
+			case MsgPaneFrame:
+				var pf PaneFrame
+				if err := json.Unmarshal(payload, &pf); err != nil {
+					t.Fatalf("decode pane_frame: %v", err)
+				}
+				f := pf.Frame
+				switch {
+				case f.Full:
+					fulls++
+					if f.Sparse || len(f.Cells) != int(f.Cols)*int(f.Rows) {
+						t.Fatalf("a full frame is not dense: sparse=%v cells=%d", f.Sparse, len(f.Cells))
+					}
+				case f.Sparse:
+					sparse++
+					if len(f.Cells) != 0 {
+						t.Fatalf("a sparse diff carries %d dense cells", len(f.Cells))
+					}
+					for _, r := range f.Runs {
+						for _, cell := range r.Cells {
+							sparseText += cell.Symbol
+						}
+					}
+				default:
+					dense++
+				}
+			case MsgPaneExited:
+				return
+			case MsgError:
+				t.Fatalf("unexpected error event: %s", payload)
+			}
+		}
+	}
+
+	t.Run("advertised", func(t *testing.T) {
+		hello := NewHello()
+		hello.Features = []string{ClientFeatureSparseFrames}
+		fulls, dense, sparse, text := run(t, hello)
+		if fulls == 0 || sparse == 0 || dense != 0 {
+			t.Fatalf("fulls=%d sparse=%d dense=%d, want fulls and sparse diffs only", fulls, sparse, dense)
+		}
+		if !strings.Contains(text, "BBBB") {
+			t.Fatalf("the second burst never arrived in a sparse diff: %q", text)
+		}
+	})
+	t.Run("not advertised", func(t *testing.T) {
+		fulls, dense, sparse, _ := run(t, NewHello())
+		if fulls == 0 || sparse != 0 || dense == 0 {
+			t.Fatalf("fulls=%d sparse=%d dense=%d, want dense diffs only", fulls, sparse, dense)
+		}
+	})
 }

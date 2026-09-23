@@ -11,10 +11,12 @@
 package orchestration
 
 import (
+	"bytes"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
+	"slices"
 	"time"
 
 	"github.com/rohanthewiz/cats/internal/filexfer"
@@ -242,7 +244,27 @@ type Hello struct {
 	// and a token would add a secret to manage for no gain. A v2 daemon ignores
 	// this field, so sending it costs nothing.
 	Token string `json:"token,omitempty"`
+	// Features lists what the CLIENT can accept beyond the base protocol — the
+	// mirror of Welcome.Features, for the direction that one cannot carry: a
+	// daemon changing the shape of what it SENDS has to know the receiver can
+	// read it before the first byte goes out. An unknown hello field is ignored
+	// by every daemon version, so an older daemon simply never hears it and
+	// keeps sending the base shapes; a client that sends nothing (every build
+	// before this, tests, probes) gets the base shapes from a newer daemon.
+	Features []string `json:"features,omitempty"`
 }
+
+// Client features (Hello.Features).
+const (
+	// ClientFeatureSparseFrames: the client keeps each pane's grid and can
+	// apply a diff frame that carries only the changed cells (Frame.Sparse).
+	// Without it a diff frame carries the whole grid with unchanged cells
+	// marked Skip — see FrameFromSnapshot for why that density was needed.
+	ClientFeatureSparseFrames = "sparse_frames"
+)
+
+// HasFeature reports whether the hello advertised one client feature.
+func (c Hello) HasFeature(name string) bool { return slices.Contains(c.Features, name) }
 
 func NewHello() Hello { return Hello{Type: MsgHello, ProtocolVersion: ProtocolVersion} }
 
@@ -1169,13 +1191,28 @@ func NewError(paneID uint32, msg string) Error {
 // Shaped to drop straight into Rust wire::FrameData / CellData compositing.
 
 // Cell mirrors Rust wire::CellData.
+//
+// Modifier, Skip and Hyperlink are omitted at their zero values. That is a pure
+// size change, readable by every receiver: each decode targets a fresh value
+// (catway unmarshals every frame into a new PaneFrame), so an absent field
+// reads back as exactly the zero that used to be spelled out. On a plain-text
+// screen the three were ~40 of a cell's ~85 bytes.
 type Cell struct {
 	Symbol    string  `json:"symbol"`
-	Fg        uint32  `json:"fg"`        // packed: 0x02_RR_GG_BB
-	Bg        uint32  `json:"bg"`        // packed: 0x02_RR_GG_BB
-	Modifier  uint16  `json:"modifier"`  // ratatui Modifier bitmask
-	Skip      bool    `json:"skip"`      // true ⇒ unchanged since last frame (diff)
-	Hyperlink *uint32 `json:"hyperlink"` // OSC 8 index (reserved; not yet populated)
+	Fg        uint32  `json:"fg"`                  // packed: 0x02_RR_GG_BB
+	Bg        uint32  `json:"bg"`                  // packed: 0x02_RR_GG_BB
+	Modifier  uint16  `json:"modifier,omitempty"`  // ratatui Modifier bitmask
+	Skip      bool    `json:"skip,omitempty"`      // true ⇒ unchanged since last frame (diff)
+	Hyperlink *uint32 `json:"hyperlink,omitempty"` // OSC 8 index into Frame.Hyperlinks
+}
+
+// CellRun is a contiguous stretch of changed cells in a sparse diff: Cells[k]
+// is the cell at row-major index At+k. Runs rather than one index per cell,
+// because changes cluster — a line of output, a status bar, a spinner — and a
+// run pays for its index once.
+type CellRun struct {
+	At    int    `json:"at"`
+	Cells []Cell `json:"cells"`
 }
 
 // Cursor mirrors Rust wire::CursorState.
@@ -1187,12 +1224,20 @@ type Cursor struct {
 }
 
 // Frame is one pane's grid, full or diffed.
+//
+// A diff comes in two shapes. DENSE (the base protocol): Cells holds the whole
+// grid, unchanged cells marked Skip. SPARSE (Sparse set, only to a client that
+// advertised ClientFeatureSparseFrames): Cells is empty and Runs holds only
+// what changed. A full frame is always dense.
 type Frame struct {
 	Cols   uint16  `json:"cols"`
 	Rows   uint16  `json:"rows"`
 	Full   bool    `json:"full"`
 	Cursor *Cursor `json:"cursor"`
-	Cells  []Cell  `json:"cells"` // row-major, len == cols*rows
+	Cells  []Cell  `json:"cells"` // row-major, len == cols*rows (nil on a sparse diff)
+	// Sparse marks a diff that carries Runs instead of Cells.
+	Sparse bool      `json:"sparse,omitempty"`
+	Runs   []CellRun `json:"runs,omitempty"`
 	// Hyperlinks is the frame's OSC 8 URI table; a cell's Hyperlink indexes into it.
 	// Only populated on frames that carry links (which are always sent full).
 	Hyperlinks []string `json:"hyperlinks,omitempty"`
@@ -1342,6 +1387,39 @@ func FrameFromSnapshot(cur, prev *terminal.Snapshot) *Frame {
 	return f
 }
 
+// Sparsify turns a dense diff into a sparse one in place: the changed cells are
+// gathered into runs and the full grid is dropped. A full frame is left alone —
+// it has no unchanged cells to leave out, and a receiver rebuilds its grid from
+// it. A diff with nothing changed (a cursor move, a scroll-position update)
+// becomes a sparse frame with no runs.
+//
+// Only for a client that advertised ClientFeatureSparseFrames: an older client
+// builds full browser frames out of a diff's skipped cells, and would draw a
+// blank screen from one of these.
+func (f *Frame) Sparsify() {
+	if f.Full || f.Sparse {
+		return
+	}
+	var runs []CellRun
+	for i := 0; i < len(f.Cells); {
+		if f.Cells[i].Skip {
+			i++
+			continue
+		}
+		j := i
+		for j < len(f.Cells) && !f.Cells[j].Skip {
+			j++
+		}
+		// Re-sliced, not copied: the dense slice is dropped below and nothing
+		// else holds it, so the run can share its backing array.
+		runs = append(runs, CellRun{At: i, Cells: f.Cells[i:j:j]})
+		i = j
+	}
+	f.Runs = runs
+	f.Cells = nil
+	f.Sparse = true
+}
+
 // --- Framing codec: [u32-LE length][JSON payload] ---------------------------
 
 // WriteMessage marshals m to JSON and writes it as a length-prefixed frame.
@@ -1399,6 +1477,9 @@ func ReadMessage(r io.Reader) (MessageType, []byte, error) {
 	if _, err := io.ReadFull(r, payload); err != nil {
 		return "", nil, err
 	}
+	if typ, ok := peekType(payload); ok {
+		return typ, payload, nil
+	}
 	var env struct {
 		Type MessageType `json:"type"`
 	}
@@ -1406,4 +1487,29 @@ func ReadMessage(r io.Reader) (MessageType, []byte, error) {
 		return "", nil, fmt.Errorf("orchestration: decode type: %w", err)
 	}
 	return env.Type, payload, nil
+}
+
+// peekType reads the "type" discriminator off the front of a payload without
+// decoding the rest of it.
+//
+// Every message is marshalled from a struct whose FIRST field is Type, so the
+// payload starts `{"type":"<name>"`. ReadMessage used to json.Unmarshal the
+// whole payload to learn that name and then the caller unmarshalled it again
+// into the concrete struct: for a pane frame that was a full second pass over
+// what can be most of a megabyte, every flush tick, per busy pane. Anything
+// that does not match the exact prefix (hand-written JSON, a reordered peer, an
+// escaped name) reports !ok and takes the full decode, so this can only ever be
+// a shortcut, never a different answer. A malformed body behind a well-formed
+// prefix is still caught: the caller's own unmarshal rejects it.
+func peekType(payload []byte) (MessageType, bool) {
+	const prefix = `{"type":"`
+	if !bytes.HasPrefix(payload, []byte(prefix)) {
+		return "", false
+	}
+	rest := payload[len(prefix):]
+	end := bytes.IndexByte(rest, '"')
+	if end <= 0 || bytes.IndexByte(rest[:end], '\\') >= 0 {
+		return "", false
+	}
+	return MessageType(rest[:end]), true
 }

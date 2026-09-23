@@ -132,6 +132,11 @@ type paneRuntime struct {
 	// created reports whether the daemon holds this pane's PTY. reconcile
 	// resets it from the daemon's surviving-pane set on every (re)connect.
 	created bool
+	// grid is the pane's last resolved screen, maintained from the daemon's
+	// frames on the loop. It is what lets the daemon send a diff carrying only
+	// the cells that changed: a connection that needs a full frame is served
+	// from here (see browserproto.Grid).
+	grid browserproto.Grid
 	// histDirty marks output since the last history capture (WS3): the periodic
 	// sweep only captures panes whose content actually changed. Set on every
 	// pane_frame, cleared when a capture is issued.

@@ -399,6 +399,13 @@ type Host struct {
 	// The command-ledger subscription (ledger.go): off until a client asks for
 	// shell-integration marks, and off again when it stops.
 	ledgerFields
+
+	// sparseFrames records that the attached client's hello advertised
+	// ClientFeatureSparseFrames, so diff frames go out carrying only their
+	// changed cells (Frame.Sparsify). Per session: set by the hello, cleared on
+	// detach, so a frame taken between the next Attach and its hello is dense —
+	// the next client may be an older build that cannot read a sparse one.
+	sparseFrames atomic.Bool
 }
 
 // NewHost creates an empty Host.
@@ -538,6 +545,7 @@ func (h *Host) Attach(ctx context.Context, conn io.ReadWriteCloser) error {
 	h.sessDone = nil
 	h.sessCancel = nil
 	h.connMu.Unlock()
+	h.sparseFrames.Store(false)
 	box.Close()
 	// The subscription belongs to the connection that asked for it. Left
 	// running, a persistent daemon would go on sampling (and, on darwin, keep an
@@ -869,6 +877,10 @@ func (h *Host) handleHello(payload []byte) error {
 			return h.rejectHello("authentication failed: bad or missing token")
 		}
 	}
+	// Before the replay below, though it does not matter to it — the replay is
+	// full frames, which are the same in both shapes. It matters to the flusher,
+	// whose next diff is the first one this client could misread.
+	h.sparseFrames.Store(c.HasFeature(ClientFeatureSparseFrames))
 
 	h.mu.Lock()
 	ids := make([]uint32, 0, len(h.panes))
@@ -1451,6 +1463,12 @@ func (h *Host) takeFrame(p *pane) (*Frame, error) {
 	}
 	f := FrameFromSnapshot(snap, p.prev)
 	p.prev = snap
+	// A client that keeps its own grid is sent only what changed. For a
+	// one-character echo on a 200×50 pane that is ~100 bytes instead of the
+	// ~850 KB a dense diff spells out, cell by skipped cell.
+	if h.sparseFrames.Load() {
+		f.Sparsify()
+	}
 	return f, nil
 }
 
