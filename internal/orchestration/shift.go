@@ -42,14 +42,19 @@ const minShiftGainRows = 2
 // chooseShift reports the shift (rows moved up) that best explains cur given
 // prev, and prev moved up by it with the vacated rows set to fill. n is 0 —
 // and shifted nil — when no shift saves enough to be worth sending.
-func chooseShift(cur, prev []Cell, cols, rows int, fill Cell) (n int, shifted []Cell) {
+//
+// plain is how many cells differ from prev in place, when the caller already
+// knows (FrameBuilder counts it while resolving); pass -1 to have it counted.
+func chooseShift(cur, prev []Cell, cols, rows int, fill Cell, plain int) (n int, shifted []Cell) {
 	if cols <= 0 || rows < 3 || len(cur) != cols*rows || len(prev) != cols*rows {
 		return 0, nil
 	}
-	plain := 0
-	for i := range cur {
-		if cur[i] != prev[i] {
-			plain++
+	if plain < 0 {
+		plain = 0
+		for i := range cur {
+			if cur[i] != prev[i] {
+				plain++
+			}
 		}
 	}
 	gain := minShiftGainRows * cols

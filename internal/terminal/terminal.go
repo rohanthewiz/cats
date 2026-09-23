@@ -58,6 +58,11 @@ type Cell struct {
 // Snapshot is an immutable, copied view of the terminal grid. Every field is a
 // Go value (no references into the C terminal), so it is safe to hand to the
 // renderer and to retain across further writes.
+//
+// Immutable is a rule readers must keep, not only a property: an emulator may
+// share an unchanged row's slice between successive snapshots (the ghostty
+// emulator does, for rows the terminal did not touch), so writing into one
+// snapshot's cells would change another's.
 type Snapshot struct {
 	Cols, Rows uint16
 	Cells      [][]Cell // [row][col], len == Rows, each row len == Cols

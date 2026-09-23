@@ -1437,16 +1437,12 @@ func frameFromSnapshot(cur, prev *terminal.Snapshot, allowShift bool) *Frame {
 		cur.HasHyperlinks || prev.HasHyperlinks
 
 	f := &Frame{
-		Cols:  cur.Cols,
-		Rows:  cur.Rows,
-		Full:  full,
-		Cells: make([]Cell, 0, int(cur.Cols)*int(cur.Rows)),
-		Cursor: &Cursor{
-			X:       cur.Cursor.X,
-			Y:       cur.Cursor.Y,
-			Visible: cur.Cursor.Visible,
-			Shape:   cursorShape(cur.Cursor.Style),
-		},
+		Cols:   cur.Cols,
+		Rows:   cur.Rows,
+		Full:   full,
+		Cells:  make([]Cell, 0, int(cur.Cols)*int(cur.Rows)),
+		Cursor: frameCursor(cur),
+		Scroll: frameScroll(cur),
 	}
 
 	var hlIndex map[string]uint32 // URI → table index, built only when links present
@@ -1478,7 +1474,7 @@ func frameFromSnapshot(cur, prev *terminal.Snapshot, allowShift bool) *Frame {
 		base := resolveCells(prev)
 		if allowShift {
 			fill := Cell{Symbol: " ", Fg: packRGB(cur.DefaultFg), Bg: packRGB(cur.DefaultBg)}
-			if n, shifted := chooseShift(f.Cells, base, int(cur.Cols), int(cur.Rows), fill); n > 0 {
+			if n, shifted := chooseShift(f.Cells, base, int(cur.Cols), int(cur.Rows), fill, -1); n > 0 {
 				base = shifted
 				f.Shift = &Shift{Rows: n, Fill: fill}
 			}
@@ -1489,16 +1485,30 @@ func frameFromSnapshot(cur, prev *terminal.Snapshot, allowShift bool) *Frame {
 			}
 		}
 	}
-	// Carry scrollback position only when the pane has history (or is scrolled),
-	// leaving non-scrollback panes' frames byte-for-byte as before.
-	if cur.Scroll.MaxOffsetFromBottom > 0 || cur.Scroll.OffsetFromBottom > 0 {
-		f.Scroll = &ScrollInfo{
-			OffsetFromBottom:    cur.Scroll.OffsetFromBottom,
-			MaxOffsetFromBottom: cur.Scroll.MaxOffsetFromBottom,
-			ViewportRows:        cur.Scroll.ViewportRows,
-		}
-	}
 	return f
+}
+
+func frameCursor(cur *terminal.Snapshot) *Cursor {
+	return &Cursor{
+		X:       cur.Cursor.X,
+		Y:       cur.Cursor.Y,
+		Visible: cur.Cursor.Visible,
+		Shape:   cursorShape(cur.Cursor.Style),
+	}
+}
+
+// frameScroll carries the scrollback position only when the pane has history
+// (or is scrolled), leaving non-scrollback panes' frames byte-for-byte as
+// before.
+func frameScroll(cur *terminal.Snapshot) *ScrollInfo {
+	if cur.Scroll.MaxOffsetFromBottom == 0 && cur.Scroll.OffsetFromBottom == 0 {
+		return nil
+	}
+	return &ScrollInfo{
+		OffsetFromBottom:    cur.Scroll.OffsetFromBottom,
+		MaxOffsetFromBottom: cur.Scroll.MaxOffsetFromBottom,
+		ViewportRows:        cur.Scroll.ViewportRows,
+	}
 }
 
 // resolveCells resolves every cell of snap, row-major, without links: it is

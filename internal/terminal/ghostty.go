@@ -34,6 +34,16 @@ type ghosttyEmulator struct {
 	rs *libghostty.RenderState
 	ri *libghostty.RenderStateRowIterator
 	rc *libghostty.RenderStateRowCells
+
+	// The rows of the last snapshot, reused for rows libghostty reports
+	// clean (see Snapshot). lastLinks[y] records whether row y carries an
+	// OSC 8 link, since a reused row skips the check that finds out.
+	// lastScroll and lastCols are what the cache was taken at: a viewport that
+	// moved or a width that changed invalidates it outright.
+	lastRows   [][]Cell
+	lastLinks  []bool
+	lastCols   uint16
+	lastScroll ScrollMetrics
 }
 
 // Option configures a new Emulator.
@@ -380,23 +390,62 @@ func (e *ghosttyEmulator) Snapshot() (*Snapshot, error) {
 	}
 
 	if err := e.rs.RowIterator(e.ri); err != nil {
+		e.lastRows = nil
 		return nil, fmt.Errorf("terminal: row iterator bind: %w", err)
+	}
+
+	// Rows libghostty reports clean since the last snapshot are taken from
+	// that snapshot instead of being read again.
+	//
+	// Reading a row costs ~3 cgo calls per cell (next, graphemes, style) and
+	// an allocation for every coloured cell; a 200×50 screen was ~1 ms and
+	// 10,000 allocations per snapshot, every flush tick, for a busy pane whose
+	// output typically touches a row or two. The render state tracks exactly
+	// which rows changed — it is what Ghostty's own renderer redraws from —
+	// and the dirty flags are cleared here after each read, so "clean" means
+	// "unchanged since the snapshot this emulator last produced".
+	//
+	// Sharing the row slices is safe because a Snapshot is immutable: no
+	// reader writes into its cells (see Snapshot's doc).
+	//
+	// The cache is only trusted when nothing global moved: libghostty's own
+	// full-redraw signal, a resize, or a viewport that scrolled (the rows on
+	// screen are then different rows of the buffer) each read every row.
+	reuse := e.lastRows != nil && e.lastCols == cols && len(e.lastRows) == int(rows) &&
+		snap.Scroll == e.lastScroll
+	if d, err := e.rs.Dirty(); err != nil || d == libghostty.RenderStateDirtyFull {
+		reuse = false
 	}
 
 	var style libghostty.RenderCellStyle
 	buf := make([]byte, 0, 8)
 	var linkRows []uint32 // viewport rows the iterator flags as containing OSC 8 links
+	rowLinks := make([]bool, 0, rows)
 	for e.ri.Next() {
+		y := len(snap.Cells)
+		if reuse && y < len(e.lastRows) {
+			if dirty, err := e.ri.Dirty(); err == nil && !dirty {
+				snap.Cells = append(snap.Cells, e.lastRows[y])
+				rowLinks = append(rowLinks, e.lastLinks[y])
+				if e.lastLinks[y] {
+					snap.HasHyperlinks = true
+				}
+				continue
+			}
+		}
 		if err := e.ri.Cells(e.rc); err != nil {
+			e.lastRows = nil
 			return nil, fmt.Errorf("terminal: cells: %w", err)
 		}
 		row := make([]Cell, 0, cols)
 		for e.rc.Next() {
 			g, err := e.rc.AppendGraphemes(buf[:0])
 			if err != nil {
+				e.lastRows = nil
 				return nil, fmt.Errorf("terminal: graphemes: %w", err)
 			}
 			if err := e.rc.StyleInto(&style); err != nil {
+				e.lastRows = nil
 				return nil, fmt.Errorf("terminal: style: %w", err)
 			}
 			row = append(row, toCell(string(g), &style))
@@ -406,11 +455,15 @@ func (e *ghosttyEmulator) Snapshot() (*Snapshot, error) {
 		// false positives, which the per-cell HyperlinkURI ("" = none) absorbs.
 		if raw, err := e.ri.Raw(); err == nil {
 			if hl, err := raw.Hyperlink(); err == nil && hl {
-				linkRows = append(linkRows, uint32(len(snap.Cells)))
+				linkRows = append(linkRows, uint32(y))
 			}
 		}
+		// Read, so clean until the terminal next touches it.
+		_ = e.ri.SetDirty(false)
 		snap.Cells = append(snap.Cells, row)
+		rowLinks = append(rowLinks, false)
 	}
+	_ = e.rs.SetDirty(libghostty.RenderStateDirtyFalse)
 
 	// Resolve OSC 8 URIs for flagged rows after the render iteration completes, so
 	// GridRef (a borrowed view of terminal internals) never interleaves with the
@@ -432,10 +485,12 @@ func (e *ghosttyEmulator) Snapshot() (*Snapshot, error) {
 				continue
 			}
 			row[x].Link = uri
+			rowLinks[y] = true
 			snap.HasHyperlinks = true
 		}
 	}
 
+	e.lastRows, e.lastLinks, e.lastCols, e.lastScroll = snap.Cells, rowLinks, cols, snap.Scroll
 	return snap, nil
 }
 

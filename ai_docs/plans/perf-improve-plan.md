@@ -234,13 +234,49 @@ byte equality, every escaping branch), `TestMarshalFrameFallsBack`,
 
 ---
 
+## 6. Snapshot and diff cost  (done)
+
+### Problem
+Measured on a 200×50 coloured screen with one character changed per tick:
+`Snapshot` took ~1 ms and 10,000 allocations (~3 cgo calls per cell, a
+pointer per coloured cell), and building the diff another ~370 µs (both
+snapshots resolved in full, every cell compared) — all of it under `emuMu`,
+so `readPump` could not feed the emulator meanwhile.
+
+### Design
+- **Row cache in the emulator** (`terminal/ghostty.go`). Rows the render state
+  reports clean are taken from the previous snapshot (same slice) instead of
+  read again; dirty flags are cleared after each read. Distrusted wholesale on
+  libghostty's `DirtyFull`, a resize, or a viewport that scrolled.
+  `Snapshot` is documented as immutable-by-rule, since rows are now shared.
+- **`FrameBuilder`** (`orchestration/framebuild.go`) replaces `p.prev`: it keeps
+  the last frame's resolved grid, copies rows the snapshot shared (equal by
+  construction; skipped when the default colours changed), resolves and
+  compares only the rest, gathers sparse runs directly, and double-buffers the
+  grid. `FrameFromSnapshot` stays as the stateless reference.
+- **Off `emuMu`.** Only the snapshot is taken under `emuMu`; the diff is built
+  afterwards. A new `frameMu` spans snapshot → emit in both the flusher
+  (`emitFrame`) and `resyncPane`, which also closes an older race: a resync's
+  full frame could overtake a diff taken against the old base.
+
+### Result
+`BenchmarkSnapshotOneCellChanged`: 1,025 µs / 10,214 allocs → 24 µs / 272.
+`BenchmarkTakeFrameOneCellChanged` (snapshot + sparse shifted diff): 389 µs
+through the reference path → 40 µs through the builder (and ~1.4 ms before
+the row cache).
+
+Tests: `TestSnapshotRowCacheMatchesAFreshRead` (3,000 random VT steps — scroll
+regions, IL/DL, alt screen, links, viewport scrolls, resizes — cached snapshot
+== fresh read; verified to fail when the cache is deliberately broken),
+`TestFrameBuilderMatchesTheReference` (four builders, one per feature
+combination, against the reference on real emulator snapshots).
+
+---
+
 ## Later (not started)
 
 3b. **Compression.** rweb v0.1.28 has no permessage-deflate; adding it shrinks
    terminal JSON 10–20×.
-6. **Snapshot cost.** ~3 cgo calls per cell; libghostty's per-row dirty tracking
-   (`RenderState.Dirty`, row `Dirty`) is unused; `FrameFromSnapshot` runs under
-   `emuMu`, stalling `feed`; per-tick allocation of the whole grid.
 7. **Suppress empty frames** (no cell, cursor or scroll change).
 8. **WebSocket write batching** in rweb (header + payload in one write; drain
    the queue per wakeup).

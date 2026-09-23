@@ -61,10 +61,20 @@ type pane struct {
 	detectSeq atomic.Uint64
 
 	// emuMu serializes all emulator access (the emulator is not concurrency
-	// safe) and guards prev/closed.
+	// safe) and guards closed.
 	emuMu  sync.Mutex
-	prev   *terminal.Snapshot // last snapshot sent, for diffing
 	closed bool
+
+	// frameMu guards frames and orders the frames this pane emits. It is held
+	// from the snapshot to the emit, so the frame built from a snapshot leaves
+	// before the next snapshot is taken — by the flusher or by a resync. Without
+	// that, a resync's full frame could overtake a diff the flusher had taken
+	// against the OLD base, and the client would apply the diff on top of the
+	// new one. Taken before emuMu, never inside it, and held only across the
+	// snapshot and the (non-blocking) emit, so readPump's feed waits on emuMu
+	// for the snapshot alone, not for the diff.
+	frameMu sync.Mutex
+	frames  FrameBuilder // the last frame sent, resolved, for diffing
 
 	// OSC passthrough scanners, owned exclusively by this pane's readPump goroutine
 	// (libghostty-vt does not surface OSC 7 cwd, so we scan the raw byte stream).
@@ -945,24 +955,27 @@ func (h *Host) rejectHello(reason string) error {
 // current input modes, and the last-known cwd/title/agent. Used on reconnect so
 // an adopted pane is immediately consistent without waiting for new output.
 func (h *Host) resyncPane(p *pane) {
+	p.frameMu.Lock()
 	p.emuMu.Lock()
 	if p.closed {
 		p.emuMu.Unlock()
+		p.frameMu.Unlock()
 		return
 	}
 	snap, err := p.emu.Snapshot()
 	var modes terminal.InputModes
 	var modesErr error
 	if err == nil {
-		p.prev = snap // re-baseline: subsequent diffs are relative to this full frame
 		modes, modesErr = p.emu.InputModes()
 	}
 	p.emuMu.Unlock()
 	if err != nil {
+		p.frameMu.Unlock()
 		return
 	}
-
-	h.emit(NewPaneFrame(p.id, FrameFromSnapshot(snap, nil))) // full frame
+	// Full, and the new base: subsequent diffs are relative to this frame.
+	h.emit(NewPaneFrame(p.id, p.frames.Full(snap)))
+	p.frameMu.Unlock()
 	modes.ModifyOtherKeys = p.modifyOtherKeys.Load()
 	if modesErr == nil {
 		// Emit current modes directly; don't touch the flusher-owned lastModes/hasModes.
@@ -1189,9 +1202,7 @@ func (h *Host) readPump(p *pane) {
 	}
 
 	h.removePane(p.id) // stop the flusher from touching it
-	if f, err := h.takeFrame(p); err == nil && f != nil {
-		h.emit(NewPaneFrame(p.id, f))
-	}
+	_ = h.emitFrame(p)
 	h.closePane(p)
 	h.emit(NewPaneExited(p.id, exitCode(p.cmd.Wait())))
 }
@@ -1471,34 +1482,34 @@ func (h *Host) feed(p *pane, b []byte) {
 	_, _ = p.emu.Write(b)
 }
 
-// takeFrame snapshots the pane, diffs against the last sent snapshot, and
-// records the new snapshot — all under emuMu. Returns (nil, nil) if closed.
-func (h *Host) takeFrame(p *pane) (*Frame, error) {
+// emitFrame snapshots the pane, diffs it against the last frame sent, and
+// emits the diff. Nothing is emitted for a closed pane.
+//
+// Only the snapshot happens under emuMu. The diff is built from the snapshot,
+// which is an immutable copy, after the emulator is released — so readPump,
+// which needs emuMu to feed the emulator the pane's output, waits for the
+// snapshot and not for the diff (see frameMu for what keeps the order).
+func (h *Host) emitFrame(p *pane) error {
+	p.frameMu.Lock()
+	defer p.frameMu.Unlock()
 	p.emuMu.Lock()
-	defer p.emuMu.Unlock()
 	if p.closed {
-		return nil, nil
+		p.emuMu.Unlock()
+		return nil
 	}
 	snap, err := p.emu.Snapshot()
+	p.emuMu.Unlock()
 	if err != nil {
-		return nil, err
+		return err
 	}
-	var f *Frame
-	if h.shiftFrames.Load() {
-		// Scrolling output diffs against the previous screen moved up, so a
-		// line of `cat` costs a line, not the whole grid.
-		f = ShiftedFrameFromSnapshot(snap, p.prev)
-	} else {
-		f = FrameFromSnapshot(snap, p.prev)
-	}
-	p.prev = snap
 	// A client that keeps its own grid is sent only what changed. For a
 	// one-character echo on a 200×50 pane that is ~100 bytes instead of the
-	// ~850 KB a dense diff spells out, cell by skipped cell.
-	if h.sparseFrames.Load() {
-		f.Sparsify()
-	}
-	return f, nil
+	// ~850 KB a dense diff spells out, cell by skipped cell. One that can also
+	// scroll it is sent scrolling output as a shift, so a line of `cat` costs
+	// a line, not the whole grid.
+	f := p.frames.Diff(snap, h.sparseFrames.Load(), h.shiftFrames.Load())
+	h.emit(NewPaneFrame(p.id, f))
+	return nil
 }
 
 func (h *Host) resizePane(c Resize) error {
@@ -1618,13 +1629,9 @@ func (h *Host) flushDirty() {
 		if !p.dirty.Swap(false) {
 			continue
 		}
-		f, err := h.takeFrame(p)
-		if err != nil {
+		if err := h.emitFrame(p); err != nil {
 			h.emit(NewError(p.id, err.Error()))
 			continue
-		}
-		if f != nil {
-			h.emit(NewPaneFrame(p.id, f))
 		}
 		// Input modes can only change as a result of program output, so a pane that
 		// just produced a frame is exactly when to re-check them.

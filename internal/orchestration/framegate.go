@@ -23,9 +23,9 @@ import (
 //
 // What keeps that correct is the client's side of the bargain, which it already
 // kept before the gate existed: a pane entering a viewport is sent a
-// request_resync, which re-baselines p.prev and replays a full frame. The
-// frames skipped while it was hidden are never needed, because nothing is ever
-// diffed against them.
+// request_resync, which re-baselines the pane's FrameBuilder and replays a full
+// frame. The frames skipped while it was hidden are never needed, because
+// nothing is ever diffed against them.
 //
 // Input modes are still read for a gated pane that produced output: they
 // decide how input is encoded (bracketed paste, the kitty protocol), and input
