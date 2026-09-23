@@ -18,6 +18,10 @@ type FrameTranslator struct {
 	pane         uint32
 	defFg, defBg uint32
 	haveFull     bool
+	// shift: this connection applies PaneDiff.Shift (wire.FeaturePaneShift).
+	// Without it, a shifted β frame is answered with a full frame, which is
+	// exactly what scrolling output cost before shifts existed.
+	shift bool
 }
 
 func NewFrameTranslator(pane uint32) *FrameTranslator {
@@ -27,6 +31,9 @@ func NewFrameTranslator(pane uint32) *FrameTranslator {
 // Reset forces the next Translate to emit a full pane_frame — used when the
 // pane becomes visible in this connection's viewport (§8) or after a resync.
 func (t *FrameTranslator) Reset() { t.haveFull = false }
+
+// AllowShift records that the connection can apply PaneDiff.Shift.
+func (t *FrameTranslator) AllowShift() { t.shift = true }
 
 // FrameView is one β frame resolved against the pane's whole grid — what a
 // translator needs whichever shape the frame arrived in.
@@ -42,14 +49,22 @@ type FrameView struct {
 	Frame *orchestration.Frame // cursor, scroll, links, dimensions, Full
 	Cells []orchestration.Cell // the whole grid after this frame, row-major
 	// Changed lists the row-major indices this diff touched, ascending. Unused
-	// when Frame.Full.
+	// when Frame.Full. With a Shift they are relative to the SHIFTED grid:
+	// every other cell equals the cell Shift rows below it in the previous
+	// grid (or the fill, in the vacated rows).
 	Changed []int
+	// Shift is the rows the grid scrolled up by before Changed applied
+	// (orchestration.Shift); 0 for none.
+	Shift int
 }
 
 // DenseView is the view of a frame that carries its own grid: a full frame,
 // or a diff in the base (dense, skip-flagged) shape.
 func DenseView(f *orchestration.Frame) FrameView {
 	v := FrameView{Frame: f, Cells: f.Cells}
+	if f.Shift != nil && !f.Full {
+		v.Shift = f.Shift.Rows
+	}
 	if !f.Full {
 		for i := range f.Cells {
 			if !f.Cells[i].Skip {
@@ -101,6 +116,21 @@ func (g *Grid) Apply(f *orchestration.Frame) (v FrameView, ok bool) {
 		return FrameView{}, false
 	}
 	v = FrameView{Frame: f, Cells: g.cells}
+	if sh := f.Shift; sh != nil {
+		// Scroll first, then patch: the runs were taken against the shifted
+		// grid (orchestration.Shift). A shift the grid cannot hold is the same
+		// disagreement as a run off the end — refuse and wait for a full frame.
+		if sh.Rows <= 0 || sh.Rows >= int(g.rows) {
+			g.valid = false
+			return FrameView{}, false
+		}
+		cols := int(g.cols)
+		k := copy(g.cells, g.cells[sh.Rows*cols:])
+		for i := k; i < n; i++ {
+			g.cells[i] = sh.Fill
+		}
+		v.Shift = sh.Rows
+	}
 	for _, r := range f.Runs {
 		if r.At < 0 || r.At+len(r.Cells) > n {
 			// A run off the end of the grid means the two sides disagree about
@@ -131,7 +161,21 @@ func (t *FrameTranslator) Translate(f *orchestration.Frame) any {
 // otherwise a *PaneDiff.
 func (t *FrameTranslator) TranslateView(v *FrameView) any {
 	f := v.Frame
-	if f.Full || !t.haveFull || len(v.Changed)*fullFallbackDen > len(v.Cells)*fullFallbackNum {
+	if f.Full || !t.haveFull {
+		return t.translateFull(v)
+	}
+	changed := len(v.Changed)
+	if v.Shift > 0 {
+		if !t.shift {
+			// Changed is relative to a shifted grid this client will never
+			// hold, so no diff can describe the update to it.
+			return t.translateFull(v)
+		}
+		// The vacated rows may cost cells of their own (see translateDiff);
+		// counted as a whole so the fallback errs toward the full frame.
+		changed += v.Shift * int(f.Cols)
+	}
+	if changed*fullFallbackDen > len(v.Cells)*fullFallbackNum {
 		return t.translateFull(v)
 	}
 	return t.translateDiff(v)
@@ -175,11 +219,35 @@ func (t *FrameTranslator) translateDiff(v *FrameView) *PaneDiff {
 		cur := cursorFrom(f.Cursor)
 		out.Cur = &cur
 	}
+	if v.Shift == 0 {
+		for _, i := range v.Changed {
+			out.Cells = append(out.Cells, DiffCell{I: i, Cell: cellFrom(v.Cells[i], t.defFg, t.defBg)})
+		}
+		return out
+	}
+	// A shift blanks the vacated rows to THIS connection's blank — a space in
+	// its def_fg/def_bg — which need not be the β fill (the terminal's default
+	// colours; def_fg/def_bg are the frame's dominant ones). So the vacated
+	// rows are not trusted to Changed: every cell there that differs from the
+	// browser's blank is sent, and Changed covers the rows above them.
+	out.Shift = v.Shift
+	vacated := (int(f.Rows) - v.Shift) * int(f.Cols)
 	for _, i := range v.Changed {
+		if i >= vacated {
+			break // ascending, so the rest are all in the vacated rows
+		}
 		out.Cells = append(out.Cells, DiffCell{I: i, Cell: cellFrom(v.Cells[i], t.defFg, t.defBg)})
+	}
+	for i := vacated; i < len(v.Cells); i++ {
+		if c := cellFrom(v.Cells[i], t.defFg, t.defBg); c != blankCell {
+			out.Cells = append(out.Cells, DiffCell{I: i, Cell: c})
+		}
 	}
 	return out
 }
+
+// blankCell is what a browser fills a shift's vacated rows with.
+var blankCell = Cell{S: " "}
 
 // cellFrom translates a resolved β cell, zeroing (⇒ omitting) colors equal to
 // the frame defaults. β's link index becomes 1-based (0 = none).

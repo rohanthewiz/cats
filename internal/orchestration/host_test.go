@@ -1171,6 +1171,63 @@ func TestHostSparseFramesFollowTheHello(t *testing.T) {
 	})
 }
 
+// Shifted diffs go only to a client that asked for them (with sparse frames),
+// and real scrolling output in a real emulator produces them.
+func TestHostShiftFramesFollowTheHello(t *testing.T) {
+	run := func(t *testing.T, features ...string) (shifts int) {
+		hello := NewHello()
+		hello.Features = features
+		c := startTestHostHello(t, hello)
+		cp := NewCreatePane(1, 30, 6)
+		cp.Command = "/bin/sh"
+		// A screenful of long, distinct lines, a pause so a frame holds them,
+		// then two more lines: the screen scrolls by two.
+		cp.Args = []string{"-c", `for c in a b c d e f g; do printf "%s\n" "$c$c$c$c$c$c$c$c$c$c$c$c$c$c$c$c$c$c$c$c$c$c$c$c$c"; done
+sleep 0.3
+for c in x y; do printf "%s\n" "$c$c$c$c$c$c$c$c$c$c$c$c$c$c$c$c$c$c$c$c$c$c$c$c$c"; done
+sleep 0.3`}
+		if err := WriteMessage(c, cp); err != nil {
+			t.Fatalf("create_pane: %v", err)
+		}
+		for {
+			typ, payload := readEvent(t, c)
+			switch typ {
+			case MsgPaneFrame:
+				var pf PaneFrame
+				if err := json.Unmarshal(payload, &pf); err != nil {
+					t.Fatalf("decode pane_frame: %v", err)
+				}
+				if sh := pf.Frame.Shift; sh != nil {
+					if !pf.Frame.Sparse || sh.Rows <= 0 || sh.Rows >= int(pf.Frame.Rows) {
+						t.Fatalf("bad shifted frame: sparse=%v shift=%+v", pf.Frame.Sparse, sh)
+					}
+					shifts++
+				}
+			case MsgPaneExited:
+				return shifts
+			case MsgError:
+				t.Fatalf("unexpected error event: %s", payload)
+			}
+		}
+	}
+
+	t.Run("advertised", func(t *testing.T) {
+		if n := run(t, ClientFeatureSparseFrames, ClientFeatureShiftFrames); n == 0 {
+			t.Fatal("scrolling output produced no shifted diff")
+		}
+	})
+	t.Run("without sparse frames", func(t *testing.T) {
+		if n := run(t, ClientFeatureShiftFrames); n != 0 {
+			t.Fatalf("%d shifted diffs to a client that cannot take sparse frames", n)
+		}
+	})
+	t.Run("not advertised", func(t *testing.T) {
+		if n := run(t, ClientFeatureSparseFrames); n != 0 {
+			t.Fatalf("%d shifted diffs to a client that did not ask", n)
+		}
+	})
+}
+
 // The frame gate: a pane outside it is never framed, only reported as active;
 // let back in and resynced, it replays a full frame holding everything it
 // printed while hidden.

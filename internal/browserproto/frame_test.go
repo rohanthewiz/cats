@@ -266,6 +266,16 @@ func (r *recon) apply(t *testing.T, msg any) {
 		}
 		r.cur = m.Cur
 	case *PaneDiff:
+		if m.Shift > 0 {
+			// wire.PaneDiff: scroll up, blank the vacated rows, then patch.
+			if m.Shift >= r.h {
+				t.Fatalf("shift %d on a %d-row grid", m.Shift, r.h)
+			}
+			k := copy(r.cells, r.cells[m.Shift*r.w:])
+			for i := k; i < len(r.cells); i++ {
+				r.cells[i] = r.resolve(Cell{S: " "})
+			}
+		}
 		prev := -1
 		for _, dc := range m.Cells {
 			if dc.I <= prev || dc.I >= len(r.cells) {
@@ -367,30 +377,61 @@ func TestReplayReconstruction(t *testing.T) {
 	var fold betaFold
 	fulls, diffs, linkSteps := 0, 0, 0
 
-	for step := range 60 {
+	// And a third time, with shifted diffs (ClientFeatureShiftFrames): one
+	// view, translated for two connections, as catway's frame loop does — one
+	// that applies PaneDiff.Shift and one that does not, which must be handed
+	// a full frame whenever the β frame shifted. Both must land on the same
+	// screen as the plain path.
+	shTr := NewFrameTranslator(9)
+	shTr.AllowShift()
+	noTr := NewFrameTranslator(9)
+	var shRc, noRc recon
+	var shGrid Grid
+	shifts, shiftDiffs := 0, 0
+
+	for step := range 200 {
 		withLinks := step%13 == 5 // periodic link-bearing frames
 		switch {
 		case step > 0 && rng.Intn(10) == 0: // resize
 			cols = uint16(6 + rng.Intn(5))
 			rows = uint16(3 + rng.Intn(3))
 			grid = newGrid(withLinks)
+		case step > 0 && !withLinks && rng.Intn(4) == 0: // output scrolled
+			// k rows off the top, k fresh rows at the bottom — and, now and
+			// then, a pinned last row that did not move with the rest (a
+			// status bar), which a whole-grid shift has to send as cells.
+			k := 1 + rng.Intn(int(rows)-1)
+			pinned := rng.Intn(3) == 0
+			last := grid[rows-1]
+			next := append([][]terminal.Cell(nil), grid[k:]...)
+			for len(next) < int(rows) {
+				row := make([]terminal.Cell, cols)
+				for x := range row {
+					row[x] = randCell(false)
+				}
+				next = append(next, row)
+			}
+			if pinned {
+				next[rows-1] = last
+			}
+			grid = next
 		default:
 			n := rng.Intn(int(cols)*int(rows) + 1) // 0..all cells, crossing the 60% fallback
 			for range n {
 				grid[rng.Intn(int(rows))][rng.Intn(int(cols))] = randCell(withLinks)
 			}
-			if !withLinks {
-				// Clear leftover links, changing the rune with them: β's skip
-				// comparison ignores Link (resolveCell), so a link removed with
-				// no other change would never be propagated by a diff. Real
-				// emulators drop links alongside content changes; "·" is not in
-				// the symbol set, so the cell is guaranteed to differ.
-				for y := range grid {
-					for x := range grid[y] {
-						if grid[y][x].Link != "" {
-							grid[y][x].Link = ""
-							grid[y][x].Rune = "·"
-						}
+		}
+		if !withLinks {
+			// Clear leftover links, changing the rune with them: β's skip
+			// comparison ignores Link (resolveCell), so a link removed with
+			// no other change would never be propagated by a diff. Real
+			// emulators drop links alongside content changes; "·" is not in
+			// the symbol set, so the cell is guaranteed to differ.
+			for y := range grid {
+				for x := range grid[y] {
+					if grid[y][x].Link != "" {
+						grid[y][x].Link = ""
+						grid[y][x].Rune = "·"
 					}
 				}
 			}
@@ -464,12 +505,43 @@ func TestReplayReconstruction(t *testing.T) {
 			t.Fatalf("step %d sparse: cursor = %+v, want %+v", step, src.cur, rc.cur)
 		}
 
+		hf := orchestration.ShiftedFrameFromSnapshot(snap, prev)
+		hf.Sparsify()
+		hf = viaWire(t, hf)
+		hview, ok := shGrid.Apply(hf)
+		if !ok {
+			t.Fatalf("step %d: the grid refused a shifted frame (shift=%+v)", step, hf.Shift)
+		}
+		if hview.Shift > 0 {
+			shifts++
+		}
+		for _, c := range []struct {
+			name string
+			tr   *FrameTranslator
+			rc   *recon
+		}{{"shift", shTr, &shRc}, {"no-shift", noTr, &noRc}} {
+			m := c.tr.TranslateView(&hview)
+			if d, isDiff := m.(*PaneDiff); isDiff && d.Shift > 0 {
+				if c.tr == noTr {
+					t.Fatalf("step %d: a shifted diff went to a client without the feature", step)
+				}
+				shiftDiffs++
+			}
+			c.rc.apply(t, m)
+			for i := range fold {
+				if c.rc.cells[i] != fold[i] {
+					t.Fatalf("step %d %s (%T): cell %d = %+v, want %+v", step, c.name, m, i, c.rc.cells[i], fold[i])
+				}
+			}
+		}
+
 		prev = snap
 	}
 
 	// The run must exercise all paths, or the property proves nothing.
-	if fulls < 3 || diffs < 3 || linkSteps < 2 {
-		t.Fatalf("weak coverage: %d fulls, %d diffs, %d link steps", fulls, diffs, linkSteps)
+	if fulls < 3 || diffs < 3 || linkSteps < 2 || shifts < 3 || shiftDiffs < 3 {
+		t.Fatalf("weak coverage: %d fulls, %d diffs, %d link steps, %d shifts, %d shifted diffs",
+			fulls, diffs, linkSteps, shifts, shiftDiffs)
 	}
 }
 

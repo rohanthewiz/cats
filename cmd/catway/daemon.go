@@ -923,7 +923,10 @@ func (d *daemon) session(conn net.Conn) error {
 	// feature ignores the field and keeps sending dense diffs, which the grid
 	// applies just the same.
 	hello := orchestration.NewHelloWithToken(tok)
-	hello.Features = []string{orchestration.ClientFeatureSparseFrames}
+	//
+	// It can also scroll that grid (Grid.Apply), so it asks for shifted diffs
+	// too: scrolling output then costs the new lines, not the whole grid.
+	hello.Features = []string{orchestration.ClientFeatureSparseFrames, orchestration.ClientFeatureShiftFrames}
 	if err := orchestration.WriteMessage(conn, hello); err != nil {
 		return err
 	}

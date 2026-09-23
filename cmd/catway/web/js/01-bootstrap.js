@@ -101,6 +101,11 @@
   // ratatui Modifier bits (cell.m).
   const M_BOLD = 0x1, M_DIM = 0x2, M_ITALIC = 0x4, M_UNDERLINED = 0x8, M_REVERSED = 0x40, M_HIDDEN = 0x80;
 
+  // The cell a pane_diff shift leaves in the rows it vacates: a space in the
+  // frame's default colours. Shared and frozen, because cells are only ever
+  // replaced, never edited in place.
+  const BLANK_CELL = Object.freeze({ s: " " });
+
   let ws = null, cellW = 9, cellH = 19, cols = 0, rows = 0;
   let layoutMsg = null;          // last layout message
   let tabZoomed = false;         // active tab zoomed (applyLayout; header ZOOM chip)

@@ -138,12 +138,53 @@ features, sparse frame shape).
 
 ---
 
+## 3. Scroll op  (done)
+
+### Problem
+Scrolling output (`cat`, a build log, an agent streaming its transcript) moves
+every row, so a cell-by-cell diff says the whole grid changed: a full browser
+frame (~119 KB) per tick per pane, and a β sparse diff no smaller than a dense
+one.
+
+### Design
+- **Detected at the source.** cathost diffs against the previous screen, so it
+  is the one place that can see the move. `ShiftedFrameFromSnapshot` counts
+  what changed in place; if that is under two rows' worth nothing else runs (the
+  typing/spinner path pays one comparison pass). Otherwise every row is hashed
+  and each new row votes for the shift that explains it (`new r == old j` ⇒
+  `n = j-r`, unique old rows only, so blank rows cannot vote). The winner is
+  kept only if diffing against the shifted old grid saves ≥ 2 rows of cells.
+- **β wire.** `Frame.Shift {rows, fill}`: move up, fill the vacated rows, then
+  apply the runs. Negotiated as client feature `shift_frames`, honoured only
+  with `sparse_frames`. catway's `Grid.Apply` performs the shift and the
+  `FrameView` carries it.
+- **Browser wire.** `PaneDiff.Shift` (vacated rows = browser blank in the
+  translator's own `def_fg/def_bg`, which need not be β's fill, so those rows
+  are re-checked per translator). A client lists `pane_shift` in the new
+  `Init.Features`; one that does not (cats-mobile today) gets a full frame for a
+  shifted update — exactly what it got before.
+- **Browser.** `copyWithin` + fill with a frozen `BLANK_CELL`, then a full
+  repaint (every row moved).
+- **Found on the way:** the first frame after links leave the screen is now
+  full. A diff ignores links, so a cell that lost its link but kept its text was
+  skipped and the receiver kept the stale link.
+
+### Result
+`TestShiftedDiffIsSmall`: a one-line scroll on 200×50 is 133,556 B as a sparse
+diff and 2,234 B shifted.
+
+Tests: `shift_test.go` (size, exact reconstruction with a pinned status row, no
+shift for typing / in-place redraw / blank rows), `TestHostShiftFramesFollowTheHello`
+(ghostty: real scrolling output; not sent without `sparse_frames` or without
+asking), the replay property test run a third time with shifted frames for a
+shift-capable and a plain translator sharing one view, catway
+`TestShiftedDiffsFollowTheWindowsFeatures`, and the jstest shift case.
+
+---
+
 ## Later (not started)
 
-3. **Scroll op + compression.** Scrolling output shifts every row, so it
-   always falls back to full frames (~119 KB/tick/pane to the browser). A
-   `scroll_up n` diff op (row-hash match of prev vs cur) turns `cat` into ~one
-   row per line. rweb v0.1.28 has no permessage-deflate; adding it shrinks
+3b. **Compression.** rweb v0.1.28 has no permessage-deflate; adding it shrinks
    terminal JSON 10–20×.
 4. **Coalesce slow browser clients** instead of dropping at 512 queued messages:
    track queued bytes, stop translating above a threshold, `Reset()` the

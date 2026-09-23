@@ -39,6 +39,17 @@
         // paint in 18-render). Diff cells arrive in row-major order, so a
         // run of cells on one row costs one Set insert, not one per cell.
         const W = p.W || 1;
+        // A shift scrolls the grid BEFORE the cells land: row r takes row
+        // r+shift, and the rows vacated at the bottom become blanks in the
+        // frame's default colours (wire.PaneDiff). Every row moved, so it is
+        // a full repaint; the saving is on the wire, where a line of output
+        // now costs that line instead of the whole grid.
+        if (msg.shift > 0 && p.cells) {
+          const n = msg.shift * W;
+          p.cells.copyWithin(0, n);
+          p.cells.fill(BLANK_CELL, p.cells.length - n);
+          p.full = true;
+        }
         let lastY = -1;
         if (msg.cells) for (const dc of msg.cells) {
           p.cells[dc.i] = dc;

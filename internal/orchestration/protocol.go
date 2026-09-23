@@ -280,6 +280,11 @@ const (
 	// Without it a diff frame carries the whole grid with unchanged cells
 	// marked Skip — see FrameFromSnapshot for why that density was needed.
 	ClientFeatureSparseFrames = "sparse_frames"
+	// ClientFeatureShiftFrames: the client can apply a diff frame that first
+	// scrolls its grid (Frame.Shift). Only honoured alongside
+	// ClientFeatureSparseFrames: a shift is what makes a scrolling screen's
+	// diff small, and a dense diff spells out the whole grid anyway.
+	ClientFeatureShiftFrames = "shift_frames"
 )
 
 // HasFeature reports whether the hello advertised one client feature.
@@ -1294,6 +1299,34 @@ type Frame struct {
 	// Scroll is the pane's scrollback position, present only when the pane has
 	// scrollback history (so non-scrollback panes' frames are unchanged).
 	Scroll *ScrollInfo `json:"scroll,omitempty"`
+	// Shift, on a diff, says the grid scrolled before the changed cells were
+	// taken: the receiver moves its rows up first, then applies Cells/Runs on
+	// top. Only sent to a client that advertised ClientFeatureShiftFrames. See
+	// Shift for the exact semantics.
+	Shift *Shift `json:"shift,omitempty"`
+}
+
+// Shift is a whole-grid scroll folded into a diff frame.
+//
+// Output that scrolls (cat, a build log, an agent streaming its transcript)
+// moves every row up, so compared cell for cell nearly the whole grid
+// "changed" even though almost nothing new is on it. Diffing against the
+// PREVIOUS grid moved up by Rows instead leaves only what is really new: the
+// freshly exposed bottom lines, plus whatever did not move with the rest (a
+// pinned status bar or prompt box).
+//
+// Applying it, for a grid of R rows:
+//
+//	row r   ← old row r+Rows   for r < R-Rows
+//	row r   ← Fill everywhere   for R-Rows ≤ r < R   (the vacated rows)
+//
+// and then the frame's changed cells on top, exactly as for any diff. Fill is
+// a blank in the terminal's default colours, sent rather than implied because
+// the receiver never learns the terminal's defaults: every cell it holds is
+// already resolved to concrete colours.
+type Shift struct {
+	Rows int  `json:"rows"`
+	Fill Cell `json:"fill"`
 }
 
 // ScrollInfo mirrors terminal.ScrollMetrics on the wire (and cats's ScrollMetrics).
@@ -1379,11 +1412,29 @@ func resolveCell(snap *terminal.Snapshot, c terminal.Cell) Cell {
 // differ, the frame is full (all cells sent, skip=false). Otherwise it is a
 // diff: cells unchanged from prev are marked skip=true.
 func FrameFromSnapshot(cur, prev *terminal.Snapshot) *Frame {
+	return frameFromSnapshot(cur, prev, false)
+}
+
+// ShiftedFrameFromSnapshot is FrameFromSnapshot for a client that can apply
+// Frame.Shift: when the screen scrolled, the diff is taken against prev moved
+// up by the scroll, and the frame says so. Falls back to the plain diff
+// whenever no shift pays for itself (see chooseShift), so it is never worse.
+func ShiftedFrameFromSnapshot(cur, prev *terminal.Snapshot) *Frame {
+	return frameFromSnapshot(cur, prev, true)
+}
+
+func frameFromSnapshot(cur, prev *terminal.Snapshot, allowShift bool) *Frame {
 	// A frame carrying OSC 8 links is always sent full: the per-cell hyperlink
 	// index points into this frame's Hyperlinks table, and a skipped (diff) cell
 	// would keep a stale index from the prior frame's table. Links are uncommon
 	// and transient, so the lost diff savings while a link is on screen is fine.
-	full := prev == nil || prev.Cols != cur.Cols || prev.Rows != cur.Rows || cur.HasHyperlinks
+	//
+	// So is the first frame AFTER links leave the screen. The diff compares
+	// cells without their links (a diff never carries them), so a cell that
+	// kept its text but lost its link would be skipped, and the receiver would
+	// go on holding a link that is no longer there. One full frame clears them.
+	full := prev == nil || prev.Cols != cur.Cols || prev.Rows != cur.Rows ||
+		cur.HasHyperlinks || prev.HasHyperlinks
 
 	f := &Frame{
 		Cols:  cur.Cols,
@@ -1407,11 +1458,6 @@ func FrameFromSnapshot(cur, prev *terminal.Snapshot) *Frame {
 		for x := uint16(0); x < cur.Cols; x++ {
 			src := cur.At(x, y)
 			cell := resolveCell(cur, src)
-			if !full {
-				if prevCell := resolveCell(prev, prev.At(x, y)); prevCell == cell {
-					cell.Skip = true
-				}
-			}
 			if hlIndex != nil && src.Link != "" {
 				idx, ok := hlIndex[src.Link]
 				if !ok {
@@ -1425,6 +1471,24 @@ func FrameFromSnapshot(cur, prev *terminal.Snapshot) *Frame {
 			f.Cells = append(f.Cells, cell)
 		}
 	}
+	if !full {
+		// The whole of prev is resolved up front, rather than cell by cell
+		// inside the loop above, because a shift compares each new cell with
+		// an OLD cell from a different row.
+		base := resolveCells(prev)
+		if allowShift {
+			fill := Cell{Symbol: " ", Fg: packRGB(cur.DefaultFg), Bg: packRGB(cur.DefaultBg)}
+			if n, shifted := chooseShift(f.Cells, base, int(cur.Cols), int(cur.Rows), fill); n > 0 {
+				base = shifted
+				f.Shift = &Shift{Rows: n, Fill: fill}
+			}
+		}
+		for i := range f.Cells {
+			if f.Cells[i] == base[i] {
+				f.Cells[i].Skip = true
+			}
+		}
+	}
 	// Carry scrollback position only when the pane has history (or is scrolled),
 	// leaving non-scrollback panes' frames byte-for-byte as before.
 	if cur.Scroll.MaxOffsetFromBottom > 0 || cur.Scroll.OffsetFromBottom > 0 {
@@ -1435,6 +1499,18 @@ func FrameFromSnapshot(cur, prev *terminal.Snapshot) *Frame {
 		}
 	}
 	return f
+}
+
+// resolveCells resolves every cell of snap, row-major, without links: it is
+// only ever the base a diff compares against, and a diff never carries links.
+func resolveCells(snap *terminal.Snapshot) []Cell {
+	out := make([]Cell, 0, int(snap.Cols)*int(snap.Rows))
+	for y := uint16(0); y < snap.Rows; y++ {
+		for x := uint16(0); x < snap.Cols; x++ {
+			out = append(out, resolveCell(snap, snap.At(x, y)))
+		}
+	}
+	return out
 }
 
 // Sparsify turns a dense diff into a sparse one in place: the changed cells are

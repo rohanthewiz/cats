@@ -190,6 +190,7 @@ ends, so the next client starts from the base protocol until its own hello.
 | Client feature | Changes | Used for |
 |----------------|---------|----------|
 | `sparse_frames` | diff frames carry only their changed cells (`sparse`, `runs`) | see [Frame shape](#frame-shape) |
+| `shift_frames` | a diff may scroll the grid before its cells apply (`shift`); honoured only alongside `sparse_frames` | see [Frame shape](#frame-shape) |
 
 ### Frame gate
 
@@ -595,6 +596,20 @@ flowchart LR
   it. A sparse diff that arrives for a grid which missed a frame (the pane was
   off every screen, the daemon reconnected, the pane moved host) is dropped until
   the full frame that makes the grid whole again.
+* **shifted** (`shift: {"rows": n, "fill": cell}`, only to a client that sent
+  both `sparse_frames` and `shift_frames`): the screen scrolled, and the diff
+  was taken against the previous grid moved up by `n` rows. The receiver moves
+  its rows up (`row r ← row r+n`), fills the `n` vacated bottom rows with
+  `fill` (a blank in the terminal's default colours), and then applies the
+  runs as usual. Without it, scrolling output changes every row and costs the
+  whole grid per tick; with it, a line of `cat` on a 200×50 pane is ~2 KB
+  instead of ~130 KB. The daemon detects the scroll by matching row hashes and
+  keeps a shift only when it saves at least two rows' worth of cells over the
+  plain diff, so it is never worse. Only a whole-grid scroll is detected: rows a
+  program pins outside a scroll region (a status bar) arrive as changed cells.
+* The first frame after links leave the screen is full as well: a diff compares
+  cells without their links, so a cell that kept its text but lost its link
+  would otherwise be skipped and keep the stale link.
 * `modifier`, `skip` and `hyperlink` are omitted at their zero values.
 * Colours are packed into a `u32`. `nil` foreground/background are resolved
   against the snapshot defaults before they hit the wire, so the consumer always

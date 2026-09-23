@@ -19,9 +19,13 @@
       // where it is. Omitted (the plain URL) means "whatever the primary window
       // is showing", which is the single-window behaviour. Re-read per connect
       // so a reconnect lands back on the same workspace.
+      // features: what this page can apply beyond the base protocol.
+      // pane_shift is a pane_diff that scrolls the grid before its cells land
+      // (see the pane_diff handler), which is what keeps scrolling output
+      // from costing a full frame per tick.
       sendMsg({ t: "init", v: PV, cols, rows, dpr,
         cell_w_px: Math.round(cellW * dpr), cell_h_px: Math.round(cellH * dpr),
-        workspace: urlWorkspace() });
+        workspace: urlWorkspace(), features: ["pane_shift"] });
       // The server assumes a fresh connection is in front; correct it straight
       // away if this window actually reconnected while in the background.
       if (!winFocused) sendMsg({ t: "focus", focused: false });

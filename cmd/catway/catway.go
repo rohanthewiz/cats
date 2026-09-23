@@ -30,6 +30,7 @@ import (
 	"github.com/rohanthewiz/cats/internal/push"
 	"github.com/rohanthewiz/cats/internal/terminal"
 	"github.com/rohanthewiz/cats/internal/workspace"
+	"github.com/rohanthewiz/cats/wire"
 )
 
 // chromeRows is reserved at the top of every pane rect for browser-side pane
@@ -2681,7 +2682,11 @@ type client struct {
 	out    chan []byte
 	pong   chan []byte // ping payloads to echo back; see serve's ping handler
 	viewer bool
-	trans  map[uint32]*browserproto.FrameTranslator
+	// shift mirrors wire.FeaturePaneShift in Init.Features: this client can
+	// apply a scrolled diff (PaneDiff.Shift). Set like viewer, before the
+	// client is published to the loop, and read-only after.
+	shift bool
+	trans map[uint32]*browserproto.FrameTranslator
 	// view is what this window is looking at: its workspace, its grid, and the
 	// pane set it streams (view.go). It is the per-connection half of what used
 	// to be one shared viewport, and it is the reason two windows can now show
@@ -2699,6 +2704,9 @@ func (c *client) translator(pid uint32) *browserproto.FrameTranslator {
 	t := c.trans[pid]
 	if t == nil {
 		t = browserproto.NewFrameTranslator(pid)
+		if c.shift {
+			t.AllowShift()
+		}
 		c.trans[pid] = t
 	}
 	return t
@@ -2816,6 +2824,7 @@ func (o *orch) serve(ws *rweb.WSConn) error {
 	c := &client{o: o, ws: ws, out: make(chan []byte, 512),
 		pong:   make(chan []byte, 4),
 		viewer: init.Viewer,
+		shift:  slices.Contains(init.Features, wire.FeaturePaneShift),
 		trans:  make(map[uint32]*browserproto.FrameTranslator)}
 	// The view is set before the client is published to the loop, like viewer:
 	// the writer goroutine must never see a half-built client. registerConn

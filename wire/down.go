@@ -599,10 +599,19 @@ type DiffCell struct {
 // PaneDiff is a sparse-index patch (D1): only changed cells, addressed by
 // row-major index. Omitted cell colors resolve against the def_fg/def_bg of
 // the last full PaneFrame.
+//
+// Shift, when non-zero, is applied BEFORE Cells: the grid scrolled up by
+// Shift rows, so row r takes row r+Shift's cells and the Shift rows vacated at
+// the bottom become blank (S " ", default colors, no modifiers or link). Cells
+// then patch the shifted grid. It is what turns scrolling output from a full
+// frame per tick into a line or two of cells. Only sent to a client that
+// listed FeaturePaneShift in Init.Features; any other client gets a full
+// PaneFrame for the same update, as it always has.
 type PaneDiff struct {
 	T      Type       `json:"t"`
 	Pane   uint32     `json:"pane"`
 	Cur    *Cursor    `json:"cur,omitempty"`
+	Shift  int        `json:"shift,omitempty"`
 	Cells  []DiffCell `json:"cells"`
 	Scroll *Scroll    `json:"scroll,omitempty"`
 }

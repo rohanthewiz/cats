@@ -35,7 +35,20 @@ type Init struct {
 	Viewer  bool    `json:"viewer,omitempty"`
 	// Workspace is the public workspace id ("w2") this window opens on.
 	Workspace string `json:"workspace,omitempty"`
+	// Features lists what this CLIENT can accept beyond the base protocol
+	// (Feature* below) — the mirror of Welcome.Caps. A server changing the
+	// shape of what it sends has to know the receiver can read it before the
+	// first frame goes out, and an older server ignores the unknown field, so
+	// listing a feature is always safe.
+	Features []string `json:"features,omitempty"`
 }
+
+// Client features, listed in Init.Features.
+const (
+	// FeaturePaneShift: the client applies PaneDiff.Shift (scroll the grid up,
+	// blank the vacated rows) before the diff's cells.
+	FeaturePaneShift = "pane_shift"
+)
 
 // --- Input events (§6, D4: structured, encoded server-side) --------------------
 

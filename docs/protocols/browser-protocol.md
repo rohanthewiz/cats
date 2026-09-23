@@ -71,7 +71,7 @@ roster holds more than one host — with one, every pane's answer is the same.
 | `t` | Purpose |
 |-----|---------|
 | `pane_frame` | a full grid: `w`, `h`, cursor, `def_fg`, `def_bg`, the link table, all cells, scroll metrics |
-| `pane_diff` | a sparse patch: only changed cells, each addressed by row-major index `i`. Omitted colours resolve against the last full frame's `def_fg` / `def_bg` |
+| `pane_diff` | a sparse patch: only changed cells, each addressed by row-major index `i`. Omitted colours resolve against the last full frame's `def_fg` / `def_bg`. With `shift: n` (only to a client whose `init.features` lists `pane_shift`) the grid first scrolls up `n` rows — `row r ← row r+n`, the vacated bottom rows become blanks (`s: " "`, default colours) — and the cells then patch the shifted grid. A client without the feature gets a full `pane_frame` for the same update |
 
 See [Keystroke to pixel](../architecture/request-lifecycle.md#two-layers-of-diffing)
 for when the server picks which.
@@ -100,7 +100,7 @@ Input is **structured**; the browser never pre-encodes VT bytes.
 
 | `t` | Payload |
 |-----|---------|
-| `init` | protocol version, grid size, device pixel ratio, cell pixel metrics |
+| `init` | protocol version, grid size, device pixel ratio, cell pixel metrics, and `features`: what this client can accept beyond the base protocol (`pane_shift`) |
 | `key` | W3C `KeyboardEvent.code` plus `.key`, a modifier bitmask, and the event kind. The server runs keybinding interception, then encodes from the pane's live modes |
 | `mouse` | kind, button, cell coordinates within a pane, modifier bitmask, and wheel deltas in lines. The browser converts pixels → cells with its own metrics; the server applies the pane's reported mouse encoding. The bitmask carries ⌘ like a key does, but the mouse wire has no bit for it, so the server spells a ⌘-modified pointer event as **ctrl+alt** (see [Mouse modifiers](../subsystems/terminal.md#mouse-modifiers)) |
 | `paste` | plain text. The server applies bracketed-paste wrapping per the focused pane's mode |

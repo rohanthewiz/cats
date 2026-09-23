@@ -120,7 +120,7 @@ const R = loadFns({
     "drawBand", "paintCells", "cellFonts", "drawOverlays", "hasScrollbar", "drawScrollbar",
     "drawCopyCursor", "drawSelection", "rgbOf", "css", "blend", "dimCss", "onMessage",
     "sameScroll", "setInset", "placePane"],
-  consts: ["M_BOLD", "COLOR_CACHE_MAX", "cssCache", "MIN_INSET_SCALE"],
+  consts: ["M_BOLD", "BLANK_CELL", "COLOR_CACHE_MAX", "cssCache", "MIN_INSET_SCALE"],
   env,
   lets: ["cellFontsPx", "cellFontsTab"],
 });
@@ -230,6 +230,32 @@ function firstDiff(a, b, w) {
   const spent = p.stats.text - before;
   ok(full > 1000, `a full draw of a busy 80x40 pane is thousands of glyphs (${full})`);
   ok(spent <= 5 * W, `a one-cell diff repaints at most five rows of glyphs (${spent})`);
+}
+
+// ---- a shifted diff scrolls the grid before its cells land -------------------
+
+{
+  const W = 10, H = 6;
+  const p = newTestPane(W, H);
+  current = p;
+  R.scheduleDraw(p); flush();
+  const before = p.cells.slice();
+  // Two lines scrolled off the top, one new line printed on the first vacated
+  // row, the second vacated row left blank.
+  const cells = [{ i: (H - 2) * W, s: "n" }, { i: (H - 2) * W + 1, s: "w" }];
+  R.onMessage({ t: "pane_diff", pane: "p1", shift: 2, cells, scroll: p.scroll });
+  const want = before.slice(2 * W).concat(new Array(2 * W).fill({ s: " " }));
+  want[(H - 2) * W] = cells[0]; want[(H - 2) * W + 1] = cells[1];
+  let bad = null;
+  for (let i = 0; i < W * H; i++) {
+    const a = p.cells[i], b = want[i];
+    if (a.s !== b.s || (a.f || 0) !== (b.f || 0) || (a.b || 0) !== (b.b || 0) || (a.m || 0) !== (b.m || 0)) { bad = i; break; }
+  }
+  eq(bad, null, "row r holds old row r+2, the vacated rows are blank, and the diff's cells land on top");
+  eq(p.cells.length, W * H, "the grid keeps its size");
+  ok(p.full, "a shift asks for a full repaint");
+  flush();
+  eq(firstDiff(p.px, reference(p), p.canvas.width), null, "…which matches a from-scratch draw");
 }
 
 // ---- canvas state is written only when it changes ---------------------------

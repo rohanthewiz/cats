@@ -156,3 +156,57 @@ func TestSparseDiffAfterAMissedFrameWaitsForFull(t *testing.T) {
 		t.Fatalf("the diff after recovery reached the window as %#v", msgs[1])
 	}
 }
+
+// A shifted β diff (orchestration.Shift): a window that listed
+// wire.FeaturePaneShift gets it as a shifted PaneDiff carrying only the new
+// row; one that did not — cats-mobile, an older page — gets the same update
+// as a full frame, which is all it could ever have been given before.
+func TestShiftedDiffsFollowTheWindowsFeatures(t *testing.T) {
+	o, pid, _ := mcOrch(t)
+	plain := newConn(o, false, browserproto.Init{Cols: 120, Rows: 40})
+	shifting := &client{o: o, out: make(chan []byte, 64), shift: true,
+		trans: make(map[uint32]*browserproto.FrameTranslator)}
+	o.registerConn(shifting, &browserproto.Init{Viewer: true})
+	o.flushClients()
+	for _, c := range []*client{plain, shifting} {
+		if !c.view.visible[pid] {
+			t.Fatalf("pane %d is not on a window's screen", pid)
+		}
+		drain(c)
+	}
+
+	const cols, rows = 3, 4
+	base := &orchestration.Frame{Cols: cols, Rows: rows, Full: true,
+		Cursor: &orchestration.Cursor{Visible: true, Shape: 2}}
+	for _, s := range "abcdefghijkl" {
+		base.Cells = append(base.Cells, frameCell(string(s)))
+	}
+	dispatchFrame(t, o, pid, base)
+	frameMsgs(t, plain, pid)
+	frameMsgs(t, shifting, pid)
+
+	// One line of output: everything moves up a row, "xyz" lands at the bottom.
+	scrolled := &orchestration.Frame{Cols: cols, Rows: rows, Sparse: true,
+		Cursor: &orchestration.Cursor{Visible: true, Shape: 2},
+		Shift:  &orchestration.Shift{Rows: 1, Fill: frameCell(" ")},
+		Runs: []orchestration.CellRun{{At: (rows - 1) * cols,
+			Cells: []orchestration.Cell{frameCell("x"), frameCell("y"), frameCell("z")}}}}
+	dispatchFrame(t, o, pid, scrolled)
+
+	msgs := frameMsgs(t, shifting, pid)
+	if len(msgs) != 1 {
+		t.Fatalf("shifting window: %d messages, want 1", len(msgs))
+	}
+	d, ok := msgs[0].(*browserproto.PaneDiff)
+	if !ok || d.Shift != 1 || len(d.Cells) != 3 || d.Cells[0].I != 9 || d.Cells[2].S != "z" {
+		t.Fatalf("shifting window got %#v, want a 1-row shift carrying xyz", msgs[0])
+	}
+
+	msgs = frameMsgs(t, plain, pid)
+	if len(msgs) != 1 {
+		t.Fatalf("plain window: %d messages, want 1", len(msgs))
+	}
+	if pf, ok := msgs[0].(*browserproto.PaneFrame); !ok || symbols(pf) != "defghijklxyz" {
+		t.Fatalf("plain window got %#v, want a full frame reading defghijklxyz", msgs[0])
+	}
+}

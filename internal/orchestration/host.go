@@ -414,6 +414,10 @@ type Host struct {
 	// detach, so a frame taken between the next Attach and its hello is dense —
 	// the next client may be an older build that cannot read a sparse one.
 	sparseFrames atomic.Bool
+	// shiftFrames is the same for ClientFeatureShiftFrames, and only ever set
+	// together with sparseFrames (see the hello): a shift exists to keep a
+	// scrolling screen's diff small, and a dense diff is never small.
+	shiftFrames atomic.Bool
 }
 
 // NewHost creates an empty Host.
@@ -554,6 +558,7 @@ func (h *Host) Attach(ctx context.Context, conn io.ReadWriteCloser) error {
 	h.sessCancel = nil
 	h.connMu.Unlock()
 	h.sparseFrames.Store(false)
+	h.shiftFrames.Store(false)
 	box.Close()
 	// The subscription belongs to the connection that asked for it. Left
 	// running, a persistent daemon would go on sampling (and, on darwin, keep an
@@ -897,6 +902,7 @@ func (h *Host) handleHello(payload []byte) error {
 	// full frames, which are the same in both shapes. It matters to the flusher,
 	// whose next diff is the first one this client could misread.
 	h.sparseFrames.Store(c.HasFeature(ClientFeatureSparseFrames))
+	h.shiftFrames.Store(c.HasFeature(ClientFeatureSparseFrames) && c.HasFeature(ClientFeatureShiftFrames))
 
 	h.mu.Lock()
 	ids := make([]uint32, 0, len(h.panes))
@@ -1477,7 +1483,14 @@ func (h *Host) takeFrame(p *pane) (*Frame, error) {
 	if err != nil {
 		return nil, err
 	}
-	f := FrameFromSnapshot(snap, p.prev)
+	var f *Frame
+	if h.shiftFrames.Load() {
+		// Scrolling output diffs against the previous screen moved up, so a
+		// line of `cat` costs a line, not the whole grid.
+		f = ShiftedFrameFromSnapshot(snap, p.prev)
+	} else {
+		f = FrameFromSnapshot(snap, p.prev)
+	}
 	p.prev = snap
 	// A client that keeps its own grid is sent only what changed. For a
 	// one-character echo on a 200×50 pane that is ~100 bytes instead of the
