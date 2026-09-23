@@ -182,13 +182,38 @@ shift-capable and a plain translator sharing one view, catway
 
 ---
 
+## 4. Coalesce slow browser clients  (done)
+
+### Problem
+A slow connection queued every frame until its 512-message channel filled —
+up to ~60 MB of screens already stale when sent — and was then dropped.
+
+### Design (`cmd/catway/backpressure.go`)
+- **Bytes, not messages.** `client.queued` is added in `enqueue` (loop) and
+  subtracted by the writer after each write (`wrote`).
+- **Hold frames back above 4 MB.** The frame loop skips a congested connection:
+  `skipFrame` resets its translator and marks the pane stale. Everything that is
+  not a frame keeps flowing; the 512 cap stays as the last resort.
+- **Catch up below 1 MB.** The writer's first write under the low watermark
+  posts `catchUp` (once, via `behind.CompareAndSwap`; `markBehind` re-checks
+  after arming so a drain racing the arm cannot strand it). `catchUp` sends
+  each stale, still-visible pane's CURRENT screen, translated from
+  `Grid.FullView()` — no daemon round trip. A pane with an invalid grid asks
+  its host for a resync instead. A pane that got a frame in between (its reset
+  translator made it full) is already un-staled by the frame loop.
+- **`Grid` remembers cursor, scroll and links** of the last applied frame so
+  `FullView` is a complete full frame.
+
+Tests: `TestSlowConnectionSkipsToTheCurrentScreen` (a fast and a slow window
+side by side; the slow one gets base → current screen → diffs),
+`TestCatchUpWithoutAGridAsksTheHost`, `TestGridFullViewIsTheCurrentScreen`.
+
+---
+
 ## Later (not started)
 
 3b. **Compression.** rweb v0.1.28 has no permessage-deflate; adding it shrinks
    terminal JSON 10–20×.
-4. **Coalesce slow browser clients** instead of dropping at 512 queued messages:
-   track queued bytes, stop translating above a threshold, `Reset()` the
-   translators, send one fresh full frame per visible pane once drained.
 5. **Encode once per pane, off the loop.** Marshal on the loop is per
    connection; cache by (pane, frame seq, translator state) or move to the
    reader goroutine. Hand-written appender instead of reflective JSON.

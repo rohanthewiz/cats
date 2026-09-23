@@ -89,6 +89,11 @@ type Grid struct {
 	cols, rows uint16
 	cells      []orchestration.Cell
 	valid      bool
+	// What the last applied frame said besides its cells, kept so FullView
+	// can stand in for a full frame without asking the daemon for one.
+	cursor *orchestration.Cursor
+	scroll *orchestration.ScrollInfo
+	links  []string
 }
 
 // Invalidate records that a frame went by unapplied.
@@ -109,6 +114,7 @@ func (g *Grid) Apply(f *orchestration.Frame) (v FrameView, ok bool) {
 			return FrameView{}, false
 		}
 		g.cols, g.rows, g.cells, g.valid = f.Cols, f.Rows, f.Cells, true
+		g.cursor, g.scroll, g.links = f.Cursor, f.Scroll, f.Hyperlinks
 		return DenseView(f), true
 	}
 	if !g.valid || f.Full || f.Cols != g.cols || f.Rows != g.rows {
@@ -145,7 +151,25 @@ func (g *Grid) Apply(f *orchestration.Frame) (v FrameView, ok bool) {
 			v.Changed = append(v.Changed, r.At+k)
 		}
 	}
+	// Links only ever ride full frames (and the frame after them is full too),
+	// so a diff means none are on screen.
+	g.cursor, g.scroll, g.links = f.Cursor, f.Scroll, nil
 	return v, true
+}
+
+// FullView is the grid's current screen as a full frame's view: what a
+// translator needs to hand a window the whole screen right now, without a
+// round trip to the daemon. ok is false while the grid is invalid.
+//
+// The view shares the grid's cells, so it must be translated before the next
+// Apply — the same rule every view from Apply already follows.
+func (g *Grid) FullView() (FrameView, bool) {
+	if !g.valid {
+		return FrameView{}, false
+	}
+	f := &orchestration.Frame{Cols: g.cols, Rows: g.rows, Full: true,
+		Cursor: g.cursor, Scroll: g.scroll, Hyperlinks: g.links}
+	return FrameView{Frame: f, Cells: g.cells}, true
 }
 
 // Translate converts one dense β frame into the message to send — see

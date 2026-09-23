@@ -616,3 +616,46 @@ func TestGridRefusesWhatItCannotResolve(t *testing.T) {
 		t.Fatal("a sparse diff for other dimensions was applied")
 	}
 }
+
+// FullView stands in for a full frame from catway's own copy: the whole grid,
+// plus the cursor, scroll position and links the last frame carried.
+func TestGridFullViewIsTheCurrentScreen(t *testing.T) {
+	cell := func(s string) orchestration.Cell {
+		return orchestration.Cell{Symbol: s, Fg: 0x02c8c8c8, Bg: 0x02000000}
+	}
+	var g Grid
+	if _, ok := g.FullView(); ok {
+		t.Fatal("an empty grid produced a view")
+	}
+	link := uint32(0)
+	full := &orchestration.Frame{Cols: 2, Rows: 1, Full: true,
+		Cells:      []orchestration.Cell{cell("a"), cell("b")},
+		Hyperlinks: []string{"https://example.com"},
+		Cursor:     &orchestration.Cursor{X: 1, Visible: true}}
+	full.Cells[0].Hyperlink = &link
+	g.Apply(full)
+	v, ok := g.FullView()
+	if !ok || !v.Frame.Full || len(v.Frame.Hyperlinks) != 1 || v.Frame.Cursor.X != 1 {
+		t.Fatalf("after a full frame: ok=%v frame=%+v", ok, v.Frame)
+	}
+
+	diff := &orchestration.Frame{Cols: 2, Rows: 1, Sparse: true,
+		Cursor: &orchestration.Cursor{X: 0, Visible: true},
+		Scroll: &orchestration.ScrollInfo{OffsetFromBottom: 2, MaxOffsetFromBottom: 9, ViewportRows: 1},
+		Runs:   []orchestration.CellRun{{At: 0, Cells: []orchestration.Cell{cell("z")}}}}
+	g.Apply(diff)
+	v, _ = g.FullView()
+	msg := NewFrameTranslator(1).TranslateView(&v)
+	pf, ok := msg.(*PaneFrame)
+	if !ok {
+		t.Fatalf("translated a full view into %T", msg)
+	}
+	if pf.Cells[0].S != "z" || pf.Cells[1].S != "b" || pf.Cur.X != 0 || pf.Scroll == nil || pf.Scroll.Off != 2 || len(pf.Links) != 0 {
+		t.Fatalf("full view after a diff = %+v", pf)
+	}
+
+	g.Invalidate()
+	if _, ok := g.FullView(); ok {
+		t.Fatal("an invalid grid produced a view")
+	}
+}

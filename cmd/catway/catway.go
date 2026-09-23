@@ -2542,6 +2542,7 @@ func (o *orch) enqueue(c *client, b []byte) {
 	}
 	select {
 	case c.out <- b:
+		c.queued.Add(int64(len(b)))
 	default:
 		dlog.Warnf("catway: dropping slow browser connection")
 		o.dropConn(c)
@@ -2687,6 +2688,14 @@ type client struct {
 	// client is published to the loop, and read-only after.
 	shift bool
 	trans map[uint32]*browserproto.FrameTranslator
+	// Backpressure (backpressure.go). queued is the bytes handed to the
+	// writer and not yet written — added on the loop, subtracted by the
+	// writer. behind is set while frames are being held back and no catch-up
+	// has been posted yet. stale is the panes whose frames were held back;
+	// loop-goroutine only.
+	queued atomic.Int64
+	behind atomic.Bool
+	stale  map[uint32]bool
 	// view is what this window is looking at: its workspace, its grid, and the
 	// pane set it streams (view.go). It is the per-connection half of what used
 	// to be one shared viewport, and it is the reason two windows can now show
@@ -2759,7 +2768,9 @@ func (c *client) writeLoop(pingEvery time.Duration) {
 				_ = c.ws.Close(1000, "bye")
 				return
 			}
-			if !c.write(rweb.TextMessage, b) {
+			ok = c.write(rweb.TextMessage, b)
+			c.wrote(len(b))
+			if !ok {
 				return
 			}
 		case data := <-c.pong:

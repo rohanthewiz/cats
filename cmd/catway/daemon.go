@@ -1221,6 +1221,17 @@ func (d *daemon) dispatch(mt orchestration.MessageType, payload []byte) {
 				if !c.view.visible[ev.PaneID] {
 					continue
 				}
+				// A connection that is too far behind is not handed this
+				// screen: by the time it got there it would be stale. It
+				// gets the current one when it drains (backpressure.go).
+				if c.frameCongested() {
+					c.skipFrame(ev.PaneID)
+					continue
+				}
+				// This frame reaches it, and a pane held back earlier had
+				// its translator reset, so it goes out whole: the catch-up
+				// has nothing left to do for it.
+				delete(c.stale, ev.PaneID)
 				msg := c.translator(ev.PaneID).TranslateView(&view)
 				if b, err := browserproto.Marshal(msg); err == nil {
 					o.enqueue(c, b)
