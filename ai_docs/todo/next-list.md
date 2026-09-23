@@ -32,7 +32,7 @@ window were dated by grepping every session doc.
 - Open and Roadmap stay in ID order. New items append to the end of Open (or
   Roadmap, for future work) with the next ID.
 
-**Next ID:** N-027
+**Next ID:** N-031
 
 ## Open
 
@@ -59,7 +59,13 @@ window were dated by grepping every session doc.
     labels, and that AGENTS says "none" when only plugins are open
     (`2026-0922-1713`). roman is linked too since
     `2026-0922-2006-roman-http-client-plugin`: its row should read `http`
-    with the title `roman: <project>`, and `(done/total)` while a batch runs.
+    with the title `roman: <project>`, and `(done/total)` while a batch runs;
+  - the perf work (`2026-0923-1437`), which needs a NEW cathost as well as
+    catway (restarting a persistent cathost ends its shells): the canvas's
+    row-band repaint on a busy agent pane (no stale ink around box-drawing or
+    emoji, no seams at band edges, cursor never left behind), sparse diffs
+    and the frame gate live (a background tab's agent keeps streaming, and
+    switching to it shows its current screen at once).
 
 - **N-003** · raised `2026-0905-1938-plugin-panes-in-the-agents-section` · value low
   A plugin started by hand from a shell (e.g. `cats-todo` typed at a prompt)
@@ -169,6 +175,32 @@ window were dated by grepping every session doc.
   was rebased onto it. Add `wire.PluginTypeHTTPClient` to the hint's
   arguments, or build the list from one slice of known types so the next type
   can't miss it.
+
+- **N-027** · raised `2026-0923-1437-perf-canvas-sparse-frames-and-frame-gate` · value medium
+  Scrolling output (`cat`, `yes`, an agent streaming) shifts every row, so it
+  always falls back to a full browser frame, ~119 KB per tick per pane,
+  uncompressed. Add a scroll op to the diff (row-hash match of prev vs cur),
+  and permessage-deflate to rweb (v0.1.28 has none). See
+  `ai_docs/plans/perf-improve-plan.md` §3.
+
+- **N-028** · raised `2026-0923-1437-perf-canvas-sparse-frames-and-frame-gate` · value low
+  Remaining frame-path costs, plan §5–8: snapshot makes ~3 cgo calls per cell
+  and ignores libghostty's per-row dirty tracking; `FrameFromSnapshot` runs
+  under `emuMu` and stalls `feed`; catway marshals per connection on the loop
+  with reflective JSON; frames with no change are still sent; rweb writes a
+  WebSocket message in 2–3 syscalls.
+
+- **N-029** · raised `2026-0923-1437-perf-canvas-sparse-frames-and-frame-gate` · value low
+  A slow browser is dropped when its 512-message queue fills, after queuing up
+  to ~60 MB of stale frames. Track queued bytes, stop translating above a
+  threshold, and send one fresh full frame per visible pane once it drains.
+  Plan §4.
+
+- **N-030** · raised `2026-0923-1437-perf-canvas-sparse-frames-and-frame-gate` · value low
+  Front-end leftovers from the perf audit, plan §9: the 5 s / 10 s sidebar
+  tickers run while the page is hidden; the command palette re-renders its
+  whole list on hover; the autoclose tick rebuilds the whole pane header every
+  500 ms; each host pong re-renders every header.
 
 ## Roadmap
 
