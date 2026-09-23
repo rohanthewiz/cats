@@ -33,7 +33,7 @@ catway [--config PATH] [--addr :8421] [--socket /tmp/cats-cathost.sock]
 
 | Flag | Default | Notes |
 |------|---------|-------|
-| `--config` | `~/.config/cats/config.yaml` | also `$CATS_CONFIG` |
+| `--config` | `~/.config/cats/config.json` | also `$CATS_CONFIG` |
 | `--addr` | `:8421` | binds all interfaces |
 | `--socket` | `/tmp/cats-cathost.sock` | the `cathost` seam |
 | `--control-socket` | `$CATS_CONTROL_SOCKET`, else `/tmp/cats-control.sock` | |
@@ -447,7 +447,7 @@ Files:
 catctl cp devbox:/var/log/build.log .        # from a cathost
 catctl cp ./patch.diff devbox:~/work/        # to one
 catctl cp devbox:notes.md laptop:notes.md    # between two
-catctl cp -f ./config.yaml devbox:/etc/app/config.yaml   # -f allows a replace
+catctl cp -f ./config.json devbox:/etc/app/config.json   # -f allows a replace
 ```
 
 Either operand may be `host:path`, in the scp notation; a leading `/`, `.` or `~`

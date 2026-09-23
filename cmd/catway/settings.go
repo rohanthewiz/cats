@@ -3,6 +3,9 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
+	"fmt"
 	"maps"
 	"slices"
 
@@ -60,10 +63,17 @@ func (o *orch) ConfigSet(r app.Responder, p app.ConfigSetParams) {
 			cfg.Keybindings.CopyMode[action] = slices.Clone(keys)
 		}
 	}
+	if len(p.Options) > 0 {
+		if err := applyOptions(&cfg, p.Options); err != nil {
+			r.Fail(err.Error())
+			return
+		}
+	}
 	if err := o.saveConfig(cfg); err != "" {
 		r.Fail(err)
 		return
 	}
+	o.applyLiveOptions()
 	// Reply before broadcasting: the issuer acts on its reply, and the theme
 	// push it also receives is idempotent (same values it just applied).
 	r.OK(o.configSnapshot())
@@ -134,6 +144,104 @@ func (o *orch) ThemeDelete(r app.Responder, p app.ThemeDeleteParams) {
 	}
 	r.OK(o.configSnapshot())
 	o.broadcastTheme()
+}
+
+// --- generic option sections -------------------------------------------------
+//
+// The settings screen edits most of the file through one generic channel:
+// config.get hands out each section as the JSON it is on disk, config.set
+// hands edited sections back. The alternative — a typed wire struct and a
+// bespoke config.set field per section — would put every new knob through a
+// protocol release (wire is pinned by other repos), for sections whose schema
+// already lives, validated, in internal/config.
+
+// optionSections are the sections config.set may write through Options, in the
+// order the screen shows them. Deliberately absent:
+//   - server, hosts, peers: restart-bound or owned by their own dialogs and
+//     commands (host.attach, peer.attach), which do the live roster work a raw
+//     write would skip.
+//   - theme, keybindings: already have their own typed params, with
+//     switch-vs-merge semantics a raw section write would bypass.
+//   - runbooks: a runbook can issue config.set, so making triggers settable
+//     here would let a runbook re-enable its own triggers (see config.Runbooks).
+var optionSections = []string{"panes", "persistence", "worktrees", "push", "editor", "ledger", "ui"}
+
+// restartSections are the optionSections catway only reads at startup (main.go
+// builds the persister, the push bridge and the ledger once). Saving them is
+// still useful — it is the next launch's config — but the screen must say so.
+var restartSections = []string{"persistence", "push", "ledger"}
+
+// optionTarget maps a section name to the field it decodes onto.
+func optionTarget(c *config.Config, section string) any {
+	switch section {
+	case "panes":
+		return &c.Panes
+	case "persistence":
+		return &c.Persistence
+	case "worktrees":
+		return &c.Worktrees
+	case "push":
+		return &c.Push
+	case "editor":
+		return &c.Editor
+	case "ledger":
+		return &c.Ledger
+	case "ui":
+		return &c.UI
+	}
+	return nil
+}
+
+// applyOptions decodes each section ONTO cfg's current value, so a partial
+// object changes only the keys it carries. Unknown sections and unknown keys
+// are errors: the screen only sends what config.get gave it, so either one is a
+// client bug or a typo in a hand-made catctl call, and a silent no-op there
+// would read as a successful save.
+//
+// cfg is a copy of the live config, but its maps and slices still alias it —
+// Push.Priority is cloned before decoding, because encoding/json writes INTO an
+// existing map, and a request that then fails validation must leave the live
+// config untouched. (Slices are replaced wholesale by the decoder, never
+// written through.)
+func applyOptions(cfg *config.Config, opts map[string]json.RawMessage) error {
+	cfg.Push.Priority = maps.Clone(cfg.Push.Priority)
+	// Sorted so which error a multi-section mistake reports is deterministic.
+	for _, section := range slices.Sorted(maps.Keys(opts)) {
+		target := optionTarget(cfg, section)
+		if target == nil {
+			return fmt.Errorf("config.set: %q is not an editable section (want one of %v)", section, optionSections)
+		}
+		dec := json.NewDecoder(bytes.NewReader(opts[section]))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(target); err != nil {
+			return fmt.Errorf("config.set: %s: %w", section, err)
+		}
+	}
+	return nil
+}
+
+// configOptions is the Options half of configSnapshot: each editable section
+// marshalled exactly as config.json holds it.
+func configOptions(c config.Config) map[string]json.RawMessage {
+	out := make(map[string]json.RawMessage, len(optionSections))
+	for _, section := range optionSections {
+		raw, err := json.Marshal(optionTarget(&c, section))
+		if err != nil {
+			continue // plain structs; cannot fail
+		}
+		out[section] = raw
+	}
+	return out
+}
+
+// applyLiveOptions re-derives the runtime values that are cached off o.cfg at
+// startup but are safe to change while running — the same set ReloadConfig
+// re-applies, plus the worktree directory. Everything else either reads o.cfg
+// on use (editor, ui via the re-rendered page) or is in restartSections.
+func (o *orch) applyLiveOptions() {
+	o.reapAfter = reapAfterFromConfig(o.cfg.Panes)
+	o.autocloseAfter = autocloseAfterFromConfig(o.cfg.Panes)
+	o.worktreeDir = o.cfg.Worktrees.Directory
 }
 
 // saveConfig validates and persists cfg, adopts it as the live config, and
@@ -252,5 +360,7 @@ func (o *orch) configSnapshot() app.ConfigGetResult {
 			// the file, and connectivity is not a config fact at all.
 			Hosts: o.Hosts(),
 		},
+		Options:         configOptions(c),
+		RestartSections: slices.Clone(restartSections),
 	}
 }

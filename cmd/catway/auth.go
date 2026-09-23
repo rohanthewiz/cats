@@ -31,7 +31,7 @@ func resolveSecret(flagVal string) (secret string, generated bool, err error) {
 
 // resolvePushToken returns the push webhook's bearer credential, from the
 // environment only. Like CATS_PASSWORD it is deliberately unreadable from
-// config.yaml — and here the reason is sharper: config.set marshals the whole
+// config.json — and here the reason is sharper: config.set marshals the whole
 // config struct back to disk, so a token field would write a secret the
 // operator carefully kept in their environment into a file the first time they
 // changed a theme colour. An empty result simply sends no Authorization header,

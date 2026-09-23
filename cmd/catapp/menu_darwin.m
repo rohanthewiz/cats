@@ -27,6 +27,7 @@
 - (void)zoomOut:(id)sender;
 - (void)zoomActual:(id)sender;
 - (void)connect:(id)sender;
+- (void)openSettings:(id)sender;
 @end
 
 @implementation CatsMenuTarget
@@ -44,6 +45,10 @@
 // "Connect to Another…" carries -1. The list itself lives in Go, so the tag is
 // the whole message.
 - (void)connect:(id)sender { catappConnectPreset((int)[(NSMenuItem *)sender tag]); }
+// Settings… opens the page's settings screen in the front window (Go Evals
+// window.catsOpenSettings). A menu item rather than a page shortcut for the
+// same reason as zoom: Cocoa claims ⌘, as a key equivalent first.
+- (void)openSettings:(id)sender { catappOpenSettings(); }
 @end
 
 static CatsMenuTarget *gMenuTarget = nil;
@@ -73,6 +78,14 @@ void installAppMenu(const char *cAppName, const char **hostNames, int hostCount,
         [appMenu addItemWithTitle:[@"About " stringByAppendingString:appName]
                            action:@selector(orderFrontStandardAboutPanel:)
                     keyEquivalent:@""];
+        [appMenu addItem:[NSMenuItem separatorItem]];
+        // "Settings…" (not "Preferences…") is the macOS 13+ name, and ⌘, the
+        // shortcut every Mac app answers to. The ellipsis is earned: it opens
+        // a screen, it changes nothing by itself.
+        NSMenuItem *settingsItem = [appMenu addItemWithTitle:@"Settings…"
+                                                      action:@selector(openSettings:)
+                                               keyEquivalent:@","];
+        [settingsItem setTarget:gMenuTarget];
         [appMenu addItem:[NSMenuItem separatorItem]];
         [appMenu addItemWithTitle:[@"Hide " stringByAppendingString:appName]
                            action:@selector(hide:)

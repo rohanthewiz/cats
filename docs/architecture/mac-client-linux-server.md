@@ -322,7 +322,7 @@ tighten:
 | Control | Setting |
 |---------|---------|
 | Auth | `--auth password` (the default). Never `none` on a routable address. |
-| Secret source | `CATS_PASSWORD` or `--password` — deliberately *not* readable from `config.yaml`, so it never lands in a committed file |
+| Secret source | `CATS_PASSWORD` or `--password` — deliberately *not* readable from `config.json`, so it never lands in a committed file |
 | Transport | `--tls`, ideally with your own certificate |
 | Cookie | `hsess`, HMAC-signed with a per-process key, `HttpOnly`, `Secure` under TLS, `SameSite=Strict`, TTL from `session_ttl` (default 24h) |
 | WebSocket | strict same-origin, plus any `allowed_origins` entries |

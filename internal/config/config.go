@@ -1,4 +1,6 @@
-// Package config is catway's optional YAML configuration file. It is a second
+// Package config is catway's optional JSON configuration file
+// (~/.config/cats/config.json; an older config.yaml is migrated on first
+// load — see migrateLegacy). It is a second
 // source of settings alongside the command-line flags: for the server settings
 // the precedence is flag > config > built-in default (main.go applies the flag
 // layer via flag.Visit); the front-end settings (theme colours and copy-mode
@@ -19,9 +21,11 @@ package config
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
+	"log"
 	"maps"
 	"net"
 	"net/url"
@@ -42,18 +46,55 @@ const EnvVar = "CATS_CONFIG"
 
 // Config is the whole catway configuration file.
 type Config struct {
-	Server      Server      `yaml:"server"`
-	Hosts       []Host      `yaml:"hosts,omitempty"`
-	Peers       []Peer      `yaml:"peers,omitempty"`
-	Persistence Persistence `yaml:"persistence"`
-	Panes       Panes       `yaml:"panes"`
-	Theme       Theme       `yaml:"theme"`
-	Keybindings Keybindings `yaml:"keybindings"`
-	Worktrees   Worktrees   `yaml:"worktrees"`
-	Push        Push        `yaml:"push"`
-	Editor      Editor      `yaml:"editor"`
-	Ledger      Ledger      `yaml:"ledger"`
-	Runbooks    Runbooks    `yaml:"runbooks"`
+	Server      Server      `yaml:"server" json:"server"`
+	Hosts       []Host      `yaml:"hosts,omitempty" json:"hosts,omitempty"`
+	Peers       []Peer      `yaml:"peers,omitempty" json:"peers,omitempty"`
+	Persistence Persistence `yaml:"persistence" json:"persistence"`
+	Panes       Panes       `yaml:"panes" json:"panes"`
+	Theme       Theme       `yaml:"theme" json:"theme"`
+	Keybindings Keybindings `yaml:"keybindings" json:"keybindings"`
+	Worktrees   Worktrees   `yaml:"worktrees" json:"worktrees"`
+	Push        Push        `yaml:"push" json:"push"`
+	Editor      Editor      `yaml:"editor" json:"editor"`
+	Ledger      Ledger      `yaml:"ledger" json:"ledger"`
+	Runbooks    Runbooks    `yaml:"runbooks" json:"runbooks"`
+	// UI holds the front-end preferences that used to live only in each
+	// browser's localStorage (font size, sidebar width). They sit in the file
+	// so a preference follows the user between browsers and the Mac app; the
+	// page is still seeded from localStorage first, so an unset field changes
+	// nothing for an existing client.
+	UI UI `yaml:"ui,omitempty" json:"ui,omitempty"`
+}
+
+// UI is the front-end preference section. Zero means "unset — the client's own
+// default (or its last local value) wins", which is why every field is
+// omitempty and there is no Default() entry for it: a config that says nothing
+// about the UI must not pin every client to one font size.
+type UI struct {
+	// FontPx is the terminal font size in CSS px (the ⌘+/⌘- zoom level).
+	FontPx int `yaml:"font_px,omitempty" json:"font_px,omitempty"`
+	// SidebarWidth is the sidebar's dragged width in CSS px.
+	SidebarWidth int `yaml:"sidebar_width,omitempty" json:"sidebar_width,omitempty"`
+}
+
+// UI bounds, mirroring the front end's own clamps (01-bootstrap.js FONT_MIN /
+// FONT_MAX, 38-sidebar.js SBW_MIN). Checked here so a hand-edit that would be
+// silently clamped away in the browser fails loudly at load instead.
+const (
+	UIFontMin         = 9
+	UIFontMax         = 32
+	UISidebarWidthMin = 150
+)
+
+// validate checks the UI section; zero fields are "unset" and always valid.
+func (u UI) validate() error {
+	if u.FontPx != 0 && (u.FontPx < UIFontMin || u.FontPx > UIFontMax) {
+		return fmt.Errorf("ui.font_px %d: want %d..%d (or 0 for the client default)", u.FontPx, UIFontMin, UIFontMax)
+	}
+	if u.SidebarWidth != 0 && u.SidebarWidth < UISidebarWidthMin {
+		return fmt.Errorf("ui.sidebar_width %d: want >= %d (or 0 for the client default)", u.SidebarWidth, UISidebarWidthMin)
+	}
+	return nil
 }
 
 // --- hosts --------------------------------------------------------------------
@@ -90,16 +131,16 @@ const (
 // in a file that is easy to commit by accident (the same reasoning that keeps
 // Push's credential out of the config entirely).
 type Host struct {
-	ID          string `yaml:"id"`
-	Label       string `yaml:"label,omitempty"` // display name; "" ⇒ the id
-	Addr        string `yaml:"addr"`
-	Token       string `yaml:"token,omitempty"`
-	TokenFile   string `yaml:"token_file,omitempty"`
-	Fingerprint string `yaml:"fingerprint,omitempty"` // pinned TLS cert SHA-256
+	ID          string `yaml:"id" json:"id"`
+	Label       string `yaml:"label,omitempty" json:"label,omitempty"` // display name; "" ⇒ the id
+	Addr        string `yaml:"addr" json:"addr"`
+	Token       string `yaml:"token,omitempty" json:"token,omitempty"`
+	TokenFile   string `yaml:"token_file,omitempty" json:"token_file,omitempty"`
+	Fingerprint string `yaml:"fingerprint,omitempty" json:"fingerprint,omitempty"` // pinned TLS cert SHA-256
 	// Default marks the host new panes land on when nothing names one — and the
 	// host a pane whose recorded host has vanished falls back to. At most one
 	// entry may set it; with none set, the local host is the default.
-	Default bool `yaml:"default,omitempty"`
+	Default bool `yaml:"default,omitempty" json:"default,omitempty"`
 	// ControlRelay lets panes on this host reach the control API — in-pane
 	// catctl, cats-todo, plugin binaries — by relaying it through that machine's
 	// cathost.
@@ -117,7 +158,7 @@ type Host struct {
 	// the same argument ctlproto.MethodClipboardRead already makes about the
 	// local socket. Enable it for a machine you trust as much as the one running
 	// catway, and leave it off otherwise.
-	ControlRelay bool `yaml:"control_relay,omitempty"`
+	ControlRelay bool `yaml:"control_relay,omitempty" json:"control_relay,omitempty"`
 }
 
 // DisplayLabel is the host's human name: its label, or its id when unlabelled.
@@ -284,23 +325,23 @@ func localHostLabel() string {
 // URL is itself a capability, so someone who wants file-only config can embed
 // credentials there — their choice, not our default.)
 type Push struct {
-	Enabled bool   `yaml:"enabled"`
-	URL     string `yaml:"url,omitempty"` // e.g. https://ntfy.sh/cats-7f3a91
+	Enabled bool   `yaml:"enabled" json:"enabled"`
+	URL     string `yaml:"url,omitempty" json:"url,omitempty"` // e.g. https://ntfy.sh/cats-7f3a91
 	// Kinds are the notify kinds forwarded to the phone. The default is
 	// "attention" only: "finished" fires on every completion of every agent,
 	// and a bridge that pushes those is how its owner learns to ignore it.
-	Kinds []string `yaml:"kinds,omitempty"`
+	Kinds []string `yaml:"kinds,omitempty" json:"kinds,omitempty"`
 	// Priority maps a notify kind onto the endpoint's priority value. Note the
 	// default tops out at "high", never ntfy's "urgent"/5 — that bypasses Do Not
 	// Disturb on Android, and a blocked agent is not a 3am emergency.
-	Priority map[string]string `yaml:"priority,omitempty"`
+	Priority map[string]string `yaml:"priority,omitempty" json:"priority,omitempty"`
 	// ClickURL is the deep-link base a notification tap opens; the pane's public
 	// handle is appended ("cats://pane/" + "w1:p3"). Empty ⇒ no click action.
-	ClickURL string `yaml:"click_url,omitempty"`
+	ClickURL string `yaml:"click_url,omitempty" json:"click_url,omitempty"`
 	// MinInterval debounces per (pane, kind) as a Go duration: an agent flapping
 	// between working and blocked while a tool retries must not vibrate the
 	// phone every few seconds.
-	MinInterval string `yaml:"min_interval,omitempty"`
+	MinInterval string `yaml:"min_interval,omitempty" json:"min_interval,omitempty"`
 	// Actions turns the notification's buttons on. An "attention" push then
 	// carries the agent's own menu (read off the pane's screen) as tappable
 	// choices, and tapping one answers the prompt.
@@ -310,7 +351,7 @@ type Push struct {
 	// Turning it on means a request arriving from the internet, carrying a token
 	// the notification server has also seen, can type into a terminal. That is
 	// worth deciding on purpose.
-	Actions bool `yaml:"actions,omitempty"`
+	Actions bool `yaml:"actions,omitempty" json:"actions,omitempty"`
 	// ActionURL is the base catway is reachable at FROM THE PHONE — scheme,
 	// host and port, no trailing path. The action endpoint is appended.
 	//
@@ -319,7 +360,7 @@ type Push struct {
 	// one a phone on another network would use to come back. Required when
 	// Actions is set, because buttons pointing nowhere are worse than no
 	// buttons — they look like they worked.
-	ActionURL string `yaml:"action_url,omitempty"`
+	ActionURL string `yaml:"action_url,omitempty" json:"action_url,omitempty"`
 }
 
 // Interval is the parsed MinInterval; an empty value means no debounce.
@@ -351,20 +392,20 @@ func (p Push) KindSet() map[string]bool {
 // shared secret belongs in the environment (CATS_PASSWORD) or a flag, never a
 // config file that is easy to commit by accident.
 type Server struct {
-	Addr          string `yaml:"addr"`
-	CathostSocket string `yaml:"cathost_socket"`
-	ControlSocket string `yaml:"control_socket"` // "" ⇒ ctlproto resolves env/default
-	HookSocket    string `yaml:"hook_socket"`    // agent hook-report API socket
-	Auth          string `yaml:"auth"`           // "password" | "none"
-	SessionTTL    string `yaml:"session_ttl"`    // a Go duration string, e.g. "24h"
-	TLS           TLS    `yaml:"tls"`
+	Addr          string `yaml:"addr" json:"addr"`
+	CathostSocket string `yaml:"cathost_socket" json:"cathost_socket"`
+	ControlSocket string `yaml:"control_socket" json:"control_socket"` // "" ⇒ ctlproto resolves env/default
+	HookSocket    string `yaml:"hook_socket" json:"hook_socket"`       // agent hook-report API socket
+	Auth          string `yaml:"auth" json:"auth"`                     // "password" | "none"
+	SessionTTL    string `yaml:"session_ttl" json:"session_ttl"`       // a Go duration string, e.g. "24h"
+	TLS           TLS    `yaml:"tls" json:"tls"`
 	// AllowedOrigins are extra WebSocket Origins accepted beyond same-origin
 	// (see gwauth.OriginOK): full origins or bare host[:port] authorities. Needed
 	// when a reverse proxy or relay serves the UI under a host that differs from
 	// the catway's own Host header. Empty ⇒ strict same-origin only. omitempty
 	// keeps an unset list out of a saved file, so it round-trips as nil (not [])
 	// and stays equal to the default.
-	AllowedOrigins []string `yaml:"allowed_origins,omitempty"`
+	AllowedOrigins []string `yaml:"allowed_origins,omitempty" json:"allowed_origins,omitempty"`
 }
 
 // Persistence is session persistence & restore (WS3): the model snapshot that
@@ -373,26 +414,26 @@ type Server struct {
 type Persistence struct {
 	// Enabled turns persistence on (the default): the session model is saved on
 	// every mutation and restored at startup.
-	Enabled bool `yaml:"enabled"`
+	Enabled bool `yaml:"enabled" json:"enabled"`
 	// StateDir overrides where session.json/history.json live ("" ⇒
 	// $XDG_STATE_HOME/cats, falling back to ~/.local/state/cats).
-	StateDir string `yaml:"state_dir"`
+	StateDir string `yaml:"state_dir" json:"state_dir"`
 	// HistoryLines bounds the scrollback captured per pane for cold-restore
 	// seeds (0 = the whole buffer).
-	HistoryLines int `yaml:"history_lines"`
+	HistoryLines int `yaml:"history_lines" json:"history_lines"`
 	// ResumeAgents relaunches supported AI-agent panes into their native
 	// conversation sessions on a cold restore (cats's
 	// session.resume_agents_on_restore, default true). Requires official
 	// integrations that report session refs over the hook API.
-	ResumeAgents bool `yaml:"resume_agents"`
+	ResumeAgents bool `yaml:"resume_agents" json:"resume_agents"`
 }
 
 // TLS is the HTTPS configuration. Enabled alone uses an auto self-signed cert;
 // Cert+Key provide operator PEMs (and imply Enabled).
 type TLS struct {
-	Enabled bool   `yaml:"enabled"`
-	Cert    string `yaml:"cert"`
-	Key     string `yaml:"key"`
+	Enabled bool   `yaml:"enabled" json:"enabled"`
+	Cert    string `yaml:"cert" json:"cert"`
+	Key     string `yaml:"key" json:"key"`
 	// SANs are extra subject alternative names for the auto-generated
 	// certificate — a LAN DNS name, or the hostname a relay will front — on top
 	// of the loopback/hostname/interface set gwtls discovers. Each entry is an IP
@@ -403,7 +444,7 @@ type TLS struct {
 	// a client may have pinned, so it takes effect at restart rather than on
 	// server.reload_config. omitempty keeps an unset list out of a saved file so
 	// it round-trips as nil, matching AllowedOrigins.
-	SANs []string `yaml:"sans,omitempty"`
+	SANs []string `yaml:"sans,omitempty" json:"sans,omitempty"`
 }
 
 // Theme is the front-end appearance. Name selects a named theme (a built-in,
@@ -414,23 +455,23 @@ type TLS struct {
 // only the user's choices; the full effective palette is resolved at render
 // time, so this package needs no knowledge of what themes exist.
 type Theme struct {
-	Name   string            `yaml:"name,omitempty"`
-	Colors map[string]string `yaml:"colors,omitempty"`
-	Font   string            `yaml:"font,omitempty"`
+	Name   string            `yaml:"name,omitempty" json:"name,omitempty"`
+	Colors map[string]string `yaml:"colors,omitempty" json:"colors,omitempty"`
+	Font   string            `yaml:"font,omitempty" json:"font,omitempty"`
 }
 
 // Keybindings maps a front-end action to the keyboard keys that trigger it. Only
 // copy-mode is configurable today; keys are DOM KeyboardEvent.key values
 // ("ArrowLeft", "h", "Escape", …).
 type Keybindings struct {
-	CopyMode map[string][]string `yaml:"copy_mode"`
+	CopyMode map[string][]string `yaml:"copy_mode" json:"copy_mode"`
 }
 
 // Worktrees configures the git-worktree feature (WS8 dialogs): where new
 // checkouts land. Directory may start with "~" — expanded where used, not here,
 // so the stored config stays portable.
 type Worktrees struct {
-	Directory string `yaml:"directory"`
+	Directory string `yaml:"directory" json:"directory"`
 }
 
 // Panes configures the pane lifecycle — specifically the one part of it that
@@ -460,7 +501,7 @@ type Panes struct {
 	//
 	// The session's last pane is never reaped whatever this says; a terminal
 	// that tidies itself out of existence is not a tidy terminal.
-	ReapExited string `yaml:"reap_exited"`
+	ReapExited string `yaml:"reap_exited" json:"reap_exited"`
 
 	// AutocloseExited is the short countdown a pane gets when its child exits
 	// CLEANLY (status 0), as a Go duration string; the same off-switch
@@ -483,7 +524,7 @@ type Panes struct {
 	// output. Output worth reading is worth keeping, and keeping it is one
 	// click — sizing the default for the slowest reader instead would leave
 	// every ordinary `exit`ed shell sitting around for its sake.
-	AutocloseExited string `yaml:"autoclose_exited"`
+	AutocloseExited string `yaml:"autoclose_exited" json:"autoclose_exited"`
 }
 
 // AutocloseExitedAfter parses AutocloseExited. 0 means "never auto-close",
@@ -533,12 +574,12 @@ func (p Panes) ReapExitedAfter() (time.Duration, error) {
 // switch really controls is whether cats asks, and therefore whether any pane
 // pays for the scan.
 type Ledger struct {
-	Enabled bool `yaml:"enabled"`
+	Enabled bool `yaml:"enabled" json:"enabled"`
 	// Retention is how many records are kept; the oldest go first. It is a count
 	// rather than an age because it is the bound that keeps a query's backward
 	// scan honest — an age bound would let a quiet month and a frantic week
 	// differ by three orders of magnitude in how much a listing walks.
-	Retention int `yaml:"retention,omitempty"`
+	Retention int `yaml:"retention,omitempty" json:"retention,omitempty"`
 }
 
 // Runbooks configures the runbook engine — specifically the only part of it
@@ -556,7 +597,7 @@ type Ledger struct {
 // appears broken the first time it is used. The two files belong to the same
 // person and live in the same directory.
 type Runbooks struct {
-	Triggers bool `yaml:"triggers"`
+	Triggers bool `yaml:"triggers" json:"triggers"`
 }
 
 // Editor is what cats knows about editors, which is deliberately almost
@@ -569,13 +610,13 @@ type Runbooks struct {
 // because the label is whatever that editor reports over the hook API — it is
 // the editor's name for itself, not a cats-side registry.
 type Editor struct {
-	Agents  []string `yaml:"agents,omitempty"`
-	Command []string `yaml:"command,omitempty"`
+	Agents  []string `yaml:"agents,omitempty" json:"agents,omitempty"`
+	Command []string `yaml:"command,omitempty" json:"command,omitempty"`
 	// Spawn allows pane.open_file to start an editor when none is running. On
 	// by default: "click a path and it opens" is the whole point, and a
 	// request that silently does nothing because no editor happened to be open
 	// is the worst of the three outcomes.
-	Spawn bool `yaml:"spawn"`
+	Spawn bool `yaml:"spawn" json:"spawn"`
 }
 
 // TTL parses SessionTTL into a duration.
@@ -610,12 +651,12 @@ func (s Server) TTL() (time.Duration, error) {
 // for a peer on the same machine or an ssh tunnel, and refused anywhere else
 // (see validatePeers), because it would send the secret in the clear.
 type Peer struct {
-	ID          string `yaml:"id"`
-	Label       string `yaml:"label,omitempty"` // display name; "" ⇒ the id
-	URL         string `yaml:"url"`
-	Token       string `yaml:"token,omitempty"`
-	TokenFile   string `yaml:"token_file,omitempty"`
-	Fingerprint string `yaml:"fingerprint,omitempty"` // pinned TLS cert SHA-256
+	ID          string `yaml:"id" json:"id"`
+	Label       string `yaml:"label,omitempty" json:"label,omitempty"` // display name; "" ⇒ the id
+	URL         string `yaml:"url" json:"url"`
+	Token       string `yaml:"token,omitempty" json:"token,omitempty"`
+	TokenFile   string `yaml:"token_file,omitempty" json:"token_file,omitempty"`
+	Fingerprint string `yaml:"fingerprint,omitempty" json:"fingerprint,omitempty"` // pinned TLS cert SHA-256
 }
 
 // DisplayLabel is the peer's human name: its label, or its id when unlabelled.
@@ -758,10 +799,26 @@ func Default() Config {
 // missing file at the default location yields Default with no error; a missing
 // file at an explicitly requested path (flag or env) is an error, since the user
 // named a file that isn't there.
+//
+// The format follows the extension: .yaml/.yml is read as YAML (an explicit
+// --config pointing at an old file keeps working), anything else as JSON. At
+// the default location a pre-JSON config.yaml with no config.json beside it is
+// migrated first (see migrateLegacy), so an upgrade keeps the user's settings
+// without them doing anything.
 func Load(override string) (Config, string, error) {
 	path, explicit := resolvePath(override)
 	if path == "" {
 		return Default(), "", nil
+	}
+	if !explicit {
+		if legacy, err := migrateLegacy(path); err != nil {
+			// The JSON could not be written (read-only dir, disk full). Serving
+			// the YAML is strictly better than silently reverting the user to
+			// defaults, and Save follows the extension, so later saves land in
+			// the YAML file rather than failing.
+			log.Printf("config: could not migrate %s to JSON, reading it as-is: %v", legacy, err)
+			path = legacy
+		}
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -773,26 +830,37 @@ func Load(override string) (Config, string, error) {
 		}
 		return Default(), path, fmt.Errorf("read config %s: %w", path, err)
 	}
-	cfg, err := parse(data)
+	cfg, err := parse(data, isYAMLPath(path))
 	if err != nil {
 		return Default(), path, fmt.Errorf("config %s: %w", path, err)
 	}
 	return cfg, path, nil
 }
 
-// parse decodes YAML onto a defaults copy (so absent scalars keep their
+// parse decodes the document onto a defaults copy (so absent scalars keep their
 // defaults) and merges the theme/keybinding maps key-wise (which unmarshal
 // would otherwise replace wholesale — and for theme.colors the merge base is
 // deliberately empty, normalizing an absent map to a non-nil one), then
-// validates.
-func parse(data []byte) (Config, error) {
+// validates. asYAML picks the decoder; the struct tags are identical for both,
+// so the two formats describe exactly the same schema.
+//
+// Unknown top-level keys are ignored rather than rejected: the JSON file is
+// shared with the Mac app, which keeps its own "app" section in it (see
+// ReadSection / WriteSection) that this struct deliberately does not model.
+func parse(data []byte, asYAML bool) (Config, error) {
 	cfg := Default()
 	if len(bytes.TrimSpace(data)) == 0 {
 		return cfg, nil // empty document ⇒ pure defaults (goccy would zero the struct)
 	}
 	defColors, defKeys := cfg.Theme.Colors, cfg.Keybindings.CopyMode
 	cfg.Theme.Colors, cfg.Keybindings.CopyMode = nil, nil
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
+	var err error
+	if asYAML {
+		err = yaml.Unmarshal(data, &cfg)
+	} else {
+		err = json.Unmarshal(data, &cfg)
+	}
+	if err != nil {
 		return Default(), err
 	}
 	cfg.Theme.Colors = mergeStrMap(defColors, cfg.Theme.Colors)
@@ -805,13 +873,21 @@ func parse(data []byte) (Config, error) {
 
 // --- saving ------------------------------------------------------------------
 
-// Save writes cfg as YAML to path, creating parent directories. The Config
-// struct is the whole schema, so marshalling it writes the complete file; any
-// comments in a hand-written config are lost on the first save (accepted — the
-// settings modal owns the file from then on). Callers validate first.
+// Save writes cfg to path, creating parent directories. The Config struct is
+// the whole schema, so marshalling it writes the complete file. Callers
+// validate first.
+//
+// JSON (the default) goes through saveJSON, which keeps any top-level section
+// this struct does not own — the Mac app's "app" block lives in the same file
+// and is written by another process. A .yaml path (an explicit legacy --config)
+// is still written as YAML, whole; comments in a hand-written YAML config are
+// lost on the first save, as they always were.
 func Save(path string, cfg Config) error {
 	if path == "" {
 		return errors.New("save config: empty path")
+	}
+	if !isYAMLPath(path) {
+		return saveJSON(path, cfg)
 	}
 	data, err := yaml.Marshal(cfg)
 	if err != nil {
@@ -870,6 +946,9 @@ func (c Config) Validate() error {
 	}
 	if err := c.Push.Validate(); err != nil {
 		return fmt.Errorf("push.%w", err)
+	}
+	if err := c.UI.validate(); err != nil {
+		return err
 	}
 	return nil
 }
@@ -969,11 +1048,37 @@ func resolvePath(override string) (path string, explicit bool) {
 	return DefaultPath(), false
 }
 
-// DefaultPath is $XDG_CONFIG_HOME/cats/config.yaml, falling back to
-// ~/.config/cats/config.yaml (the conventional location for a dev CLI tool, on
+// ResolvePath is resolvePath for other processes that share the file (the Mac
+// app): the path catway would load with no --config flag.
+func ResolvePath() string {
+	p, _ := resolvePath("")
+	return p
+}
+
+// DefaultPath is $XDG_CONFIG_HOME/cats/config.json, falling back to
+// ~/.config/cats/config.json (the conventional location for a dev CLI tool, on
 // macOS too). Returns "" if neither the env var nor a home dir is available.
 // Exported so config.set can create the file when no config was in use yet.
 func DefaultPath() string {
+	d := configDir()
+	if d == "" {
+		return ""
+	}
+	return filepath.Join(d, DefaultFile)
+}
+
+// LegacyPath is where the pre-JSON config.yaml lived: the file migrateLegacy
+// reads once, and nothing reads after that.
+func LegacyPath() string {
+	d := configDir()
+	if d == "" {
+		return ""
+	}
+	return filepath.Join(d, legacyFile)
+}
+
+// configDir is $XDG_CONFIG_HOME/cats or ~/.config/cats.
+func configDir() string {
 	dir := os.Getenv("XDG_CONFIG_HOME")
 	if dir == "" {
 		home, err := os.UserHomeDir()
@@ -982,7 +1087,7 @@ func DefaultPath() string {
 		}
 		dir = filepath.Join(home, ".config")
 	}
-	return filepath.Join(dir, "cats", "config.yaml")
+	return filepath.Join(dir, "cats")
 }
 
 // --- map helpers -------------------------------------------------------------

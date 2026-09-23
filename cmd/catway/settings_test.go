@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/rohanthewiz/cats/internal/app"
@@ -310,5 +311,97 @@ func TestThemeChangedIsSessionScoped(t *testing.T) {
 	}
 	if len(all.names) != 1 {
 		t.Fatalf("an unfiltered subscription received %v, want one event", all.names)
+	}
+}
+
+// config.set's generic options channel: a partial section is laid over the
+// current one, persisted to JSON, applied live where catway can (panes), and
+// echoed back in config.get's options with the restart-bound sections named.
+func TestConfigSetOptions(t *testing.T) {
+	o, c := newPendingHarness()
+	path := filepath.Join(t.TempDir(), "config.json")
+	o.cfg = config.Default()
+	o.cfgPath = path
+
+	o.handleCmd(c, cmd(t, "c1", browserproto.CmdConfigSet, browserproto.ConfigSetParams{
+		Options: map[string]json.RawMessage{
+			"panes": json.RawMessage(`{"reap_exited":"30m"}`),
+			"ui":    json.RawMessage(`{"font_px":17}`),
+			"push":  json.RawMessage(`{"min_interval":"5m"}`),
+		},
+	}))
+	r := expectOK(t, c, "config.set")
+	expectThemePush(t, c)
+	res := decodeData[browserproto.ConfigGetResult](t, r)
+
+	var panes config.Panes
+	if err := json.Unmarshal(res.Options["panes"], &panes); err != nil {
+		t.Fatal(err)
+	}
+	// The key the request left out keeps its value: decode-onto, not replace.
+	if panes.ReapExited != "30m" || panes.AutocloseExited != config.Default().Panes.AutocloseExited {
+		t.Fatalf("panes echoed as %+v", panes)
+	}
+	if o.reapAfter.String() != "30m0s" {
+		t.Fatalf("reap_exited not applied live: %v", o.reapAfter)
+	}
+	if !reflect.DeepEqual(res.RestartSections, restartSections) {
+		t.Fatalf("restart sections = %v", res.RestartSections)
+	}
+
+	got, _, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.UI.FontPx != 17 || got.Push.MinInterval != "5m" || got.Panes.ReapExited != "30m" {
+		t.Fatalf("not persisted: ui=%+v push.min_interval=%q panes=%+v", got.UI, got.Push.MinInterval, got.Panes)
+	}
+	// Priority is a map the decoder would write INTO; the default's entries
+	// must survive a push edit that did not mention them.
+	if got.Push.Priority["attention"] != "high" {
+		t.Fatalf("push.priority lost: %v", got.Push.Priority)
+	}
+}
+
+// Sections outside the editable set, unknown keys and invalid values are all
+// refused, and none of them touches the file or the live config.
+func TestConfigSetOptionsRejects(t *testing.T) {
+	for name, opts := range map[string]map[string]json.RawMessage{
+		"runbooks section": {"runbooks": json.RawMessage(`{"triggers":false}`)},
+		"server section":   {"server": json.RawMessage(`{"addr":":1"}`)},
+		"unknown key":      {"panes": json.RawMessage(`{"reap_exitted":"1h"}`)},
+		"invalid value":    {"panes": json.RawMessage(`{"reap_exited":"soon"}`)},
+		"ui out of range":  {"ui": json.RawMessage(`{"font_px":3}`)},
+		"push map alias":   {"push": json.RawMessage(`{"priority":{"attention":"loud"}}`)},
+	} {
+		t.Run(name, func(t *testing.T) {
+			o, c := newPendingHarness()
+			path := filepath.Join(t.TempDir(), "config.json")
+			o.cfg = config.Default()
+			o.cfgPath = path
+			o.handleCmd(c, cmd(t, "c1", browserproto.CmdConfigSet, browserproto.ConfigSetParams{Options: opts}))
+			if r, ok := recvDown(t, c).(*browserproto.CmdResult); !ok || r.Ok {
+				t.Fatalf("should fail, got %#v", r)
+			}
+			if _, _, err := config.Load(path); err == nil {
+				t.Fatal("a rejected config.set must not write the file")
+			}
+			// The map case: a failed decode/validate must not have written
+			// through the shared map into the live config.
+			if o.cfg.Push.Priority["attention"] != "high" || !o.cfg.Runbooks.Triggers {
+				t.Fatalf("live config mutated: %+v %+v", o.cfg.Push.Priority, o.cfg.Runbooks)
+			}
+		})
+	}
+}
+
+// The UI section is baked into the served page, and only its set fields.
+func TestUIPrefsScript(t *testing.T) {
+	if got := uiPrefsScript(config.UI{}); got != "<script id=\"cats-config-ui\">window.__catsUI={};</script>\n" {
+		t.Fatalf("empty ui: %q", got)
+	}
+	got := uiPrefsScript(config.UI{FontPx: 15})
+	if want := `window.__catsUI={"font_px":15};`; !strings.Contains(got, want) {
+		t.Fatalf("got %q, want it to contain %q", got, want)
 	}
 }

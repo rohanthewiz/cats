@@ -117,7 +117,7 @@ server, web client + Mac server), or
 - **Remote access**: shared-password login with HMAC-signed session cookies
   (headless clients use a Bearer token) and optional TLS (self-signed
   auto-generated, or bring your own cert).
-- **Configuration** in YAML (`~/.config/cats/config.yaml`): server settings,
+- **Configuration** in JSON (`~/.config/cats/config.json`, edited from the settings screen — ⌘,): server settings,
   theme colors/font, and keybindings — see
   [`config.example.yaml`](config.example.yaml). Theme/keybinding edits apply
   with `catctl reload`, no restart.

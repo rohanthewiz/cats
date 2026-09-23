@@ -38,7 +38,7 @@ func TestDefaultValid(t *testing.T) {
 
 // An empty file yields exactly the defaults.
 func TestParseEmpty(t *testing.T) {
-	got, err := parse([]byte(""))
+	got, err := parse([]byte(""), true)
 	if err != nil {
 		t.Fatalf("parse empty: %v", err)
 	}
@@ -64,7 +64,7 @@ keybindings:
   copy_mode:
     yank: ["y", "c"]
 `
-	got, err := parse([]byte(yaml))
+	got, err := parse([]byte(yaml), true)
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
@@ -118,7 +118,7 @@ func TestValidateRejects(t *testing.T) {
 		"panes negative reap": "panes:\n  reap_exited: \"-4h\"\n",
 	}
 	for name, yaml := range cases {
-		if _, err := parse([]byte(yaml)); err == nil {
+		if _, err := parse([]byte(yaml), true); err == nil {
 			t.Errorf("%s: expected parse error", name)
 		}
 	}
@@ -210,12 +210,12 @@ func TestParsePush(t *testing.T) {
 		t.Fatalf("default push.min_interval = %v (err %v), want 1m", d, err)
 	}
 
-	cfg, err := parse([]byte("push:\n" +
-		"  enabled: true\n" +
-		"  url: https://ntfy.sh/cats-7f3a91\n" +
-		"  kinds: [\"attention\", \"finished\"]\n" +
-		"  click_url: \"cats://pane/\"\n" +
-		"  min_interval: 15s\n"))
+	cfg, err := parse([]byte("push:\n"+
+		"  enabled: true\n"+
+		"  url: https://ntfy.sh/cats-7f3a91\n"+
+		"  kinds: [\"attention\", \"finished\"]\n"+
+		"  click_url: \"cats://pane/\"\n"+
+		"  min_interval: 15s\n"), true)
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
@@ -233,7 +233,7 @@ func TestParsePush(t *testing.T) {
 
 	// A narrowing override replaces, and the priority map keeps its defaults for
 	// the kind the operator didn't mention.
-	cfg, err = parse([]byte("push:\n  kinds: [\"finished\"]\n"))
+	cfg, err = parse([]byte("push:\n  kinds: [\"finished\"]\n"), true)
 	if err != nil {
 		t.Fatalf("parse narrowing: %v", err)
 	}
@@ -252,7 +252,7 @@ func TestParseWorktrees(t *testing.T) {
 	if got := Default().Worktrees.Directory; got != "~/.cats/worktrees" {
 		t.Fatalf("default worktrees.directory = %q", got)
 	}
-	got, err := parse([]byte("worktrees:\n  directory: /tmp/checkouts\n"))
+	got, err := parse([]byte("worktrees:\n  directory: /tmp/checkouts\n"), true)
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
@@ -264,7 +264,7 @@ func TestParseWorktrees(t *testing.T) {
 // The persistence block: absent keys keep the on-by-default behaviour; present
 // keys override; a negative history_lines is rejected.
 func TestParsePersistence(t *testing.T) {
-	got, err := parse([]byte("persistence:\n  state_dir: /tmp/state\n"))
+	got, err := parse([]byte("persistence:\n  state_dir: /tmp/state\n"), true)
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
@@ -272,7 +272,7 @@ func TestParsePersistence(t *testing.T) {
 		t.Fatalf("got %+v", got.Persistence)
 	}
 
-	got, err = parse([]byte("persistence:\n  enabled: false\n  history_lines: 500\n"))
+	got, err = parse([]byte("persistence:\n  enabled: false\n  history_lines: 500\n"), true)
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
@@ -280,11 +280,11 @@ func TestParsePersistence(t *testing.T) {
 		t.Fatalf("got %+v", got.Persistence)
 	}
 
-	if _, err := parse([]byte("persistence:\n  history_lines: -1\n")); err == nil {
+	if _, err := parse([]byte("persistence:\n  history_lines: -1\n"), true); err == nil {
 		t.Fatal("negative history_lines should be rejected")
 	}
 
-	got, err = parse([]byte("persistence:\n  resume_agents: false\n"))
+	got, err = parse([]byte("persistence:\n  resume_agents: false\n"), true)
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
@@ -296,7 +296,7 @@ func TestParsePersistence(t *testing.T) {
 // The exited-pane reaper's TTL: a duration by default, an off-switch by any of
 // the spellings someone reaching for one would actually type.
 func TestParsePanes(t *testing.T) {
-	got, err := parse(nil)
+	got, err := parse(nil, true)
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
@@ -304,7 +304,7 @@ func TestParsePanes(t *testing.T) {
 		t.Fatalf("default reap_exited = %v (%v), want 4h", d, err)
 	}
 
-	got, err = parse([]byte("panes:\n  reap_exited: \"30m\"\n"))
+	got, err = parse([]byte("panes:\n  reap_exited: \"30m\"\n"), true)
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
@@ -314,7 +314,7 @@ func TestParsePanes(t *testing.T) {
 
 	// Every off-switch spelling means the same thing: keep corpses forever.
 	for _, off := range []string{`""`, `"0"`, `"off"`, `"never"`, `"none"`, `"OFF"`} {
-		got, err = parse([]byte("panes:\n  reap_exited: " + off + "\n"))
+		got, err = parse([]byte("panes:\n  reap_exited: "+off+"\n"), true)
 		if err != nil {
 			t.Fatalf("parse %s: %v", off, err)
 		}
@@ -331,7 +331,7 @@ func TestExampleConfigParses(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read example config: %v", err)
 	}
-	got, err := parse(data)
+	got, err := parse(data, true)
 	if err != nil {
 		t.Fatalf("example config does not parse: %v", err)
 	}
@@ -473,7 +473,7 @@ hosts:
     label: "devbox (ssh)"
     addr: "unix:///tmp/devbox.sock"
     default: true
-`))
+`), true)
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
@@ -564,7 +564,7 @@ func TestValidatePeers(t *testing.T) {
 }
 
 func TestParsePeersRoundTrip(t *testing.T) {
-	cfg, err := parse([]byte("peers:\n  - id: home\n    url: https://mini:8421\n    token_file: ~/t\n    label: Home\n"))
+	cfg, err := parse([]byte("peers:\n  - id: home\n    url: https://mini:8421\n    token_file: ~/t\n    label: Home\n"), true)
 	if err != nil {
 		t.Fatal(err)
 	}

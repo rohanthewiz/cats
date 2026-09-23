@@ -140,7 +140,7 @@ the manifest format and for writing your own.
 
 | What | Path |
 |------|------|
-| Config | `~/.config/cats/config.yaml` (`$XDG_CONFIG_HOME/cats`) |
+| Config | `~/.config/cats/config.json` (`$XDG_CONFIG_HOME/cats`) |
 | Session + scrollback state | `~/.local/state/cats` (`$XDG_STATE_HOME/cats`) |
 | Auto-generated TLS cert | `~/.config/cats` |
 | Plugins | `~/.config/cats/plugins` |

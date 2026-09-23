@@ -28,7 +28,7 @@ flowchart LR
     CTL["control socket 0600"]
     HOOK["hook socket"]
     ST["~/.local/state/cats"]
-    CFG["~/.config/cats/config.yaml"]
+    CFG["~/.config/cats/config.json"]
   end
 
   CLI["catctl · plugins · cats-todo"]

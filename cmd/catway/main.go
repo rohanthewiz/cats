@@ -84,7 +84,7 @@ import (
 
 func main() {
 	configPath := flag.String("config", "",
-		"config file path (env "+config.EnvVar+"; default ~/.config/cats/config.yaml)")
+		"config file path (env "+config.EnvVar+"; default ~/.config/cats/config.json)")
 	addr := flag.String("addr", ":8421", "listen address")
 	socket := flag.String("socket", "/tmp/cats-cathost.sock", "cathost daemon socket path")
 	controlSocket := flag.String("control-socket", "",

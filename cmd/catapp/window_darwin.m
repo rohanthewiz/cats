@@ -119,7 +119,13 @@ static NSString *const kBridgeJS =
     @"window.catsForget  = (u)   => window.webkit.messageHandlers.catsApp.postMessage({op:'forget',url:String(u)});\n"
     @"window.catsCancel  = ()    => window.webkit.messageHandlers.catsApp.postMessage({op:'cancel'});\n"
     @"window.catsRestartBackend = () => window.webkit.messageHandlers.catsApp.postMessage({op:'restart'});\n"
-    @"window.catsBoot = (p,d) => window.webkit.messageHandlers.catsBoot.postMessage({phase:String(p),detail:String(d||'')});\n";
+    @"window.catsBoot = (p,d) => window.webkit.messageHandlers.catsBoot.postMessage({phase:String(p),detail:String(d||'')});\n"
+    // The settings screen's app tab (33-settings.js): the launcher's own
+    // section of config.json, which only this process can reach — in remote
+    // mode the page's catway is on another machine. Promise-shaped, like the
+    // clipboard read, because the screen waits for the answer.
+    @"window.catsAppSettingsGet = ()  => window.webkit.messageHandlers.catsSettings.postMessage({op:'get'});\n"
+    @"window.catsAppSettingsSet = (j) => window.webkit.messageHandlers.catsSettings.postMessage({op:'set',json:String(j)});\n";
 
 static WKWebViewConfiguration *catsConfig(CatsWindowController *owner) {
     WKWebViewConfiguration *cfg = [[WKWebViewConfiguration alloc] init];
@@ -134,6 +140,9 @@ static WKWebViewConfiguration *catsConfig(CatsWindowController *owner) {
     [ucc addScriptMessageHandlerWithReply:owner
                              contentWorld:[WKContentWorld pageWorld]
                                      name:@"catsClip"];
+    [ucc addScriptMessageHandlerWithReply:owner
+                             contentWorld:[WKContentWorld pageWorld]
+                                     name:@"catsSettings"];
     [ucc addScriptMessageHandler:owner name:@"catsApp"];
     [ucc addScriptMessageHandler:owner name:@"catsBoot"];
     [ucc addUserScript:[[WKUserScript alloc] initWithSource:kBridgeJS
@@ -201,11 +210,29 @@ static WKWebViewConfiguration *catsConfig(CatsWindowController *owner) {
 
 // catsClip: the native pasteboard, with a reply so the page keeps its promise
 // shape (window.catsClipRead() is awaited by the paste path).
+// catsSettings: the launcher's config section for the settings screen — get
+// replies with the section as JSON, set with "" or an error message.
 - (void)userContentController:(WKUserContentController *)ucc
       didReceiveScriptMessage:(WKScriptMessage *)message
                         replyHandler:(void (^)(id, NSString *))replyHandler {
     NSDictionary *m = [message.body isKindOfClass:[NSDictionary class]] ? message.body : nil;
     NSString *op = m[@"op"];
+    if ([message.name isEqualToString:@"catsSettings"]) {
+        char *out = NULL;
+        if ([op isEqualToString:@"get"]) {
+            out = catappSettingsGet();
+        } else if ([op isEqualToString:@"set"]) {
+            NSString *json = m[@"json"] ?: @"";
+            out = catappSettingsSet((char *)[json UTF8String]);
+        } else {
+            replyHandler(nil, @"unknown settings op");
+            return;
+        }
+        NSString *s = out ? [NSString stringWithUTF8String:out] : @"";
+        free(out); // both exports hand over a C.CString
+        replyHandler(s, nil);
+        return;
+    }
     if ([op isEqualToString:@"write"]) {
         NSString *text = m[@"text"] ?: @"";
         catappClipWrite((char *)[text UTF8String]);
@@ -276,6 +303,7 @@ static WKWebViewConfiguration *catsConfig(CatsWindowController *owner) {
     // whole web view alive with it.
     WKUserContentController *ucc = self.web.configuration.userContentController;
     [ucc removeScriptMessageHandlerForName:@"catsClip" contentWorld:[WKContentWorld pageWorld]];
+    [ucc removeScriptMessageHandlerForName:@"catsSettings" contentWorld:[WKContentWorld pageWorld]];
     [ucc removeScriptMessageHandlerForName:@"catsApp"];
     [ucc removeScriptMessageHandlerForName:@"catsBoot"];
     self.web.UIDelegate = nil;
@@ -444,6 +472,28 @@ void catsZoomKeyWindow(int delta) {
                 return;
             }
         }
+    }
+}
+
+// catsEvalKeyWindow runs a script in the FRONT window's page — falling back to
+// the first window when none is key (the app is active with every window
+// minimized, or a sheet has focus), because a menu command the user just chose
+// should land somewhere visible rather than nowhere.
+void catsEvalKeyWindow(const char *cJS) {
+    @autoreleasepool {
+        NSString *js = [NSString stringWithUTF8String:cJS];
+        if (!js || gWindows.count == 0) {
+            return;
+        }
+        CatsWindowController *target = gWindows.firstObject;
+        for (CatsWindowController *wc in gWindows) {
+            if (wc.window.isKeyWindow) {
+                target = wc;
+                break;
+            }
+        }
+        [target.window makeKeyAndOrderFront:nil];
+        [target.web evaluateJavaScript:js completionHandler:nil];
     }
 }
 

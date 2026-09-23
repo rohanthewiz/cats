@@ -190,6 +190,6 @@ Flags: `--persist=false`, `--state-dir DIR`.
     status.json                      per-agent update outcomes
 ```
 
-`~/.config/cats/` holds the other half — `config.yaml`, `plugins/`, and the
+`~/.config/cats/` holds the other half — `config.json`, `plugins/`, and the
 auto-generated TLS cert. The split is intentional: *state* is machine-local
 runtime data cats remembers; *config* is what you chose.

@@ -60,7 +60,7 @@ It is a short list, and it is the reason the modes are cheap to switch between:
   PTYs.
 * **Persistence** — `session.json` and `history.json` under the *server's*
   `$XDG_STATE_HOME/cats`.
-* **Configuration** — `config.yaml` on the *server's* host, including theme and
+* **Configuration** — `config.json` on the *server's* host, including theme and
   keybindings, since the page is rendered server-side.
 * The **four protocols** and their independent version numbers.
 
@@ -69,7 +69,7 @@ It is a short list, and it is the reason the modes are cheap to switch between:
 ```mermaid
 flowchart LR
   subgraph moves["Follows the server"]
-    A["config.yaml"]
+    A["config.json"]
     B["session.json / history.json"]
     C["control socket + catctl"]
     D["hook socket + installed agent hooks"]

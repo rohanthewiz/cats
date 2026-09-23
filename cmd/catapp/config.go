@@ -4,19 +4,30 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"log"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/rohanthewiz/cats/internal/config"
 )
 
-// appConfig is the launcher's own persisted settings — deliberately separate
-// from the catway's ~/.config/cats/config.yaml. It records which mode the
+// appConfig is the launcher's own persisted settings. It records which mode the
 // window opens in and, for remote mode, where to point the webview, so a user's
-// choice in the connect form survives relaunches. It lives in the platform
-// app-data dir (see appDataDir) as app.json.
+// choice in the connect form survives relaunches.
+//
+// It is the "app" section of the same ~/.config/cats/config.json catway reads —
+// one file for every option cats has — but it is still the launcher's section,
+// read and written only from here and never over the wire: in remote mode the
+// catway this window shows runs on another machine, and its config.json is not
+// the one this Mac launches from. Two processes sharing one file is safe
+// because each rewrites only what it owns, under a lock; see
+// internal/config/jsonfile.go. (Before the JSON config it was app.json in
+// appDataDir; loadAppConfig imports that once.)
 type appConfig struct {
 	// Mode is "local" (supervise the in-bundle daemons) or "remote" (thin client
 	// to a catway URL). An empty value falls back to the build-time defaultMode.
@@ -113,11 +124,29 @@ func (c appConfig) currentPreset() int {
 	return -1
 }
 
-// appConfigFile is the launcher settings filename inside appDataDir.
-const appConfigFile = "app.json"
+// appSection is the key the launcher's settings live under in config.json.
+const appSection = "app"
 
-// appDataDir returns the per-user directory for the launcher's own state
-// (app.json): ~/Library/Application Support/cats, the conventional home for a
+// legacyAppConfigFile is the pre-JSON-config settings file inside appDataDir,
+// imported once by loadAppConfig and left in place after that.
+const legacyAppConfigFile = "app.json"
+
+// appConfigPath is the config.json the launcher shares with the catway it
+// supervises: CATS_CONFIG when that names a JSON file (the supervised catway
+// inherits the same env, so both processes resolve the same file), otherwise
+// the default location. A CATS_CONFIG pointing at an old YAML config is left
+// to catway alone — YAML has no room for a foreign section, so the app's
+// settings go to the default JSON path beside it.
+func appConfigPath() string {
+	p := config.ResolvePath()
+	if p == "" || strings.HasSuffix(strings.ToLower(p), ".yaml") || strings.HasSuffix(strings.ToLower(p), ".yml") {
+		return config.DefaultPath()
+	}
+	return p
+}
+
+// appDataDir returns the per-user directory for the launcher's own state (the
+// daemon and boot logs, and the legacy app.json): ~/Library/Application Support/cats, the conventional home for a
 // GUI app's support files, kept separate from the daemons' XDG config/state so
 // packaging never disturbs existing sessions. (This launcher is macOS-only —
 // see the darwin build constraint — so no other-platform branch is needed.)
@@ -129,27 +158,36 @@ func appDataDir() (string, error) {
 	return filepath.Join(home, "Library", "Application Support", "cats"), nil
 }
 
-// loadAppConfig reads app.json, falling back to the build-time defaultMode on a
-// first run or any read/parse problem — the launcher must always resolve to a
-// usable mode, never fail to open. A malformed file is logged, not fatal.
+// loadAppConfig reads the "app" section of config.json, falling back to the
+// build-time defaultMode on a first run or any read/parse problem — the
+// launcher must always resolve to a usable mode, never fail to open. A
+// malformed section is logged, not fatal.
+//
+// First run after the move to config.json: the section is absent, and a
+// legacy app.json is imported into it (and left where it was, like the
+// config.yaml catway migrates). Without that a user's saved catways and
+// window layout would vanish on upgrade.
 func loadAppConfig() appConfig {
 	cfg := appConfig{Mode: defaultMode}
-	dir, err := appDataDir()
-	if err != nil {
-		log.Printf("app data dir unavailable, using build defaults: %v", err)
+	path := appConfigPath()
+	if path == "" {
+		log.Printf("config path unavailable, using build defaults")
 		return cfg
 	}
-	path := filepath.Join(dir, appConfigFile)
-	data, err := os.ReadFile(path)
+	found, err := config.ReadSection(path, appSection, &cfg)
 	if err != nil {
-		if !os.IsNotExist(err) { // a missing file is the normal first-run case
-			log.Printf("read %s, using build defaults: %v", path, err)
-		}
-		return cfg
-	}
-	if err := json.Unmarshal(data, &cfg); err != nil {
-		log.Printf("%s is malformed, using build defaults: %v", path, err)
+		log.Printf("%s, using build defaults: %v", path, err)
 		return appConfig{Mode: defaultMode}
+	}
+	if !found {
+		if legacy, ok := readLegacyAppConfig(); ok {
+			cfg = legacy
+			if err := saveAppConfig(cfg); err != nil {
+				log.Printf("could not import app.json into %s: %v", path, err)
+			} else {
+				log.Printf("imported app.json into %s (the old file is no longer read)", path)
+			}
+		}
 	}
 	if cfg.Mode == "" {
 		cfg.Mode = defaultMode
@@ -157,23 +195,35 @@ func loadAppConfig() appConfig {
 	return cfg
 }
 
-// saveAppConfig persists cfg to app.json (0600 in a 0700 dir — it can hold a
-// remote URL that is nobody else's business). Parent dirs are created as needed.
-func saveAppConfig(cfg appConfig) error {
+// readLegacyAppConfig reads the pre-config.json app.json, if there is one.
+func readLegacyAppConfig() (appConfig, bool) {
 	dir, err := appDataDir()
 	if err != nil {
-		return err
+		return appConfig{}, false
 	}
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return fmt.Errorf("create app data dir %s: %w", dir, err)
-	}
-	data, err := json.MarshalIndent(cfg, "", "  ")
+	path := filepath.Join(dir, legacyAppConfigFile)
+	data, err := os.ReadFile(path)
 	if err != nil {
-		return fmt.Errorf("marshal app.json: %w", err)
+		if !errors.Is(err, fs.ErrNotExist) {
+			log.Printf("read %s: %v", path, err)
+		}
+		return appConfig{}, false
 	}
-	path := filepath.Join(dir, appConfigFile)
-	if err := os.WriteFile(path, data, 0o600); err != nil {
-		return fmt.Errorf("write %s: %w", path, err)
+	var cfg appConfig
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		log.Printf("%s is malformed, not importing it: %v", path, err)
+		return appConfig{}, false
 	}
-	return nil
+	return cfg, true
+}
+
+// saveAppConfig writes cfg as config.json's "app" section, leaving catway's
+// sections untouched. A brand-new file is created 0600 — it can hold a remote
+// URL that is nobody else's business.
+func saveAppConfig(cfg appConfig) error {
+	path := appConfigPath()
+	if path == "" {
+		return errors.New("no resolvable config path")
+	}
+	return config.WriteSection(path, appSection, cfg)
 }

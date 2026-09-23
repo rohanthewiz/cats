@@ -108,6 +108,15 @@
         ((e.metaKey && !e.ctrlKey) || (e.ctrlKey && e.altKey))) {
       e.preventDefault(); openPalette(); return;
     }
+    // ⌘, (mac) / Ctrl+, opens settings — the platform's own "preferences"
+    // chord. In the Mac app Cocoa takes ⌘, for the Cats › Settings… menu item
+    // before the page sees it, and that item Evals window.catsOpenSettings,
+    // so both routes land on the same screen. A desktop browser may keep ⌘,
+    // for its own preferences; Ctrl+, and the gear menu still work there.
+    if (e.type === "keydown" && e.code === "Comma" && !e.altKey && !e.shiftKey &&
+        (e.metaKey !== e.ctrlKey)) {
+      e.preventDefault(); openSettings(); return;
+    }
     // ⌘B (mac) / Ctrl+Alt+B folds the left column away and back. Same modifier
     // pair as the palette above, so the window-chrome toggles are learned once;
     // matched on e.code so a non-QWERTY layout still gets the physical key.

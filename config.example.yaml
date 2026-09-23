@@ -1,7 +1,10 @@
-# cats catway configuration (YAML).
+# cats catway configuration — the annotated reference, in the legacy YAML form.
 #
-# Copy to ~/.config/cats/config.yaml (or point at it with `catway --config
-# <path>` / the CATS_CONFIG env var). Every field is optional — omit anything
+# The live config is JSON: ~/.config/cats/config.json (defaults in
+# config.example.json; edit it from Settings — ⌘, / Ctrl+,). This file keeps
+# the per-key commentary JSON cannot carry, and the keys are identical. It is
+# still accepted as-is via `catway --config <path>.yaml` / CATS_CONFIG, and a
+# config.yaml at the default location is migrated to config.json on first start. Every field is optional — omit anything
 # you don't want to change and the built-in default is used. For the server
 # settings a command-line flag still wins over this file, which wins over the
 # default (flag > config > default). The theme and keybindings have no flags and

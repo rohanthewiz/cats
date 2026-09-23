@@ -28,7 +28,7 @@ import (
 // keybindings and build info ride through json.Marshal, whose default HTML
 // escaping keeps a "</script>" in a value inert.
 func renderPage(base []byte, cfg config.Config) []byte {
-	inject := themeStyle(resolveTheme(cfg)) + keybindingsScript(cfg.Keybindings) + buildScript() + homeScript()
+	inject := themeStyle(resolveTheme(cfg)) + keybindingsScript(cfg.Keybindings) + uiPrefsScript(cfg.UI) + buildScript() + homeScript()
 	html := string(base)
 	if i := strings.LastIndex(html, "</head>"); i >= 0 {
 		return []byte(html[:i] + inject + html[i:])
@@ -108,6 +108,20 @@ func keybindingsScript(k config.Keybindings) string {
 		return ""
 	}
 	return "<script id=\"cats-config-keys\">window.__catsKeys=" + string(data) + ";</script>\n"
+}
+
+// uiPrefsScript publishes the config file's front-end preferences as
+// window.__catsUI (font_px, sidebar_width). Only set fields are emitted — an
+// empty object means "the file says nothing", and the page then keeps whatever
+// this browser last used (its localStorage), exactly as before the section
+// existed. When a field IS set the file wins over localStorage: that is what
+// makes a preference follow the user from one browser to the next.
+func uiPrefsScript(u config.UI) string {
+	data, err := json.Marshal(u) // omitempty: unset fields are absent
+	if err != nil {
+		return ""
+	}
+	return "<script id=\"cats-config-ui\">window.__catsUI=" + string(data) + ";</script>\n"
 }
 
 // buildScript publishes the binary's git identity for the sidebar's build badge.

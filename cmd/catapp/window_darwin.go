@@ -13,6 +13,7 @@ void  catsOpenHTMLWindow(const char *html, const char *title);
 void  catsShowHTMLInKeyWindow(const char *html, const char *title);
 void  catsNavigateAll(const char *url, const char *title);
 void  catsEvalAll(const char *js);
+void  catsEvalKeyWindow(const char *js);
 void  catsZoomKeyWindow(int delta);
 void  catsSetWindowTitle(const char *title);
 char *catsWindowsJSON(void);
@@ -302,6 +303,14 @@ func (m *winManager) navigateAll(u, title string) {
 	defer C.free(unsafe.Pointer(cURL))
 	defer C.free(unsafe.Pointer(cTitle))
 	C.catsNavigateAll(cURL, cTitle)
+}
+
+// evalKeyWindow runs a script in the front window's page (the first window
+// when none is key). Main thread only.
+func (m *winManager) evalKeyWindow(js string) {
+	cJS := C.CString(js)
+	defer C.free(unsafe.Pointer(cJS))
+	C.catsEvalKeyWindow(cJS)
 }
 
 // evalAll runs a script in every window's page. The backend overlay

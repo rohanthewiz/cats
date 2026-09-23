@@ -11,6 +11,14 @@
     const stored = parseInt(localStorage.getItem(FONT_KEY), 10);
     if (stored >= FONT_MIN && stored <= FONT_MAX) FONT_PX = stored;
   } catch (e) { /* storage disabled (private mode / file://) — keep the default */ }
+  // config.json's ui.font_px, when set, wins over this browser's own memory: it
+  // is how the size follows the user to another browser or the Mac app. The
+  // file only says anything once someone chose a size (⌘+/⌘- write it back —
+  // see persistUIPref), so a fresh install still starts from localStorage.
+  {
+    const filePx = (window.__catsUI || {}).font_px;
+    if (filePx >= FONT_MIN && filePx <= FONT_MAX) FONT_PX = filePx;
+  }
 
   const panesEl = document.getElementById("panes");
   const wsListEl = document.getElementById("ws-list");
@@ -221,6 +229,7 @@
     if (px === FONT_PX) return;
     FONT_PX = px;
     try { localStorage.setItem(FONT_KEY, String(px)); } catch (e) { /* not persisted */ }
+    persistUIPref("font_px", px);
     measure();
     gridSize();
     sendMsg({ t: "resize", cols, rows });

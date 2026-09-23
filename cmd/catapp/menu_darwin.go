@@ -40,6 +40,21 @@ func catappZoom(delta C.int) {
 	zoomFont(int(delta))
 }
 
+// catappOpenSettings is called from Cats › Settings… (⌘,) in menu_darwin.m. It
+// opens the page's settings screen in the front window; the guard makes it a
+// no-op on pages that have none (the connect form, the login page, the error
+// sheet), where there is no catway to configure yet.
+//
+//export catappOpenSettings
+func catappOpenSettings() {
+	if windows == nil {
+		return
+	}
+	onMainThread(func() {
+		windows.evalKeyWindow("window.catsOpenSettings && window.catsOpenSettings()")
+	})
+}
+
 // catappMainTick drains the closures queued for the main thread (see
 // onMainThread). Called from window_darwin.m's catsDispatchMain.
 //

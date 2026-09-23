@@ -159,6 +159,7 @@ var recordedParamClasses = map[string]map[string]string{
 	},
 	"config.set": {
 		"copy_mode": ClassPlain,
+		"options":   ClassPlain,
 		"theme":     ClassPlain,
 	},
 	"theme.save": {

@@ -46,7 +46,7 @@ Resolution order:
 2. `CATS_PASSWORD` environment variable
 3. a freshly **generated** secret, logged for you to read
 
-The secret is deliberately **not** readable from `config.yaml`, so it can never
+The secret is deliberately **not** readable from `config.json`, so it can never
 land in a committed file. Comparison is constant-time (`subtle.ConstantTimeCompare`).
 
 The generated fallback is fine for a quick local run and useless for a service —

@@ -15,6 +15,12 @@
     const storedW = parseInt(localStorage.getItem(SBW_KEY), 10);
     if (storedW >= SBW_MIN) document.documentElement.style.setProperty("--sidebar-w", storedW + "px");
   } catch (e) { /* storage disabled — keep the stylesheet default */ }
+  // As with the font size, config.json's ui.sidebar_width wins when the file
+  // has one — written back when a drag comes to rest (the pointerup below).
+  {
+    const fileW = (window.__catsUI || {}).sidebar_width;
+    if (fileW >= SBW_MIN) document.documentElement.style.setProperty("--sidebar-w", fileW + "px");
+  }
 
   // Panes are laid out from cols/rows, so a drag has to re-derive the grid and
   // tell the server. That is debounced while the pointer moves (the same 120ms
@@ -122,6 +128,12 @@
       // the only thing a click there can mean is "show it again".
       if (startHidden && !moved) { setSidebarHidden(false); revealedAt = Date.now(); }
       sidebarResized(true);
+      // Only a real drag that ended with the column showing is a new width;
+      // folding it away is its own (per-browser) toggle, not a width of 0.
+      if (moved && !sidebarHidden()) {
+        const w = parseInt(document.documentElement.style.getPropertyValue("--sidebar-w"), 10);
+        if (w >= SBW_MIN) persistUIPref("sidebar_width", w);
+      }
     };
     splitterEl.addEventListener("pointermove", move);
     splitterEl.addEventListener("pointerup", up, { once: true });
@@ -132,6 +144,7 @@
     if (Date.now() - revealedAt < 600) return;   // this was the reveal click, twice
     document.documentElement.style.removeProperty("--sidebar-w");
     try { localStorage.removeItem(SBW_KEY); } catch (e) { /* nothing to clear */ }
+    persistUIPref("sidebar_width", 0); // back to "each browser's own default"
     sidebarResized(true);
   });
 

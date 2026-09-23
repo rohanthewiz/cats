@@ -1,6 +1,7 @@
 package wire
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
@@ -1660,6 +1661,19 @@ type ConfigGetResult struct {
 	Themes         []ThemeInfo         `json:"themes,omitempty"`
 	CopyMode       map[string][]string `json:"copy_mode"`
 	Server         ConfigServerInfo    `json:"server"`
+	// Options is every config-file section the settings screen edits
+	// generically (panes, persistence, worktrees, push, editor, ledger, ui),
+	// keyed by section name, each exactly as it appears in config.json. Raw
+	// JSON rather than typed structs on purpose: this package is the shared,
+	// stdlib-only contract, and mirroring each section here would mean a wire
+	// release for every new knob. The settings screen renders from the values
+	// it is given; a client that does not know a key round-trips it untouched.
+	Options map[string]json.RawMessage `json:"options,omitempty"`
+	// RestartSections names the Options sections the running catway reads only
+	// at startup — a save persists them, but they take effect on the next
+	// launch. Server-supplied so the screen never claims "applied" for a
+	// setting the process cannot pick up live.
+	RestartSections []string `json:"restart_sections,omitempty"`
 }
 
 // ConfigSetParams: config.set — only the live-appliable sections. Absent fields
@@ -1670,9 +1684,15 @@ type ConfigGetResult struct {
 // are exactly what a switch must shed. With Name absent, Colors merge key-wise
 // and a non-empty Font replaces, preserving the pre-themes contract for
 // callers that just poke individual colors.
+//
+// Options sections (see ConfigGetResult.Options) are decoded ONTO the current
+// section, so a partial object changes only the keys it carries; a section
+// that is not one of the editable ones is refused rather than ignored, so a
+// typo cannot look like a successful save.
 type ConfigSetParams struct {
-	Theme    *ConfigTheme        `json:"theme,omitempty"`
-	CopyMode map[string][]string `json:"copy_mode,omitempty"`
+	Theme    *ConfigTheme               `json:"theme,omitempty"`
+	CopyMode map[string][]string        `json:"copy_mode,omitempty"`
+	Options  map[string]json.RawMessage `json:"options,omitempty"`
 }
 
 // ThemeListResult is CmdResult.Data for theme.list.

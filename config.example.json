@@ -1,0 +1,104 @@
+{
+  "server": {
+    "addr": ":8421",
+    "cathost_socket": "/tmp/cats-cathost.sock",
+    "control_socket": "",
+    "hook_socket": "/tmp/cats-hooks.sock",
+    "auth": "password",
+    "session_ttl": "24h",
+    "tls": {
+      "enabled": false,
+      "cert": "",
+      "key": ""
+    }
+  },
+  "persistence": {
+    "enabled": true,
+    "state_dir": "",
+    "history_lines": 2000,
+    "resume_agents": true
+  },
+  "panes": {
+    "reap_exited": "4h",
+    "autoclose_exited": "10s"
+  },
+  "theme": {},
+  "keybindings": {
+    "copy_mode": {
+      "bottom": [
+        "G"
+      ],
+      "exit": [
+        "Escape",
+        "q"
+      ],
+      "line-end": [
+        "$",
+        "End"
+      ],
+      "line-start": [
+        "0",
+        "Home"
+      ],
+      "move-down": [
+        "ArrowDown",
+        "j"
+      ],
+      "move-left": [
+        "ArrowLeft",
+        "h"
+      ],
+      "move-right": [
+        "ArrowRight",
+        "l"
+      ],
+      "move-up": [
+        "ArrowUp",
+        "k"
+      ],
+      "rect": [
+        "r"
+      ],
+      "select": [
+        "v"
+      ],
+      "top": [
+        "g"
+      ],
+      "yank": [
+        "y",
+        "Enter"
+      ]
+    }
+  },
+  "worktrees": {
+    "directory": "~/.cats/worktrees"
+  },
+  "push": {
+    "enabled": false,
+    "kinds": [
+      "attention"
+    ],
+    "priority": {
+      "attention": "high",
+      "finished": "low"
+    },
+    "min_interval": "60s"
+  },
+  "editor": {
+    "agents": [
+      "ced"
+    ],
+    "command": [
+      "ced"
+    ],
+    "spawn": true
+  },
+  "ledger": {
+    "enabled": true
+  },
+  "runbooks": {
+    "triggers": true
+  },
+  "ui": {}
+}

@@ -54,7 +54,7 @@
       dirWrap.appendChild(dir); body.appendChild(dirWrap);
       if (!peer.has_token) {
         const warn = document.createElement("div"); warn.className = "hint warn";
-        warn.textContent = "this peer has no token_file — the sync will be refused; add one in config.yaml (peers:)";
+        warn.textContent = "this peer has no token_file — the sync will be refused; add one in config.json (peers:)";
         body.appendChild(warn);
       }
       const note = document.createElement("div"); note.className = "hint";
@@ -152,7 +152,7 @@
 
   // peerAddDialog collects one peers: entry — the config file's fields in the
   // order an operator fills them. The token is a FILE path, never typed here:
-  // the settings modal rewrites config.yaml wholesale, so a literal secret in
+  // the settings modal rewrites config.json wholesale, so a literal secret in
   // it is one commit away from being published (the same reason the hosts
   // dialog takes a token file).
   function peerAddDialog() {

@@ -1,17 +1,34 @@
 # Configuration
 
-One YAML file: `~/.config/cats/config.yaml`. Every field is optional — omit
+One JSON file: `~/.config/cats/config.json`. Every field is optional — omit
 anything you do not want to change and the built-in default applies.
 
+Most of it is editable without touching the file: **Settings** (⌘, / Ctrl+,,
+the gear menu, the palette, or Cats › Settings… in the Mac app) has a tab per
+section. Server settings are shown read-only (they need a restart); hosts and
+peers keep their own dialogs.
+
+- **Migration.** A pre-JSON `config.yaml` at the default location is converted
+  to `config.json` on first start and left in place — after that it is no
+  longer read. An explicit `--config something.yaml` is still read and written
+  as YAML. The section examples below are written in YAML for readability; the
+  keys are identical in JSON.
+- **Shared with the Mac app.** The app keeps its own top-level `app` section
+  in the same file (launch mode, saved catways, window layout). catway never
+  rewrites it; each process rewrites only its own sections, under a lock.
+- **`ui`** holds front-end preferences that follow you between browsers:
+  `font_px` (9–32) and `sidebar_width` (≥150). ⌘+/⌘- and dragging the sidebar
+  gutter write them; unset means each browser keeps its own.
+
 Location resolution: `catway --config <path>` > `$CATS_CONFIG` >
-`$XDG_CONFIG_HOME/cats/config.yaml` > `~/.config/cats/config.yaml`.
+`$XDG_CONFIG_HOME/cats/config.json` > `~/.config/cats/config.json`.
 
 ## Precedence
 
 ```mermaid
 flowchart TD
   D["built-in default"]
-  C["config.yaml"]
+  C["config.json"]
   F["command-line flag"]
   E["effective value"]
 
@@ -33,7 +50,7 @@ its own default.
 
 ```mermaid
 flowchart TD
-  EDIT["edit config.yaml"]
+  EDIT["edit config.json"]
   KIND{"which section?"}
   LIVE["theme · keybindings<br/>catctl reload — re-renders the served page"]
   HOSTS["hosts<br/>catctl reload — diffs the roster, dials/detaches"]
@@ -531,7 +548,7 @@ adding another editor is one word here and no code anywhere.
 > the URL like a secret and pick something unguessable. If your endpoint also
 > wants a bearer credential, set `CATS_PUSH_TOKEN` in the environment. Like
 > `CATS_PASSWORD` it is deliberately **not** read from this file: the settings
-> modal rewrites `config.yaml`, and a token field would mean it silently copied
+> modal rewrites `config.json`, and a token field would mean it silently copied
 > your secret into a file you may well commit.
 
 ## `worktrees`
@@ -693,7 +710,7 @@ Injected **into** every pane by `catway`:
 
 | What | Path |
 |------|------|
-| config | `~/.config/cats/config.yaml` |
+| config | `~/.config/cats/config.json` |
 | plugins | `~/.config/cats/plugins/` |
 | TLS cert cache | `~/.config/cats/catway-{cert,key}.pem` |
 | session + history state | `~/.local/state/cats/` |
