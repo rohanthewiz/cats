@@ -1754,6 +1754,7 @@ type PluginInfo struct {
 //	editor       PLUGINS   no            ced
 //	todos_mgr    PLUGINS   no            cats-todo
 //	notes_mgr    PLUGINS   no            gonotes
+//	http_client  PLUGINS   no            roman
 //	"" (unset)   PLUGINS   no            any older manifest
 //
 // PluginTypeAgent has no plugin behind it yet. It is defined now so the day a
@@ -1769,6 +1770,10 @@ const (
 	PluginTypeEditor   = "editor"
 	PluginTypeTodosMgr = "todos_mgr"
 	PluginTypeNotesMgr = "notes_mgr"
+	// PluginTypeHTTPClient is an HTTP request tool (roman: batch API calls
+	// over {{field}} templates). Named for what it is to a client looking for
+	// one — "send this request somewhere" — not for roman specifically.
+	PluginTypeHTTPClient = "http_client"
 )
 
 // pluginTypePattern bounds what a declared type may look like: a lowercase

@@ -185,6 +185,8 @@ eq(world().fns.isAgentPlugin({ type: "agent" }), true, "type agent is an agent p
 eq(world().fns.isAgentPlugin({}), false, "an untyped plugin is a tool");
 eq(world().fns.isAgentPlugin({ type: "Agent" }), false, "the match is exact, as the wire's is");
 eq(world().fns.pluginTypeLabel("todos_mgr"), "todos", "pluginTypeLabel drops _mgr");
+eq(world().fns.pluginTypeLabel("http_client"), "http", "…and _client");
+eq(world().fns.pluginTypeLabel("client_tool"), "client_tool", "…only as a suffix");
 eq(world().fns.pluginTypeLabel("editor"), "editor", "…and leaves other types alone");
 eq(world().fns.pluginTypeLabel(undefined), "", "…and says nothing for no type");
 eq(world().fns.pluginShort("rohanthewiz.cats-todo"), "cats-todo", "pluginShort drops the vendor prefix");

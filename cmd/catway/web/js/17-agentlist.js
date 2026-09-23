@@ -189,12 +189,13 @@
   }
 
   // pluginTypeLabel is the short word a plugin row shows for its type. The
-  // "_mgr" suffix is dropped: the section heading already says these are tools,
-  // and "todos" reads faster than "todos_mgr" in 10px type. An unknown type is
-  // shown as sent, so a plugin newer than this page still says what it is.
+  // role suffixes "_mgr" and "_client" are dropped: the section heading already
+  // says these are tools, and "todos" / "http" read faster than "todos_mgr" /
+  // "http_client" in 10px type. An unknown type is shown as sent (less a
+  // suffix), so a plugin newer than this page still says what it is.
   function pluginTypeLabel(t) {
     if (!t) return "";
-    return t.endsWith("_mgr") ? t.slice(0, -4) : t;
+    return t.replace(/_(mgr|client)$/, "");
   }
 
   // pluginRow builds one plugin-pane row. Same three fields as an agent row,

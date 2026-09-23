@@ -44,7 +44,7 @@ type Manifest struct {
 	Version     string `toml:"version"`
 	Description string `toml:"description"`
 	// Type declares what kind of tool the plugin is (wire.PluginType*:
-	// "agent", "editor", "todos_mgr", "notes_mgr"). Optional: an undeclared
+	// "agent", "editor", "todos_mgr", "notes_mgr", "http_client"). Optional: an undeclared
 	// type is a plain tool, which is what every plugin written before the key
 	// existed is. The host never branches on it — it rides the launch
 	// environment (TypeEnvVar) to catway, which records it on the pane, and

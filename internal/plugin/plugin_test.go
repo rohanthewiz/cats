@@ -737,7 +737,7 @@ func TestBinLinksRemovedForBrokenManifest(t *testing.T) {
 // A declared type is optional, and any well-formed word passes, known or not:
 // a newer plugin's type must not stop an older cats from installing it.
 func TestValidateAcceptsPluginTypes(t *testing.T) {
-	for _, typ := range []string{"", "agent", "editor", "todos_mgr", "notes_mgr", "dev_server"} {
+	for _, typ := range []string{"", "agent", "editor", "todos_mgr", "notes_mgr", "http_client", "dev_server"} {
 		m := Manifest{ID: "acme.demo", Version: "1.0", Type: typ}
 		if err := m.Validate(); err != nil {
 			t.Errorf("type %q rejected: %v", typ, err)
