@@ -57,7 +57,9 @@ window were dated by grepping every session doc.
   - PLUGINS below AGENTS, after relaunching cats-todo, ced and gonotes through
     the plugin host so their panes carry `CATS_PLUGIN_TYPE`. Check the type
     labels, and that AGENTS says "none" when only plugins are open
-    (`2026-0922-1713`).
+    (`2026-0922-1713`). roman is linked too since
+    `2026-0922-2006-roman-http-client-plugin`: its row should read `http`
+    with the title `roman: <project>`, and `(done/total)` while a batch runs.
 
 - **N-003** · raised `2026-0905-1938-plugin-panes-in-the-agents-section` · value low
   A plugin started by hand from a shell (e.g. `cats-todo` typed at a prompt)
