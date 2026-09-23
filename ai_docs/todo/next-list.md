@@ -32,7 +32,7 @@ window were dated by grepping every session doc.
 - Open and Roadmap stay in ID order. New items append to the end of Open (or
   Roadmap, for future work) with the next ID.
 
-**Next ID:** N-034
+**Next ID:** N-035
 
 ## Open
 
@@ -65,7 +65,12 @@ window were dated by grepping every session doc.
     row-band repaint on a busy agent pane (no stale ink around box-drawing or
     emoji, no seams at band edges, cursor never left behind), sparse diffs
     and the frame gate live (a background tab's agent keeps streaming, and
-    switching to it shows its current screen at once).
+    switching to it shows its current screen at once). And the second round
+    (`2026-0923-2100`): `cat` of a long file and a streaming agent scroll
+    smoothly (shifted diffs), a busy pane's typing echo stays snappy (row
+    cache + frame builder), the WebSocket shows `permessage-deflate` in the
+    devtools handshake, the command palette's hover, and an exited pane's
+    countdown ticking without the header flickering.
   - the settings screen in the app (`2026-0923-1443-settings-json-and-screen`): Cats › Settings… (⌘,)
     opens it in the front window; the **app** tab lists the saved catways,
     and renaming or forgetting one redraws the Connect menu at once; first
@@ -180,32 +185,6 @@ window were dated by grepping every session doc.
   arguments, or build the list from one slice of known types so the next type
   can't miss it.
 
-- **N-027** · raised `2026-0923-1437-perf-canvas-sparse-frames-and-frame-gate` · value medium
-  Scrolling output (`cat`, `yes`, an agent streaming) shifts every row, so it
-  always falls back to a full browser frame, ~119 KB per tick per pane,
-  uncompressed. Add a scroll op to the diff (row-hash match of prev vs cur),
-  and permessage-deflate to rweb (v0.1.28 has none). See
-  `ai_docs/plans/perf-improve-plan.md` §3.
-
-- **N-028** · raised `2026-0923-1437-perf-canvas-sparse-frames-and-frame-gate` · value low
-  Remaining frame-path costs, plan §5–8: snapshot makes ~3 cgo calls per cell
-  and ignores libghostty's per-row dirty tracking; `FrameFromSnapshot` runs
-  under `emuMu` and stalls `feed`; catway marshals per connection on the loop
-  with reflective JSON; frames with no change are still sent; rweb writes a
-  WebSocket message in 2–3 syscalls.
-
-- **N-029** · raised `2026-0923-1437-perf-canvas-sparse-frames-and-frame-gate` · value low
-  A slow browser is dropped when its 512-message queue fills, after queuing up
-  to ~60 MB of stale frames. Track queued bytes, stop translating above a
-  threshold, and send one fresh full frame per visible pane once it drains.
-  Plan §4.
-
-- **N-030** · raised `2026-0923-1437-perf-canvas-sparse-frames-and-frame-gate` · value low
-  Front-end leftovers from the perf audit, plan §9: the 5 s / 10 s sidebar
-  tickers run while the page is hidden; the command palette re-renders its
-  whole list on hover; the autoclose tick rebuilds the whole pane header every
-  500 ms; each host pong re-renders every header.
-
 - **N-031** · raised `2026-0923-1443-settings-json-and-screen` · value low
   `docs/reference/configuration.md` still shows every section example in YAML
   (the keys are identical in JSON; the intro says so). Convert them to JSON,
@@ -220,6 +199,12 @@ window were dated by grepping every session doc.
 - **N-033** · raised `2026-0923-1443-settings-json-and-screen` · value low
   Other open browsers don't pick up a `ui` pref (font size, sidebar width)
   changed elsewhere until they reload; there is no broadcast for it.
+
+- **N-034** · raised `2026-0923-2100-perf-shifts-builder-deflate` · value low
+  cats-mobile does not list `pane_shift` in `Init.Features`, so a scrolling
+  pane still reaches the phone as a full frame per tick (now compressed). Its
+  grid (`internal/catsclient/grid.go`) would apply `PaneDiff.Shift` as the
+  browser does: scroll the cells up, blank the vacated rows, then the cells.
 
 ## Roadmap
 
@@ -255,6 +240,29 @@ unchanged.
 Closures before this file existed live in the session docs' own write-ups.
 Newest first. The unnumbered entries at the end were found done while seeding,
 so they are not carried.
+
+- **N-027** · raised `2026-0923-1437-perf-canvas-sparse-frames-and-frame-gate` ·
+  closed 2026-09-23, `2026-0923-2100-perf-shifts-builder-deflate` — Scrolling
+  output as a full frame per tick. Shifted diffs (`Frame.Shift`,
+  `PaneDiff.Shift`, negotiated on both hops) and permessage-deflate (rweb
+  v0.1.31). A one-line scroll on 200×50 is 2.2 KB instead of 133 KB, before
+  compression. Plan §3, §3b.
+- **N-028** · raised `2026-0923-1437-perf-canvas-sparse-frames-and-frame-gate` ·
+  closed 2026-09-23, `2026-0923-2100-perf-shifts-builder-deflate` — Remaining
+  frame-path costs. Row cache in the emulator and `FrameBuilder` (snapshot +
+  diff for a one-cell change 1.4 ms → 40 µs, off `emuMu`), hand-written frame
+  JSON shared per translator state (562 → 100 µs per full frame), empty frames
+  suppressed, one socket write per frame and batches of queued frames. Plan
+  §5–8.
+- **N-029** · raised `2026-0923-1437-perf-canvas-sparse-frames-and-frame-gate` ·
+  closed 2026-09-23, `2026-0923-2100-perf-shifts-builder-deflate` — Slow
+  browsers dropped at 512 queued messages. Frames are held back above 4 MB
+  unwritten, and the current screen is sent from catway's grid below 1 MB.
+  Plan §4.
+- **N-030** · raised `2026-0923-1437-perf-canvas-sparse-frames-and-frame-gate` ·
+  closed 2026-09-23, `2026-0923-2100-perf-shifts-builder-deflate` — Front-end
+  leftovers: visibility-gated tickers, palette highlight without a rebuild,
+  in-place countdown, host badges redrawn only when they can change. Plan §9.
 
 - **N-002** · raised `2026-0905-1938-plugin-panes-in-the-agents-section` ·
   closed 2026-09-22, `2026-0922-1857-next-list-seed-and-adopted-exec-panes`
