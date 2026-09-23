@@ -51,8 +51,9 @@
   // This tick is also the only thing that can raise the 45-minute warning: a row
   // crosses that line precisely because nothing happened, so there is no rollup
   // coming to redraw it. Hence the state travels on the element (data-st) rather
-  // than being closed over at render time.
-  setInterval(() => {
+  // than being closed over at render time. Skipped while the page is hidden
+  // (everyVisible), which is also when there is nobody to warn.
+  everyVisible(() => {
     for (const el of agentListEl.querySelectorAll(".aage")) {
       paintAge(el, Date.now() - Number(el.dataset.at), el.dataset.st);
     }

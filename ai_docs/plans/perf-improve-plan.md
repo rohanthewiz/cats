@@ -290,13 +290,27 @@ that the builder is silent exactly when the reference diff is empty.
 
 ---
 
+## 9. Front-end leftovers  (done)
+
+- **Sidebar tickers** (agent ages every 5 s, usage countdowns every 10 s) run
+  through `everyVisible`: skipped while `document.hidden`, and run once the
+  moment the page is shown again so nothing reads stale.
+- **Command palette**: hover and the arrow keys move the highlight
+  (`select`) instead of re-filtering, re-sorting and rebuilding up to sixty
+  rows; the highlight is clamped to the rows drawn.
+- **Autoclose tick**: rewrites the countdown's text node (`updateAutoclose`)
+  instead of rebuilding the header twice a second; expiry still re-renders.
+- **Host roster pushes** redraw pane headers and workspace rows only when
+  `hostBadgeKey` (ids, labels, connected) changes — not for every latency
+  update.
+
+Tests: the autoclose jstest gained the in-place tick and the expiry re-render.
+
+---
+
 ## Later (not started)
 
 3b. **Compression.** rweb v0.1.28 has no permessage-deflate; adding it shrinks
    terminal JSON 10–20×.
 8. **WebSocket write batching** in rweb (header + payload in one write; drain
    the queue per wakeup).
-9. **Front end, low:** 5 s / 10 s sidebar tickers ignore `document.hidden`;
-   the command palette re-renders its list on hover; `renderChrome` rebuilds the
-   whole header on the 500 ms autoclose tick; `hosts` pong latency re-renders
-   every header.

@@ -236,11 +236,29 @@
           row.appendChild(meta);
         }
         row.addEventListener("click", () => { closeModal(); it.fn(); });
-        row.addEventListener("mousemove", () => { if (sel !== i) { sel = i; render(); } });
+        row.addEventListener("mousemove", () => select(i, false));
         listEl.appendChild(row);
       });
       const cur = listEl.children[sel];
       if (cur && cur.scrollIntoView) cur.scrollIntoView({ block: "nearest" });
+    };
+
+    // select moves the highlight to row i without rebuilding the list. Only
+    // the query and the pane list change what the rows ARE; the pointer
+    // travelling over them and the arrow keys only change which one is lit,
+    // and re-filtering, re-sorting and re-creating up to sixty rows for that
+    // made the list stutter under a moving mouse. Clamped to the rows drawn,
+    // so the highlight never goes somewhere Enter cannot see. scroll is for
+    // the keyboard: a hovered row is already under the pointer.
+    const select = (i, scroll) => {
+      const rowEls = listEl.children;
+      if (!rowEls.length || !rowEls[0].classList.contains("row")) return; // "no matches"
+      i = Math.max(0, Math.min(i, rowEls.length - 1));
+      if (i === sel) return;
+      if (rowEls[sel]) rowEls[sel].classList.remove("sel");
+      sel = i;
+      rowEls[sel].classList.add("sel");
+      if (scroll && rowEls[sel].scrollIntoView) rowEls[sel].scrollIntoView({ block: "nearest" });
     };
 
     openOverlay((ov) => {
@@ -253,8 +271,8 @@
       inputEl.addEventListener("input", () => { query = inputEl.value; sel = 0; render(); });
       inputEl.addEventListener("keydown", (e) => {
         e.stopPropagation();
-        if (e.key === "ArrowDown") { e.preventDefault(); sel++; render(); }
-        else if (e.key === "ArrowUp") { e.preventDefault(); sel = Math.max(0, sel - 1); render(); }
+        if (e.key === "ArrowDown") { e.preventDefault(); select(sel + 1, true); }
+        else if (e.key === "ArrowUp") { e.preventDefault(); select(sel - 1, true); }
         else if (e.key === "Enter") {
           e.preventDefault();
           const rows = filtered();

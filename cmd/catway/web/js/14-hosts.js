@@ -9,6 +9,17 @@
   let hostItems = [];
   const multiHost = () => hostItems.length > 1;
 
+  // hostBadgeKey is everything a host badge elsewhere in the UI is drawn from
+  // (multiHost, hostLabel, hostUp): the roster's ids, labels and connection
+  // state. The roster is re-pushed on every ping round (for the latency) and
+  // on pane counts changing, neither of which any badge shows, so the pane
+  // headers and workspace rows are redrawn only when this key moves.
+  // A box so a unit test can reach it (web/jstest/testutil.mjs).
+  const hostBadges = { key: "" };
+  function hostBadgeKey() {
+    return JSON.stringify(hostItems.map((h) => [h.id, h.label || "", !!h.connected]));
+  }
+
   // hostLabel/hostUp resolve a host id against the roster. Both are deliberately
   // forgiving of an id the roster does not list: a layout can name a host for the
   // moment between its removal and the next roster push, and printing the raw id

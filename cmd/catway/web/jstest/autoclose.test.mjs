@@ -30,7 +30,7 @@ function world() {
   const panes = new Map();
   const fns = loadFns({
     files: ["06-chrome.js"],
-    names: ["drawAutoclose", "keepPane", "tickAutoclose", "startAutoclose"],
+    names: ["drawAutoclose", "autocloseText", "updateAutoclose", "keepPane", "tickAutoclose", "startAutoclose"],
     consts: ["autocloseTick"],
     env: {
       panes,
@@ -123,6 +123,30 @@ function world() {
   counting.autocloseAt = 0;
   w.tickAutoclose();
   ok(!w.intervals[0].live, "the ticker stops once nothing is counting");
+}
+
+// A tick moves the drawn number in place; it does not rebuild the header,
+// which is what an exited pane used to cost twice a second.
+{
+  const w = world();
+  const p = { id: 9, autocloseAt: 0 };
+  w.panes.set(9, p);
+  w.startAutoclose(p, 9000);
+  // The header as renderChrome would have drawn it, with a stale number.
+  const row = el("div");
+  const span = el("span");
+  span.className = "autoclose";
+  span.firstChild = { nodeValue: "— close in 99s " };
+  row.appendChild(span);
+  p.chromeInfo = { querySelector: (sel) => (sel === ".autoclose" ? span : null) };
+
+  w.tickAutoclose();
+  eq(span.firstChild.nodeValue, "— close in 9s ", "the countdown's text moved to the current second");
+  eq(w.rendered, [], "and the header was not rebuilt for it");
+
+  p.autocloseAt = Date.now() - 1;
+  w.tickAutoclose();
+  eq(w.rendered, [9], "expiry rebuilds it, since the countdown and its button go");
 }
 
 report("autoclose");

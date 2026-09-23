@@ -101,6 +101,17 @@
   // ratatui Modifier bits (cell.m).
   const M_BOLD = 0x1, M_DIM = 0x2, M_ITALIC = 0x4, M_UNDERLINED = 0x8, M_REVERSED = 0x40, M_HIDDEN = 0x80;
 
+  // everyVisible runs fn every ms while the page is visible, and once more the
+  // moment it becomes visible again. For the sidebar's relabelling ticks
+  // (ages, countdowns): they rewrite text nobody can see while the window is
+  // hidden or minimised, and a browser does not stop a background page's
+  // intervals, only slows them. The catch-up call on return is what keeps a
+  // skipped tick from showing a stale "5m ago" for up to an interval.
+  function everyVisible(fn, ms) {
+    setInterval(() => { if (!document.hidden) fn(); }, ms);
+    document.addEventListener("visibilitychange", () => { if (!document.hidden) fn(); });
+  }
+
   // The cell a pane_diff shift leaves in the rows it vacates: a space in the
   // frame's default colours. Shared and frozen, because cells are only ever
   // replaced, never edited in place.

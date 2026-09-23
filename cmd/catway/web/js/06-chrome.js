@@ -128,8 +128,7 @@
   // reimplemented so this run lands in the same info row as every other field.
   function drawAutoclose(p, add) {
     if (!p.autocloseAt) return;
-    const left = Math.max(0, Math.ceil((p.autocloseAt - Date.now()) / 1000));
-    const s = add("autoclose", "— close in " + left + "s ");
+    const s = add("autoclose", autocloseText(p));
     const x = document.createElement("button");
     x.className = "keep";
     x.textContent = "✕";
@@ -142,6 +141,22 @@
       keepPane(p.id);
     });
     s.appendChild(x);
+  }
+
+  function autocloseText(p) {
+    return "— close in " + Math.max(0, Math.ceil((p.autocloseAt - Date.now()) / 1000)) + "s ";
+  }
+
+  // updateAutoclose moves a drawn countdown to the current second in place.
+  // The ticker runs twice a second per counting pane, and rebuilding the whole
+  // header for it (every span, the flag's listeners, the keep button) was
+  // almost all of what an exited pane cost; only the number changes, and only
+  // once a second. A header with no countdown drawn yet gets the full render.
+  function updateAutoclose(p) {
+    const s = p.chromeInfo && p.chromeInfo.querySelector(".autoclose");
+    if (!s || !s.firstChild) { renderChrome(p); return; }
+    const t = autocloseText(p);
+    if (s.firstChild.nodeValue !== t) s.firstChild.nodeValue = t;
   }
 
   // keepPane cancels a pane's countdown. The local clear is optimistic — the
@@ -173,9 +188,11 @@
     const now = Date.now();
     for (const p of panes.values()) {
       if (!p.autocloseAt) continue;
-      if (p.autocloseAt <= now) p.autocloseAt = 0;
-      else live++;
-      renderChrome(p);
+      // Expiry changes the header's shape (the countdown and its button go),
+      // so that one takes the full render; a tick only moves the number.
+      if (p.autocloseAt <= now) { p.autocloseAt = 0; renderChrome(p); continue; }
+      live++;
+      updateAutoclose(p);
     }
     if (!live && autocloseTick.timer) { clearInterval(autocloseTick.timer); autocloseTick.timer = null; }
   }

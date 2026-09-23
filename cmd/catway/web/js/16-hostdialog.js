@@ -118,8 +118,13 @@
     }
     // Every host badge in the app is gated on this message, so a roster change
     // has to redraw the places that carry one: the pane headers and, through the
-    // layout, the workspace rows.
-    for (const p of panes.values()) renderChrome(p);
-    renderWorkspacesSoon();
+    // layout, the workspace rows. Only a change a badge can show, though — see
+    // hostBadgeKey: most pushes only move a latency figure drawn above.
+    const key = hostBadgeKey();
+    if (key !== hostBadges.key) {
+      hostBadges.key = key;
+      for (const p of panes.values()) renderChrome(p);
+      renderWorkspacesSoon();
+    }
   }
 

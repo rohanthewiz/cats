@@ -513,8 +513,10 @@
   // and the age of the reading — share one tick, which rewrites them rather than
   // re-rendering the rows. Ten seconds rather than the countdown's old thirty:
   // the age starts at zero after every push, and a "0s ago" that lingers half a
-  // minute is the one stale number this section exists to prevent.
-  setInterval(() => {
+  // minute is the one stale number this section exists to prevent. Skipped
+  // while the page is hidden, and caught up the moment it is shown
+  // (everyVisible).
+  everyVisible(() => {
     renderUsageAge();
     // Only the stamped ones: the same slot also carries the HOST rows' absolute
     // figures, which are facts rather than countdowns and have no instant to
