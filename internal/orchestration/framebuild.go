@@ -54,6 +54,14 @@ func (b *FrameBuilder) Full(cur *terminal.Snapshot) *Frame {
 // (ClientFeatureSparseFrames, ClientFeatureShiftFrames); the frame is exactly
 // what FrameFromSnapshot / ShiftedFrameFromSnapshot followed by Sparsify would
 // have produced, run boundaries aside.
+//
+// It returns nil when there is nothing to send: no cell, the cursor and the
+// scroll position all as they were. A pane is flushed because output arrived,
+// and output often leaves the screen exactly as it was — a spinner redrawing
+// the same glyph, a program repainting its whole screen with the same
+// content, a cursor hidden and shown again inside one tick. Each of those was
+// a frame every receiver decoded, resolved and translated only to change
+// nothing.
 func (b *FrameBuilder) Diff(cur *terminal.Snapshot, sparse, shift bool) *Frame {
 	prev := b.prev
 	// Full for the same reasons FrameFromSnapshot is: nothing to diff against,
@@ -92,6 +100,13 @@ func (b *FrameBuilder) Diff(cur *terminal.Snapshot, sparse, shift bool) *Frame {
 				changed++
 			}
 		}
+	}
+
+	if changed == 0 && cur.Cursor == prev.Cursor && cur.Scroll == prev.Scroll {
+		// Still the new base: equal cells, but cur's rows are the ones the
+		// emulator will share with the NEXT snapshot.
+		b.prev, b.cells, b.spare = cur, cells, b.cells
+		return nil
 	}
 
 	f := &Frame{Cols: cur.Cols, Rows: cur.Rows, Cursor: frameCursor(cur), Scroll: frameScroll(cur)}

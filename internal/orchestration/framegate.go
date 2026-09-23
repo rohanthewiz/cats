@@ -83,6 +83,14 @@ func (h *Host) flushGated(p *pane, now time.Time) {
 		p.activityDue = true
 		h.emitModeChanges(p)
 	}
+	h.reportActivity(p, now)
+}
+
+// reportActivity emits the pane_activity owed for output that produced no
+// frame — a gated pane's, or a pane whose output left the screen unchanged —
+// at most once per gatedActivityInterval, and late rather than never. Flusher
+// goroutine only, like the fields it reads.
+func (h *Host) reportActivity(p *pane, now time.Time) {
 	if p.activityDue && now.Sub(p.activityAt) >= gatedActivityInterval {
 		p.activityDue = false
 		p.activityAt = now

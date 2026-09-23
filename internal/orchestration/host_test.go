@@ -1228,6 +1228,49 @@ sleep 0.3`}
 	})
 }
 
+// Output that leaves the screen exactly as it was produces no frame — only a
+// pane_activity, so the client still hears that the pane was busy.
+func TestHostSuppressesEmptyFrames(t *testing.T) {
+	c := startTestHost(t)
+	cp := NewCreatePane(1, 20, 3)
+	cp.Command = "/bin/sh"
+	// The same four letters, redrawn in place after a pause long enough for
+	// a frame to hold the first draw: the cursor ends where it was, too.
+	cp.Args = []string{"-c", `printf AAAA; sleep 0.3; printf '\rAAAA'; sleep 0.3`}
+	if err := WriteMessage(c, cp); err != nil {
+		t.Fatalf("create_pane: %v", err)
+	}
+	framesAfterText, activity := 0, 0
+	seenText := false
+	for {
+		typ, payload := readEvent(t, c)
+		switch typ {
+		case MsgPaneFrame:
+			if seenText {
+				framesAfterText++
+			}
+			if strings.Contains(string(payload), `"A"`) {
+				seenText = true
+			}
+		case MsgPaneActivity:
+			activity++
+		case MsgPaneExited:
+			if !seenText {
+				t.Fatal("the text never arrived")
+			}
+			if framesAfterText != 0 {
+				t.Fatalf("%d frames after the text, for a redraw that changed nothing", framesAfterText)
+			}
+			if activity == 0 {
+				t.Fatal("the redraw was not reported as activity")
+			}
+			return
+		case MsgError:
+			t.Fatalf("unexpected error event: %s", payload)
+		}
+	}
+}
+
 // The frame gate: a pane outside it is never framed, only reported as active;
 // let back in and resynced, it replays a full frame holding everything it
 // printed while hidden.

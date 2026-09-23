@@ -69,7 +69,7 @@ func TestFrameBuilderMatchesTheReference(t *testing.T) {
 	vs := []*variant{{false, false, FrameBuilder{}}, {true, false, FrameBuilder{}},
 		{false, true, FrameBuilder{}}, {true, true, FrameBuilder{}}}
 	var prev *terminal.Snapshot
-	shifts, sharedSteps := 0, 0
+	shifts, sharedSteps, empties := 0, 0, 0
 
 	for step := range 1500 {
 		switch k := rng.Intn(50); {
@@ -104,6 +104,20 @@ func TestFrameBuilderMatchesTheReference(t *testing.T) {
 				want.Sparsify()
 			}
 			name := fmt.Sprintf("step %d sparse=%v shift=%v", step, v.sparse, v.shift)
+			if got == nil {
+				// Suppressed as empty: the reference must agree there was
+				// nothing to say — no cell, and the same cursor and scroll.
+				if want.Full || want.Shift != nil || len(changedCells(t, want)) != 0 ||
+					*frameCursor(prev) != *want.Cursor || !reflect.DeepEqual(frameScroll(prev), want.Scroll) {
+					t.Fatalf("%s: builder sent nothing, the reference sent a change", name)
+				}
+				empties++
+				continue
+			}
+			if !want.Full && want.Shift == nil && len(changedCells(t, want)) == 0 &&
+				*frameCursor(prev) == *want.Cursor && reflect.DeepEqual(frameScroll(prev), want.Scroll) {
+				t.Fatalf("%s: an empty diff was sent", name)
+			}
 			if got.Full != want.Full || got.Sparse != want.Sparse || got.Cols != want.Cols || got.Rows != want.Rows {
 				t.Fatalf("%s: full=%v/%v sparse=%v/%v", name, got.Full, want.Full, got.Sparse, want.Sparse)
 			}
@@ -130,7 +144,8 @@ func TestFrameBuilderMatchesTheReference(t *testing.T) {
 		}
 		prev = cur
 	}
-	if shifts < 5 || sharedSteps < 100 {
-		t.Fatalf("weak coverage: %d shifted sparse diffs, %d steps with shared rows", shifts, sharedSteps)
+	if shifts < 5 || sharedSteps < 100 || empties < 20 {
+		t.Fatalf("weak coverage: %d shifted sparse diffs, %d steps with shared rows, %d empty diffs",
+			shifts, sharedSteps, empties)
 	}
 }

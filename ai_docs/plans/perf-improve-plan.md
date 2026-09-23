@@ -273,11 +273,27 @@ combination, against the reference on real emulator snapshots).
 
 ---
 
+## 7. Suppress empty frames  (done)
+
+`FrameBuilder.Diff` returns nil when no cell changed and the cursor and scroll
+position are as they were (a spinner redrawing the same glyph, a full-screen
+repaint with the same content, a cursor hidden and shown within one tick).
+`emitFrame` then sends nothing, and the flusher marks the pane active instead:
+the same throttled `pane_activity` a gated pane gets (`reportActivity`, now run
+every tick so a held-back report is late rather than lost), because a frame was
+the client's only sign that output had arrived (`histDirty`). catway ignores
+unknown events, so an older catway is unaffected.
+
+Tests: `TestHostSuppressesEmptyFrames` (ghostty: an identical redraw yields no
+frame, one activity report); `TestFrameBuilderMatchesTheReference` now checks
+that the builder is silent exactly when the reference diff is empty.
+
+---
+
 ## Later (not started)
 
 3b. **Compression.** rweb v0.1.28 has no permessage-deflate; adding it shrinks
    terminal JSON 10–20×.
-7. **Suppress empty frames** (no cell, cursor or scroll change).
 8. **WebSocket write batching** in rweb (header + payload in one write; drain
    the queue per wakeup).
 9. **Front end, low:** 5 s / 10 s sidebar tickers ignore `document.hidden`;

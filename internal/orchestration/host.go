@@ -95,9 +95,10 @@ type pane struct {
 	// it in. Written by createPane and resizePane, read by resolveBlock.
 	cols atomic.Uint32
 
-	// activityDue / activityAt pace pane_activity for a pane outside the frame
-	// gate (framegate.go): output not yet reported, and when the last report
-	// went out. Owned by the flusher goroutine.
+	// activityDue / activityAt pace pane_activity for output that produced no
+	// frame — a pane outside the frame gate (framegate.go), or one whose output
+	// left the screen unchanged: output not yet reported, and when the last
+	// report went out. Owned by the flusher goroutine.
 	activityDue bool
 	activityAt  time.Time
 
@@ -1202,7 +1203,7 @@ func (h *Host) readPump(p *pane) {
 	}
 
 	h.removePane(p.id) // stop the flusher from touching it
-	_ = h.emitFrame(p)
+	_, _ = h.emitFrame(p)
 	h.closePane(p)
 	h.emit(NewPaneExited(p.id, exitCode(p.cmd.Wait())))
 }
@@ -1483,24 +1484,25 @@ func (h *Host) feed(p *pane, b []byte) {
 }
 
 // emitFrame snapshots the pane, diffs it against the last frame sent, and
-// emits the diff. Nothing is emitted for a closed pane.
+// emits the diff. Nothing is emitted for a closed pane, nor when the diff is
+// empty (FrameBuilder.Diff); sent reports whether a frame went out.
 //
 // Only the snapshot happens under emuMu. The diff is built from the snapshot,
 // which is an immutable copy, after the emulator is released — so readPump,
 // which needs emuMu to feed the emulator the pane's output, waits for the
 // snapshot and not for the diff (see frameMu for what keeps the order).
-func (h *Host) emitFrame(p *pane) error {
+func (h *Host) emitFrame(p *pane) (sent bool, err error) {
 	p.frameMu.Lock()
 	defer p.frameMu.Unlock()
 	p.emuMu.Lock()
 	if p.closed {
 		p.emuMu.Unlock()
-		return nil
+		return false, nil
 	}
 	snap, err := p.emu.Snapshot()
 	p.emuMu.Unlock()
 	if err != nil {
-		return err
+		return false, err
 	}
 	// A client that keeps its own grid is sent only what changed. For a
 	// one-character echo on a 200×50 pane that is ~100 bytes instead of the
@@ -1508,8 +1510,11 @@ func (h *Host) emitFrame(p *pane) error {
 	// scroll it is sent scrolling output as a shift, so a line of `cat` costs
 	// a line, not the whole grid.
 	f := p.frames.Diff(snap, h.sparseFrames.Load(), h.shiftFrames.Load())
+	if f == nil {
+		return false, nil
+	}
 	h.emit(NewPaneFrame(p.id, f))
-	return nil
+	return true, nil
 }
 
 func (h *Host) resizePane(c Resize) error {
@@ -1626,16 +1631,27 @@ func (h *Host) flushDirty() {
 			h.flushGated(p, now)
 			continue
 		}
-		if !p.dirty.Swap(false) {
-			continue
+		if p.dirty.Swap(false) {
+			sent, err := h.emitFrame(p)
+			if err != nil {
+				h.emit(NewError(p.id, err.Error()))
+				continue
+			}
+			if !sent {
+				// Output that changed nothing on screen can still have changed
+				// what is behind it (scrollback that was already full scrolls
+				// identically), and a frame was all the client had to go on
+				// for that. So the pane is reported active, throttled, as a
+				// gated pane is.
+				p.activityDue = true
+			}
+			// Input modes can only change as a result of program output, so a
+			// pane that just produced output is exactly when to re-check them.
+			h.emitModeChanges(p)
 		}
-		if err := h.emitFrame(p); err != nil {
-			h.emit(NewError(p.id, err.Error()))
-			continue
-		}
-		// Input modes can only change as a result of program output, so a pane that
-		// just produced a frame is exactly when to re-check them.
-		h.emitModeChanges(p)
+		// Every tick, not only dirty ones: a report held back by the throttle
+		// goes out when the interval ends, whether or not more output came.
+		h.reportActivity(p, now)
 	}
 }
 
