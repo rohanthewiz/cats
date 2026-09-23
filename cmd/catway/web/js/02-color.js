@@ -1,6 +1,36 @@
   // ---- Packed u32 colors (D2): 0x02_RR_GG_BB → CSS ----
   function rgbOf(v) { return [(v >> 16) & 255, (v >> 8) & 255, v & 255]; }
-  function css(v) { const [r, g, b] = rgbOf(v); return `rgb(${r},${g},${b})`; }
+  // css memoizes: the painter asks for a color string per cell, and handing
+  // back the SAME string object for the same packed value both skips the
+  // array + template allocation and lets the painter skip a redundant
+  // fillStyle write with a plain === (see paintCells). The caches are cleared
+  // wholesale when they grow past a bound, which only a truecolor gradient-
+  // heavy program would reach; a miss just rebuilds the string.
+  const COLOR_CACHE_MAX = 4096;
+  const cssCache = new Map(), dimCache = new Map();
+  function css(v) {
+    let s = cssCache.get(v);
+    if (s === undefined) {
+      if (cssCache.size >= COLOR_CACHE_MAX) cssCache.clear();
+      const [r, g, b] = rgbOf(v);
+      s = `rgb(${r},${g},${b})`;
+      cssCache.set(v, s);
+    }
+    return s;
+  }
+  // dimCss is blend(fg, bg, 0.5) — the SGR 2 (dim) glyph color — memoized on
+  // the pair. The key packs both 24-bit colors into one 48-bit number, which
+  // is still an exact integer in a double and avoids building a string key.
+  function dimCss(fg, bg) {
+    const k = (fg & 0xffffff) * 0x1000000 + (bg & 0xffffff);
+    let s = dimCache.get(k);
+    if (s === undefined) {
+      if (dimCache.size >= COLOR_CACHE_MAX) dimCache.clear();
+      s = blend(fg, bg, 0.5);
+      dimCache.set(k, s);
+    }
+    return s;
+  }
   function blend(a, b, t) { // mix packed a toward packed b
     const pa = rgbOf(a), pb = rgbOf(b);
     return `rgb(${Math.round(pa[0] + (pb[0] - pa[0]) * t)},${Math.round(pa[1] + (pb[1] - pa[1]) * t)},${Math.round(pa[2] + (pb[2] - pa[2]) * t)})`;
@@ -44,7 +74,11 @@
       // itself (a local Date.now() deadline derived from the remaining time it
       // sent), 0 when no countdown is running. See armAutoclose in reap.go.
       autocloseAt: 0,
-      pressed: -1, lastCell: "", dirty: false, scroll: null, sel: null, cm: null };
+      pressed: -1, lastCell: "", dirty: false, scroll: null, sel: null, cm: null,
+      // Incremental painting (see paint in 18-render): full forces a whole-grid
+      // draw on the next frame, rows holds the rows a diff touched, and
+      // curRow/curCol are where the cursor was last painted (-1: none painted).
+      full: true, rows: new Set(), curRow: -1, curCol: -1 };
     // Clicking the header (not its buttons) focuses the pane; double-click
     // renames, right-click opens the pane menu (chrome or canvas); holding
     // and moving drags the pane onto another to swap slots. The sidebar pane

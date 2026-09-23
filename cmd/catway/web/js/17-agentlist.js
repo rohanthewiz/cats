@@ -36,7 +36,11 @@
     const agentPlugs = plugs.filter(isAgentPlugin);
     const toolPlugs = plugs.filter((p) => !isAgentPlugin(p));
     agentAttentionSweep(agentItems);
-    if (layoutMsg) { renderWorkspaces(layoutMsg); renderTabbar(layoutMsg); } // ws badges + tab markers derive from the rollup
+    // Workspace badges and tab markers derive from the rollup. The workspace
+    // rows ride the coalesced inventory frame (refreshPaneList below asks for
+    // it too, so the rebuild happens once); the tab bar is small and redrawn
+    // here.
+    if (layoutMsg) { renderWorkspacesSoon(); renderTabbar(layoutMsg); }
     const foc = focusedPaneId();
 
     agentListEl.innerHTML = "";

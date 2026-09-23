@@ -13,8 +13,15 @@
     p.canvas.style.top = ((iy - ry) * cellH) + "px";
     p.canvas.style.width = (iw * cellW) + "px";
     p.canvas.style.height = (ih * cellH) + "px";
-    p.canvas.width = Math.floor(iw * cellW * dpr);
-    p.canvas.height = Math.floor(ih * cellH * dpr);
+    // Only a real size change touches the backing store. Assigning width or
+    // height — even the value it already has — reallocates the bitmap and
+    // wipes it, and applyLayout runs this for EVERY pane on EVERY layout
+    // message (a focus click, a rename, a lock flip), so an unconditional
+    // write cost each pane a fresh GPU surface plus a blank-then-repaint
+    // for nothing.
+    const bw = Math.floor(iw * cellW * dpr), bh = Math.floor(ih * cellH * dpr);
+    if (p.canvas.width !== bw) p.canvas.width = bw;
+    if (p.canvas.height !== bh) p.canvas.height = bh;
     // Sizing the canvas resets its context (transform included), so the
     // padded transform is (re)installed per frame in draw() — see setInset.
     setInset(p, iw * cellW, ih * cellH);

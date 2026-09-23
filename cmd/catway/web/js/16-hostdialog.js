@@ -120,6 +120,6 @@
     // has to redraw the places that carry one: the pane headers and, through the
     // layout, the workspace rows.
     for (const p of panes.values()) renderChrome(p);
-    if (layoutMsg) renderWorkspaces(layoutMsg);
+    renderWorkspacesSoon();
   }
 

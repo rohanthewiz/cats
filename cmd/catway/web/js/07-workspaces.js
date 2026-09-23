@@ -604,7 +604,7 @@
   // merge would quietly keep.
   function applyWorkspaceGit(items) {
     wsGit = new Map(items.map((it) => [it.ws, it]));
-    if (layoutMsg) renderWorkspaces(layoutMsg);
+    renderWorkspacesSoon();
   }
 
   // gitDot builds the circle in front of a workspace name.

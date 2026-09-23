@@ -6,23 +6,45 @@
   paneTipEl.id = "panetip";
   document.body.appendChild(paneTipEl);
 
+  //
+  // A card that is up rides the pointer, so this runs on every mousemove over
+  // its row — and it used to rebuild the card's spans and then read its size
+  // back each time, a DOM write followed by a forced synchronous layout at
+  // pointer rate. The rows are keyed now: when the card is already showing the
+  // same rows, only its position moves, using the size measured when those
+  // rows were built. Live state still flows through — a changed value changes
+  // the key, and that move rebuilds.
+  let tipKey = "", tipW = 0, tipH = 0;
   function showTip(e, items) {
-    paneTipEl.innerHTML = "";
-    for (const [k, v, vcls] of items) {
-      if (v === undefined || v === null || v === "") continue;
-      const kk = document.createElement("span"); kk.className = "k"; kk.textContent = k;
-      const vv = document.createElement("span"); vv.className = "v" + (vcls ? " " + vcls : ""); vv.textContent = v;
-      paneTipEl.appendChild(kk); paneTipEl.appendChild(vv);
+    const key = tipItemsKey(items);
+    if (key !== tipKey || !paneTipEl.classList.contains("show")) {
+      paneTipEl.innerHTML = "";
+      for (const [k, v, vcls] of items) {
+        if (v === undefined || v === null || v === "") continue;
+        const kk = document.createElement("span"); kk.className = "k"; kk.textContent = k;
+        const vv = document.createElement("span"); vv.className = "v" + (vcls ? " " + vcls : ""); vv.textContent = v;
+        paneTipEl.appendChild(kk); paneTipEl.appendChild(vv);
+      }
+      // Measured after making it visible so its size is known.
+      paneTipEl.classList.add("show");
+      const r = paneTipEl.getBoundingClientRect();
+      tipKey = key; tipW = r.width; tipH = r.height;
     }
-    // Position the popup to the right of the cursor, clamped into the viewport
-    // (measured after making it visible so its size is known).
-    paneTipEl.classList.add("show");
-    const r = paneTipEl.getBoundingClientRect();
+    // Position the popup to the right of the cursor, clamped into the viewport.
+    const r = { width: tipW, height: tipH };
     let x = e.clientX + 14, y = e.clientY + 8;
     if (x + r.width > window.innerWidth - 4) x = e.clientX - r.width - 8;
     if (y + r.height > window.innerHeight - 4) y = window.innerHeight - r.height - 4;
     paneTipEl.style.left = Math.max(4, x) + "px";
     paneTipEl.style.top = Math.max(4, y) + "px";
+  }
+
+  // tipItemsKey flattens a card's rows into one comparable string. The
+  // separators are control characters no label or value contains.
+  function tipItemsKey(items) {
+    let k = "";
+    for (const [a, v, c] of items) k += a + "\u0001" + (v ?? "") + "\u0001" + (c || "") + "\u0002";
+    return k;
   }
 
   // hideTip is the pointer's own teardown: the card goes, the row it was about

@@ -326,13 +326,34 @@
   // rebuilding per message made a switch cost O(panes in tab × panes in session)
   // to paint the last one anyway. The 120ms query debounce below never covered
   // this; it guards only the round trip.
-  let invFrame = 0;
+  //
+  // The same frame also absorbs pushes that only move the Workspaces rows (the
+  // client census, git sync, the agents rollup, the host roster): those used to
+  // rebuild the section synchronously on arrival, so an agent state change —
+  // which lands an agents rollup AND the pane_agent that goes with it — rebuilt
+  // Workspaces three times in one burst. Two flags record which views a frame
+  // owes, so a Workspaces-only push does not drag the Panes rebuild along.
+  let invFrame = 0, invPanesDue = false, invWsDue = false;
   function renderInventoryViews() {
+    invPanesDue = true; invWsDue = true;
+    scheduleInventoryFrame();
+  }
+  // renderWorkspacesSoon is renderWorkspaces for pushes: coalesced into the
+  // inventory frame instead of run on the spot. User-driven redraws (a fold
+  // toggle, a heading control) still call renderWorkspaces directly — the
+  // click should answer in the same frame, and it does not arrive in bursts.
+  function renderWorkspacesSoon() {
+    invWsDue = true;
+    scheduleInventoryFrame();
+  }
+  function scheduleInventoryFrame() {
     if (invFrame) return;
     invFrame = requestAnimationFrame(() => { invFrame = 0; renderInventoryViewsNow(); });
   }
   function renderInventoryViewsNow() {
-    renderPaneList();
-    if (layoutMsg) renderWorkspaces(layoutMsg);
+    const panesDue = invPanesDue, wsDue = invWsDue;
+    invPanesDue = false; invWsDue = false;
+    if (panesDue) renderPaneList();
+    if (wsDue && layoutMsg) renderWorkspaces(layoutMsg);
   }
 

@@ -185,24 +185,34 @@ func TestPageForwardsWorkspaceQueryInInit(t *testing.T) {
 // renderer never has to know which cells are spacers. Asserted on the source
 // because there is no headless canvas here, and the failure it guards is
 // someone folding the two loops back into one for the tidiness of it.
+//
+// The passes live in paintCells, which both painters share: draw() runs it over
+// the whole grid, and the incremental row-band repaint (drawBand) over a range
+// of rows. So guarding paintCells covers both — and the test also pins that
+// draw() still delegates to it, so a full draw cannot quietly grow a
+// single-pass loop of its own.
 func TestPagePaintsBackgroundsBeforeGlyphs(t *testing.T) {
-	draw := drawFuncSource(t, string(web.Page()))
+	page := string(web.Page())
+	if !strings.Contains(drawFuncSource(t, page), "paintCells(") {
+		t.Fatal("draw() no longer paints through paintCells — the two-pass guard below no longer covers it")
+	}
+	draw := funcSource(t, page, "paintCells")
 
-	const gridLoop = "for (let y = 0; y < p.H; y++)"
+	const gridLoop = "for (let y = y0; y <= y1; y++)"
 	first := strings.Index(draw, gridLoop)
 	if first < 0 {
-		t.Fatal("draw() no longer walks the grid")
+		t.Fatal("paintCells() no longer walks the grid")
 	}
 	second := strings.Index(draw[first+len(gridLoop):], gridLoop)
 	if second < 0 {
-		t.Fatal("draw() walks the grid once — backgrounds and glyphs share a pass, so a wide glyph's spacer will clip it")
+		t.Fatal("paintCells() walks the grid once — backgrounds and glyphs share a pass, so a wide glyph's spacer will clip it")
 	}
 	second += first + len(gridLoop)
 
 	// The background rect belongs to the first pass and the glyph to the second.
 	bg := strings.Index(draw, "ctx.fillRect(x * cellW, y * cellH, cellW + 0.5, cellH + 0.5)")
 	if bg < 0 {
-		t.Fatal("no cell-background rect in draw()")
+		t.Fatal("no cell-background rect in paintCells()")
 	}
 	if bg > second {
 		t.Error("the cell background is painted in the glyph pass — a wide glyph's spacer will clip it")
@@ -216,9 +226,15 @@ func TestPagePaintsBackgroundsBeforeGlyphs(t *testing.T) {
 // so the assertions above cannot be satisfied by an unrelated part of the page.
 func drawFuncSource(t *testing.T, page string) string {
 	t.Helper()
-	start := strings.Index(page, "function draw(p) {")
+	return funcSource(t, page, "draw")
+}
+
+// funcSource returns one named top-level function from the page, brace-matched.
+func funcSource(t *testing.T, page, name string) string {
+	t.Helper()
+	start := strings.Index(page, "function "+name+"(")
 	if start < 0 {
-		t.Fatal("draw() not found in the page")
+		t.Fatalf("%s() not found in the page", name)
 	}
 	depth := 0
 	for i := start + strings.Index(page[start:], "{"); i < len(page); i++ {
@@ -231,6 +247,6 @@ func drawFuncSource(t *testing.T, page string) string {
 			}
 		}
 	}
-	t.Fatal("draw() is unbalanced")
+	t.Fatalf("%s() is unbalanced", name)
 	return ""
 }

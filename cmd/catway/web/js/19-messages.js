@@ -24,7 +24,7 @@
       // reaction.
       case "clients":
         clientsMsg = msg;
-        if (layoutMsg) renderWorkspaces(layoutMsg);
+        renderWorkspacesSoon();
         break;
       case "pane_frame": {
         const p = pane(msg.pane);
@@ -35,14 +35,49 @@
       }
       case "pane_diff": {
         const p = pane(msg.pane);
-        if (msg.cells) for (const dc of msg.cells) p.cells[dc.i] = dc;
+        // Each changed cell marks its row for the incremental painter (see
+        // paint in 18-render). Diff cells arrive in row-major order, so a
+        // run of cells on one row costs one Set insert, not one per cell.
+        const W = p.W || 1;
+        let lastY = -1;
+        if (msg.cells) for (const dc of msg.cells) {
+          p.cells[dc.i] = dc;
+          const y = (dc.i / W) | 0;
+          if (y !== lastY) { markRow(p, y); lastY = y; }
+        }
         if (msg.cur) p.cur = msg.cur;
         // Every frame carries current scroll, absent ⇒ no scrollback: reset, don't
         // retain (a stale max misplaces read coords after the buffer shrinks, e.g. clear).
-        p.scroll = msg.scroll || null;
-        scheduleDraw(p); break;
+        // A scroll that MOVED repaints everything: the scrollbar thumb spans
+        // rows the diff did not touch.
+        const sc = msg.scroll || null;
+        if (!sameScroll(p.scroll, sc)) p.full = true;
+        p.scroll = sc;
+        requestPaint(p); break;
       }
-      case "pane_title": { const p = pane(msg.pane); p.title = msg.title; renderChrome(p); refreshPaneList(); break; }
+      // A title push is the chattiest message there is — an agent retitles its
+      // pane on every spinner tick — and it is only ever sent for panes on
+      // screen, whose rows renderPaneList already reads from local state. So it
+      // redraws from what is here and does NOT re-query pane.list: that round
+      // trip (and the second full rebuild its reply triggers) could only bring
+      // back what this message just delivered.
+      //
+      // One reader does take titles from the pane.list snapshot even for panes
+      // on screen: the workspace todo marks, which count a cats-todo pane's
+      // "todo: … (3)" title. So the snapshot entry is patched in place, which
+      // is exactly what the query would have returned. The pushed title is the
+      // EFFECTIVE one (a custom name wins), so it can stand in for the raw
+      // terminal title only when the pane has no custom name; a named pane
+      // still takes the query.
+      case "pane_title": {
+        const p = pane(msg.pane);
+        if (p.title === msg.title) break;
+        p.title = msg.title; renderChrome(p);
+        const pi = paneInv.find((x) => x.pane === msg.pane);
+        if (pi && !pi.name) { pi.title = msg.title; renderInventoryViews(); }
+        else refreshPaneList();
+        break;
+      }
       case "pane_cwd": { const p = pane(msg.pane); p.cwd = msg.cwd; renderChrome(p); break; }
       // The branch arrives on its own message rather than with the cwd: a
       // checkout changes it without the pane ever moving, so the two are pushed
@@ -120,6 +155,11 @@
       case "chat_delta": chatAppendDelta(msg.id, msg.text); break;
       case "chat_perm": chatPermUpdate(msg); break;
     }
+  }
+
+  function sameScroll(a, b) {
+    if (!a || !b) return a === b;
+    return a.off === b.off && a.max === b.max && a.rows === b.rows;
   }
 
   function b64decode(s) {
