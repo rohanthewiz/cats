@@ -1170,3 +1170,95 @@ func TestHostSparseFramesFollowTheHello(t *testing.T) {
 		}
 	})
 }
+
+// The frame gate: a pane outside it is never framed, only reported as active;
+// let back in and resynced, it replays a full frame holding everything it
+// printed while hidden.
+func TestHostFrameGate(t *testing.T) {
+	c := startTestHost(t)
+
+	// Pane 1 stays in the gate; pane 2 is outside it from the start. The gate
+	// is set before either pane exists, which is also the order a client that
+	// is filtering from its first viewport produces.
+	if err := WriteMessage(c, NewSetFramePanes([]uint32{1})); err != nil {
+		t.Fatalf("set_frame_panes: %v", err)
+	}
+	for id, script := range map[uint32]string{
+		1: "printf ONE; sleep 3",
+		// Output, a pause longer than the flush tick, more output: without the
+		// gate that is at least two frames.
+		2: "printf TWO; sleep 0.3; printf MORE; sleep 3",
+	} {
+		cp := NewCreatePane(id, 40, 5)
+		cp.Command = "/bin/sh"
+		cp.Args = []string{"-c", script}
+		if err := WriteMessage(c, cp); err != nil {
+			t.Fatalf("create_pane %d: %v", id, err)
+		}
+	}
+
+	var sawOne, sawActivity bool
+	deadline := time.Now().Add(10 * time.Second)
+	for !(sawOne && sawActivity) {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out: pane 1 framed=%v, pane 2 activity=%v", sawOne, sawActivity)
+		}
+		typ, payload := readEvent(t, c)
+		switch typ {
+		case MsgPaneFrame:
+			var pf PaneFrame
+			if err := json.Unmarshal(payload, &pf); err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			if pf.PaneID == 2 {
+				t.Fatalf("a frame for the gated pane: %q", frameText(pf.Frame))
+			}
+			if strings.Contains(frameText(pf.Frame), "ONE") {
+				sawOne = true
+			}
+		case MsgPaneActivity:
+			var pa PaneActivity
+			if err := json.Unmarshal(payload, &pa); err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			if pa.PaneID != 2 {
+				t.Fatalf("pane_activity for pane %d, which is in the gate", pa.PaneID)
+			}
+			sawActivity = true
+		}
+	}
+
+	// Let the second burst land while the pane is still hidden.
+	time.Sleep(500 * time.Millisecond)
+
+	// Back into view: the client widens the gate, then asks for the full frame.
+	if err := WriteMessage(c, NewSetFramePanes([]uint32{1, 2})); err != nil {
+		t.Fatalf("set_frame_panes: %v", err)
+	}
+	if err := WriteMessage(c, NewRequestResync(2)); err != nil {
+		t.Fatalf("request_resync: %v", err)
+	}
+	for {
+		if time.Now().After(deadline) {
+			t.Fatal("timed out waiting for pane 2's full frame")
+		}
+		typ, payload := readEvent(t, c)
+		if typ != MsgPaneFrame {
+			continue
+		}
+		var pf PaneFrame
+		if err := json.Unmarshal(payload, &pf); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if pf.PaneID != 2 {
+			continue
+		}
+		if !pf.Frame.Full {
+			continue // a diff may beat the resync; the full frame is what counts
+		}
+		if text := frameText(pf.Frame); !strings.Contains(text, "TWOMORE") {
+			t.Fatalf("resync frame lost output printed while hidden: %q", text)
+		}
+		return
+	}
+}

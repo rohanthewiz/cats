@@ -85,6 +85,12 @@ type pane struct {
 	// it in. Written by createPane and resizePane, read by resolveBlock.
 	cols atomic.Uint32
 
+	// activityDue / activityAt pace pane_activity for a pane outside the frame
+	// gate (framegate.go): output not yet reported, and when the last report
+	// went out. Owned by the flusher goroutine.
+	activityDue bool
+	activityAt  time.Time
+
 	// modifyOtherKeys is the scanner's current state, published by readPump and
 	// read by the flusher/resync when reporting pane_modes.
 	modifyOtherKeys atomic.Bool
@@ -399,6 +405,8 @@ type Host struct {
 	// The command-ledger subscription (ledger.go): off until a client asks for
 	// shell-integration marks, and off again when it stops.
 	ledgerFields
+	// The frame gate (framegate.go): which panes the client wants frames for.
+	frameGateFields
 
 	// sparseFrames records that the attached client's hello advertised
 	// ClientFeatureSparseFrames, so diff frames go out carrying only their
@@ -552,6 +560,7 @@ func (h *Host) Attach(ctx context.Context, conn io.ReadWriteCloser) error {
 	// iostat alive) for a client that has gone.
 	h.stopHostStats()
 	h.stopCommandMarks()
+	h.clearFrameGate()
 	close(sessDone)
 	cancel()
 	wg.Wait()
@@ -816,6 +825,13 @@ func (h *Host) dispatch(typ MessageType, payload []byte) error {
 			return nil
 		}
 		h.resolveBlock(c)
+	case MsgSetFramePanes:
+		var c SetFramePanes
+		if err := json.Unmarshal(payload, &c); err != nil {
+			h.emit(NewError(0, "bad set_frame_panes: "+err.Error()))
+			return nil
+		}
+		h.setFramePanes(c)
 	case MsgRequestCommandMarks:
 		var c RequestCommandMarks
 		if err := json.Unmarshal(payload, &c); err != nil {
@@ -1577,7 +1593,15 @@ func (h *Host) flushDirty() {
 	}
 	h.mu.Unlock()
 
+	// Read once per tick: a gate that changes mid-sweep takes effect on the
+	// next one, which is 16 ms away and no different from arriving then.
+	gate := h.frameGate()
+	now := time.Now()
 	for _, p := range ps {
+		if gate != nil && !gate[p.id] {
+			h.flushGated(p, now)
+			continue
+		}
 		if !p.dirty.Swap(false) {
 			continue
 		}

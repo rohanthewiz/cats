@@ -96,7 +96,7 @@ until a full frame).
 
 ---
 
-## 2. Stop streaming hidden panes  (next)
+## 2. Stop streaming hidden panes  (done)
 
 ### Problem
 cathost snapshots, diffs, encodes and ships every dirty pane every 16 ms, and
@@ -120,6 +120,21 @@ price of §1 at 60 Hz.
   (`resyncViews`), which re-baselines cathost's `p.prev` and sends a full frame,
   so a pane coming back into view is exact. The gate is sent before the resync
   on the same connection, so ordering holds.
+- **Grid invalidation.** A pane leaving the viewport union has its catway grid
+  invalidated (`syncFrameGates`), so a diff that beats the resync's full frame
+  is dropped rather than applied to a base the host no longer diffs against.
+
+### Result
+An off-screen pane costs an atomic swap, an input-modes read when it has
+output, and one small event per 2 s — no snapshot, diff, encode or decode.
+
+Tests: `TestHostFrameGate` (ghostty: a gated pane is never framed, reports
+activity, and replays everything it printed while hidden on resync),
+`TestFrameGateFollowsTheViewport` (list follows zoom/unzoom, is sent before the
+returning pane's resync, is not re-sent when unchanged, hidden grid refuses
+diffs), `TestFrameGateNeedsTheFeature`, `TestPaneActivityMarksHistoryDirty`.
+Documented in `docs/protocols/orchestration-seam.md` (frame gate, client
+features, sparse frame shape).
 
 ---
 

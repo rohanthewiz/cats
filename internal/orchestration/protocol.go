@@ -106,9 +106,12 @@ const (
 	MsgRequestGitSync MessageType = "request_git_sync"
 	// MsgRequestFile asks for one file operation on the daemon's own disk —
 	// stat, a ranged read, a ranged write.
-	MsgRequestFile  MessageType = "request_file"
-	MsgHookReply    MessageType = "hook_reply"
-	MsgControlReply MessageType = "control_reply"
+	MsgRequestFile MessageType = "request_file"
+	// MsgSetFramePanes names the panes the client wants frames for; see
+	// FeatureFrameGate.
+	MsgSetFramePanes MessageType = "set_frame_panes"
+	MsgHookReply     MessageType = "hook_reply"
+	MsgControlReply  MessageType = "control_reply"
 
 	// Go → Rust (events).
 	MsgWelcome    MessageType = "welcome"
@@ -136,11 +139,13 @@ const (
 	MsgWorktreeResult MessageType = "worktree_result"
 	MsgGitSyncResult  MessageType = "git_sync_result"
 	MsgFileResult     MessageType = "file_result"
-	MsgHookReport     MessageType = "hook_report"
-	MsgControlOpen    MessageType = "control_open"
-	MsgControlData    MessageType = "control_data"
-	MsgControlClose   MessageType = "control_close"
-	MsgError          MessageType = "error"
+	// MsgPaneActivity says a pane outside the frame gate produced output.
+	MsgPaneActivity MessageType = "pane_activity"
+	MsgHookReport   MessageType = "hook_report"
+	MsgControlOpen  MessageType = "control_open"
+	MsgControlData  MessageType = "control_data"
+	MsgControlClose MessageType = "control_close"
+	MsgError        MessageType = "error"
 )
 
 // --- Capabilities ------------------------------------------------------------
@@ -231,6 +236,20 @@ const (
 	// it no longer has to, which is the difference between a feature and a
 	// workaround — see the plan's decision 2 for the same argument one layer up.
 	FeatureFileTransfer = "file_transfer"
+	// FeatureFrameGate: the daemon takes frames only for the panes the client
+	// names (MsgSetFramePanes) and reports the rest with a rate-limited
+	// MsgPaneActivity instead.
+	//
+	// Without it every dirty pane is snapshotted, diffed, encoded, shipped and
+	// decoded every flush tick, and the client throws the frame away when no
+	// window is showing the pane — an agent streaming in a background tab cost
+	// as much as one on screen. The client already asks for a full frame
+	// (MsgRequestResync) when a pane comes into view, so nothing is lost by not
+	// sending the ones in between.
+	//
+	// Opt-in per session: until the client sends the list, every pane streams,
+	// which is what an older client (and a probe) expects.
+	FeatureFrameGate = "frame_gate"
 )
 
 // --- Commands (Rust → Go) ---------------------------------------------------
@@ -686,7 +705,7 @@ func NewWelcomeAt(version int, errMsg string, panes []uint32) Welcome {
 func Features() []string {
 	return []string{FeaturePing, FeatureHostStats, FeatureListDir, FeatureWorktree,
 		FeatureGitSync, FeatureHookRelay, FeatureControlRelay, FeatureCommandLedger,
-		FeatureFileTransfer}
+		FeatureFileTransfer, FeatureFrameGate}
 }
 
 type PaneFrame struct {
@@ -976,6 +995,37 @@ type RequestCommandMarks struct {
 
 func NewRequestCommandMarks(on bool) RequestCommandMarks {
 	return RequestCommandMarks{Type: MsgRequestCommandMarks, On: on}
+}
+
+// SetFramePanes is the frame gate (FeatureFrameGate): the panes the client
+// wants frames for — the ones some window is showing. It replaces the previous
+// list whole; an empty list is a real answer ("nobody is looking at anything"),
+// not a reset, and the gate stays on until the session ends.
+type SetFramePanes struct {
+	Type  MessageType `json:"type"`
+	Panes []uint32    `json:"panes"`
+}
+
+func NewSetFramePanes(panes []uint32) SetFramePanes {
+	if panes == nil {
+		panes = []uint32{} // "none", on the wire as [] rather than null
+	}
+	return SetFramePanes{Type: MsgSetFramePanes, Panes: panes}
+}
+
+// PaneActivity reports that a pane outside the frame gate has produced output
+// since the last report. It stands in for the frames the gate withholds, for
+// the one thing a client used them for while nobody was looking: knowing the
+// pane's content changed (catway's history capture only re-reads panes that
+// did). Rate-limited by the daemon, so a flood of output is one event every
+// few seconds, not one per tick.
+type PaneActivity struct {
+	Type   MessageType `json:"type"`
+	PaneID uint32      `json:"pane_id"`
+}
+
+func NewPaneActivity(id uint32) PaneActivity {
+	return PaneActivity{Type: MsgPaneActivity, PaneID: id}
 }
 
 // CommandStart reports that a pane's shell began running Cmd. Cwd is the pane's

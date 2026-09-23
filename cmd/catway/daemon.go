@@ -147,6 +147,12 @@ type daemon struct {
 	// marks for the command ledger. Remembered across a disconnect for the same
 	// reason statsInterval is: the reconnect is what applies it.
 	cmdMarks bool
+	// framePanes is this host's share of the viewport — the panes it should
+	// take frames for (framegate.go). framePanesKnown is false until the
+	// orchestrator has computed one, so a reconnect during startup does not
+	// send an empty list that would mean "nobody is looking at anything".
+	framePanes      []uint32
+	framePanesKnown bool
 	// hookSocket is the path, ON THIS HOST'S MACHINE, of the socket its cathost
 	// relays agent hook reports through (Welcome.HookSocket). It is what a pane
 	// created here gets as CATS_SOCKET_PATH.
@@ -982,6 +988,7 @@ func (d *daemon) session(conn net.Conn) error {
 	// stay quiet.
 	d.sendStatsRequest()
 	d.sendCommandMarksRequest()
+	d.sendFramePanes()
 
 	for {
 		mt, payload, err := orchestration.ReadMessage(conn)
@@ -1215,6 +1222,20 @@ func (d *daemon) dispatch(mt orchestration.MessageType, payload []byte) {
 				if b, err := browserproto.Marshal(msg); err == nil {
 					o.enqueue(c, b)
 				}
+			}
+		})
+
+	case orchestration.MsgPaneActivity:
+		// The frame gate's stand-in for the frames of a pane nobody is
+		// showing: all an off-screen frame was ever used for was marking the
+		// pane's history as worth re-capturing.
+		var ev orchestration.PaneActivity
+		if err := json.Unmarshal(payload, &ev); err != nil {
+			return
+		}
+		o.post(func() {
+			if rt := o.panes[ev.PaneID]; rt != nil {
+				rt.histDirty = true
 			}
 		})
 

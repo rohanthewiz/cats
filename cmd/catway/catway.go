@@ -1468,7 +1468,11 @@ func (o *orch) refreshViewport() (added []uint32, perClient map[*client][]uint32
 		}
 	}
 	slices.Sort(added) // map iteration order must not leak into the effects below
+	prev := o.visible
 	o.visible = union
+	// Before returning to a caller that may ask for full frames: the hosts must
+	// be streaming a pane again by the time that request reaches them.
+	o.syncFrameGates(prev)
 	return added, perClient
 }
 

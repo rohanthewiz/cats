@@ -14,7 +14,10 @@ The orchestrator owns *what the session looks like*; the terminal backend owns
 
 * `MaxFrameSize` = 8 MiB. A frame is **one pane**, not a composited UI, so 8 MiB
   is generous headroom for large grids.
-* Every message is a JSON object with a `"type"` discriminator.
+* Every message is a JSON object with a `"type"` discriminator, marshalled as
+  the first key. `ReadMessage` reads it off the `{"type":"…"` prefix rather than
+  decoding the whole payload twice, and falls back to a full decode for anything
+  else.
 * The `Host` API is transport-agnostic — `Host.Serve(ctx, conn io.ReadWriteCloser)`
   and `Host.Attach(ctx, conn io.ReadWriteCloser)` — and the orchestrator names the
   transport at exactly **one** dial site (`dialerFor`). Three are supported:
@@ -69,7 +72,7 @@ without racing the daemon's own post-hello replay. Unknown pane ids are ignored.
 
 | Type | Payload | Notes |
 |------|---------|-------|
-| `hello` | `protocol_version`, `token` | first message on every connection; `token` only when the daemon requires one (`-token-file`) |
+| `hello` | `protocol_version`, `token`, `features` | first message on every connection; `token` only when the daemon requires one (`-token-file`); `features` is what the *client* can accept — see [Client features](#client-features) |
 | `create_pane` | `pane_id`, `cols`, `rows`, cell px, `cwd`, `command`, `args`, `env`, `initial_history` | empty `command` means the default shell; `initial_history` is VT-encoded scrollback seeded before the child's first output |
 | `input` | `pane_id`, `data` (base64) | already-encoded VT bytes; see [inputenc](../subsystems/terminal.md) |
 | `resize` | `pane_id`, `cols`, `rows`, cell px | cell pixel metrics travel too, for programs that ask |
@@ -83,6 +86,7 @@ without racing the daemon's own post-hello replay. Unknown pane ids are ignored.
 | `request_host_stats` | `interval_ms` | subscribe to the daemon's readings of its own machine, one `host_stats` per interval; `0` cancels. Capability: `host_stats` |
 | `request_block` | `id`, `pane_id`, `block`, `text` | where a recorded command's output is NOW, and optionally its text; answered with `block_result` carrying the same `id`. Capability: `command_ledger` |
 | `request_command_marks` | `on` | turn shell-integration scanning on or off for this connection. Capability: `command_ledger` |
+| `set_frame_panes` | `panes` | the panes to take frames for — the ones some window is showing; the rest get `pane_activity` instead. Replaces the previous list; stays on for the session. Capability: `frame_gate` |
 | `request_list_dir` | `pane_id`, `dir`, `base`, `recents`, `live` | list a directory **on the daemon's filesystem**; answered with `dir_listing`. Capability: `list_dir` |
 | `request_worktree` | `id`, `req` (`op`, `cwd`, `path`, `branch`, `root`, `force`) | run one git-worktree operation **on the daemon's machine**; answered with `worktree_result` carrying the same `id`. Capability: `worktree` |
 | `request_git_sync` | `id`, `dir` | is `dir`'s trunk branch level with its remote, **on the daemon's machine**; answered with `git_sync_result` carrying the same `id`. Capability: `git_sync` |
@@ -96,7 +100,8 @@ without racing the daemon's own post-hello replay. Unknown pane ids are ignored.
 | Type | Payload | Notes |
 |------|---------|-------|
 | `welcome` | `protocol_version`, `panes`, `features`, `hook_socket`, `control_socket` | the surviving pane ids — the input to reconciliation — the optional requests this daemon can answer, and the paths of its agent-hook and control relays |
-| `pane_frame` | `Frame` (see below) | full or skip-flagged diff |
+| `pane_frame` | `Frame` (see below) | full, skip-flagged (dense) diff, or sparse diff |
+| `pane_activity` | `pane_id` | a pane outside the frame gate produced output since the last report; at most one per pane per 2 s. Capability: `frame_gate` |
 | `pane_output` | `pane_id`, `data` (base64) | raw PTY bytes, only while streaming is enabled. **Not** browser-facing |
 | `pane_cwd` | `pane_id`, `cwd` | from OSC 7, or the process probe |
 | `pane_branch` | `pane_id`, `branch` | v3. The git branch of the pane's cwd — `""` outside a repository, `@<sha>` while detached. Resolved **daemon-side**, because the cwd is a path on the daemon's filesystem |
@@ -170,6 +175,43 @@ reads correctly as "the base protocol only".
 | `control_relay` | `control_open` / `control_data` / `control_reply` / `control_close`, plus `welcome.control_socket` | the orchestrator's control API, for in-pane tooling on this machine — see below |
 | `command_ledger` | `request_command_marks` / `command_start` / `command_end` | the command history, read out of this machine's panes — see below |
 | `file_transfer` | `request_file` / `file_result` | `file.stat` / `file.get` / `file.put` and `catctl cp` reaching this machine's disk — see below |
+| `frame_gate` | `set_frame_panes` / `pane_activity` | frames only for the panes on screen — see below |
+
+### Client features
+
+The mirror image, for the one thing capabilities cannot carry: a change to what
+the daemon *sends*. A daemon has to know the receiver can read a new shape
+before the first byte goes out, so the client lists what it accepts in
+`hello.features`. An older daemon ignores the unknown field and keeps sending
+the base shapes; a client that lists nothing (every older build, tests, probes)
+gets the base shapes from a newer daemon. The daemon resets it when the session
+ends, so the next client starts from the base protocol until its own hello.
+
+| Client feature | Changes | Used for |
+|----------------|---------|----------|
+| `sparse_frames` | diff frames carry only their changed cells (`sparse`, `runs`) | see [Frame shape](#frame-shape) |
+
+### Frame gate
+
+Frames are the most expensive thing a daemon produces — a snapshot of the whole
+grid through cgo, a diff, an encode, a write — and before the gate every dirty
+pane got one every flush tick, whether or not any window showed it. catway
+dropped the off-screen ones on arrival.
+
+With `frame_gate`, catway sends `set_frame_panes` with its viewport union split
+by host, whenever a host's share changes and once after every (re)connect. The
+flusher does not snapshot a pane outside the list: it consumes the dirty flag,
+still re-reads the input modes (input reaches hidden panes too — `catctl send`,
+plugins, runbooks — and its encoding depends on them), and sends a
+rate-limited `pane_activity`, which is all catway ever used an off-screen frame
+for: marking the pane's history as worth re-capturing.
+
+Nothing is lost by the frames that are never taken, because nothing is ever
+diffed against them. A pane coming back into view is sent `request_resync`,
+which re-baselines the daemon's previous snapshot and replays a full frame —
+and catway sends the widened list **before** that request on the same
+connection, so the daemon is streaming the pane again by the time it takes the
+full frame.
 
 ### Workspace git sync
 
@@ -539,14 +581,27 @@ flowchart LR
 ```
 
 * `Frame.Full` is true when `prev` is nil or the dimensions changed. Otherwise
-  it is a diff: every cell is still present, but unchanged ones carry
-  `skip = true`.
+  it is a diff, in one of two shapes:
+  * **dense** (the base protocol): every cell is still present, but unchanged
+    ones carry `skip = true`.
+  * **sparse** (`sparse: true`, only to a client that sent `sparse_frames`):
+    `cells` is empty and `runs` lists the changed cells as
+    `{"at": index, "cells": [...]}` stretches, row-major. A one-character echo on
+    a 200×50 pane is ~230 bytes instead of ~550 KB.
+
+  A dense diff is self-contained — a receiver can draw a full screen from it —
+  which is why the base protocol sends one. A sparse diff is not, so catway keeps
+  each pane's resolved grid (`browserproto.Grid`) and resolves the diff against
+  it. A sparse diff that arrives for a grid which missed a frame (the pane was
+  off every screen, the daemon reconnected, the pane moved host) is dropped until
+  the full frame that makes the grid whole again.
+* `modifier`, `skip` and `hyperlink` are omitted at their zero values.
 * Colours are packed into a `u32`. `nil` foreground/background are resolved
   against the snapshot defaults before they hit the wire, so the consumer always
   receives concrete colours.
-* Sending the whole grid on every frame is what makes the seam **stateless
-  enough to resync**: a reconnecting orchestrator can always be handed a
-  self-contained picture.
+* A full frame is always the whole grid, which is what makes the seam
+  **stateless enough to resync**: a reconnecting orchestrator can always be
+  handed a self-contained picture (`request_resync`).
 
 ## Pane lifecycle on the `cathost` side
 
