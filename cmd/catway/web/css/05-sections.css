@@ -38,3 +38,57 @@
      than by size, which keeps the whole sidebar inside a two-size scale. */
   #sidebar li { font-size:calc(11px * var(--sb-scale)); padding:4px 8px; border-radius:4px; white-space:nowrap;
     overflow:hidden; text-overflow:ellipsis; cursor:default; display:flex; align-items:baseline; gap:6px; }
+
+  /* ---- Section splitters ----
+     A drag grip rides the hairline between two sections (the border-top above)
+     and sets the height of the section ABOVE it — the same "the line you grab
+     is the edge you move" rule the column gutter follows.
+
+       ┌ USAGE ──────────┐
+       │ …               │  ← sized: max-height = --sec-h, its <ul> scrolls
+       ├═════════════════┤  ← .sec-grip of the NEXT section, straddling the seam
+       │ WORKSPACES      │
+       │ …               │
+
+     The grip belongs to the lower section rather than being a sibling element
+     between the two, so it is shown and hidden by that section's own `hidden`
+     attribute: a splitter can never dangle above a section that is not there.
+     The JS walks back past hidden siblings to find the section it sizes, so a
+     hidden Hosts between Usage and Workspaces does not leave a dead grip.
+
+     The size is a CAP, not a height (max-height, not height). A section with
+     fewer rows than its cap simply ends where its rows do, so a drag can never
+     leave a block of blank panel behind it; when rows are added past the cap,
+     that section's list scrolls on its own instead of pushing everything below
+     it down. Unsized sections keep their natural height, and #sidebar's own
+     overflow-y:auto still catches whatever the whole column cannot fit. */
+  #sidebar section { position:relative; }
+  #sidebar .sec-grip { position:absolute; left:0; right:0; top:-4px; height:7px;
+    cursor:row-resize; z-index:1; }
+  /* The first section sits under the brand row, not under another section:
+     there is nothing above it for its grip to size. */
+  #sidebar section:first-of-type > .sec-grip { display:none; }
+  #sidebar .sec-grip:hover, #sidebar .sec-grip.drag { background:var(--accent-dim); }
+  /* Above a folded section there is only a heading, and a heading has no
+     height worth choosing — the grip stays in place but stops offering. */
+  #sidebar .sec-grip.inert { cursor:default; background:transparent; }
+  /* :not([hidden]) is load-bearing: `display:flex` is an author rule and would
+     otherwise beat the UA's [hidden]{display:none}, resurrecting a sized
+     section the renderer had just hidden. :not(.folded) keeps a folded section
+     to its one heading line whatever cap it carries. */
+  #sidebar section.sized:not([hidden]):not(.folded) {
+    display:flex; flex-direction:column; box-sizing:border-box;
+    max-height:var(--sec-h);
+    /* The column scrolls as a whole when it overflows; a sized section must
+       keep the height it was given rather than be the first thing flexbox
+       squeezes to make room. */
+    flex:0 0 auto; }
+  #sidebar section.sized > h2 { flex:none; }
+  /* The list takes whatever the cap leaves after the heading and scrolls in
+     it. max-height:none lifts #pane-list's standing 34vh cap: once the user
+     has chosen a size, that choice is the cap. */
+  #sidebar section.sized > ul { flex:0 1 auto; min-height:0; overflow-y:auto; max-height:none; }
+  /* Held for the length of a drag, like body.splitting for the column gutter:
+     the cursor stays a resize cursor wherever the pointer wanders, and the
+     rows under it cannot start a text selection. */
+  body.splitting-sec { cursor:row-resize; user-select:none; }

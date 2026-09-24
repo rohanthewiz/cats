@@ -148,3 +148,121 @@
     sidebarResized(true);
   });
 
+
+  // ---- Section splitters ----
+  // A grip on the seam above each sidebar section; dragging it sets the height
+  // cap of the nearest *visible* section above (the CSS under "Section
+  // splitters" explains why it is a cap and why the grip lives in the lower
+  // section). Double-click hands that section back to its natural height.
+  //
+  // Per-browser, in localStorage, for the same reason the column width is: it
+  // is a display preference about this window's shape, not session state. It
+  // is deliberately NOT written to config.json the way sidebar_width is — a set
+  // of per-section heights only makes sense against one window's height, and
+  // the Mac app and a browser tab rarely share that.
+  //
+  // Stored as { "sec-panes": 220, … } keyed by section id, so a section that is
+  // renamed or removed just leaves an entry nothing reads.
+  const SECH_KEY = "cats.section_h";
+  let secSizes = {};
+  try {
+    const raw = JSON.parse(localStorage.getItem(SECH_KEY));
+    if (raw && typeof raw === "object") secSizes = raw;
+  } catch (e) { /* storage disabled or corrupt — every section at natural height */ }
+  function saveSecSizes() {
+    try { localStorage.setItem(SECH_KEY, JSON.stringify(secSizes)); } catch (e) { /* not persisted */ }
+  }
+  function setSectionCap(sec, px) {
+    if (px == null) {
+      sec.classList.remove("sized");
+      sec.style.removeProperty("--sec-h");
+      delete secSizes[sec.id];
+    } else {
+      sec.style.setProperty("--sec-h", px + "px");
+      sec.classList.add("sized");
+      secSizes[sec.id] = px;
+    }
+  }
+
+  (function initSectionSplitters() {
+    const sidebarEl = document.getElementById("sidebar");
+    const sections = [...sidebarEl.querySelectorAll(":scope > section")];
+
+    // The section a grip sizes: the closest earlier sibling that is actually
+    // on screen. null when there is none, or when that one is folded — a
+    // folded section is a single heading line and has no height to choose.
+    // Resolved on every use rather than once, because Hosts, Plugins, Runbooks
+    // and History show and hide themselves as the session changes, and a fold
+    // can land at any time.
+    function gripTarget(sec) {
+      for (let p = sec.previousElementSibling; p; p = p.previousElementSibling) {
+        if (p.tagName !== "SECTION") return null;   // reached the brand row
+        if (p.hidden) continue;
+        return p.classList.contains("folded") ? null : p;
+      }
+      return null;
+    }
+
+    for (const sec of sections) {
+      const px = secSizes[sec.id];
+      if (px > 0) setSectionCap(sec, px);
+
+      const grip = document.createElement("div");
+      grip.className = "sec-grip";
+      grip.title = "drag to resize the section above (double-click to reset)";
+      // The cursor has to be right before the press, so the "is there
+      // anything to size?" check runs on the way in, not only on pointerdown.
+      grip.addEventListener("pointerenter", () => grip.classList.toggle("inert", !gripTarget(sec)));
+
+      grip.addEventListener("pointerdown", (e) => {
+        if (e.button !== 0) return;
+        const target = gripTarget(sec);
+        if (!target) return;
+        e.preventDefault(); e.stopPropagation();
+        grip.setPointerCapture(e.pointerId);
+        grip.classList.add("drag");
+        document.body.classList.add("splitting-sec");
+
+        // Measured from what is on screen, not from the stored cap: a cap set
+        // above the section's content is not where its edge is drawn, and
+        // starting from it would leave the seam lagging the pointer by the
+        // difference until the pointer had travelled that far back up.
+        const startH = target.getBoundingClientRect().height, startY = e.clientY;
+        // Floor: the heading plus about one row, so a section is never dragged
+        // into a heading with an invisible list under it — that is what the
+        // fold arrow is for, and it says so. Ceiling: the column itself; a cap
+        // taller than the sidebar could never be shown anyway.
+        const h2 = target.querySelector(":scope > h2");
+        const minH = (h2 ? h2.offsetHeight : 0) + 40;
+        const maxH = Math.max(minH, sidebarEl.clientHeight);
+        let moved = false;
+
+        const move = (ev) => {
+          const dy = ev.clientY - startY;
+          if (Math.abs(dy) > 2) moved = true;
+          if (!moved) return;
+          setSectionCap(target, Math.round(Math.min(maxH, Math.max(minH, startH + dy))));
+        };
+        const up = () => {
+          grip.removeEventListener("pointermove", move);
+          grip.classList.remove("drag");
+          document.body.classList.remove("splitting-sec");
+          // A press with no travel changed nothing, so it must not turn a
+          // natural-height section into a capped one at its current height.
+          if (moved) saveSecSizes();
+        };
+        grip.addEventListener("pointermove", move);
+        grip.addEventListener("pointerup", up, { once: true });
+        grip.addEventListener("pointercancel", up, { once: true });
+      });
+
+      grip.addEventListener("dblclick", () => {
+        const target = gripTarget(sec);
+        if (!target) return;
+        setSectionCap(target, null);
+        saveSecSizes();
+      });
+
+      sec.appendChild(grip);
+    }
+  })();
