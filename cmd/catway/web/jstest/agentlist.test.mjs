@@ -186,6 +186,7 @@ eq(world().fns.isAgentPlugin({}), false, "an untyped plugin is a tool");
 eq(world().fns.isAgentPlugin({ type: "Agent" }), false, "the match is exact, as the wire's is");
 eq(world().fns.pluginTypeLabel("todos_mgr"), "todos", "pluginTypeLabel drops _mgr");
 eq(world().fns.pluginTypeLabel("http_client"), "http", "…and _client");
+eq(world().fns.pluginTypeLabel("db_client"), "db", "…so db_client (dbc) reads db");
 eq(world().fns.pluginTypeLabel("client_tool"), "client_tool", "…only as a suffix");
 eq(world().fns.pluginTypeLabel("editor"), "editor", "…and leaves other types alone");
 eq(world().fns.pluginTypeLabel("git"), "git", "…including git (cats-git)");

@@ -1763,8 +1763,8 @@ type PluginInfo struct {
 // it has a state worth watching (working / idle / blocked), it goes in the
 // sidebar's AGENTS section, and it is somewhere a prompt can be dropped. Every
 // other plugin is a tool the user drives — an editor, a backlog manager, a
-// notes app, a git UI — and goes in PLUGINS, where there is no state to watch and nothing
-// to drop a prompt into. The finer types below "tool" are there so a client can
+// notes app, a git UI, a database client — and goes in PLUGINS, where there
+// is no state to watch and nothing to drop a prompt into. The finer types below "tool" are there so a client can
 // find the one it needs (cats-todo filing a note wants the notes manager, not
 // just "some plugin") without matching on plugin ids it cannot know in advance.
 //
@@ -1776,6 +1776,7 @@ type PluginInfo struct {
 //	notes_mgr    PLUGINS   no            gonotes
 //	http_client  PLUGINS   no            roman
 //	git          PLUGINS   no            cats-git
+//	db_client    PLUGINS   no            dbc
 //	"" (unset)   PLUGINS   no            any older manifest
 //
 // PluginTypeAgent has no plugin behind it yet. It is defined now so the day a
@@ -1798,7 +1799,29 @@ const (
 	// PluginTypeGit is a git UI (cats-git: ced's git panels as a standalone
 	// tool).
 	PluginTypeGit = "git"
+	// PluginTypeDBClient is a database client (dbc: SQL against Postgres,
+	// MySQL, SQLite and bytdb, scriptable in Go). Like http_client it names
+	// the job — "run this query somewhere" — rather than the one tool that
+	// does it today.
+	PluginTypeDBClient = "db_client"
 )
+
+// KnownPluginTypes lists every type this build names, in the order the table
+// above gives them. It is the one place a new type has to be added for the
+// manifest's error hint to mention it: the hint used to spell the constants
+// out by hand and fell behind twice (http_client, then db_client, would each
+// have been missing from it). Being listed here is NOT what makes a type
+// valid — any well-formed word is (ValidPluginType) — it only makes it one
+// cats can suggest.
+var KnownPluginTypes = []string{
+	PluginTypeAgent,
+	PluginTypeEditor,
+	PluginTypeTodosMgr,
+	PluginTypeNotesMgr,
+	PluginTypeHTTPClient,
+	PluginTypeGit,
+	PluginTypeDBClient,
+}
 
 // pluginTypePattern bounds what a declared type may look like: a lowercase
 // snake_case word, the same shape as the ones above. It is checked at manifest

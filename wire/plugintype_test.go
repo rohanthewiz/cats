@@ -7,7 +7,7 @@ import "testing"
 // be dropped into it.
 
 func TestValidPluginType(t *testing.T) {
-	for _, typ := range []string{"", PluginTypeAgent, PluginTypeEditor, PluginTypeTodosMgr, PluginTypeNotesMgr, PluginTypeHTTPClient, PluginTypeGit, "dev_server"} {
+	for _, typ := range []string{"", PluginTypeAgent, PluginTypeEditor, PluginTypeTodosMgr, PluginTypeNotesMgr, PluginTypeHTTPClient, PluginTypeGit, PluginTypeDBClient, "dev_server"} {
 		if !ValidPluginType(typ) {
 			t.Errorf("%q should be a valid plugin type", typ)
 		}
@@ -15,6 +15,28 @@ func TestValidPluginType(t *testing.T) {
 	for _, typ := range []string{"Editor", "todos-mgr", "notes mgr", "_x", "1st"} {
 		if ValidPluginType(typ) {
 			t.Errorf("%q should be refused", typ)
+		}
+	}
+}
+
+// Every named type is in KnownPluginTypes (the manifest's error hint is built
+// from it, so a type missing here is a type the hint never suggests), is
+// itself valid, and appears once.
+func TestKnownPluginTypes(t *testing.T) {
+	named := []string{PluginTypeAgent, PluginTypeEditor, PluginTypeTodosMgr, PluginTypeNotesMgr, PluginTypeHTTPClient, PluginTypeGit, PluginTypeDBClient}
+	seen := map[string]bool{}
+	for _, typ := range KnownPluginTypes {
+		if !ValidPluginType(typ) || typ == "" {
+			t.Errorf("known type %q is not a valid declared type", typ)
+		}
+		if seen[typ] {
+			t.Errorf("known type %q listed twice", typ)
+		}
+		seen[typ] = true
+	}
+	for _, typ := range named {
+		if !seen[typ] {
+			t.Errorf("%q is named but missing from KnownPluginTypes", typ)
 		}
 	}
 }

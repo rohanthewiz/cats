@@ -104,7 +104,7 @@ zsh = "shell/cats-todo.zsh"         # sourced at shell startup (see Shell hooks)
 | Field | Notes |
 |-------|-------|
 | `id` | the directory name under the plugins root |
-| `type` | what kind of tool the plugin is — `agent`, `editor`, `todos_mgr`, `notes_mgr`, `http_client`, `git`; optional (see [Plugin types](#plugin-types)) |
+| `type` | what kind of tool the plugin is — `agent`, `editor`, `todos_mgr`, `notes_mgr`, `http_client`, `git`, `db_client`; optional (see [Plugin types](#plugin-types)) |
 | `platforms` | limits where the plugin installs |
 | `min_cats_version` | carried for forward compatibility but **not enforced** — cats has no single server version constant yet, and enforcing against the wrong number would be worse than not enforcing |
 | `[[build]]` | commands run in the plugin root at install/link time (see [Build step environment](#build-step-environment)) |
@@ -137,6 +137,7 @@ wants the notes manager) without knowing plugin ids in advance.
 | `notes_mgr` | tool | PLUGINS | no | gonotes |
 | `http_client` | tool | PLUGINS | no | roman |
 | `git` | tool | PLUGINS | no | cats-git |
+| `db_client` | tool | PLUGINS | no | dbc |
 | *(unset)* | tool | PLUGINS | no | any manifest written before the key |
 
 The key is optional, and any lowercase `snake_case` word validates, known or
@@ -345,7 +346,7 @@ id          = "you.cats-hello"     # also the install directory name
 name        = "Hello cats"
 version     = "0.1.0"
 description = "Renames its own pane, then lists every pane cats knows about"
-# type      = "notes_mgr"          # optional: agent, editor, todos_mgr, notes_mgr, http_client, git
+# type      = "notes_mgr"          # optional: agent, editor, todos_mgr, notes_mgr, http_client, git, db_client
 platforms   = ["macos", "linux"]   # omit for "everywhere"; GOOS names also work
 
 # Run once in the plugin root at install/link time. Usually a `go build`.
@@ -551,8 +552,8 @@ PLUGINS
 A plugin row shows the plugin's name and, beside it, the pane's own terminal
 title. The title is the plugin's one channel, which is why cats-todo shows its
 open count there. The plugin's type goes before the pane handle (a `_mgr` or
-`_client` suffix is dropped, so `todos_mgr` shows as `todos` and `http_client`
-as `http`). The dot has no state colour and the
+`_client` suffix is dropped, so `todos_mgr` shows as `todos`, `http_client`
+as `http` and `db_client` as `db`). The dot has no state colour and the
 row has no age: a plugin is a program, not an agent taking turns, and catway
 has nothing to report that would mean what "idle 5m ago" means on an agent
 row. Clicking a row reveals the pane, as an agent row does, and right-clicking
@@ -562,6 +563,14 @@ An editor (every label in `editor.agents`) goes in PLUGINS even though it
 reports over the hook API as an agent. That reporting is only how
 `pane.open_file` finds it and how a blocked question reaches the phone. It is
 not a sign the editor is taking turns.
+
+Any other tool that reports its own state over the hook API is listed the
+other way round: as a row in AGENTS, with its state and age, because a row
+that says "working 40s" is the useful one for that pane. dbc does this
+(`working` while a query runs, `idle` when it ends), as does gonotes. Its
+declared type still keeps it from being offered as a drop target
+(`PaneMeta.IsDropAgent`), so being listed with the agents never makes it
+somewhere a prompt can land.
 
 The id and type are durable pane state (`PaneState.PluginID` and `PluginType`),
 so the grouping survives a catway restart against a live cathost, where the

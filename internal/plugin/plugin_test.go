@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/rohanthewiz/cats/wire"
 )
 
 // validManifest is a minimal manifest with one build step that stamps a file,
@@ -737,11 +739,29 @@ func TestBinLinksRemovedForBrokenManifest(t *testing.T) {
 // A declared type is optional, and any well-formed word passes, known or not:
 // a newer plugin's type must not stop an older cats from installing it.
 func TestValidateAcceptsPluginTypes(t *testing.T) {
-	for _, typ := range []string{"", "agent", "editor", "todos_mgr", "notes_mgr", "http_client", "dev_server"} {
+	for _, typ := range []string{"", "agent", "editor", "todos_mgr", "notes_mgr", "http_client", "git", "db_client", "dev_server"} {
 		m := Manifest{ID: "acme.demo", Version: "1.0", Type: typ}
 		if err := m.Validate(); err != nil {
 			t.Errorf("type %q rejected: %v", typ, err)
 		}
+	}
+}
+
+// The refusal for a malformed type suggests every type cats names. The hint
+// was once a hand-kept list and silently fell behind the vocabulary (N-026);
+// now it is generated, and this pins that it stays complete.
+func TestValidateTypeHintNamesEveryKnownType(t *testing.T) {
+	err := Manifest{ID: "acme.demo", Version: "1.0", Type: "Db-Client"}.Validate()
+	if err == nil {
+		t.Fatal("malformed type accepted")
+	}
+	for _, typ := range wire.KnownPluginTypes {
+		if !strings.Contains(err.Error(), `"`+typ+`"`) {
+			t.Errorf("hint %q does not suggest %q", err, typ)
+		}
+	}
+	if !strings.Contains(err.Error(), ` or "`) {
+		t.Errorf("hint %q should end in an \"or\" list", err)
 	}
 }
 

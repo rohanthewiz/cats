@@ -194,8 +194,8 @@
 
   // pluginTypeLabel is the short word a plugin row shows for its type. The
   // role suffixes "_mgr" and "_client" are dropped: the section heading already
-  // says these are tools, and "todos" / "http" read faster than "todos_mgr" /
-  // "http_client" in 10px type. An unknown type is shown as sent (less a
+  // says these are tools, and "todos" / "http" / "db" read faster than
+  // "todos_mgr" / "http_client" / "db_client" in 10px type. An unknown type is shown as sent (less a
   // suffix), so a plugin newer than this page still says what it is.
   function pluginTypeLabel(t) {
     if (!t) return "";

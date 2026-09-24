@@ -32,7 +32,7 @@ window were dated by grepping every session doc.
 - Open and Roadmap stay in ID order. New items append to the end of Open (or
   Roadmap, for future work) with the next ID.
 
-**Next ID:** N-035
+**Next ID:** N-036
 
 ## Open
 
@@ -176,14 +176,6 @@ window were dated by grepping every session doc.
   session docs) can now find the notes plugin by `plugin_type ==
   "notes_mgr"` in `pane.list` instead of by id.
 
-- **N-026** · raised `2026-0922-1857-next-list-seed-and-adopted-exec-panes` · value low
-  The manifest's "invalid type" error hint (`internal/plugin/manifest.go`,
-  `Validate`) lists `git` but not `http_client`. `06a67c3` added the
-  `http_client` type without touching the hint, and `272c134` (the `git` type)
-  was rebased onto it. Add `wire.PluginTypeHTTPClient` to the hint's
-  arguments, or build the list from one slice of known types so the next type
-  can't miss it.
-
 - **N-031** · raised `2026-0923-1443-settings-json-and-screen` · value low
   `docs/reference/configuration.md` still shows every section example in YAML
   (the keys are identical in JSON; the intro says so). Convert them to JSON,
@@ -204,6 +196,15 @@ window were dated by grepping every session doc.
   pane still reaches the phone as a full frame per tick (now compressed). Its
   grid (`internal/catsclient/grid.go`) would apply `PaneDiff.Shift` as the
   browser does: scroll the cells up, blank the vacated rows, then the cells.
+
+- **N-035** · raised 2026-09-24, the `db_client` commit (no session doc) · value low
+  dbc and gonotes typed into a shell (not launched by `plugin run`) report
+  over the hook API as agents `dbc` / `gonotes` with no plugin type, so
+  `PaneMeta.IsDropAgent` treats them as LLM agents and the drop picker can
+  offer them as a prompt target. Launched as plugins they carry `db_client` /
+  `notes_mgr` and are excluded. A config list like `editor.agents` (a
+  `tools.agents`, or a type map by agent label) would type them however they
+  were started, as it already does for ced.
 
 ## Roadmap
 
@@ -239,6 +240,12 @@ unchanged.
 Closures before this file existed live in the session docs' own write-ups.
 Newest first. The unnumbered entries at the end were found done while seeding,
 so they are not carried.
+
+- **N-026** · raised `2026-0922-1857-next-list-seed-and-adopted-exec-panes` ·
+  closed 2026-09-24, the `db_client` commit — The manifest's
+  invalid-type hint missed `http_client`. It is now generated from
+  `wire.KnownPluginTypes` (added with the `db_client` type), and
+  `TestValidateTypeHintNamesEveryKnownType` pins that it names every one.
 
 - **N-017** · raised `2026-0922-1713-plugin-types-and-releases` ·
   closed 2026-09-24, `2026-0924-1144-sidebar-section-splitters-v0.3.0` — The
