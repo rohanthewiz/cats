@@ -78,6 +78,10 @@ window were dated by grepping every session doc.
   - the flag menu's **note…** row (`2026-0924-1126-flag-note-menuitem-consolidation`):
     on a workspace and on a pane, it opens the flag dialog preset to ▤ note,
     keeps any existing note text, and no "flag with a note…" row is left.
+  - the sidebar's section splitters (`2026-0924-1144-sidebar-section-splitters-v0.3.0`):
+    drag the seam above Panes and Agents with real rows, check the grip goes
+    inert under a folded section, and that a trackpad drag inside the
+    WKWebView keeps the row-resize cursor for the whole drag.
 
 - **N-003** · raised `2026-0905-1938-plugin-panes-in-the-agents-section` · value low
   A plugin started by hand from a shell (e.g. `cats-todo` typed at a prompt)
