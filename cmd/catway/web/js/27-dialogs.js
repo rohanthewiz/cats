@@ -338,9 +338,17 @@
   // server refuses any kind containing whitespace (flags.ParseKind), so this can
   // never be mistaken for a value worth sending.
   const FLAG_CUSTOM = "custom glyph";
-  function openFlagDialog(target) {
+  //
+  // presetKind, when given, is the kind the chooser opens on, overriding the
+  // subject's current one — the flag menu's "note…" row passes "note", since
+  // choosing that row is choosing the kind. The note field still starts from
+  // whatever note the subject already carries, so re-kinding a flag to a note
+  // does not throw away what was written on it.
+  function openFlagDialog(target, presetKind) {
     const cur = target.flag;
     const named = cur && FLAG_BY_KIND.has(cur.kind);
+    let startKind = cur ? (named ? cur.kind : FLAG_CUSTOM) : FLAG_DEFS[0].kind;
+    if (presetKind && FLAG_BY_KIND.has(presetKind)) startKind = presetKind;
     const choices = FLAG_DEFS.map((d) => ({ value: d.kind, label: d.glyph + "  " + d.label + " — " + d.meaning }));
     choices.push({ value: FLAG_CUSTOM, label: "custom glyph…" });
     dialogFields({
@@ -350,7 +358,7 @@
       fields: [
         {
           label: "flag", choices,
-          value: cur ? (named ? cur.kind : FLAG_CUSTOM) : FLAG_DEFS[0].kind,
+          value: startKind,
           onChange: (v, rows) => {
             // rows[1] is the glyph field; its .field wrapper is what carries the
             // label, so hiding the wrapper hides the whole row.

@@ -75,6 +75,9 @@ window were dated by grepping every session doc.
     opens it in the front window; the **app** tab lists the saved catways,
     and renaming or forgetting one redraws the Connect menu at once; first
     launch imports `app.json` into config.json's `app` section.
+  - the flag menu's **note…** row (`2026-0924-1126-flag-note-menuitem-consolidation`):
+    on a workspace and on a pane, it opens the flag dialog preset to ▤ note,
+    keeps any existing note text, and no "flag with a note…" row is left.
 
 - **N-003** · raised `2026-0905-1938-plugin-panes-in-the-agents-section` · value low
   A plugin started by hand from a shell (e.g. `cats-todo` typed at a prompt)

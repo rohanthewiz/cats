@@ -219,32 +219,35 @@
   }
 
   // flagMenuItems is the whole flag vocabulary as a menu: one row per named
-  // kind, then (unless the caller hoists it out, see opts below) the dialog that
-  // covers a note and a custom glyph, then the two rows that only make sense
-  // once something is flagged.
+  // kind, then the two rows that only make sense once something is flagged.
   //
   // Picking a kind is one click and keeps whatever note is already there — the
   // common motion is "mark this, I'll come back", and making that cost a dialog
-  // would mean it doesn't get used. The note has its own row for when it is the
-  // point.
+  // would mean it doesn't get used.
   //
-  // opts.noteRow drops that "flag with a note…" row from the submenu for callers
-  // that carry it as a sibling of the flag row instead (the workspace menu does;
-  // see wsMenuItems). The rows that only make sense once something is flagged
-  // stay in the submenu either way, since they are about the flag already there
-  // rather than about setting one.
-  function flagMenuItems(target, opts) {
+  // The "note" kind is the exception: a note flag with no note is a sticky note
+  // with nothing written on it, so its row opens the full flag dialog (preset to
+  // the note kind) instead of flagging blind. That row is also the one way in to
+  // the dialog from this menu — it took over from a separate "flag with a
+  // note…" row, which asked the same question from a second place. The dialog
+  // still offers every kind and the custom glyph, so nothing that row reached is
+  // lost. The row keeps the note kind's own icon so it reads as one of the
+  // vocabulary, with the ellipsis saying that a dialog follows.
+  function flagMenuItems(target) {
     const cur = target.flag;
-    const noteRow = !opts || opts.noteRow !== false;
-    const items = FLAG_DEFS.map((d) => ({
-      icon: { text: d.glyph, cls: "fk-" + d.kind },
-      label: d.label + (cur && cur.kind === d.kind ? "  (current)" : ""),
-      fn: () => sendFlag(target, d.kind, cur ? cur.note : ""),
-    }));
-    // One separator at most, and only when something follows it.
-    if (noteRow || cur) items.push("-");
-    if (noteRow) items.push({ label: "flag with a note…", fn: () => openFlagDialog(target) });
+    const items = FLAG_DEFS.map((d) => {
+      const asDialog = d.kind === "note";
+      return {
+        icon: { text: d.glyph, cls: "fk-" + d.kind },
+        label: d.label + (asDialog ? "…" : "") + (cur && cur.kind === d.kind ? "  (current)" : ""),
+        fn: asDialog
+          ? () => openFlagDialog(target, d.kind)
+          : () => sendFlag(target, d.kind, cur ? cur.note : ""),
+      };
+    });
+    // A separator only when something follows it.
     if (cur) {
+      items.push("-");
       items.push({ label: "edit note…", fn: () => editFlagNote(target) });
       items.push({ label: "clear flag", fn: () => sendFlag(target, "", "") });
     }
@@ -263,12 +266,9 @@
       // and are what a reader scans for. Everything below changes its state.
       { label: "new…", fn: newWorkspace },
       { label: "rename…", fn: () => renameWorkspace(w) },
-      { label: flagRowLabel(flagOf(w)), sub: flagMenuItems(wsFlagTarget(w), { noteRow: false }) },
-      // The annotated flag reads as a peer of "flag…" rather than as the last
-      // row of its submenu: both set a flag on this workspace, one straight from
-      // the vocabulary and one through the dialog, so they sit together at the
-      // same level instead of one hiding inside the other.
-      { label: "flag with a note…", fn: () => openFlagDialog(wsFlagTarget(w)) },
+      // Annotating a flag lives inside this submenu, on its "note…" row (see
+      // flagMenuItems), rather than as a sibling "flag with a note…" row here.
+      { label: flagRowLabel(flagOf(w)), sub: flagMenuItems(wsFlagTarget(w)) },
       // A second window on this workspace, leaving the current one where it is.
       // Two windows on ONE workspace mirror each other; the useful shape is one
       // window per project, which is why this sits on the row rather than on
