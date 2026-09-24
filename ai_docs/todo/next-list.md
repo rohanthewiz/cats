@@ -157,14 +157,6 @@ window were dated by grepping every session doc.
   Legacy X10 / urxvt mouse encodings are never droppable (the conservative
   choice). Fine while the browser encoder emits SGR.
 
-- **N-017** · raised `2026-0922-1713-plugin-types-and-releases` · value medium
-  Verify the fixed `release.yml` on the next cats tag. It has only been
-  checked locally (`scripts/release-notes.sh` against v0.2.3, and a YAML
-  parse). Confirm the `release` job runs before the four `dist` jobs, the body
-  is the tag message exactly once, and all four tarballs attach. If
-  `release-notes.sh` prints nothing for an annotated tag on the runner, the
-  tag re-fetch step is the suspect.
-
 - **N-018** · raised `2026-0922-1713-plugin-types-and-releases` · value medium
   ced repo: `TestThemeAfterSave_RepaintsLive` fails about 1 run in 10. TempDir
   cleanup reports `themes/` "directory not empty", so something writes into
@@ -247,6 +239,12 @@ unchanged.
 Closures before this file existed live in the session docs' own write-ups.
 Newest first. The unnumbered entries at the end were found done while seeding,
 so they are not carried.
+
+- **N-017** · raised `2026-0922-1713-plugin-types-and-releases` ·
+  closed 2026-09-24, `2026-0924-1144-sidebar-section-splitters-v0.3.0` — The
+  fixed `release.yml`, on its first real tag (v0.3.0, run 36029600049): the
+  `release` job ran first, the four `dist` jobs after it, the body is the tag
+  message exactly once plus the compare link, and all four tarballs attached.
 
 - **N-027** · raised `2026-0923-1437-perf-canvas-sparse-frames-and-frame-gate` ·
   closed 2026-09-23, `2026-0923-1545-perf-shifts-builder-deflate` — Scrolling

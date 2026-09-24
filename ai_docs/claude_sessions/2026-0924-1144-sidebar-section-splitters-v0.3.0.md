@@ -68,11 +68,16 @@ perf rounds (frame gate, sparse and shifted diffs, row cache and frame
 builder, empty-frame suppression, slow-browser hold-back, deflate), the
 section splitters, the http_client and git plugin types, flag › note…, and
 the adopted-exec-pane fix. Pushing the tag runs the fixed `release.yml` for
-the first time, which is what N-017 is waiting on.
+the first time, which is what N-017 was waiting on.
+
+It passed (run 36029600049): `release` ran first, then the four `dist` jobs,
+all green. The published release has the tag message as its body exactly
+once, with the v0.2.3...v0.3.0 compare link, and all four tarballs
+(`cats_v0.3.0_{darwin,linux}_{amd64,arm64}.tar.gz`). N-017 is closed.
 
 ## Next
 
-Closed: None. Declined: None. Raised: None.
+Closed: N-017. Declined: None. Raised: None.
 Deferred: None. Promoted: None.
 Updated: N-001 (hands-on check of the section splitters in Cats.app).
 Full list: `ai_docs/todo/next-list.md`.
