@@ -58,6 +58,7 @@ import (
 	"io/fs"
 	"log"
 	"maps"
+	"net"
 	"net/url"
 	"os"
 	"os/signal"
@@ -345,7 +346,7 @@ func main() {
 	}
 
 	// Auth: build the guard unless explicitly disabled.
-	guard, err := buildGuard(eff.Auth, *password, effTTL, tlsOn, eff.AllowedOrigins)
+	guard, err := buildGuard(eff.Auth, *password, effTTL, tlsOn, eff.AllowedOrigins, eff.Addr)
 	if err != nil {
 		dlog.Fatalf("catway: auth: %v", err)
 	}
@@ -577,10 +578,23 @@ func buildOrch(hosts []config.Host, cwd string, pc config.Persistence) (*orch, e
 // nil guard (no middleware). "password" resolves the shared secret (flag → env
 // → generated) and logs a generated one so the operator can find it.
 // allowedOrigins is the extra WebSocket Origin allow-list (see gwauth.OriginOK).
-func buildGuard(mode, password string, ttl time.Duration, tlsOn bool, allowedOrigins []string) (*authGuard, error) {
+// addr is the listen address, consulted only to decide how loudly to report
+// "none".
+func buildGuard(mode, password string, ttl time.Duration, tlsOn bool, allowedOrigins []string, addr string) (*authGuard, error) {
 	switch mode {
 	case "none":
-		dlog.Warnf("catway: auth disabled (--auth none) — anyone who can reach the listen address can drive your terminals")
+		// How loud depends on who can reach the listener. On a loopback bind it
+		// is only this machine's own processes — which is catapp's local mode,
+		// run on every launch of the Mac app (cmd/catapp/supervise.go), and a
+		// WARN there fired on every launch and buried the lines daemons.log
+		// exists to keep. So it is informational there. Anywhere else (0.0.0.0,
+		// a LAN address, a name that is not "localhost") it is the thing the
+		// warning is for, and stays one.
+		if isLoopbackAddr(addr) {
+			log.Printf("catway: auth disabled (--auth none) on loopback %s — local processes can drive your terminals", addr)
+		} else {
+			dlog.Warnf("catway: auth disabled (--auth none) — anyone who can reach the listen address can drive your terminals")
+		}
 		return nil, nil
 	case "password":
 		secret, generated, err := resolveSecret(password)
@@ -598,6 +612,21 @@ func buildGuard(mode, password string, ttl time.Duration, tlsOn bool, allowedOri
 	default:
 		return nil, fmt.Errorf("unknown --auth %q (want password|none)", mode)
 	}
+}
+
+// isLoopbackAddr reports whether a host:port listen address only accepts
+// connections from this machine: "localhost" or a loopback IP. An empty host
+// (":8421") binds every interface, so it is not.
+func isLoopbackAddr(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return false
+	}
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 // splitCSV parses a comma-separated flag value into a trimmed, non-empty slice.

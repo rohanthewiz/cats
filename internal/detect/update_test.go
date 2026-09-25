@@ -1,6 +1,7 @@
 package detect
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -110,6 +111,20 @@ func TestParseRemoteManifestValidation(t *testing.T) {
 		if _, err := parseRemoteManifest("codex", []byte(content)); err == nil {
 			t.Errorf("%s: expected error", name)
 		}
+	}
+}
+
+// A manifest written for a newer engine is told apart from every other
+// rejection, because it is the one case that is logged quietly (CheckAndUpdate):
+// it is what a catalog ahead of this build looks like, not a fault.
+func TestNeedsNewerEngineIsDistinguishable(t *testing.T) {
+	tooNew := strings.Replace(remoteManifest("1.0", "x"), "min_engine_version = 1", "min_engine_version = 99", 1)
+	if _, err := parseRemoteManifest("codex", []byte(tooNew)); !errors.Is(err, errNeedsNewerEngine) {
+		t.Fatalf("engine too new: err = %v, want errNeedsNewerEngine", err)
+	}
+	wrongID := strings.Replace(remoteManifest("1.0", "x"), `id = "codex"`, `id = "claude"`, 1)
+	if _, err := parseRemoteManifest("codex", []byte(wrongID)); err == nil || errors.Is(err, errNeedsNewerEngine) {
+		t.Fatalf("wrong id: err = %v, want an error that is not errNeedsNewerEngine", err)
 	}
 }
 

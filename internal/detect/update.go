@@ -82,6 +82,11 @@ type UpdateOutput struct {
 	Status  UpdateStatus
 }
 
+// errNeedsNewerEngine marks a remote manifest written for a newer detect engine
+// than this build has. It is wrapped rather than returned bare so the message
+// keeps both version numbers.
+var errNeedsNewerEngine = errors.New("needs a newer cats")
+
 // AutoUpdate runs one background update pass against the configured catalog
 // (env override, else the default), reloads the manifest store when anything
 // changed, and logs the outcome. Meant to be launched in a goroutine at daemon
@@ -152,7 +157,18 @@ func CheckAndUpdate(stateDir, url string) (UpdateOutput, error) {
 		}
 		switch {
 		case err != nil:
-			dlog.Warnf("detect: manifest update failed for %s: %v", entry.id, err)
+			// A catalog that has moved ahead of this build is the normal state
+			// between a manifest release and the next cats release, not a fault:
+			// the cached manifest keeps working, and the fix is updating cats,
+			// which a log line cannot do. It fired on every launch while it
+			// lasted, so it is informational; the status file still records it
+			// as failed with the reason, for whoever asks. Anything else (a fetch
+			// failure, a rejected downgrade, a malformed manifest) stays a WARN.
+			if errors.Is(err, errNeedsNewerEngine) {
+				log.Printf("detect: manifest update skipped for %s: %v — keeping the cached one until cats is updated", entry.id, err)
+			} else {
+				dlog.Warnf("detect: manifest update failed for %s: %v", entry.id, err)
+			}
 			status.Agents[entry.id] = AgentRemoteStatus{
 				CachedVersion:   cachedRemoteVersionString(stateDir, entry.id),
 				LastCheckedUnix: checkTime,
@@ -239,8 +255,8 @@ func parseRemoteManifest(id string, data []byte) (*rawManifest, error) {
 		return nil, errors.New("remote manifest must include min_engine_version")
 	}
 	if rm.MinEngineVersion > EngineVersion {
-		return nil, fmt.Errorf("manifest requires engine %d, current engine is %d",
-			rm.MinEngineVersion, EngineVersion)
+		return nil, fmt.Errorf("%w: manifest requires engine %d, current engine is %d",
+			errNeedsNewerEngine, rm.MinEngineVersion, EngineVersion)
 	}
 	if err := validateManifestLimits(&rm); err != nil {
 		return nil, err

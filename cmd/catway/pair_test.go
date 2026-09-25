@@ -276,3 +276,22 @@ func mustBearer(t *testing.T, header string) string {
 	}
 	return token
 }
+
+// Only a listener this machine alone can reach counts as loopback for the
+// auth-none log level (buildGuard); an all-interfaces bind does not.
+func TestIsLoopbackAddr(t *testing.T) {
+	for addr, want := range map[string]bool{
+		"127.0.0.1:8421":   true,
+		"localhost:8421":   true,
+		"[::1]:8421":       true,
+		":8421":            false,
+		"0.0.0.0:8421":     false,
+		"192.168.1.9:8421": false,
+		"devbox:8421":      false,
+		"garbage":          false,
+	} {
+		if got := isLoopbackAddr(addr); got != want {
+			t.Errorf("isLoopbackAddr(%q) = %v, want %v", addr, got, want)
+		}
+	}
+}

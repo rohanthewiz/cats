@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"os/exec"
@@ -21,7 +22,6 @@ import (
 	"time"
 
 	"github.com/rohanthewiz/cats/internal/browserproto"
-	"github.com/rohanthewiz/cats/internal/dlog"
 	"github.com/rohanthewiz/cats/internal/hostmeter"
 )
 
@@ -955,6 +955,13 @@ func formatTokens(n int64) string {
 // logUsageOnce reports a persistent account-read failure exactly once per
 // reason, so a machine with no claude login does not narrate it every two
 // minutes into the server log.
+//
+// Informational, not a WARN. The reasons are an expired claude login or an
+// unreachable endpoint — states of the account and the network, not faults in
+// cats — and the sidebar already shows them: the USAGE section drops to the
+// local estimate with the reason as its note (claudeUsageGroup). As a WARN it
+// was once per launch, every launch, in daemons.log, which keeps only the lines
+// that could explain a failure; this one never could.
 var usageLogged = map[string]bool{}
 
 func logUsageOnce(reason string) {
@@ -962,7 +969,7 @@ func logUsageOnce(reason string) {
 		return
 	}
 	usageLogged[reason] = true
-	dlog.Warnf("catway: account usage unavailable (%s) — showing local estimate", reason)
+	log.Printf("catway: account usage unavailable (%s) — showing local estimate", reason)
 }
 
 // sortedMinutes is test support: the bucket keys in order.

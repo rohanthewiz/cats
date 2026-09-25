@@ -100,15 +100,6 @@ window were dated by grepping every session doc.
   agent exit is still only inferred from timestamps. It needs a recurrence;
   stalls, drops, unexpected exits and restarts now land in `daemons.log`.
 
-- **N-006** · raised `2026-0914-0134-daemon-logs-bounded-cathost-and-next-list` · value medium
-  Demote the `daemons.log` WARN lines that fire routinely. Checked 2026-09-22
-  against 8 days of the installed app's log (32 WARNs). The candidates
-  guessed when this was raised (`session ended`, `dropping slow browser
-  connection`) barely appear. The ones that fire on every launch are
-  `catway: auth disabled (--auth none)` (7), expected under catapp's local
-  mode, and `detect: manifest update failed for codex: manifest requires
-  engine N` (7). `account usage unavailable` (10) is real but repetitive.
-
 - **N-007** · raised `2026-0914-0158-catway-restart-cats-todo-release` · value low
   A window opened or reloaded while catway is down stays blank after
   recovery. `catwayBack` only evaluates JS in existing pages
@@ -240,6 +231,18 @@ unchanged.
 Closures before this file existed live in the session docs' own write-ups.
 Newest first. The unnumbered entries at the end were found done while seeding,
 so they are not carried.
+
+- **N-006** · raised `2026-0914-0134-daemon-logs-bounded-cathost-and-next-list` ·
+  closed 2026-09-24, the WARN-demotion commit — Re-counted against the
+  installed app's `daemons.log` (35 lines): the three routine ones were 27 of
+  them, now all informational. `auth disabled (--auth none)` is `log.Printf` on
+  a loopback bind (catapp's local mode) and still a WARN on any other address
+  (`isLoopbackAddr`). `manifest requires engine N` wraps a new sentinel,
+  `errNeedsNewerEngine`, and logs as "skipped" rather than "failed"; other
+  manifest failures stay WARN, and `status.json` still records it as failed.
+  `account usage unavailable` is informational, because the sidebar's USAGE note
+  already shows the reason. Left as WARN: `daemon error (pane N): no such pane`
+  (3), and the one-off socket-close lines around a restart.
 
 - **N-026** · raised `2026-0922-1857-next-list-seed-and-adopted-exec-panes` ·
   closed 2026-09-24, the `db_client` commit — The manifest's
