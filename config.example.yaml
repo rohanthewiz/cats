@@ -239,6 +239,17 @@ editor:
                                        # "reveal it if the editor is open"
                                        # command instead.
 
+# --- Tools --------------------------------------------------------------------
+# The other tools that report over the hook API under their own name, typed by
+# that name — so dbc typed into a shell is a database client, exactly as it is
+# when `plugin run` launches it, and never shows up as an LLM agent a prompt can
+# be dropped on. Merged key-wise over these defaults; map a label to "" to opt
+# it out. Editors belong in editor.agents, not here.
+tools:
+  types:
+    dbc: db_client
+    gonotes: notes_mgr
+
 # --- Command ledger -----------------------------------------------------------
 # One durable record per command a shell ran in any pane, on any host: what ran,
 # where, how long it took, what it exited with, and whether a human or an agent

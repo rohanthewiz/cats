@@ -38,6 +38,7 @@ import (
 	"github.com/goccy/go-yaml"
 
 	"github.com/rohanthewiz/cats/internal/gwtls"
+	"github.com/rohanthewiz/cats/wire"
 )
 
 // EnvVar overrides the config file path (after an explicit --config flag, before
@@ -56,6 +57,7 @@ type Config struct {
 	Worktrees   Worktrees   `yaml:"worktrees" json:"worktrees"`
 	Push        Push        `yaml:"push" json:"push"`
 	Editor      Editor      `yaml:"editor" json:"editor"`
+	Tools       Tools       `yaml:"tools" json:"tools"`
 	Ledger      Ledger      `yaml:"ledger" json:"ledger"`
 	Runbooks    Runbooks    `yaml:"runbooks" json:"runbooks"`
 	// UI holds the front-end preferences that used to live only in each
@@ -667,6 +669,81 @@ type Editor struct {
 	Spawn bool `yaml:"spawn" json:"spawn"`
 }
 
+// Tools types the non-editor tools that report over the hook API, by the agent
+// label they report — so a tool is the same kind of pane whether a plugin
+// launched it or someone typed its name into a shell.
+//
+// Why it is needed: a pane's plugin type normally comes from the manifest of
+// the plugin that launched it (`plugin run` records it on the pane). A dbc or
+// gonotes started from a shell has no manifest behind it, so it arrived with
+// only its hook label and no type, and PaneMeta.IsDropAgent read "agent
+// detected, no type" as an LLM agent — which put the database client in the
+// drop picker as somewhere to send a prompt. editor.agents already solves this
+// for editors; this is the same idea for every other type.
+//
+//	pane reports agent "dbc" ──▶ editor.agents?  ──yes──▶ editor
+//	                                   │ no
+//	                                   ▼
+//	                             tools.types["dbc"] ──set──▶ db_client
+//	                                   │ unset / ""
+//	                                   ▼
+//	                             the launching manifest's type (or none)
+//
+// Editors are deliberately not expressible here (Validate refuses "editor"):
+// being an editor also makes a pane a pane.open_file target, which is
+// editor.agents' job, and two lists that could each half-declare an editor
+// would disagree about which panes open files.
+type Tools struct {
+	// Types maps an agent label (matched case-insensitively, like
+	// editor.agents) to a plugin type (wire.PluginType*). Merged key-wise over
+	// the defaults, so a config naming one tool keeps the others; mapping a
+	// label to "" opts it out of its default.
+	Types map[string]string `yaml:"types,omitempty" json:"types,omitempty"`
+}
+
+// TypeFor is the configured plugin type for an agent label, "" when the label
+// is not listed (or is listed as ""). Case-insensitive, and a linear scan
+// because the map is a handful of entries and lowercasing the keys at load
+// would change what a saved config writes back.
+func (t Tools) TypeFor(agent string) string {
+	if agent == "" {
+		return ""
+	}
+	for label, typ := range t.Types {
+		if strings.EqualFold(label, agent) {
+			return typ
+		}
+	}
+	return ""
+}
+
+// validate checks each mapping: a non-empty label, and a type that is "" or a
+// well-formed word other than "editor" (see the Tools doc). Unknown words pass,
+// for the same forward-compatibility reason wire.ValidPluginType gives: a
+// config naming a type a newer tool introduced should not fail to load.
+func (t Tools) validate() error {
+	for label, typ := range t.Types {
+		if strings.TrimSpace(label) == "" {
+			return errors.New("tools.types: empty agent label")
+		}
+		if typ == wire.PluginTypeEditor {
+			return fmt.Errorf("tools.types.%s: %q — list editors in editor.agents instead", label, typ)
+		}
+		if !wire.ValidPluginType(typ) {
+			return fmt.Errorf("tools.types.%s: %q is not a plugin type (a lowercase word, e.g. %s)",
+				label, typ, strings.Join(wire.KnownPluginTypes, ", "))
+		}
+	}
+	return nil
+}
+
+// defaultToolTypes are the house tools that report over the hook API under
+// their own names. ced is absent on purpose: it is an editor (editor.agents).
+var defaultToolTypes = map[string]string{
+	"dbc":     wire.PluginTypeDBClient,
+	"gonotes": wire.PluginTypeNotesMgr,
+}
+
 // TTL parses SessionTTL into a duration.
 func (s Server) TTL() (time.Duration, error) {
 	d, err := time.ParseDuration(s.SessionTTL)
@@ -827,6 +904,7 @@ func Default() Config {
 		// was built for, and the list is the extension point for anything else
 		// that reports itself over the hook API.
 		Editor:   Editor{Agents: []string{"ced"}, Command: []string{"ced"}, Spawn: true},
+		Tools:    Tools{Types: cloneStrMap(defaultToolTypes)},
 		Ledger:   Ledger{Enabled: true},
 		Runbooks: Runbooks{Triggers: true},
 		// Off by default, but with the shape filled in: a saved config then shows
@@ -900,8 +978,8 @@ func parse(data []byte, asYAML bool) (Config, error) {
 	if len(bytes.TrimSpace(data)) == 0 {
 		return cfg, nil // empty document ⇒ pure defaults (goccy would zero the struct)
 	}
-	defColors, defKeys := cfg.Theme.Colors, cfg.Keybindings.CopyMode
-	cfg.Theme.Colors, cfg.Keybindings.CopyMode = nil, nil
+	defColors, defKeys, defTools := cfg.Theme.Colors, cfg.Keybindings.CopyMode, cfg.Tools.Types
+	cfg.Theme.Colors, cfg.Keybindings.CopyMode, cfg.Tools.Types = nil, nil, nil
 	var err error
 	if asYAML {
 		err = yaml.Unmarshal(data, &cfg)
@@ -913,6 +991,7 @@ func parse(data []byte, asYAML bool) (Config, error) {
 	}
 	cfg.Theme.Colors = mergeStrMap(defColors, cfg.Theme.Colors)
 	cfg.Keybindings.CopyMode = mergeKeyMap(defKeys, cfg.Keybindings.CopyMode)
+	cfg.Tools.Types = mergeStrMap(defTools, cfg.Tools.Types)
 	if err := cfg.Validate(); err != nil {
 		return Default(), err
 	}
@@ -997,6 +1076,9 @@ func (c Config) Validate() error {
 	}
 	if err := c.Push.Validate(); err != nil {
 		return fmt.Errorf("push.%w", err)
+	}
+	if err := c.Tools.validate(); err != nil {
+		return err
 	}
 	if err := c.UI.validate(); err != nil {
 		return err

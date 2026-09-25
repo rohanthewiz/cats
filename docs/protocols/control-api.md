@@ -623,7 +623,9 @@ the [plugin type](../subsystems/plugins.md#plugin-types) and is the field to
 read when deciding whether a pane is an agent that can take a prompt. An editor
 reports `agent: "ced"`, because that label is how `pane.open_file` finds it,
 together with `plugin_type: "editor"`. catway sets `editor` for every label in
-`editor.agents`, so a client never needs its own copy of that list. The rule,
+`editor.agents`, and the mapped type for every label in `tools.types` (a
+shell-started dbc reports `plugin_type: "db_client"`), so a client never needs
+its own copy of either list. The rule,
 which Go clients can call as `wire.PaneMeta.IsDropAgent`, is: `agent` is set,
 and `plugin_type` is either empty or `agent`.
 `flag.list` gets the same merge for the panes it returns — see

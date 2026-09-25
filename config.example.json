@@ -95,6 +95,12 @@
     ],
     "spawn": true
   },
+  "tools": {
+    "types": {
+      "dbc": "db_client",
+      "gonotes": "notes_mgr"
+    }
+  },
   "ledger": {
     "enabled": true
   },

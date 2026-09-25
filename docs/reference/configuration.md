@@ -564,6 +564,36 @@ An agent label is the editor's own name for itself — what it reports over the
 [hook API](../protocols/hook-api.md) — not a cats-side registry, which is why
 adding another editor is one word here and no code anywhere.
 
+## `tools`
+
+The other tools that report over the [hook API](../protocols/hook-api.md) under
+their own name, typed by that name:
+
+```yaml
+tools:
+  types:
+    dbc: db_client      # the defaults
+    gonotes: notes_mgr
+```
+
+A pane's plugin type normally comes from the manifest of the plugin that
+launched it. A tool typed into a shell has no manifest, so without this it has
+only its agent label, and a pane with an agent label and no type reads as an LLM
+agent. Drop pickers (cats-todo's, for one) would then offer a database client
+as somewhere to send a prompt. With the map, the pane is the same kind of thing
+however it was started.
+
+| Key | Default | Notes |
+|-----|---------|-------|
+| `types` | `dbc: db_client`, `gonotes: notes_mgr` | agent label → plugin type. Labels match case-insensitively. Merged key-wise over the defaults; `""` opts a default out |
+
+The order a pane is typed in: `editor.agents` first (an editor), then
+`tools.types`, then the launching manifest's own type. The map beats the
+manifest, as `editor.agents` does, because it is your statement about the tool.
+`editor` is refused as a value: an editor is also where `pane.open_file` sends
+files, which is `editor.agents`' job. Any other well-formed word is accepted,
+including one this build does not know. Live-reloadable with `catctl reload`.
+
 > **Warning — the topic URL is a capability**
 >
 > Anyone who learns your ntfy topic path can read your notifications, so treat

@@ -188,15 +188,6 @@ window were dated by grepping every session doc.
   grid (`internal/catsclient/grid.go`) would apply `PaneDiff.Shift` as the
   browser does: scroll the cells up, blank the vacated rows, then the cells.
 
-- **N-035** · raised 2026-09-24, the `db_client` commit (no session doc) · value low
-  dbc and gonotes typed into a shell (not launched by `plugin run`) report
-  over the hook API as agents `dbc` / `gonotes` with no plugin type, so
-  `PaneMeta.IsDropAgent` treats them as LLM agents and the drop picker can
-  offer them as a prompt target. Launched as plugins they carry `db_client` /
-  `notes_mgr` and are excluded. A config list like `editor.agents` (a
-  `tools.agents`, or a type map by agent label) would type them however they
-  were started, as it already does for ced.
-
 ## Roadmap
 
 Wanted, but not next. Items move here from Open (or straight here when raised
@@ -231,6 +222,16 @@ unchanged.
 Closures before this file existed live in the session docs' own write-ups.
 Newest first. The unnumbered entries at the end were found done while seeding,
 so they are not carried.
+
+- **N-035** · raised 2026-09-24, the `db_client` commit (no session doc) ·
+  closed 2026-09-24, the `tools.types` commit — A new config map,
+  `tools.types`, types a tool by the agent label it reports, however it was
+  started. It defaults to `dbc` → `db_client` and `gonotes` → `notes_mgr`,
+  merges key-wise, and `""` opts a label out. catway's `resolvePluginType`
+  (shared by the rollup and `pane.list`) checks `editor.agents`, then the map,
+  then the manifest, so a shell-typed dbc reports `plugin_type: "db_client"`
+  and `IsDropAgent` is false. `wire` is unchanged; `editor` is refused as a map
+  value (that stays `editor.agents`).
 
 - **N-006** · raised `2026-0914-0134-daemon-logs-bounded-cathost-and-next-list` ·
   closed 2026-09-24, the WARN-demotion commit — Re-counted against the

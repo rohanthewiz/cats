@@ -151,6 +151,14 @@ started, including a ced typed into a shell, which has no manifest. The
 reverse also works: a plugin that declares `editor` stays out of AGENTS even
 if its label was never added to the list.
 
+`tools.types` does the same for every other type. It maps an agent label to a
+type (`dbc` → `db_client` and `gonotes` → `notes_mgr` by default), so a tool
+typed into a shell carries the type its manifest would have given it. That is
+what keeps a shell-started dbc out of a drop picker: without a type,
+`PaneMeta.IsDropAgent` reads any pane with an agent label as an LLM agent. The
+map also beats the manifest, but it cannot make a pane an editor; that stays
+`editor.agents`' job.
+
 The type travels as `CATS_PLUGIN_TYPE` in the launch environment. catway saves
 it on the pane next to `CATS_PLUGIN_ID`, and reports it in two places: on each
 plugin row of the agents rollup, and as `plugin_type` in `pane.list` (see the

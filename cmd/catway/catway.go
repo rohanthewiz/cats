@@ -1604,7 +1604,7 @@ func (o *orch) agentsMsg() browserproto.Agents {
 				}
 				agent, state := rt.effectiveAgent()
 				plug, declared := panePlugin(tab, id)
-				typ, editor := ed.ResolvePluginType(agent, declared)
+				typ, editor := o.resolvePluginType(ed, agent, declared)
 				if agent == "" || editor {
 					if plug == "" && editor {
 						plug = agent
@@ -2363,7 +2363,7 @@ func (o *orch) PaneMeta(pane uint32) app.PaneMeta {
 	// agent it can hand a prompt to (PaneMeta.IsDropAgent).
 	var declared string
 	meta.Plugin, declared = o.session.PanePlugin(layout.PaneID(pane))
-	meta.PluginType, _ = o.EditorConfig().ResolvePluginType(agent, declared)
+	meta.PluginType, _ = o.resolvePluginType(o.EditorConfig(), agent, declared)
 	return meta
 }
 

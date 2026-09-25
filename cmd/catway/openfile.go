@@ -39,6 +39,32 @@ func (o *orch) EditorConfig() app.EditorInfo {
 	return app.EditorInfo{Agents: e.Agents, Command: e.Command, Spawn: e.Spawn}
 }
 
+// resolvePluginType settles what kind of tool a pane runs, for the two places
+// that report it (the sidebar's rollup, agentsMsg, and pane.list's PaneMeta),
+// so they cannot disagree. It layers tools.types over the editor policy:
+//
+//  1. editor.agents, or a manifest that declared "editor" → editor (unchanged:
+//     wire.EditorInfo.ResolvePluginType, which the dispatcher shares).
+//  2. tools.types names the agent label → that type, whatever launched it.
+//  3. otherwise the launching manifest's declared type, "" for none.
+//
+// Step 2 beats the manifest for the same reason editor.agents does: the config
+// is the user's statement about the tool, and it is the only source a tool
+// typed into a shell has at all. It never makes a pane an editor
+// (config.Tools.validate refuses that), so editor is decided by step 1 alone.
+//
+// It lives here rather than in wire because the tool map is catway's config;
+// the wire type stays the editor-only policy the dispatcher needs.
+func (o *orch) resolvePluginType(ed app.EditorInfo, agent, declared string) (typ string, editor bool) {
+	if typ, editor = ed.ResolvePluginType(agent, declared); editor {
+		return typ, true
+	}
+	if t := o.cfg.Tools.TypeFor(agent); t != "" {
+		return t, false
+	}
+	return typ, false
+}
+
 // OpenFileIn implements app.Backend: hand the request to the editor in pane.
 //
 // The event is pane-addressed, so an editor subscribed to its own pane sees

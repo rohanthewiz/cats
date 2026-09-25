@@ -116,6 +116,9 @@ func TestValidateRejects(t *testing.T) {
 
 		"panes bad reap":      "panes:\n  reap_exited: \"afternoonish\"\n",
 		"panes negative reap": "panes:\n  reap_exited: \"-4h\"\n",
+		"tools editor type":   "tools:\n  types:\n    vim: editor\n",
+		"tools bad type":      "tools:\n  types:\n    dbc: \"DB Client\"\n",
+		"tools empty label":   "tools:\n  types:\n    \"\": git\n",
 		"panes bad refresh":   "panes:\n  agent_refresh: \"often\"\n",
 		"panes tiny refresh":  "panes:\n  agent_refresh: \"1ms\"\n",
 	}
@@ -353,6 +356,30 @@ func TestParseAgentRefresh(t *testing.T) {
 		if d, err := (Panes{AgentRefresh: off}).AgentRefreshEvery(); err != nil || d != 0 {
 			t.Fatalf("agent_refresh %q = %v (%v), want 0 (off)", off, d, err)
 		}
+	}
+}
+
+// tools.types merges key-wise over the defaults, like the other maps: naming one
+// tool keeps the rest, "" opts a default out, and the lookup ignores case.
+func TestParseToolTypes(t *testing.T) {
+	got, err := parse([]byte("tools:\n  types:\n    roman: http_client\n    gonotes: \"\"\n"), true)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	for agent, want := range map[string]string{
+		"roman":   "http_client", // added
+		"DBC":     "db_client",   // default kept, case ignored
+		"gonotes": "",            // opted out
+		"claude":  "",            // never listed
+		"":        "",
+	} {
+		if got := got.Tools.TypeFor(agent); got != want {
+			t.Errorf("TypeFor(%q) = %q, want %q", agent, got, want)
+		}
+	}
+	// A type newer than this build is accepted, as a manifest's would be.
+	if _, err := parse([]byte("tools:\n  types:\n    x: future_kind\n"), true); err != nil {
+		t.Fatalf("unknown but well-formed type refused: %v", err)
 	}
 }
 

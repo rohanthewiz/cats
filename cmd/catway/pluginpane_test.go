@@ -184,6 +184,62 @@ func TestAgentsRollupListsEditorsAsTools(t *testing.T) {
 	}
 }
 
+// A tool that reports over the hook API under its own name is typed by
+// tools.types however it was started (N-035): dbc typed into a shell is a
+// db_client, not an LLM agent, so a drop picker reading pane.list skips it —
+// exactly as it already skipped a dbc that `plugin run` launched. The map beats
+// a launching manifest's type, never reaches claude, and an opt-out ("") falls
+// back to the old reading.
+func TestToolTypesTypeShellLaunchedTools(t *testing.T) {
+	o, err := newOrch(filepath.Join(t.TempDir(), "s.sock"), t.TempDir())
+	if err != nil {
+		t.Fatalf("newOrch: %v", err)
+	}
+	o.cfg = config.Default() // tools.types: dbc → db_client, gonotes → notes_mgr
+	dbc := layout.PaneID(o.session.AllPaneIDs()[0])
+	notes, err := o.session.SplitPane(nil, layout.Horizontal)
+	if err != nil {
+		t.Fatalf("SplitPane: %v", err)
+	}
+	agentPane, err := o.session.SplitPane(nil, layout.Vertical)
+	if err != nil {
+		t.Fatalf("SplitPane: %v", err)
+	}
+	o.syncDaemon()
+
+	// Shell-typed: no SetPanePlugin, so nothing but the hook label to go on.
+	// The label's case is the tool's own business; the match ignores it.
+	o.panes[uint32(dbc)].hook = &hookAuthority{source: "dbc", agent: "dbc", state: "idle", reportedAt: time.Now()}
+	o.panes[uint32(notes)].hook = &hookAuthority{source: "gonotes", agent: "GoNotes", state: "idle", reportedAt: time.Now()}
+	o.onPaneAgent(orchestration.PaneAgent{PaneID: uint32(agentPane), Agent: "claude", State: "working"})
+
+	if meta := o.PaneMeta(uint32(dbc)); meta.PluginType != "db_client" || meta.IsDropAgent() {
+		t.Fatalf("a shell-typed dbc should be a db_client, not a drop target: %+v", meta)
+	}
+	if meta := o.PaneMeta(uint32(notes)); meta.PluginType != "notes_mgr" || meta.IsDropAgent() {
+		t.Fatalf("a shell-typed gonotes should be a notes_mgr, not a drop target: %+v", meta)
+	}
+	if meta := o.PaneMeta(uint32(agentPane)); meta.PluginType != "" || !meta.IsDropAgent() {
+		t.Fatalf("a coding agent should stay a drop target: %+v", meta)
+	}
+
+	// The config beats whatever the launching manifest declared.
+	o.session.SetPanePlugin(dbc, "rohanthewiz.dbc", "git")
+	if meta := o.PaneMeta(uint32(dbc)); meta.PluginType != "db_client" {
+		t.Fatalf("tools.types should beat the manifest's type: %+v", meta)
+	}
+
+	// Opting a label out restores the manifest's word, or none at all.
+	o.cfg.Tools.Types["dbc"] = ""
+	if meta := o.PaneMeta(uint32(dbc)); meta.PluginType != "git" {
+		t.Fatalf("an opted-out label should fall back to the manifest: %+v", meta)
+	}
+	o.session.SetPanePlugin(dbc, "", "")
+	if meta := o.PaneMeta(uint32(dbc)); meta.PluginType != "" || !meta.IsDropAgent() {
+		t.Fatalf("an opted-out, shell-typed label reads as an agent again: %+v", meta)
+	}
+}
+
 // createPane is the one place that knows what a pane's child actually is, so it
 // is where the pane's plugin identity is written — and, just as importantly,
 // cleared. A plugin pane whose host restarted comes back through here as a plain
