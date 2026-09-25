@@ -32,7 +32,7 @@ window were dated by grepping every session doc.
 - Open and Roadmap stay in ID order. New items append to the end of Open (or
   Roadmap, for future work) with the next ID.
 
-**Next ID:** N-036
+**Next ID:** N-039
 
 ## Open
 
@@ -188,6 +188,23 @@ window were dated by grepping every session doc.
   grid (`internal/catsclient/grid.go`) would apply `PaneDiff.Shift` as the
   browser does: scroll the cells up, blank the vacated rows, then the cells.
 
+- **N-036** · raised `2026-0924-1953-context-usage-warn-demotion-tool-types` · value low
+  `catway: daemon error (pane N): no such pane` is still a WARN (3 in 8 days of
+  the installed app's `daemons.log`). It may be a real race between a pane
+  closing and a command addressed to it, so find where it comes from before
+  demoting it (N-006 left it alone for that reason).
+
+- **N-037** · raised `2026-0924-1953-context-usage-warn-demotion-tool-types` · value low
+  The context used/window segment on agent rows (`43k/1M`) is claude-only.
+  Copilot's `events.jsonl` would need its own reader, if it records usage at
+  all (`lastCopilotModel`, `cmd/catway/agentmodel.go`).
+
+- **N-038** · raised `2026-0924-1953-context-usage-warn-demotion-tool-types` · value low
+  `tools.types` has no field on the settings screen, because the screen has no
+  key→value widget (`33-settings.js` OPTION_TABS). It is file-only plus
+  `catctl reload`. Adding it would mean adding `tools` to `optionSections` and
+  a map widget.
+
 ## Roadmap
 
 Wanted, but not next. Items move here from Open (or straight here when raised
@@ -224,7 +241,7 @@ Newest first. The unnumbered entries at the end were found done while seeding,
 so they are not carried.
 
 - **N-035** · raised 2026-09-24, the `db_client` commit (no session doc) ·
-  closed 2026-09-24, the `tools.types` commit — A new config map,
+  closed 2026-09-24, `2026-0924-1953-context-usage-warn-demotion-tool-types` — A new config map,
   `tools.types`, types a tool by the agent label it reports, however it was
   started. It defaults to `dbc` → `db_client` and `gonotes` → `notes_mgr`,
   merges key-wise, and `""` opts a label out. catway's `resolvePluginType`
@@ -234,7 +251,7 @@ so they are not carried.
   value (that stays `editor.agents`).
 
 - **N-006** · raised `2026-0914-0134-daemon-logs-bounded-cathost-and-next-list` ·
-  closed 2026-09-24, the WARN-demotion commit — Re-counted against the
+  closed 2026-09-24, `2026-0924-1953-context-usage-warn-demotion-tool-types` — Re-counted against the
   installed app's `daemons.log` (35 lines): the three routine ones were 27 of
   them, now all informational. `auth disabled (--auth none)` is `log.Printf` on
   a loopback bind (catapp's local mode) and still a WARN on any other address
