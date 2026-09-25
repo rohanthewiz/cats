@@ -237,7 +237,7 @@ Newest first. The unnumbered entries at the end were found done while seeding,
 so they are not carried.
 
 - **N-021** · raised `2026-0922-1713-plugin-types-and-releases` ·
-  closed 2026-09-24, cats-todo `52539fe` + gonotes `08eb409` (no session doc) —
+  closed 2026-09-24, `2026-0924-2029-notes-send-to-gonotes` (cats-todo `52539fe`, gonotes `08eb409`) —
   cats-todo sends an info prompt to the pane typed `notes_mgr` in `pane.list`
   (`pickNotesPane`, own workspace first), never by plugin id. The intake
   contract is a pasted `<!-- cats-note v1 -->` envelope through
