@@ -164,8 +164,10 @@ Next list only: N-021 is closed. No code change was needed.
 - While this doc was being written, another session was cutting cats-todo
   **v0.37.0**: the version bumps in `cats-plugin.toml` / `main.go`, and "Not
   yet released" → "Shipped in v0.37.0" on closed items, N-030 included. Those
-  changes were left for that session to commit. Only this doc and this
-  session's two next-list lines were committed there.
+  changes were left for that session to commit. Its `3398bb4 chore(release):
+  v0.37.0` also picked up this session's two next-list stem lines (N-030
+  closed, N-045 raised), so the cats-todo wrap commit is just this doc. The
+  notes send ships in v0.37.0.
 
 ## Next
 
