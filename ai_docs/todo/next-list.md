@@ -32,7 +32,7 @@ window were dated by grepping every session doc.
 - Open and Roadmap stay in ID order. New items append to the end of Open (or
   Roadmap, for future work) with the next ID.
 
-**Next ID:** N-040
+**Next ID:** N-041
 
 ## Open
 
@@ -124,10 +124,6 @@ window were dated by grepping every session doc.
   formula step was removed from ced's release on 2026-09-14. Whether those
   install paths stay is the user's call.
 
-- **N-011** · raised `2026-0916-1547-peer-sync` · value low
-  `catctl attach-peer` takes only a token *file*. A `pair`-style grant for
-  peers (short-lived, revocable) would avoid copying passwords.
-
 - **N-012** · raised `2026-0916-1547-peer-sync` · value low
   Cross-OS home translation in peer sync is unit-tested only; the first
   Mac ↔ Linux sync is the real test of it.
@@ -201,6 +197,12 @@ window were dated by grepping every session doc.
   holds the last screen, which is often what you want from a dead pane (the
   crash message), so serve at least `scope: screen` from it.
 
+- **N-040** · raised `2026-0925-n011-peer-pairing` · value low
+  `detach-peer` deletes the paired token file but cannot revoke the grant on
+  the other catway, which stays live until someone runs `revoke-peer-grant`
+  there (catway logs a reminder). A self-revoke route (`POST /peer/v1/unpair`,
+  authenticated by the grant itself) would make detach clean up both ends.
+
 ## Roadmap
 
 Wanted, but not next. Items move here from Open (or straight here when raised
@@ -235,6 +237,16 @@ unchanged.
 Closures before this file existed live in the session docs' own write-ups.
 Newest first. The unnumbered entries at the end were found done while seeding,
 so they are not carried.
+
+- **N-011** · raised `2026-0916-1547-peer-sync` ·
+  closed 2026-09-25 (cats `6d01456`) — `catctl pair peer [label]` mints a
+  5-minute, single-use peer-kind pairing token shown as a `cats://peer` link.
+  `catctl attach-peer <id> '<link>'` (or the peers dialog's url field) makes
+  the other catway redeem it at the public `POST /peer/v1/pair` for a durable
+  `catspeer_…` grant, stored in `<state_dir>/peer-tokens/<id>.token`. The
+  grantor keeps only hashes (`internal/peergrant`, btypedb), accepts the grant
+  on `/peer/v1/*` only, and manages it with `peer-grants` and
+  `revoke-peer-grant`. Re-attaching an id re-pairs it.
 
 - **N-021** · raised `2026-0922-1713-plugin-types-and-releases` ·
   closed 2026-09-24, `2026-0924-2029-notes-send-to-gonotes` (cats-todo `52539fe`, gonotes `08eb409`) —
