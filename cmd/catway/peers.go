@@ -43,13 +43,20 @@ import (
 //
 // The inbound routes sit behind the ordinary auth guard: the caller presents
 // this catway's shared secret as a bearer token, exactly as a headless catctl
-// would. There is no separate peer permission, deliberately — the argument
-// config.Host.ControlRelay makes applies unchanged. A caller holding the
-// secret already has /ws, and with it tab.create and pane.send_input on every
-// pane; a plugin install through /peer/v1/apply grants nothing that could not
-// be typed into a shell through that door. A second credential would only be
-// a second thing to leak. Under `auth: none` the routes are as open as the
-// rest of the server, which is the operator's stated choice.
+// would. There is no separate peer permission for a secret-holder,
+// deliberately — the argument config.Host.ControlRelay makes applies
+// unchanged. A caller holding the secret already has /ws, and with it
+// tab.create and pane.send_input on every pane; a plugin install through
+// /peer/v1/apply grants nothing that could not be typed into a shell through
+// that door. Under `auth: none` the routes are as open as the rest of the
+// server, which is the operator's stated choice.
+//
+// The other accepted credential is a peer grant (peergrants.go): obtained by
+// pairing rather than by copying the password, durable, revocable one by one,
+// and accepted on /peer/v1/* only. That is not a second copy of the secret —
+// it is strictly less than the secret, which is the point of it. (The plugin
+// install above still means a grant-holder can run code here; the grant
+// narrows the door, it does not make sync harmless.)
 
 // peerLocal is peersync.Local over the running orchestrator. Its workspace
 // methods hop onto the loop goroutine (onLoop) because the session model is
@@ -277,7 +284,14 @@ func toWireReport(rep peersync.SyncReport) app.PeerSyncResult {
 // way HostAttach does for hosts:. The URL is validated with the same rule
 // the config loader applies, so a string this refuses is one the file would
 // have refused at the next start.
+//
+// A pair_token takes the other road (peergrants.go): the credential is not
+// supplied but obtained from the peer, which needs a network round trip.
 func (o *orch) PeerAttach(r app.Responder, p app.PeerAttachParams) {
+	if p.PairToken != "" {
+		o.attachPeerByPairing(r, p)
+		return
+	}
 	if _, ok := o.findPeer(p.ID); ok {
 		r.Fail("peer " + p.ID + " is already configured")
 		return
@@ -294,8 +308,12 @@ func (o *orch) PeerAttach(r app.Responder, p app.PeerAttachParams) {
 }
 
 // PeerDetach removes a peers: entry (peer.detach). Nothing synced is undone.
+// A token file this catway wrote when pairing is deleted with the entry; the
+// grant it held stays live on the peer until revoked there — this side has no
+// way to reach over and do it — so the log line says so.
 func (o *orch) PeerDetach(r app.Responder, p app.PeerDetachParams) {
-	if _, ok := o.findPeer(p.ID); !ok {
+	peer, ok := o.findPeer(p.ID)
+	if !ok {
 		r.Fail(fmt.Sprintf("no peer %q (peers: %s)", p.ID, o.peerIDs()))
 		return
 	}
@@ -305,7 +323,11 @@ func (o *orch) PeerDetach(r app.Responder, p app.PeerDetachParams) {
 		r.Fail(msg)
 		return
 	}
-	log.Printf("catway: peer.detach %s", p.ID)
+	if o.removeManagedTokenFile(peer) {
+		log.Printf("catway: peer.detach %s — its grant on the peer stays live until revoked there (catctl revoke-peer-grant)", p.ID)
+	} else {
+		log.Printf("catway: peer.detach %s", p.ID)
+	}
 	r.OK(app.PeerListResult{Peers: o.peerInfos()})
 }
 
@@ -313,8 +335,10 @@ func (o *orch) PeerDetach(r app.Responder, p app.PeerDetachParams) {
 
 // registerPeerRoutes mounts the /peer/v1 surface. Registered unconditionally:
 // the auth guard (when there is one) already covers these paths, since only
-// the login page, the favicon and the notification callback are public.
+// the login page, the favicon, the notification callback and PathPair are
+// public — and PathPair is authenticated by the pairing token in its body.
 func (o *orch) registerPeerRoutes(s *rweb.Server) {
+	s.Post(peersync.PathPair, o.handlePeerPair) // public: the pairing token is the credential
 	s.Get(peersync.PathHello, o.handlePeerHello)
 	s.Get(peersync.PathBundle, o.handlePeerBundle)
 	s.Post(peersync.PathApply, o.handlePeerApply)

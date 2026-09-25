@@ -37,13 +37,20 @@ const controlTimeout = reqTimeout + 3*time.Second
 // path posts the same app.Dispatcher the same way — which is the whole point of
 // the seam.
 func (o *orch) controlDispatch(method string, params json.RawMessage, r app.Responder) {
-	// Two methods are answered here and never reach the dispatcher, because the
-	// §7 table is shared with the browser and these must stay behind the
-	// owner-only socket: minting credentials (pair.go) and reading the user's
-	// system clipboard (clipboard.go). Each file carries the full argument.
+	// These methods are answered here and never reach the dispatcher, because
+	// the §7 table is shared with the browser and these must stay behind the
+	// owner-only socket: minting credentials (pair.go), administering the peer
+	// grants those become (peergrants.go), and reading the user's system
+	// clipboard (clipboard.go). Each file carries the full argument.
 	switch method {
 	case ctlproto.MethodPair:
-		o.handlePair(r)
+		o.handlePair(params, r)
+		return
+	case ctlproto.MethodPeerGrants:
+		o.handlePeerGrants(r)
+		return
+	case ctlproto.MethodPeerRevoke:
+		o.handlePeerRevoke(params, r)
 		return
 	case ctlproto.MethodClipboardRead:
 		o.handleClipboardRead(r)

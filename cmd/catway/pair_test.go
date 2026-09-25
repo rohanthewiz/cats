@@ -43,7 +43,7 @@ func TestPairGrantRedeemsOnceAtLogin(t *testing.T) {
 	o, guard := newPairOrch(t, secret)
 
 	r := &pairResponder{}
-	o.handlePair(r)
+	o.handlePair(nil, r)
 	if !r.done || r.err != "" {
 		t.Fatalf("handlePair failed: %q", r.err)
 	}
@@ -96,7 +96,7 @@ func TestPasswordLoginDoesNotConsumeAGrant(t *testing.T) {
 	o, guard := newPairOrch(t, secret)
 
 	r := &pairResponder{}
-	o.handlePair(r)
+	o.handlePair(nil, r)
 	info := r.data.(ctlproto.PairInfo)
 
 	now := time.Now()
@@ -128,7 +128,7 @@ func TestLoginRejectsNonCredentials(t *testing.T) {
 func TestLoginRejectsExpiredGrant(t *testing.T) {
 	o, guard := newPairOrch(t, "pw")
 	r := &pairResponder{}
-	o.handlePair(r)
+	o.handlePair(nil, r)
 	info := r.data.(ctlproto.PairInfo)
 
 	late := time.Now().Add(gwauth.PairTTL + time.Second)
@@ -182,7 +182,7 @@ func TestControlDispatchAnswersPairWithoutTheDispatcher(t *testing.T) {
 func TestPairUnavailable(t *testing.T) {
 	o := &orch{}
 	r := &pairResponder{}
-	o.handlePair(r)
+	o.handlePair(nil, r)
 	if !r.done || r.err == "" {
 		t.Fatalf("handlePair on an unwired orch: err=%q", r.err)
 	}

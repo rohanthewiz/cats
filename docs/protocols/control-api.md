@@ -44,9 +44,9 @@ rather than pointing panes at a socket nobody serves.
 structs the browser's params decode into, so the wire shape cannot drift between
 the two front ends.
 
-`method` is an `app.Cmd*` name, or one of the four **transport-level** methods
-below — `ping`, `pair`, `clipboard.read` and `events.subscribe`
-(`ctlproto.TransportMethods()`). Those four are answered before
+`method` is an `app.Cmd*` name, or one of the six **transport-level** methods
+below — `ping`, `pair`, `peer.grants`, `peer.revoke`, `clipboard.read` and
+`events.subscribe` (`ctlproto.TransportMethods()`). Those six are answered before
 `app.Dispatcher` ever sees the name, so they are deliberately absent from
 `app.CommandNames()`; a §7 command taking one of their names would be silently
 unreachable from this socket, which `TestTransportMethodsDoNotShadowCommands`
@@ -126,6 +126,32 @@ individually revocable — the revocation granularity is the session TTL and the
 process. Set `--session-ttl` to choose how often a phone re-pairs.
 
 Under `--auth none` there is nothing to pair with and the method fails saying so.
+
+**Peer grants.** `pair` takes optional params, `ctlproto.PairParams`
+(`{"peer":true,"label":"laptop"}`). With `peer` set, the token is of the peer
+kind: it redeems only at `POST /peer/v1/pair`, by another catway, for a durable
+peer-sync grant rather than a session — see
+[peer sync](../subsystems/peer-sync.md#pairing). The `PairInfo` then carries
+`"kind":"peer"`. It fails up front when the grant table could not be opened
+(no state directory), rather than at redemption on the other machine.
+
+### `peer.grants` / `peer.revoke`
+
+`peer.grants` lists the peer grants this catway has issued
+(`ctlproto.PeerGrantList`: `{grants:[{id, label, peer, created, last_used}]}`,
+Unix seconds, oldest first). `label` is what the operator gave `pair peer`;
+`peer` is what the redeeming catway called itself. Neither the credential nor
+its hash is ever returned. `peer.revoke` (`{"id":"258e3a60"}`) deletes one and
+answers with it; the next request carrying that credential is refused.
+
+```bash
+catctl peer-grants
+catctl revoke-peer-grant 258e3a60
+```
+
+They are transport methods for the reason `pair` is: they administer
+credentials, and a browser session that could revoke grants could cut the
+owner's other machines off.
 
 ### `clipboard.read`
 

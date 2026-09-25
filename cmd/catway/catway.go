@@ -436,6 +436,11 @@ type orch struct {
 	// control socket is already accepting — hence the atomic, like page above.
 	// nil means pairing is unavailable (auth disabled, or startup incomplete).
 	pairing atomic.Pointer[pairing]
+	// stateDir is the resolved state directory ("" when none resolves). Peer
+	// pairing keeps its files there (peergrants.go): the grantor's hashed
+	// grant table and the redeemer's peer token files. Wired by main before
+	// the loop starts; read-only after.
+	stateDir string
 	// cfg is the loaded config-file state (defaults + file, not flag overrides —
 	// config.set marshals it back to disk, so flag values must never leak in).
 	// worktreeDir is the configured worktrees root new checkouts land under, as

@@ -169,7 +169,7 @@ func TestCallDialError(t *testing.T) {
 // answers itself AND the dispatcher routes would make the §7 command silently
 // unreachable from the control socket.
 func TestTransportMethods(t *testing.T) {
-	want := []string{MethodPing, MethodEventsSubscribe, MethodPair, MethodClipboardRead}
+	want := []string{MethodPing, MethodEventsSubscribe, MethodPair, MethodPeerGrants, MethodPeerRevoke, MethodClipboardRead}
 	for _, n := range app.CommandNames() {
 		if IsTransportMethod(n) {
 			t.Fatalf("§7 command %q collides with a transport-level method", n)

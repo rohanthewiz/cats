@@ -194,3 +194,54 @@ func TestBearerToken(t *testing.T) {
 		}
 	}
 }
+
+// A peer token and a device token are not interchangeable: each redeems only at
+// its own door, and a try at the wrong one leaves the token live for the right
+// one. The label the operator gave a peer token comes back on redemption.
+func TestPairTokenKinds(t *testing.T) {
+	a := newPairAuth(t)
+	now := time.Unix(1_700_000_000, 0)
+
+	device, _, err := a.IssuePairToken(now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	peer, expires, err := a.IssuePeerPairToken("laptop", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := now.Add(PairTTL); !expires.Equal(want) {
+		t.Fatalf("peer token expires = %v, want %v", expires, want)
+	}
+
+	if a.RedeemPairToken(peer, now) {
+		t.Fatal("a peer token redeemed at the device door (/login)")
+	}
+	if _, ok := a.RedeemPeerPairToken(device, now); ok {
+		t.Fatal("a device token redeemed at the peer door")
+	}
+	if n := a.PendingPairTokens(now); n != 2 {
+		t.Fatalf("pending = %d after wrong-door attempts, want both still live", n)
+	}
+
+	label, ok := a.RedeemPeerPairToken(peer, now)
+	if !ok || label != "laptop" {
+		t.Fatalf("RedeemPeerPairToken = %q, %v; want \"laptop\", true", label, ok)
+	}
+	if _, ok := a.RedeemPeerPairToken(peer, now); ok {
+		t.Fatal("peer token redeemed twice")
+	}
+	if !a.RedeemPairToken(device, now) {
+		t.Fatal("device token lost to the wrong-door attempt")
+	}
+}
+
+// A peer token expires on the same clock as a device token.
+func TestPeerPairTokenExpires(t *testing.T) {
+	a := newPairAuth(t)
+	now := time.Unix(1_700_000_000, 0)
+	token, _, _ := a.IssuePeerPairToken("", now)
+	if _, ok := a.RedeemPeerPairToken(token, now.Add(PairTTL)); ok {
+		t.Fatal("peer token redeemed at its expiry instant")
+	}
+}

@@ -171,6 +171,22 @@ Requires auth to be enabled; under --auth none there is nothing to pair with.
   catctl pair            print the code
   catctl --json pair     the raw response, for scripting
 
+Peers. catctl pair peer [label...] does the same for another catway, so peer
+sync never needs this machine's password copied over. It prints a
+cats://peer link; on the other machine run
+
+  catctl attach-peer <id> '<link>'
+
+and that catway redeems the link for a peer-sync grant. Unlike a device's
+session, the grant survives restarts of both sides, and it opens only the
+/peer/v1 sync routes — never a terminal. The label names it here:
+
+  catctl peer-grants                 list issued grants (id, label, holder, last use)
+  catctl revoke-peer-grant <id>      cut one peer off; it pairs again to return
+
+Running attach-peer with a fresh link for an id that is already attached
+re-pairs it in place.
+
 `)
 }
 

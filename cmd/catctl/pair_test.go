@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"net/url"
 	"strings"
 	"testing"
@@ -8,6 +9,7 @@ import (
 
 	"github.com/rohanthewiz/cats/internal/app"
 	"github.com/rohanthewiz/cats/internal/ctlproto"
+	"github.com/rohanthewiz/cats/internal/peersync"
 	"github.com/rohanthewiz/cats/internal/qr"
 )
 
@@ -183,6 +185,67 @@ func TestTransportMethodsDoNotShadowCommands(t *testing.T) {
 	for _, n := range app.CommandNames() {
 		if ctlproto.IsTransportMethod(n) {
 			t.Fatalf("§7 command %q collides with a transport-level method", n)
+		}
+	}
+}
+
+// `pair` alone sends no params — the request a pre-peer catway expects — and
+// `pair peer <label...>` asks for a peer grant with the label joined.
+func TestPairParams(t *testing.T) {
+	if raw, err := pairParams(nil); raw != nil || err != nil {
+		t.Fatalf("pairParams(nil) = %s, %v; want nil, nil", raw, err)
+	}
+	raw, err := pairParams([]string{"peer", "home", "laptop"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var p ctlproto.PairParams
+	if err := json.Unmarshal(raw, &p); err != nil || !p.Peer || p.Label != "home laptop" {
+		t.Fatalf("pairParams(peer home laptop) = %+v, %v", p, err)
+	}
+	if _, err := pairParams([]string{"device"}); err == nil {
+		t.Fatal("pairParams accepted an unknown operand")
+	}
+}
+
+// The peer render is a pasteable command whose link is quoted (it holds '&'),
+// and the link parses back to the grant it was made from.
+func TestRenderPeerPairing(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	info := ctlproto.PairInfo{URL: "https://10.0.0.5:8421", Token: "tok", ExpiresAt: now.Add(5 * time.Minute).Unix(),
+		Fingerprint: "ab12", Kind: ctlproto.PairKindPeer}
+	out := renderPeerPairing(info, now)
+	link := peersync.PeerLink(info.URL, info.Token, info.Fingerprint)
+	if !strings.Contains(out, "catctl attach-peer <id> '"+link+"'") {
+		t.Fatalf("render lacks the quoted attach command:\n%s", out)
+	}
+	raw, err := buildAttachPeer([]string{"mini", link, "Home", "mini"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var p app.PeerAttachParams
+	_ = json.Unmarshal(raw, &p)
+	if p.URL != info.URL || p.PairToken != "tok" || p.Fingerprint != "ab12" || p.Label != "Home mini" || p.TokenFile != "" {
+		t.Fatalf("attach-peer from the rendered link = %+v", p)
+	}
+	if _, err := buildAttachPeer([]string{"mini", link, "~/pw.token"}); err == nil {
+		t.Fatal("attach-peer accepted a link plus a token_file")
+	}
+	if _, err := buildAttachPeer([]string{"mini", "cats://peer?u=https%3A%2F%2F10.0.0.5%3A8421"}); err == nil {
+		t.Fatal("attach-peer accepted a link cut short by an unquoted '&'")
+	}
+}
+
+func TestRenderPeerGrants(t *testing.T) {
+	if out := renderPeerGrants(ctlproto.PeerGrantList{}); !strings.Contains(out, "no peer grants") {
+		t.Fatalf("empty listing = %q", out)
+	}
+	out := renderPeerGrants(ctlproto.PeerGrantList{Grants: []ctlproto.PeerGrant{
+		{ID: "0a0b0c0d", Label: "laptop", Peer: "me@laptop", Created: 1_700_000_000},
+	}})
+	for _, want := range []string{"ID", "0a0b0c0d", "laptop", "me@laptop", "never"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("listing lacks %q:\n%s", want, out)
 		}
 	}
 }

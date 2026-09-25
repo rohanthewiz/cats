@@ -13,6 +13,8 @@ import (
 	"github.com/rohanthewiz/rweb"
 
 	"github.com/rohanthewiz/cats/internal/gwauth"
+	"github.com/rohanthewiz/cats/internal/peergrant"
+	"github.com/rohanthewiz/cats/internal/peersync"
 )
 
 // resolveSecret returns the shared access secret: the --password flag, else
@@ -48,6 +50,10 @@ type authGuard struct {
 	a              *gwauth.Authenticator
 	secure         bool     // set the session cookie Secure (server is serving TLS)
 	allowedOrigins []string // extra WS Origins accepted beyond same-origin (gwauth.OriginOK)
+	// peers is the durable peer-grant table (peergrants.go), accepted on the
+	// /peer/v1/* routes only. nil when it could not be opened: then only the
+	// shared secret gets a peer in, exactly as before grants existed.
+	peers *peergrant.Store
 }
 
 // middleware gates every request. Public paths (/login, /favicon.ico) pass
@@ -67,13 +73,19 @@ func (g *authGuard) middleware(ctx rweb.Context) error {
 	if strings.HasPrefix(path, notifyActionPath) {
 		return ctx.Next()
 	}
+	// Peer pairing is public in the same way and for the same reason: the
+	// caller is a catway holding nothing yet but a single-use pairing token,
+	// which the handler checks (peergrants.go).
+	if path == peersync.PathPair {
+		return ctx.Next()
+	}
 	if path == "/ws" {
 		origin := ctx.Request().Header("Origin")
 		if !gwauth.OriginOK(origin, ctx.Request().Host(), g.allowedOrigins) {
 			return ctx.Status(http.StatusForbidden).WriteText("forbidden: cross-origin websocket")
 		}
 	}
-	if g.authed(ctx) {
+	if g.authed(ctx) || g.peerAuthed(ctx, path) {
 		return ctx.Next()
 	}
 	if path == "/ws" {
@@ -104,6 +116,26 @@ func (g *authGuard) authed(ctx rweb.Context) bool {
 		return g.a.ValidSession(cookie, time.Now())
 	}
 	return false
+}
+
+// peerAuthed reports whether the request carries a live peer grant AND is for
+// a peer route. The path test is the whole of the grant's scoping: everything
+// else the catway serves — /ws above all — goes through authed, which never
+// consults the grant table, so a grant cannot open a terminal.
+//
+// peergrant.Store.Check rejects anything without the grant prefix before
+// hashing, so the password and session tokens that make up ordinary traffic
+// cost a string compare here, not a SHA-256.
+func (g *authGuard) peerAuthed(ctx rweb.Context, path string) bool {
+	if g.peers == nil || !strings.HasPrefix(path, peersync.PathPrefix) {
+		return false
+	}
+	token, ok := gwauth.BearerToken(ctx.Request().Header("Authorization"))
+	if !ok {
+		return false
+	}
+	_, ok = g.peers.Check(token, time.Now())
+	return ok
 }
 
 // handleLoginGet renders the login form (already authenticated → straight to

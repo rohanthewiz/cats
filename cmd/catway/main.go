@@ -239,6 +239,13 @@ func main() {
 				o.pushActionBase, notifyActionPath)
 		}
 	}
+	// The resolved state directory, for the files that live there whether or
+	// not session persistence is on (the ledger below, peer pairing's grants
+	// and token files). Resolved once so every consumer agrees on it.
+	o.stateDir = effPersist.StateDir
+	if o.stateDir == "" {
+		o.stateDir = persist.DefaultDir()
+	}
 	// The command ledger (ledger.go). Opened here rather than in newOrch because
 	// it needs the resolved state directory, which is a flag-and-config
 	// decision. A store that will not open is a logged line and a disabled
@@ -349,6 +356,13 @@ func main() {
 	guard, err := buildGuard(eff.Auth, *password, effTTL, tlsOn, eff.AllowedOrigins, eff.Addr)
 	if err != nil {
 		dlog.Fatalf("catway: auth: %v", err)
+	}
+	// Peer grants (peergrants.go) exist only alongside a guard: under --auth
+	// none the peer routes are open and there is nothing to grant. The table
+	// is attached to the guard before the server is built, so the first
+	// request already sees it.
+	if guard != nil {
+		guard.peers = openPeerGrants(o.stateDir)
 	}
 	// Device pairing (catctl pair) needs the guard's authenticator plus the URL
 	// and certificate pin a phone will dial, so it can only be assembled once

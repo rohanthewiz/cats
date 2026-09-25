@@ -225,6 +225,7 @@ var recordedParamClasses = map[string]map[string]string{
 		"fingerprint": ClassPlain,
 		"id":          ClassPlain,
 		"label":       ClassPlain,
+		"pair_token":  ClassSecret,
 		"token":       ClassSecret,
 		"token_file":  ClassPlain,
 		"url":         ClassPlain,

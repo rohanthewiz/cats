@@ -8,6 +8,7 @@ import (
 
 	"github.com/rohanthewiz/cats/internal/app"
 	"github.com/rohanthewiz/cats/internal/ctlproto"
+	"github.com/rohanthewiz/cats/internal/peersync"
 )
 
 // This file is catctl's ergonomic subcommand layer: short verbs that take
@@ -129,8 +130,12 @@ var subcommands = []subcommand{
 
 	{"peers", app.CmdPeerList, "peers", nil, "list the peer catways this one can sync with", noParams},
 	{"sync", app.CmdPeerSync, "sync <peer> [workspaces|todos|plugins|all ...] [pull|push|both]", nil, "sync workspaces, todo backlogs and/or plugins with a peer catway; prints the report", buildSync},
-	{"attach-peer", app.CmdPeerAttach, "attach-peer <id> <url> [token_file] [label...]", nil, "add a peer catway (url: https://host:port; token_file holds its CATS_PASSWORD)", buildAttachPeer},
+	{"attach-peer", app.CmdPeerAttach, "attach-peer <id> <url|cats://peer link> [token_file] [label...]", nil, "add (or re-pair) a peer catway: a link from `catctl pair peer` there, or a url plus a token_file holding its CATS_PASSWORD", buildAttachPeer},
 	{"detach-peer", app.CmdPeerDetach, "detach-peer <id>", nil, "forget a peer catway (nothing synced is undone)", buildDetachPeer},
+	// The grantor's side of peer pairing. Transport methods, not §7 commands:
+	// credential administration stays on the owner-only socket (ctlproto).
+	{"peer-grants", ctlproto.MethodPeerGrants, "peer-grants", nil, "list the peer-sync grants this catway has issued (via `catctl pair peer`)", noParams},
+	{"revoke-peer-grant", ctlproto.MethodPeerRevoke, "revoke-peer-grant <grant-id>", nil, "revoke a peer-sync grant; that peer's syncs are refused until it pairs again", buildRevokePeerGrant},
 
 	// Notifications. The ergonomic verb is the plain one-liner a script wants
 	// at the end of a long build; anything with buttons goes through
@@ -645,20 +650,41 @@ func buildSync(args []string) (json.RawMessage, error) {
 	return marshal(p)
 }
 
-// buildAttachPeer: attach-peer <id> <url> [token_file] [label...].
+// buildAttachPeer: attach-peer <id> <url|cats://peer link> [token_file] [label...].
 //
 // The third word is a token file when it looks like a path (starts with ~, /
 // or .), else the first word of the label — the same "a path announces itself"
 // rule the plugins dialog uses to tell a link from an install. A literal token
 // goes through the raw form only: it would otherwise land in the shell
 // history, which is exactly the leak token_file exists to avoid.
+//
+// A cats://peer link (from `catctl pair peer` on the other machine) stands in
+// for the URL and carries the credential itself — a pairing token, which is
+// single-use and minutes-lived, so its trip through the shell history is
+// harmless. It unpacks into url, pair_token and fingerprint; a token_file
+// alongside it would be a second credential and is refused.
 func buildAttachPeer(args []string) (json.RawMessage, error) {
+	const synopsis = "attach-peer <id> <url|cats://peer link> [token_file] [label...]"
 	if len(args) < 2 {
-		return nil, usageErr{"attach-peer <id> <url> [token_file] [label...]"}
+		return nil, usageErr{synopsis}
 	}
 	p := app.PeerAttachParams{ID: args[0], URL: args[1]}
 	rest := args[2:]
-	if len(rest) > 0 && (strings.HasPrefix(rest[0], "~") || strings.HasPrefix(rest[0], "/") || strings.HasPrefix(rest[0], ".")) {
+	if peersync.IsPeerLink(args[1]) {
+		u, tok, fp, err := peersync.ParsePeerLink(args[1])
+		if err != nil {
+			return nil, err
+		}
+		p.URL, p.PairToken, p.Fingerprint = u, tok, fp
+		if len(rest) > 0 && looksLikePath(rest[0]) {
+			return nil, fmt.Errorf("attach-peer: a cats://peer link carries its own credential; drop the token_file %q", rest[0])
+		}
+		if len(rest) > 0 {
+			p.Label = strings.Join(rest, " ")
+		}
+		return marshal(p)
+	}
+	if len(rest) > 0 && looksLikePath(rest[0]) {
 		p.TokenFile = rest[0]
 		rest = rest[1:]
 	}
@@ -666,6 +692,19 @@ func buildAttachPeer(args []string) (json.RawMessage, error) {
 		p.Label = strings.Join(rest, " ")
 	}
 	return marshal(p)
+}
+
+// looksLikePath is attach-peer's "a path announces itself" test.
+func looksLikePath(s string) bool {
+	return strings.HasPrefix(s, "~") || strings.HasPrefix(s, "/") || strings.HasPrefix(s, ".")
+}
+
+// buildRevokePeerGrant: revoke-peer-grant <grant-id>.
+func buildRevokePeerGrant(args []string) (json.RawMessage, error) {
+	if len(args) != 1 {
+		return nil, usageErr{"revoke-peer-grant <grant-id>"}
+	}
+	return marshal(ctlproto.PeerRevokeParams{ID: args[0]})
 }
 
 // buildDetachPeer: detach-peer <id>.

@@ -109,7 +109,7 @@ var families = []candidate{
 	{"completion", "print a shell completion script"},
 	{"shellinit", "cats shell setup: PATH + plugin shell hooks"},
 	{"commands", "list the raw §7 method names"},
-	{"pair", "mint a device-pairing code (QR)"},
+	{"pair", "mint a device-pairing code (QR), or `pair peer` for another catway"},
 	{"help", "show help for catctl or one verb"},
 }
 
@@ -202,8 +202,14 @@ func completeCatctl(words []string) ([]candidate, string) {
 			return filter(topLevel(cur), cur), dirNoFiles
 		}
 		return nil, dirNoFiles
-	case "commands", "pair":
-		return nil, dirNoFiles // neither takes an operand
+	case "pair":
+		// One optional operand: `peer`. The label after it is free text.
+		if len(rest) == 0 && !strings.HasPrefix(cur, "-") {
+			return filter([]candidate{{"peer", "a peer-sync pairing link for another catway"}}, cur), dirNoFiles
+		}
+		return nil, dirNoFiles
+	case "commands":
+		return nil, dirNoFiles // takes no operand
 	}
 
 	if strings.HasPrefix(cur, "-") {

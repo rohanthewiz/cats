@@ -71,13 +71,42 @@ lands, without it, and is counted.
 ## Trust and transport
 
 The `/peer/v1/*` routes sit behind the same [auth guard](auth-and-tls.md) as
-everything catway serves. The credential a peer presents is that catway's own
-shared secret (`CATS_PASSWORD`), as a bearer token — the same thing a headless
-`catctl` presents. There is deliberately no separate peer permission: a caller
-holding the secret already has `/ws`, and with it `tab.create` and
-`pane.send_input` on every pane, so a plugin install through `/peer/v1/apply`
-grants nothing that could not be typed into a shell. A second credential would
-only be a second thing to leak.
+everything catway serves. A peer presents one of two bearer credentials:
+
+- a **peer grant**, obtained by [pairing](#pairing) — the usual way; or
+- that catway's own shared secret (`CATS_PASSWORD`) — the same thing a headless
+  `catctl` presents. There is deliberately no narrower permission for a secret
+  holder: it already has `/ws`, and with it `tab.create` and `pane.send_input`
+  on every pane, so a plugin install through `/peer/v1/apply` grants nothing
+  that could not be typed into a shell.
+
+A grant is strictly less than the secret: the guard accepts it on `/peer/v1/*`
+and nowhere else. It does not make sync harmless — a plugin install is still
+code run on the other side — but it keeps a sync credential from being a
+terminal credential, and it can be revoked without changing the password.
+
+### Pairing
+
+```
+B: catctl pair peer ──▶ pairing token (5 min, single use, kind=peer)
+                              │  pasted by a human as a cats://peer link
+A: catctl attach-peer b 'cats://peer?u=…&t=…&f=…'
+      └─ A's catway ── POST /peer/v1/pair {token, name} ──▶ B
+                                                           │ spend the token
+                                                           │ mint a grant; store its SHA-256
+         <state>/peer-tokens/b.token (0600) ◀─ credential ─┘
+```
+
+`/peer/v1/pair` is the one public peer route; the pairing token in the body is
+its credential. A peer pairing token is not a device pairing token — neither is
+accepted at the other's door (`/login` vs `/peer/v1/pair`), and trying the wrong
+one does not burn it. Grants live in B's `<state_dir>/peer-grants.db`
+(btypedb, hashes only), survive restarts of either side, and are managed on B
+over the control socket: `catctl peer-grants`, `catctl revoke-peer-grant <id>`.
+A's `detach-peer` deletes the token file it wrote but cannot revoke the grant on
+B; re-running `attach-peer` for an attached id with a fresh link re-pairs it.
+Minting, listing and revoking are control-socket methods, not §7 commands, so
+no browser session can administer peer access.
 
 Over `https://`, a self-signed peer is **pinned** by its certificate's SHA-256
 (the value catway logs at startup under `--tls`), the same rule that makes a

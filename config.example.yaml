@@ -103,6 +103,11 @@ server:
 # SHA-256 catway prints at startup under --tls); an http:// url is only
 # accepted for this machine or an ssh tunnel.
 #
+# Easier than copying a password: run `catctl pair peer` on the other machine
+# and paste the cats://peer link it prints into `catctl attach-peer <id> '<link>'`
+# here. That writes the entry for you, with a token_file under state_dir holding
+# a peer grant — sync-only, durable, revocable there with `revoke-peer-grant`.
+#
 # Live: `catctl attach-peer` / `detach-peer` edit this block and the running
 # roster; `catctl reload` picks up a hand-edit.
 #

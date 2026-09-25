@@ -139,7 +139,13 @@ func (c *Client) do(ctx context.Context, method, path string, in, out any, timeo
 	case http.StatusUnauthorized, http.StatusForbidden, http.StatusFound, http.StatusSeeOther, http.StatusTemporaryRedirect:
 		// 401/403 are the guard's answers for /ws-shaped calls; a redirect is
 		// its answer for everything else (to the login page). All one thing.
-		return fmt.Errorf("%s %s: the peer refused the credential (%s) — token_file must hold that catway's CATS_PASSWORD", method, path, resp.Status)
+		if path == PathPair {
+			// The pairing route's refusal is about the token in the body,
+			// not a credential in a header — and the fix is on the other
+			// machine, so say what to run there.
+			return fmt.Errorf("%s %s: the peer refused the pairing token (%s) — it expired, was already used, or is not a peer token; run `catctl pair peer` there again", method, path, resp.Status)
+		}
+		return fmt.Errorf("%s %s: the peer refused the credential (%s) — token_file must hold a peer grant from `catctl pair peer` there, or that catway's CATS_PASSWORD; a revoked grant is re-paired with attach-peer", method, path, resp.Status)
 	case http.StatusNotFound:
 		return fmt.Errorf("%s %s: %s — the peer has no /peer/v1 endpoints; is it running a cats with peer sync?", method, path, resp.Status)
 	default:

@@ -764,7 +764,9 @@ func (s Server) TTL() (time.Duration, error) {
 //
 // URL is the peer catway's browser address (https://box.lan:8421). The peer's
 // /peer/v1/* endpoints sit behind the same auth guard as everything else it
-// serves, so the credential is that catway's shared secret (its CATS_PASSWORD),
+// serves, so the credential is either a peer grant obtained by pairing
+// (`catctl pair peer` there, `catctl attach-peer <id> <link>` here — which
+// writes TokenFile itself) or that catway's shared secret (its CATS_PASSWORD),
 // presented as a bearer token. Token/TokenFile hold it; TokenFile is the better
 // of the pair for the reason Host gives — the settings modal rewrites this file
 // wholesale, so a literal secret in it is one `git add` from being published.

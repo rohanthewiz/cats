@@ -139,6 +139,20 @@ would not be.
 
 Under `--auth none` there is nothing to pair with, and `catctl pair` says so.
 
+### Peer grants
+
+A second catway syncing with this one (see [peer sync](peer-sync.md#pairing))
+would be poorly served by a session — it would lose it every day and on every
+restart — so `catctl pair peer` mints a token of a different **kind**, redeemable
+only at `POST /peer/v1/pair`, for a **peer grant**: a random
+`catspeer_…` credential whose SHA-256 is kept in `<state_dir>/peer-grants.db`
+(`internal/peergrant`). The guard checks it only on `/peer/v1/*`; on `/ws`, `/`
+or anything else it is not a credential at all. Unlike sessions, grants are
+durable and **individually revocable** (`catctl peer-grants`,
+`catctl revoke-peer-grant <id>`), which is what a long-lived credential needs.
+`/peer/v1/pair` joins `/login` among the public paths — the pairing token in its
+body is what it checks.
+
 ## WebSocket origin checking
 
 `OriginOK(origin, host, allowed)`:

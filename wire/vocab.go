@@ -1512,6 +1512,13 @@ type PeerSyncResult struct {
 // URL is the peer catway's browser address; Token/TokenFile carry that
 // catway's shared secret (its CATS_PASSWORD), the same credential a headless
 // client presents to it; Fingerprint pins a self-signed certificate.
+//
+// PairToken is the alternative to both: a single-use token from `catctl pair
+// peer` on the other machine. The backend redeems it there for a durable,
+// revocable peer grant and writes that to a token_file of its own choosing,
+// so no password crosses between the machines. With PairToken set, an ID that
+// is already attached is re-paired (its credential, URL and pin replaced)
+// rather than refused — the way back from a revoked grant.
 type PeerAttachParams struct {
 	ID          string `json:"id"`
 	Label       string `json:"label,omitempty"`
@@ -1519,6 +1526,7 @@ type PeerAttachParams struct {
 	Token       string `json:"token,omitempty" cats:"secret"`
 	TokenFile   string `json:"token_file,omitempty"`
 	Fingerprint string `json:"fingerprint,omitempty"`
+	PairToken   string `json:"pair_token,omitempty" cats:"secret"`
 }
 
 // PeerDetachParams: peer.detach — remove a peers: entry. Nothing that was

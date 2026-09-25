@@ -64,8 +64,9 @@ import (
 const Schema = 1
 
 // The peer HTTP surface a catway exposes. They sit behind the same auth guard
-// as everything else catway serves, so the credential is that catway's shared
-// secret as a bearer token — see config.Peer.
+// as everything else catway serves, so the credential is either a peer grant
+// (pair.go, internal/peergrant) or that catway's shared secret, as a bearer
+// token — see config.Peer. PathPair, in pair.go, is the one public route.
 const (
 	PathHello  = "/peer/v1/hello"  // GET  → Instance
 	PathBundle = "/peer/v1/bundle" // GET ?want=workspaces,todos,plugins → Bundle

@@ -3,6 +3,7 @@
 package main
 
 import (
+	"encoding/json"
 	"log"
 	"net"
 	"strconv"
@@ -13,6 +14,7 @@ import (
 	"github.com/rohanthewiz/cats/internal/dlog"
 	"github.com/rohanthewiz/cats/internal/gwauth"
 	"github.com/rohanthewiz/cats/internal/gwtls"
+	"github.com/rohanthewiz/cats/internal/peergrant"
 )
 
 // Device pairing (`catctl pair`). The control socket mints a short-lived
@@ -49,6 +51,10 @@ type pairing struct {
 	// fingerprint is the hex SHA-256 of the served certificate's DER, "" when
 	// serving plain HTTP.
 	fingerprint string
+	// grants is the durable peer-grant table (peergrants.go), nil when the
+	// state directory could not hold it — device pairing still works then;
+	// only `catctl pair peer` is refused.
+	grants *peergrant.Store
 }
 
 // handlePair mints a pairing grant and answers the control request with it.
@@ -57,7 +63,18 @@ type pairing struct {
 // onto the orchestrator loop: pairing touches no session state, and routing it
 // through the loop would put credential minting behind whatever the loop is
 // currently blocked on.
-func (o *orch) handlePair(r app.Responder) {
+//
+// params selects the grant's kind (ctlproto.PairParams): absent or zero is a
+// device grant, as it always was; Peer mints a token that only another catway
+// can redeem, for a durable peer-sync grant (peergrants.go).
+func (o *orch) handlePair(params json.RawMessage, r app.Responder) {
+	var pp ctlproto.PairParams
+	if len(params) > 0 {
+		if err := json.Unmarshal(params, &pp); err != nil {
+			r.Fail("pair: " + err.Error())
+			return
+		}
+	}
 	p := o.pairing.Load()
 	if p == nil {
 		// Two very different causes, one message each would be better, but the
@@ -66,17 +83,40 @@ func (o *orch) handlePair(r app.Responder) {
 		r.Fail("pairing unavailable: the server is starting, or auth is disabled (--auth none)")
 		return
 	}
-	token, expires, err := p.auth.IssuePairToken(time.Now())
+	var (
+		token   string
+		expires time.Time
+		err     error
+		kind    string
+	)
+	if pp.Peer {
+		// Refused up front rather than at redemption: a token that can only
+		// fail when the other machine spends it would waste the operator's
+		// trip there.
+		if p.grants == nil {
+			r.Fail(peerGrantsUnavailable)
+			return
+		}
+		token, expires, err = p.auth.IssuePeerPairToken(pp.Label, time.Now())
+		kind = ctlproto.PairKindPeer
+	} else {
+		token, expires, err = p.auth.IssuePairToken(time.Now())
+	}
 	if err != nil {
 		r.Fail("mint pairing token: " + err.Error())
 		return
 	}
-	log.Printf("catway: issued a pairing token for %s (valid %s, single use)", p.baseURL, gwauth.PairTTL)
+	what := "a pairing token"
+	if pp.Peer {
+		what = "a peer pairing token"
+	}
+	log.Printf("catway: issued %s for %s (valid %s, single use)", what, p.baseURL, gwauth.PairTTL)
 	r.OK(ctlproto.PairInfo{
 		URL:         p.baseURL,
 		Token:       token,
 		ExpiresAt:   expires.Unix(),
 		Fingerprint: p.fingerprint,
+		Kind:        kind,
 	})
 }
 
@@ -102,7 +142,7 @@ func buildPairing(guard *authGuard, addr, certPath string) *pairing {
 			fingerprint = fp
 		}
 	}
-	return &pairing{auth: guard.a, baseURL: advertiseURL(scheme, addr), fingerprint: fingerprint}
+	return &pairing{auth: guard.a, baseURL: advertiseURL(scheme, addr), fingerprint: fingerprint, grants: guard.peers}
 }
 
 // advertiseURL turns the listen address into a URL another device can dial.

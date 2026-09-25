@@ -60,7 +60,7 @@ func New(secret string, ttl time.Duration) (*Authenticator, error) {
 		secret:  []byte(secret),
 		signKey: key,
 		ttl:     ttl,
-		pairs:   pairStore{grants: map[string]time.Time{}},
+		pairs:   pairStore{grants: map[string]pairGrant{}},
 	}, nil
 }
 

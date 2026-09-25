@@ -48,6 +48,22 @@ const MethodEventsSubscribe = "events.subscribe"
 // ever sees the method name.
 const MethodPair = "pair"
 
+// MethodPeerGrants lists the durable peer-sync grants this catway has issued
+// (internal/peergrant); its Response.Data is a PeerGrantList. MethodPeerRevoke
+// deletes one by id (params PeerRevokeParams, data the revoked PeerGrant).
+//
+// They sit beside MethodPair rather than on the §7 table for the same reason:
+// they administer credentials. Listing reveals no secret — only hashes are
+// stored, and not even those are returned — but which machines hold a key to
+// this one is the owner's business, and revoking from a stolen browser session
+// would let the thief cut the owner's other machines off. Keeping every grant
+// operation on the owner-only socket means the question "who can manage peer
+// access?" has one answer.
+const (
+	MethodPeerGrants = "peer.grants"
+	MethodPeerRevoke = "peer.revoke"
+)
+
 // MethodClipboardRead returns the host system clipboard's text; its
 // Response.Data is a ClipboardData. Like MethodPair it is deliberately NOT an app
 // §7 command, and for the same structural reason: the §7 table is shared with the
@@ -104,6 +120,44 @@ type PairInfo struct {
 	// fresh key on every regeneration — SPKI pinning would survive nothing that
 	// DER pinning does not.
 	Fingerprint string `json:"fingerprint,omitempty"`
+	// Kind is PairKindPeer for a peer-sync grant (PairParams.Peer), empty for
+	// a device grant.
+	Kind string `json:"kind,omitempty"`
+}
+
+// PairParams are MethodPair's optional params. The zero value (and an absent
+// params object) mints a device grant, which is what `catctl pair` has always
+// done. Peer asks for a peer-sync grant instead: redeemable only by another
+// catway at /peer/v1/pair, for a durable credential rather than a session.
+// Label names that credential in `catctl peer-grants`.
+type PairParams struct {
+	Peer  bool   `json:"peer,omitempty"`
+	Label string `json:"label,omitempty"`
+}
+
+// PairKindPeer is PairInfo.Kind for a peer grant. A device grant leaves Kind
+// empty, so every response a pre-peer client ever parsed is unchanged.
+const PairKindPeer = "peer"
+
+// PeerGrant is one issued peer-sync credential as the control socket reports
+// it: who it was for and when it was last presented, never the credential or
+// its hash. Times are Unix seconds; LastUsed is 0 for a grant never used.
+type PeerGrant struct {
+	ID       string `json:"id"`
+	Label    string `json:"label,omitempty"`
+	Peer     string `json:"peer,omitempty"`
+	Created  int64  `json:"created"`
+	LastUsed int64  `json:"last_used,omitempty"`
+}
+
+// PeerGrantList is the Response.Data for MethodPeerGrants, oldest first.
+type PeerGrantList struct {
+	Grants []PeerGrant `json:"grants"`
+}
+
+// PeerRevokeParams names the grant MethodPeerRevoke deletes.
+type PeerRevokeParams struct {
+	ID string `json:"id"`
 }
 
 // TransportMethods returns every method answered by the control layer itself
@@ -116,7 +170,7 @@ type PairInfo struct {
 // these. A fourth member (clipboard.read) is what made the drift a real risk:
 // a list nobody updates silently rejects the new method as unknown.
 func TransportMethods() []string {
-	return []string{MethodPing, MethodEventsSubscribe, MethodPair, MethodClipboardRead}
+	return []string{MethodPing, MethodEventsSubscribe, MethodPair, MethodPeerGrants, MethodPeerRevoke, MethodClipboardRead}
 }
 
 // IsTransportMethod reports whether m is answered by the transport rather than by

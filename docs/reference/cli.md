@@ -115,6 +115,9 @@ catctl [flags] <method> [--params '<json>']     raw command
 catctl help [verb]                              the verb table, or one verb's page
 catctl commands                                 list the raw method names
 catctl pair                                     pair a phone with a scannable code
+catctl pair peer [label...]                     a pairing link for another catway (peer sync)
+catctl peer-grants                              the peer-sync grants this catway has issued
+catctl revoke-peer-grant <grant-id>             cut one peer off
 catctl completion <bash|zsh|fish>               shell completion script
 catctl shellinit <bash|zsh|fish>                cats shell setup: PATH + plugin shell hooks
 catctl integration <install|uninstall|status|help> ...
@@ -327,7 +330,9 @@ Peers — another cats whose backend this one syncs with (see
 `peers:` block live, like hosts:
 
 ```bash
-catctl attach-peer home https://mini.lan:8421 ~/.config/cats/peers/home.token   # token file holds its CATS_PASSWORD
+catctl attach-peer home 'cats://peer?…'         # a link from `catctl pair peer` on that machine (quote it)
+catctl attach-peer home 'cats://peer?…' home mini-PC   # ...with a label; re-running re-pairs
+catctl attach-peer home https://mini.lan:8421 ~/.config/cats/peers/home.token   # or: token file holds its CATS_PASSWORD
 catctl attach-peer home https://mini.lan:8421 ~/.config/cats/peers/home.token home mini-PC   # ...with a label
 catctl peers                                    # the roster
 catctl detach-peer home                         # forget it (nothing synced is undone)
@@ -591,6 +596,38 @@ guaranteed to have the right polarity for a scanner in the coloured form, so the
 link below it is always printed too.
 
 Requires auth to be enabled; under `--auth none` there is nothing to pair with.
+
+#### Pairing a peer
+
+`catctl pair peer [label...]` mints the same kind of five-minute, single-use
+token for **another catway** instead of a phone, and prints the command to run
+over there:
+
+```bash
+# on mini (the one being synced with)
+catctl pair peer laptop
+#   catctl attach-peer <id> 'cats://peer?f=…&t=…&u=https%3A%2F%2F192.168.1.24%3A8421'
+
+# on the laptop
+catctl attach-peer mini 'cats://peer?f=…&t=…&u=…'
+```
+
+The laptop's catway redeems the token at mini's `/peer/v1/pair` for a
+**peer grant** and keeps it in `<state_dir>/peer-tokens/mini.token` (0600),
+which the new `peers:` entry names as its `token_file`. Unlike a device's
+session, the grant survives restarts of both sides; unlike the password, it
+opens only the `/peer/v1/*` sync routes, never a terminal, and it can be
+revoked on its own. mini keeps only a hash of it, in `<state_dir>/peer-grants.db`.
+
+```bash
+catctl peer-grants                   # on mini: id, label, holder, created, last used
+catctl revoke-peer-grant 258e3a60    # the laptop's syncs are refused from the next request
+```
+
+A revoked peer comes back by running `attach-peer` again with a fresh link, for
+the same id — it re-pairs in place. `detach-peer` deletes the token file it
+wrote, but the grant stays live on the other side until revoked there. See
+[peer sync](../subsystems/peer-sync.md#pairing).
 
 ### `catctl integration`
 

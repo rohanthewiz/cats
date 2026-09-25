@@ -11,6 +11,7 @@
 //	catctl help [verb]                        the verb table, or one verb's page
 //	catctl commands                           list the raw §7 method names
 //	catctl pair                               mint a device-pairing code (QR)
+//	catctl pair peer [label...]               mint a peer-sync pairing link
 //	catctl completion <bash|zsh|fish>         shell completion script
 //	catctl integration <install|uninstall|status|help> ...  agent hook installers
 //	catctl plugin <install|link|uninstall|list|run|help> ...  plugin host
@@ -56,6 +57,10 @@
 // `catctl pair` is how a phone gets in. It mints a single-use grant that expires
 // in minutes and prints it as a QR code; the device redeems it for a session
 // credential. The shared password never appears — see internal/gwauth/pair.go.
+// `catctl pair peer` is the same for another catway: it prints a cats://peer
+// link that `catctl attach-peer <id> <link>` on the other machine redeems for a
+// durable, revocable peer-sync grant (internal/peergrant) — which `peer-grants`
+// lists and `revoke-peer-grant` cancels.
 //
 // Two verbs block/stream instead of returning at once: `wait <pane> <pattern>`
 // resolves when the pane's output contains the pattern (or times out), and
@@ -211,7 +216,9 @@ func run() int {
 			fmt.Fprintf(os.Stderr, "catctl: unknown command %q (try `catctl help`)\n", method)
 			return 2
 		}
-		if len(pos) > 0 {
+		// pair is the one raw-path method with operands of its own (`pair
+		// peer [label...]`); runPair validates them.
+		if len(pos) > 0 && method != ctlproto.MethodPair {
 			fmt.Fprintf(os.Stderr, "catctl: unexpected extra arguments: %v\n", pos)
 			return 2
 		}
@@ -235,7 +242,7 @@ func run() int {
 	// pair renders a scannable code rather than a JSON payload, so it owns its
 	// output. --json still reaches the raw response, which is the scripting path.
 	if method == ctlproto.MethodPair {
-		return runPair(socketPath, *id, *timeout, *rawJSON)
+		return runPair(socketPath, *id, *timeout, *rawJSON, pos)
 	}
 
 	// wait_for_output blocks until its pattern appears; size the round-trip deadline
@@ -278,6 +285,10 @@ func run() int {
 		// the output. `catctl output 3 12 | grep FAIL` only works if what comes
 		// out is the text.
 		printBlockOutput(resp)
+	case method == ctlproto.MethodPeerGrants && resp.OK:
+		// A credential listing is read by eye, against machine names — a
+		// table, like flag-list, with the JSON behind --json.
+		printPeerGrants(resp)
 	case method == app.CmdPeerSync && resp.OK:
 		// A sync answers with a report, and the report's own rendering is the
 		// thing to read — the JSON behind it is for --json.

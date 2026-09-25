@@ -155,11 +155,20 @@
   // the settings modal rewrites config.json wholesale, so a literal secret in
   // it is one commit away from being published (the same reason the hosts
   // dialog takes a token file).
+  //
+  // The url field also takes a cats://peer link from `catctl pair peer` on the
+  // other machine — the way to add a peer without its password at all. The
+  // link carries the url, a single-use pairing token and the certificate pin,
+  // so it is unpacked into peer.attach's url / pair_token / fingerprint and
+  // the backend redeems it (cmd/catway/peergrants.go). A pairing token is not
+  // a long-lived secret, so this is not the literal-secret leak the note above
+  // is about.
   function peerAddDialog() {
     dialogFields({
       title: "add peer",
       submitLabel: "add",
-      hint: "url: the other cats' browser address (https://box.lan:8421). token file: a file holding that cats' " +
+      hint: "url: a cats://peer link from `catctl pair peer` on the other machine (then leave token file and fingerprint empty), " +
+        "or the other cats' browser address (https://box.lan:8421). token file: a file holding that cats' " +
         "CATS_PASSWORD. fingerprint: its self-signed certificate's SHA-256, from its startup log — required for https unless it has a real certificate.",
       fields: [
         { label: "id", placeholder: "home" },
@@ -171,16 +180,39 @@
       onSubmit: (id, url, tokenFile, fingerprint, label) => {
         id = (id || "").trim(); url = (url || "").trim();
         if (!id || !url) { toast("a peer needs an id and a url"); return; }
-        sendCmdAwait("peer.attach", {
+        const params = {
           id, url, label: (label || "").trim(),
           token_file: (tokenFile || "").trim(), fingerprint: (fingerprint || "").trim(),
-        }, (res) => {
+        };
+        if (url.startsWith("cats://peer")) {
+          const link = parsePeerLink(url);
+          if (!link) { toast("that cats://peer link is missing its url or token — copy the whole link"); return; }
+          if (params.token_file) { toast("a cats://peer link carries its own credential — leave token file empty"); return; }
+          params.url = link.u;
+          params.pair_token = link.t;
+          params.fingerprint = link.f || params.fingerprint;
+          toast("pairing with " + link.u + "…");
+        }
+        sendCmdAwait("peer.attach", params, (res) => {
           if (!res.ok) { toast(res.error || "add peer failed"); return; }
-          toast("added peer " + id);
+          toast((params.pair_token ? "paired with peer " : "added peer ") + id);
           openPeersDialog();
         });
       },
     });
+  }
+
+  // parsePeerLink unpacks cats://peer?u=…&t=…&f=… (peersync.PeerLink), or
+  // returns null when the url or token is missing. URLSearchParams does the
+  // decoding; the scheme is stripped by hand because URL() will not parse a
+  // custom scheme's query the same way in every engine.
+  function parsePeerLink(s) {
+    const q = s.indexOf("?");
+    if (q < 0 || s.slice(0, q) !== "cats://peer") return null;
+    const p = new URLSearchParams(s.slice(q + 1));
+    const u = p.get("u"), t = p.get("t");
+    if (!u || !t) return null;
+    return { u, t, f: p.get("f") || "" };
   }
 
   function confirmForgetPeer(p) {
