@@ -406,6 +406,7 @@
     { tab: "panes", section: "panes", fields: [
       ["reap_exited", "reap exited", "duration", "how long an exited pane is kept before it is closed — Go duration, or off"],
       ["autoclose_exited", "autoclose on 0", "duration", "countdown before a pane whose shell exited cleanly closes itself — or off"],
+      ["agent_refresh", "agent refresh", "duration", "how often agent rows re-read model and context use while a pane stays in one state — at least 10s, or off"],
     ] },
     { tab: "editor", section: "editor", fields: [
       ["agents", "editor agents", "list", "agent labels that count as an editor (pane.open_file targets)"],

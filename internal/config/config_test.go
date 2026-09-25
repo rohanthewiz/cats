@@ -116,6 +116,8 @@ func TestValidateRejects(t *testing.T) {
 
 		"panes bad reap":      "panes:\n  reap_exited: \"afternoonish\"\n",
 		"panes negative reap": "panes:\n  reap_exited: \"-4h\"\n",
+		"panes bad refresh":   "panes:\n  agent_refresh: \"often\"\n",
+		"panes tiny refresh":  "panes:\n  agent_refresh: \"1ms\"\n",
 	}
 	for name, yaml := range cases {
 		if _, err := parse([]byte(yaml), true); err == nil {
@@ -320,6 +322,36 @@ func TestParsePanes(t *testing.T) {
 		}
 		if d, err := got.Panes.ReapExitedAfter(); err != nil || d != 0 {
 			t.Fatalf("reap_exited %s = %v (%v), want 0 (never)", off, d, err)
+		}
+	}
+}
+
+// The agent-pane refresh: a minute by default (including for a config file
+// written before the knob existed), any duration at or above the floor, and the
+// usual off-switch spellings for "state changes only".
+func TestParseAgentRefresh(t *testing.T) {
+	got, err := parse(nil, true)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if d, err := got.Panes.AgentRefreshEvery(); err != nil || d != time.Minute {
+		t.Fatalf("default agent_refresh = %v (%v), want 1m", d, err)
+	}
+	if d, err := (Panes{}).AgentRefreshEvery(); err != nil || d != time.Minute {
+		t.Fatalf("absent agent_refresh = %v (%v), want 1m", d, err)
+	}
+
+	got, err = parse([]byte("panes:\n  agent_refresh: \"2m\"\n"), true)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if d, _ := got.Panes.AgentRefreshEvery(); d != 2*time.Minute {
+		t.Fatalf("agent_refresh = %v, want 2m", d)
+	}
+
+	for _, off := range []string{"0", "off", "never", "none", "OFF"} {
+		if d, err := (Panes{AgentRefresh: off}).AgentRefreshEvery(); err != nil || d != 0 {
+			t.Fatalf("agent_refresh %q = %v (%v), want 0 (off)", off, d, err)
 		}
 	}
 }

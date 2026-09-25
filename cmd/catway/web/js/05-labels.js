@@ -1,7 +1,7 @@
   // modelLabel condenses a pane's resolved model (agentmodel.go builds it —
-  // "claude-opus-5 · high", "claude-sonnet-4-5-20250929[1m]") down to the family
-  // word and its version, which is what the pane header and the sidebar rows
-  // name: "opus 5", "sonnet 4.5 [1M]", "gpt 5.4 mini".
+  // "claude-opus-5 · high · 43k/1M", "claude-sonnet-4-5-20250929[1m]") down to
+  // the family word and its version, which is what the pane header and the
+  // sidebar rows name: "opus 5 (43k/1M)", "sonnet 4.5 [1M]", "gpt 5.4 mini".
   //
   // The version rides along because a family word alone stops distinguishing
   // rows the moment two generations of it are in play — "opus" beside "opus"
@@ -26,6 +26,13 @@
   // bound is what keeps the trailing release date out — "20250929" is a token of
   // the same shape and sits exactly where a version component would.
   const MODEL_VER = /^\d{1,3}(\.\d{1,3})*$/;
+  // MODEL_CTX is the shape of the context-usage segment agentmodel.go appends
+  // for claude panes ("43k/1M", "850/200k", "1.2M/1M"): used over window, each a
+  // count with an optional k/M suffix. It is kept, in parentheses, because how
+  // full a pane's context is is the thing a long session keeps wanting to know
+  // at a glance, and it is recognised by shape rather than position so the
+  // label does not depend on whether an effort segment came before it.
+  const MODEL_CTX = /^\d+(\.\d+)?[kM]?\/\d+(\.\d+)?[kM]?$/;
   // modelVersion reads the run of version tokens adjacent to the family at
   // toks[i], joined with dots: "claude-opus-5" -> "5", "claude-sonnet-4-5-…" ->
   // "4.5". Forward first, since every current id puts the version after the
@@ -42,9 +49,14 @@
   }
   function modelLabel(model) {
     if (!model) return "";
-    let id = model.split("·")[0].trim().toLowerCase();
-    let wide = "";
-    if (id.endsWith("[1m]")) { wide = " [1M]"; id = id.slice(0, -4); }
+    const segs = model.split("·").map((s) => s.trim());
+    let id = segs[0].toLowerCase();
+    const ctx = segs.slice(1).find((s) => MODEL_CTX.test(s));
+    let tail = "";
+    if (id.endsWith("[1m]")) { tail = " [1M]"; id = id.slice(0, -4); }
+    // The context segment names the window itself, so the [1M] marker would
+    // only repeat it.
+    if (ctx) tail = " (" + ctx + ")";
     const toks = id.split("-");
     for (let i = 0; i < toks.length; i++) {
       const tok = toks[i];
@@ -54,7 +66,7 @@
       // ever added) cannot be appended to itself.
       const size = toks.slice(i + 1).find((t) => MODEL_SIZES.includes(t));
       const ver = modelVersion(toks, i);
-      return tok + (ver ? " " + ver : "") + (size ? " " + size : "") + wide;
+      return tok + (ver ? " " + ver : "") + (size ? " " + size : "") + tail;
     }
     return "";
   }

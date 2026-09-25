@@ -458,6 +458,14 @@ type orch struct {
 	// and re-arming every corpse on reload would move a deadline the user is
 	// watching tick down.
 	autocloseAfter time.Duration
+	// modelSweep is the agent-pane re-read period (agentmodel.go's
+	// runAgentModels), from panes.agent_refresh, in nanoseconds; 0 turns the
+	// sweep off. Atomic because the sweep goroutine reads it while the loop
+	// goroutine rewrites it on a config save or reload. modelSweepNudge wakes
+	// the sweep when the period changes, so a shorter one takes effect at once
+	// instead of after the old, longer wait runs out. Set via setModelSweep.
+	modelSweep      atomic.Int64
+	modelSweepNudge chan struct{}
 	// --- session persistence (WS3), wired by main; zero values disable it ---
 	// sessionPath/historyPath are the state files ("" ⇒ persistence off). seeds
 	// and restoredCwds are loaded at startup and consumed by createPane for
@@ -693,32 +701,37 @@ func newOrchHostsWith(hosts []config.Host, cwd string, sess *app.Session) (*orch
 		// this makes notifyAll's unconditional Send correct for every orch —
 		// including the ones tests build and main's, before the bridge is wired.
 		// Leaving the field zero would make that same call panic.
-		push:           (*push.Bridge)(nil),
-		area:           defaultArea,
-		cellW:          8,
-		cellH:          16,
-		cwd:            cwd,
-		wsArea:         make(map[string]layout.Rect),
-		wsGit:          make(map[string]browserproto.WorkspaceGitInfo),
-		visible:        make(map[uint32]bool),
-		pendingReqs:    make(map[reqKey][]*pending),
-		waiters:        make(map[uint32][]*waiter),
-		waiterCheck:    make(map[uint32]bool),
-		outAccum:       make(map[uint32]*outputScanner),
-		subs:           make(map[*ctlSubscriber]struct{}),
-		seeds:          make(map[uint32]string),
-		restoredCwds:   make(map[uint32]string),
-		restoredAgents: make(map[uint32]persist.AgentSession),
-		resumePlans:    make(map[uint32][]string),
-		spawnPlans:     make(map[uint32]app.SpawnOverride),
-		capturedHist:   make(map[uint32]string),
-		reapAfter:      defaultExitedPaneTTL,
-		autocloseAfter: defaultAutocloseTTL,
-		claudeProjects: claudeProjectsDir(),
-		modelRoots:     modelRootsFor(),
-		usageNudge:     make(chan struct{}, 1),
-		mailbox:        make(chan func(), 256),
+		push:            (*push.Bridge)(nil),
+		area:            defaultArea,
+		cellW:           8,
+		cellH:           16,
+		cwd:             cwd,
+		wsArea:          make(map[string]layout.Rect),
+		wsGit:           make(map[string]browserproto.WorkspaceGitInfo),
+		visible:         make(map[uint32]bool),
+		pendingReqs:     make(map[reqKey][]*pending),
+		waiters:         make(map[uint32][]*waiter),
+		waiterCheck:     make(map[uint32]bool),
+		outAccum:        make(map[uint32]*outputScanner),
+		subs:            make(map[*ctlSubscriber]struct{}),
+		seeds:           make(map[uint32]string),
+		restoredCwds:    make(map[uint32]string),
+		restoredAgents:  make(map[uint32]persist.AgentSession),
+		resumePlans:     make(map[uint32][]string),
+		spawnPlans:      make(map[uint32]app.SpawnOverride),
+		capturedHist:    make(map[uint32]string),
+		reapAfter:       defaultExitedPaneTTL,
+		autocloseAfter:  defaultAutocloseTTL,
+		claudeProjects:  claudeProjectsDir(),
+		modelRoots:      modelRootsFor(),
+		usageNudge:      make(chan struct{}, 1),
+		modelSweepNudge: make(chan struct{}, 1),
+		mailbox:         make(chan func(), 256),
 	}
+	// Seeded with the built-in period for the same reason reapAfter is: an orch
+	// built without a config file (tests, an embedded caller) must still sweep,
+	// and a zero here would mean "off". main overwrites it from the config.
+	o.modelSweep.Store(int64(modelSweepInterval))
 	if err := o.installHosts(hosts); err != nil {
 		return nil, err
 	}
@@ -2361,8 +2374,9 @@ func (o *orch) PaneMeta(pane uint32) app.PaneMeta {
 // only the front-end half, plus the two server-side settings that are no longer
 // restart-only: hosts:, which is diffed against the running roster exactly as
 // host.attach/host.detach diff it (a host added to the file is dialed, one
-// removed is detached and its panes re-homed), and panes.reap_exited, which is
-// nothing but a number the next sweep reads. A missing config path or a
+// removed is detached and its panes re-homed), and panes.reap_exited (and its
+// siblings autoclose_exited and agent_refresh), which are nothing but numbers
+// the next sweep or countdown reads. A missing config path or a
 // parse/validate error leaves the current page in place and reports the failure
 // to the caller. Runs on the loop goroutine; the HTTP handler reads o.page
 // atomically.
@@ -2379,6 +2393,7 @@ func (o *orch) ReloadConfig() error {
 	o.cfg = cfg // keep config.get / config.set working from the reloaded state
 	o.reapAfter = reapAfterFromConfig(cfg.Panes)
 	o.autocloseAfter = autocloseAfterFromConfig(cfg.Panes)
+	o.setModelSweep(agentRefreshFromConfig(cfg.Panes))
 	page := renderPage(o.baseHTML, cfg)
 	o.page.Store(&page)
 	o.broadcastTheme() // the theme lands live everywhere; keybindings still need a reload

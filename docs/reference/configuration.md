@@ -54,7 +54,7 @@ flowchart TD
   KIND{"which section?"}
   LIVE["theme · keybindings<br/>catctl reload — re-renders the served page"]
   HOSTS["hosts<br/>catctl reload — diffs the roster, dials/detaches"]
-  REAP["panes.reap_exited<br/>catctl reload — the next sweep reads it"]
+  REAP["panes.reap_exited · autoclose_exited · agent_refresh<br/>catctl reload — the next sweep reads it"]
   FIXED["server.* · persistence.*<br/>fixed for the process lifetime — restart catway"]
 
   EDIT --> KIND
@@ -316,6 +316,7 @@ See [Persistence](../subsystems/persistence.md).
 panes:
   reap_exited: "4h"        # "off" / "0" / "never" keeps exited panes forever
   autoclose_exited: "10s"  # a CLEANLY exited pane closes itself after this
+  agent_refresh: "1m"      # how often agent rows re-read model + context use
 ```
 
 A pane whose child exits is **kept**: the chrome turns red, the last screen
@@ -327,6 +328,7 @@ how long that corpse is kept before a five-minute sweep closes it.
 |-----|------|-------|
 | `reap_exited` | — | Go duration; `""`, `"0"`, `"off"`, `"never"` disable reaping |
 | `autoclose_exited` | — | Go duration; `"0"`, `"off"`, `"never"` disable it. Absent means the 10s default |
+| `agent_refresh` | — | Go duration, at least `10s`; `"0"`, `"off"`, `"never"` disable the sweep. Absent means the 1m default |
 
 Two things the sweep will not do, whatever this is set to:
 
@@ -364,6 +366,26 @@ pane 3 · build · ~/src · exited (0) — close in 7s ✕
   `reap_exited` comes around.
 * **The last pane is never auto-closed**, for the same reason it is never
   reaped. The countdown simply stops.
+
+### `agent_refresh` — how fresh the agent rows are
+
+Each agent pane's row names its model, and for claude how full the context
+window is: `claude opus 5.5 (44k/1M)`. Both are read from the agent's own
+transcript, at two moments:
+
+* **On a state change** (working → waiting, and so on), at most once every 20s
+  per pane. This is what shows a turn's final figure promptly.
+* **On a periodic sweep**, every `agent_refresh`. This is what keeps a pane that
+  stays *working* through a long, tool-heavy turn from showing a figure minutes
+  old, and what catches a `/model` switch on a pane that then sits idle.
+
+A shorter period tracks a busy pane more closely, but every change it finds
+re-sends the sidebar's agents list to every connected window. Below 20s it buys
+nothing, since the per-pane limit still applies. `off` leaves state changes as
+the only trigger.
+
+Live-reloadable: saving it in settings, or `catctl reload`, applies it at once.
+A shorter period does not wait out the old one.
 
 ## `push`
 

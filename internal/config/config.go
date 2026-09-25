@@ -492,6 +492,19 @@ const (
 	defaultAutocloseExitedStr = "10s"
 )
 
+// defaultAgentRefresh is the agent-pane re-read period when the config says
+// nothing, spelled twice for the same reason defaultAutocloseExited is.
+// minAgentRefresh is the floor: each sweep reads a transcript tail per agent
+// pane and, when anything moved, re-broadcasts the agents rollup to every
+// client, so a typo like "1ms" would turn a background refresh into a busy
+// loop. Below the per-pane read throttle (20s, catway's modelRefreshInterval)
+// a shorter sweep buys nothing anyway.
+const (
+	defaultAgentRefresh    = time.Minute
+	defaultAgentRefreshStr = "1m"
+	minAgentRefresh        = 10 * time.Second
+)
+
 type Panes struct {
 	// ReapExited is how long a pane is kept after its child exits, as a Go
 	// duration string. Empty, "0", "off" or "never" keeps corpses forever —
@@ -525,6 +538,41 @@ type Panes struct {
 	// click — sizing the default for the slowest reader instead would leave
 	// every ordinary `exit`ed shell sitting around for its sake.
 	AutocloseExited string `yaml:"autoclose_exited" json:"autoclose_exited"`
+
+	// AgentRefresh is how often every agent pane's model line — the model, its
+	// effort and, for claude, how full the context window is — is re-read from
+	// the agent's transcript while the pane sits in one state, as a Go duration
+	// string. State changes (working → waiting, and so on) trigger a read of
+	// their own regardless; this only bounds how stale a pane that is not
+	// changing state can get. The off-switch spellings disable the sweep,
+	// leaving state changes as the only trigger.
+	//
+	// It lives under panes rather than a section of its own because it is a
+	// property of the pane rows the sidebar draws, and the panes tab is where
+	// someone looking for "why does that number lag" would look.
+	AgentRefresh string `yaml:"agent_refresh" json:"agent_refresh"`
+}
+
+// AgentRefreshEvery parses AgentRefresh. 0 means "no periodic sweep" (the
+// off-switch spellings); an absent value takes the default, like
+// AutocloseExitedAfter, so a config written before this knob existed keeps the
+// behaviour it had. Values under minAgentRefresh are refused rather than
+// clamped, so the saved file never says something the server is not doing.
+func (p Panes) AgentRefreshEvery() (time.Duration, error) {
+	switch strings.ToLower(strings.TrimSpace(p.AgentRefresh)) {
+	case "0", "off", "never", "none":
+		return 0, nil
+	case "":
+		return defaultAgentRefresh, nil
+	}
+	d, err := time.ParseDuration(p.AgentRefresh)
+	if err != nil {
+		return 0, fmt.Errorf("agent_refresh %q: %w", p.AgentRefresh, err)
+	}
+	if d < minAgentRefresh {
+		return 0, fmt.Errorf("agent_refresh %q: must be at least %s (or off)", p.AgentRefresh, minAgentRefresh)
+	}
+	return d, nil
 }
 
 // AutocloseExitedAfter parses AutocloseExited. 0 means "never auto-close",
@@ -769,7 +817,7 @@ func Default() Config {
 		// Ten seconds for a clean exit is long enough to read "exited (0)",
 		// notice the countdown and stop it if the pane still has something on
 		// screen you wanted.
-		Panes:       Panes{ReapExited: "4h", AutocloseExited: defaultAutocloseExitedStr},
+		Panes:       Panes{ReapExited: "4h", AutocloseExited: defaultAutocloseExitedStr, AgentRefresh: defaultAgentRefreshStr},
 		Theme:       Theme{Colors: map[string]string{}},
 		Keybindings: Keybindings{CopyMode: cloneKeyMap(defaultCopyMode)},
 		Worktrees:   Worktrees{Directory: "~/.cats/worktrees"},
@@ -934,6 +982,9 @@ func (c Config) Validate() error {
 		return fmt.Errorf("panes.%w", err)
 	}
 	if _, err := c.Panes.AutocloseExitedAfter(); err != nil {
+		return fmt.Errorf("panes.%w", err)
+	}
+	if _, err := c.Panes.AgentRefreshEvery(); err != nil {
 		return fmt.Errorf("panes.%w", err)
 	}
 	for action, keys := range c.Keybindings.CopyMode {

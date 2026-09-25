@@ -241,6 +241,7 @@ func configOptions(c config.Config) map[string]json.RawMessage {
 func (o *orch) applyLiveOptions() {
 	o.reapAfter = reapAfterFromConfig(o.cfg.Panes)
 	o.autocloseAfter = autocloseAfterFromConfig(o.cfg.Panes)
+	o.setModelSweep(agentRefreshFromConfig(o.cfg.Panes))
 	o.worktreeDir = o.cfg.Worktrees.Directory
 }
 

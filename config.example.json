@@ -20,7 +20,8 @@
   },
   "panes": {
     "reap_exited": "4h",
-    "autoclose_exited": "10s"
+    "autoclose_exited": "10s",
+    "agent_refresh": "1m"
   },
   "theme": {},
   "keybindings": {

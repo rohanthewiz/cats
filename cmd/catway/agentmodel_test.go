@@ -5,6 +5,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -127,6 +128,87 @@ func TestLastAssistantModelCarriesEffort(t *testing.T) {
 		assistantEffort("claude-opus-5", "a very wordy effort"))
 	if got := lastAssistantModel(junk); got != "claude-opus-5" {
 		t.Fatalf("junk effort: model = %q, want claude-opus-5", got)
+	}
+}
+
+// assistantUsage is an assistant record carrying the API's usage block, split
+// across the three input buckets the way a cached request reports them.
+func assistantUsage(model, effort string, input, cacheWrite, cacheRead int64) string {
+	return `{"type":"assistant","isSidechain":false,"effort":"` + effort +
+		`","message":{"role":"assistant","model":"` + model + `","usage":{` +
+		`"input_tokens":` + itoa(input) +
+		`,"cache_creation_input_tokens":` + itoa(cacheWrite) +
+		`,"cache_read_input_tokens":` + itoa(cacheRead) +
+		`,"output_tokens":9999}}}`
+}
+
+func itoa(n int64) string { return strconv.FormatInt(n, 10) }
+
+// The context segment sums all three input buckets (and not the output), and
+// comes from the same last main-thread record as the model — a sub-agent's
+// usage is its own context, not the pane's.
+func TestLastAssistantModelCarriesContext(t *testing.T) {
+	projects := t.TempDir()
+	path := writeTranscript(t, projects, "-p", "s.jsonl", 0,
+		assistantUsage("claude-opus-5-5", "high", 2, 3635, 39935),
+		`{"type":"assistant","isSidechain":true,"message":{"model":"claude-haiku-4-5","usage":{"input_tokens":150000}}}`)
+	if got, want := lastAssistantModel(path), "claude-opus-5-5 · high · 44k/1M"; got != want {
+		t.Fatalf("model = %q, want %q", got, want)
+	}
+
+	// No usable effort still yields the context segment, with one separator.
+	noEffort := writeTranscript(t, projects, "-p", "ne.jsonl", 0,
+		assistantUsage("claude-haiku-4-5", "", 800, 0, 0))
+	if got, want := lastAssistantModel(noEffort), "claude-haiku-4-5 · 800/200k"; got != want {
+		t.Fatalf("no effort: model = %q, want %q", got, want)
+	}
+}
+
+func TestClaudeContextWindow(t *testing.T) {
+	for _, tc := range []struct {
+		model string
+		used  int64
+		want  int64
+	}{
+		{"claude-opus-5-5", 1, 1_000_000},
+		{"claude-fable-5-1", 1, 1_000_000},
+		{"claude-sonnet-5", 1, 1_000_000},
+		{"claude-opus-4-8", 1, 1_000_000},
+		{"claude-sonnet-4-6", 1, 1_000_000},
+		{"claude-opus-4-5-20251101", 1, 200_000},
+		{"claude-sonnet-4-5-20250929", 1, 200_000},
+		{"claude-haiku-4-5", 1, 200_000},
+		{"claude-3-5-sonnet-20241022", 1, 200_000},
+		// The 1M opt-in, named outright or given away by the request's size.
+		{"claude-sonnet-4-5-20250929[1m]", 1, 1_000_000},
+		{"claude-sonnet-4-5-20250929", 250_000, 1_000_000},
+		// A model newer than the table follows the current line.
+		{"claude-opus-6", 1, 1_000_000},
+	} {
+		if got := claudeContextWindow(tc.model, tc.used); got != tc.want {
+			t.Errorf("claudeContextWindow(%q, %d) = %d, want %d", tc.model, tc.used, got, tc.want)
+		}
+	}
+}
+
+func TestCompactTokens(t *testing.T) {
+	for _, tc := range []struct {
+		n    int64
+		want string
+	}{
+		{0, "0"},
+		{999, "999"},
+		{1000, "1k"},
+		{43_572, "44k"},
+		{999_400, "999k"},
+		{999_600, "1M"}, // rounds across the boundary, never "1000k"
+		{1_000_000, "1M"},
+		{1_240_000, "1.2M"},
+		{200_000, "200k"},
+	} {
+		if got := compactTokens(tc.n); got != tc.want {
+			t.Errorf("compactTokens(%d) = %q, want %q", tc.n, got, tc.want)
+		}
 	}
 }
 
@@ -598,4 +680,33 @@ func TestModelReadOvertakenByAnIdentityChangeIsDiscarded(t *testing.T) {
 		t.Fatal("published the overtaken read's model")
 	}
 	waitFor(t, o, func() bool { return rt.agentModel == "claude-fable-5" })
+}
+
+// A changed sweep period wakes the sweep goroutine (so a shorter one applies
+// now, not after the old wait), an unchanged one does not, and nudges never
+// pile up — the goroutine re-reads the period on waking, so one is enough.
+func TestSetModelSweepNudgesOnChangeOnly(t *testing.T) {
+	o := &orch{modelSweepNudge: make(chan struct{}, 1)}
+	o.modelSweep.Store(int64(time.Minute))
+	nudged := func() bool {
+		select {
+		case <-o.modelSweepNudge:
+			return true
+		default:
+			return false
+		}
+	}
+
+	o.setModelSweep(time.Minute)
+	if nudged() {
+		t.Fatal("unchanged period nudged the sweep")
+	}
+	o.setModelSweep(2 * time.Minute)
+	o.setModelSweep(0) // a second change before the goroutine wakes must not block
+	if !nudged() || nudged() {
+		t.Fatal("want exactly one pending nudge after two changes")
+	}
+	if got := time.Duration(o.modelSweep.Load()); got != 0 {
+		t.Fatalf("period = %v, want 0 (off)", got)
+	}
 }

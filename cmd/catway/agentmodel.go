@@ -8,10 +8,13 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/rohanthewiz/cats/internal/browserproto"
+	"github.com/rohanthewiz/cats/internal/config"
+	"github.com/rohanthewiz/cats/internal/dlog"
 	"github.com/rohanthewiz/cats/internal/orchestration"
 )
 
@@ -56,8 +59,9 @@ import (
 //	         and the effort comes from whichever of session.model_change or
 //	         session.auto_mode_resolved spoke most recently (see copilotModel).
 //
-// The effort rides along inside the one model string ("claude-opus-5 · high")
-// rather than in a field of its own: the hover card shows the pair as one line, so
+// The effort, and for claude how full the context window is, ride along inside
+// the one model string ("claude-opus-5 · high · 43k/1M") rather than in fields of
+// their own: the hover card shows the pair as one line, so
 // nothing between here and there — pane state, the wire protocol, the pane.list
 // snapshot — has to learn about it.
 //
@@ -108,10 +112,20 @@ const (
 	// pane. Every publishAgent calls in, and a pane flips state several times a
 	// turn; the model only ever changes between turns.
 	modelRefreshInterval = 20 * time.Second
-	// modelSweepInterval paces the background refresh, which is what catches a
-	// /model switch on a pane that then sits idle — with no state transition,
-	// nothing else would re-read its transcript.
-	modelSweepInterval = 30 * time.Second
+	// modelSweepInterval is the built-in period of the background refresh,
+	// which is what catches a /model switch on a pane that then sits idle — with
+	// no state transition, nothing else would re-read its transcript. The live
+	// period is panes.agent_refresh (orch.modelSweep); this is what an orch uses
+	// before, or without, a config, and it matches config's own default.
+	//
+	// A minute rather than anything tighter because the string also carries the
+	// context size, which grows on every tool round-trip of a working pane: each
+	// sweep that lands mid-turn is a change, and each change re-broadcasts the
+	// agents rollup session-wide (see setAgentModel). State transitions still
+	// read sooner (bounded by modelRefreshInterval), so a pane that finishes a
+	// turn shows its final figure promptly; the sweep only bounds how stale a
+	// pane sitting in one state can get.
+	modelSweepInterval = time.Minute
 	// modelTailBytes bounds the tail read. Transcripts run to megabytes; the
 	// last assistant record is all but always within a few KB of the end.
 	modelTailBytes = 256 << 10
@@ -210,8 +224,10 @@ func (o *orch) setAgentModel(pid uint32, model string) {
 	// kicked off from, so the rollup that went out then carried the *previous*
 	// model. Without this, a row would name the model one turn behind, and a pane
 	// that resolves a model while sitting idle (the periodic sweep catching a
-	// /model switch) would never correct itself. The rebuild is session-wide but
-	// only happens when the model actually moved, which is rare.
+	// /model switch) would never correct itself. The rebuild is session-wide and,
+	// now that the string carries the context size, happens about once per turn
+	// on a busy claude pane — bounded by modelRefreshInterval per pane, and by
+	// compactTokens rounding to whole thousands so small moves do not count.
 	o.broadcast(o.agentsMsg())
 }
 
@@ -261,17 +277,69 @@ func sameSessionRef(a, b *agentSessionRef) bool {
 // runAgentModels is the periodic refresh pacer (own goroutine, started by main),
 // bounding how stale a quiet pane's model can get. Each pass is throttled per
 // pane by refreshAgentModel, so it costs nothing on panes that just refreshed.
+//
+// The period is re-read before every wait rather than fixed at start, because
+// panes.agent_refresh is live-reloadable. A plain ticker would need resetting
+// from the loop goroutine; instead the loop only stores the new period and
+// pokes modelSweepNudge (setModelSweep), and this goroutine — the only one that
+// owns the timer — starts a fresh wait with it:
+//
+//	wait(period) ──fires──▶ post sweep ──▶ wait(period)
+//	      │
+//	      └──nudged──▶ (no sweep) ──▶ wait(new period)
+//
+// A nudge does not sweep: the period changing is not a reason to read every
+// transcript right now. A period of 0 (agent_refresh: off) waits on the nudge
+// alone, so turning the sweep back on needs no restart.
 func (o *orch) runAgentModels() {
-	t := time.NewTicker(modelSweepInterval)
-	defer t.Stop()
-	for range t.C {
-		o.post(func() {
-			for _, rt := range o.panes {
-				agent, _ := rt.effectiveAgent()
-				o.refreshAgentModel(rt, agent)
-			}
-		})
+	for {
+		d := time.Duration(o.modelSweep.Load())
+		if d <= 0 {
+			<-o.modelSweepNudge
+			continue
+		}
+		t := time.NewTimer(d)
+		select {
+		case <-t.C:
+			o.post(func() {
+				for _, rt := range o.panes {
+					agent, _ := rt.effectiveAgent()
+					o.refreshAgentModel(rt, agent)
+				}
+			})
+		case <-o.modelSweepNudge:
+			t.Stop()
+		}
 	}
+}
+
+// setModelSweep adopts a new sweep period (0 = off) and wakes the sweep so it
+// takes effect now. An unchanged period is not a nudge: a config save that
+// touched some other section should not restart the current wait. The send is
+// non-blocking — a nudge already pending carries the same message, since the
+// goroutine re-reads the period when it wakes. Loop goroutine (or main, before
+// the loop starts).
+func (o *orch) setModelSweep(d time.Duration) {
+	if o.modelSweep.Swap(int64(d)) == int64(d) {
+		return
+	}
+	select {
+	case o.modelSweepNudge <- struct{}{}:
+	default:
+	}
+}
+
+// agentRefreshFromConfig resolves panes.agent_refresh, falling back to the
+// built-in period if the value is unparseable — Config.Validate has already
+// refused that at load, so this is belt-and-braces plus a log line, as with
+// reapAfterFromConfig.
+func agentRefreshFromConfig(p config.Panes) time.Duration {
+	d, err := p.AgentRefreshEvery()
+	if err != nil {
+		dlog.Warnf("catway: panes.%v — using %s", err, modelSweepInterval)
+		return modelSweepInterval
+	}
+	return d
 }
 
 // --- transcript resolution (no orch state; runs off the loop goroutine) -------
@@ -400,14 +468,29 @@ type transcriptRecord struct {
 	Effort      string `json:"effort"` // top-level, not part of the message
 	Message     struct {
 		Model string `json:"model"`
+		// Usage is the API's own accounting for the request that produced this
+		// message, copied into the transcript verbatim. Only the input side is
+		// read (see claudeContextUsed).
+		Usage struct {
+			InputTokens              int64 `json:"input_tokens"`
+			CacheCreationInputTokens int64 `json:"cache_creation_input_tokens"`
+			CacheReadInputTokens     int64 `json:"cache_read_input_tokens"`
+		} `json:"usage"`
 	} `json:"message"`
 }
 
 // lastAssistantModel is the model named by the transcript's last assistant
-// record, suffixed with the effort that record ran at when it names a usable one
-// ("claude-opus-5 · high"). Only main-thread records count: a sidechain record
-// names the model a sub-agent ran under, and claude stamps "<synthetic>" on
-// messages it fabricated (an API error, an interrupt) rather than sampled.
+// record, suffixed with the effort that record ran at when it names a usable one,
+// and then with how full the context window was for that request
+// ("claude-opus-5 · high · 43k/1M"). Only main-thread records count: a sidechain
+// record names the model a sub-agent ran under (and a sub-agent's context is its
+// own, not the pane's), and claude stamps "<synthetic>" on messages it
+// fabricated (an API error, an interrupt) rather than sampled.
+//
+// The context figure rides in the same string as the effort, for the same
+// reason the effort does (see modelEffortSep): the hover card and the rollup
+// already carry this one string end to end, so nothing downstream has to learn
+// a new field. The browser's modelLabel recognises the segment by its shape.
 func lastAssistantModel(path string) string {
 	lines := tailLines(path)
 	for i := len(lines) - 1; i >= 0; i-- {
@@ -424,13 +507,117 @@ func lastAssistantModel(path string) string {
 			continue
 		}
 		if m := rec.Message.Model; m != "" && m != "<synthetic>" {
+			out := m
 			if isEffortLabel(rec.Effort) {
-				return m + modelEffortSep + rec.Effort
+				out += modelEffortSep + rec.Effort
 			}
-			return m
+			if used := claudeContextUsed(rec); used > 0 {
+				out += modelEffortSep + formatContext(used, claudeContextWindow(m, used))
+			}
+			return out
 		}
 	}
 	return ""
+}
+
+// claudeContextUsed is how many tokens of context the record's request carried:
+// everything the model was handed as input, whether it was billed fresh, written
+// to the cache, or read from it. Those three are disjoint slices of one prompt
+// (the API reports cached tokens *instead of* counting them in input_tokens), so
+// the sum is the prompt's full size.
+//
+// The record's own output is left out. It does join the context on the next
+// request, but most of it is thinking, which is dropped from later turns, so
+// adding it would overstate the figure.
+//
+// 0 means the record carries no usage (an older transcript, a record written
+// before its response finished) and the segment is simply omitted.
+func claudeContextUsed(rec transcriptRecord) int64 {
+	u := rec.Message.Usage
+	return u.InputTokens + u.CacheCreationInputTokens + u.CacheReadInputTokens
+}
+
+const (
+	contextWindowStd  = 200_000
+	contextWindowWide = 1_000_000
+)
+
+// claudeContextWindows maps a model id prefix to its context window, first match
+// wins. The transcript names the model but not the window, so this is a table
+// rather than a read.
+//
+// It is ordered narrow-to-broad on purpose: "claude-opus-4-6" has to be tried
+// before "claude-opus-4", which would otherwise claim it (and Opus 4 / 4.1 / 4.5
+// really are 200K while 4.6 and later are 1M). The table only needs to name the
+// older generations explicitly — an id that matches nothing falls through to 1M
+// in claudeContextWindow, because every current Claude model has a 1M window
+// except Haiku, and a model released after this table was written is far likelier
+// to follow the current line than the old one.
+var claudeContextWindows = []struct {
+	prefix string
+	window int64
+}{
+	{"claude-opus-4-6", contextWindowWide},
+	{"claude-opus-4-7", contextWindowWide},
+	{"claude-opus-4-8", contextWindowWide},
+	{"claude-sonnet-4-6", contextWindowWide},
+	{"claude-opus-4", contextWindowStd},   // Opus 4, 4.1, 4.5
+	{"claude-sonnet-4", contextWindowStd}, // Sonnet 4, 4.5 (1M only as an opt-in beta)
+	{"claude-haiku-", contextWindowStd},
+	{"claude-3", contextWindowStd}, // the older "claude-3-5-sonnet-…" ordering
+}
+
+// claudeContextWindow is the context window model ran with.
+//
+// Two corrections sit on top of the table:
+//
+//   - An id ending "[1m]" names the 1M opt-in on a model whose default is 200K
+//     (the same spelling modelLabel already recognises in the browser).
+//   - A request that carried more than the table's window can only have run on
+//     the larger one. That is how a 200K-default model on the 1M beta gets the
+//     right denominator even though its transcript id says nothing about it —
+//     from the moment the conversation outgrows 200K, which is the moment the
+//     difference starts to matter.
+func claudeContextWindow(model string, used int64) int64 {
+	id := strings.ToLower(model)
+	if strings.HasSuffix(id, "[1m]") {
+		return contextWindowWide
+	}
+	window := int64(contextWindowWide)
+	for _, e := range claudeContextWindows {
+		if strings.HasPrefix(id, e.prefix) {
+			window = e.window
+			break
+		}
+	}
+	if used > window {
+		window = contextWindowWide
+	}
+	return window
+}
+
+// formatContext renders "used/window" compactly for a one-line label: "43k/1M".
+func formatContext(used, window int64) string {
+	return compactTokens(used) + "/" + compactTokens(window)
+}
+
+// compactTokens renders a token count in at most four characters or so: "850",
+// "43k", "1M", "1.2M". Thousands are whole — a sidebar label moving by a tenth
+// of a k on every turn is noise, and every change re-broadcasts the agents rollup
+// (see setAgentModel), so coarser is also cheaper.
+//
+// The k/M boundary is decided on the *rounded* value, so 999,600 reads "1M"
+// rather than "1000k". Millions keep one decimal, dropped when it is ".0".
+func compactTokens(n int64) string {
+	switch k := (n + 500) / 1000; {
+	case n < 1000:
+		return strconv.FormatInt(n, 10)
+	case k < 1000:
+		return strconv.FormatInt(k, 10) + "k"
+	default:
+		m := strconv.FormatFloat(float64(n)/1e6, 'f', 1, 64)
+		return strings.TrimSuffix(m, ".0") + "M"
+	}
 }
 
 // tailLines is the last modelTailBytes of a line-oriented history file, split

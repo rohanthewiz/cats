@@ -140,6 +140,12 @@ panes:
   # the failure you are about to read.
   autoclose_exited: "10s"              # Go duration. "off" (or "0"/"never")
                                        # keeps every corpse until reap_exited.
+  # How often each agent pane's model line — model, effort and, for claude,
+  # context used/window ("opus 5.5 (44k/1M)") — is re-read while the pane sits
+  # in one state. State changes trigger their own read, so this only bounds how
+  # far a busy pane's figure can lag. Live-reloadable.
+  agent_refresh: "1m"                  # Go duration, at least 10s. "off" leaves
+                                       # state changes as the only trigger.
 
 # Git worktrees (workspace > new worktree): where new checkouts are created.
 worktrees:
