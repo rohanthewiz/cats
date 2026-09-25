@@ -199,7 +199,7 @@ window were dated by grepping every session doc.
   `catctl reload`. Adding it would mean adding `tools` to `optionSections` and
   a map widget.
 
-- **N-039** · raised 2026-09-24, the no-such-pane commit (no session doc) · value low
+- **N-039** · raised `2026-0924-2005-no-such-pane-exited-panes` · value low
   `capture` / `read` of an exited pane now fail at once with "pane N has
   exited" (they used to time out), but they still cannot return the text. The
   daemon drops the emulator at PTY EOF. catway's grid mirror (`rt.grid`) still
@@ -242,7 +242,7 @@ Newest first. The unnumbered entries at the end were found done while seeding,
 so they are not carried.
 
 - **N-036** · raised `2026-0924-1953-context-usage-warn-demotion-tool-types` ·
-  closed 2026-09-24, the no-such-pane commit — Not a pane-close race, but
+  closed 2026-09-24, `2026-0924-2005-no-such-pane-exited-panes` — Not a pane-close race, but
   exited panes. The daemon's read pump drops a pane from its map at PTY EOF,
   while catway keeps the exited pane on screen for the reaper. Several catway
   sends had no `rt.exited` check: the reconcile resize (any layout change hit
