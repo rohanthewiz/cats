@@ -162,11 +162,6 @@ window were dated by grepping every session doc.
   cats-mobile: nothing draws `Session.Plugins` yet. If the phone gets a
   plugins list, split it by `PluginPane.Type` the way the desktop does.
 
-- **N-021** · raised `2026-0922-1713-plugin-types-and-releases` · value medium
-  cats-todo: "Send info prompts to gonotes" (carried in cats-todo's own
-  session docs) can now find the notes plugin by `plugin_type ==
-  "notes_mgr"` in `pane.list` instead of by id.
-
 - **N-031** · raised `2026-0923-1443-settings-json-and-screen` · value low
   `docs/reference/configuration.md` still shows every section example in YAML
   (the keys are identical in JSON; the intro says so). Convert them to JSON,
@@ -240,6 +235,17 @@ unchanged.
 Closures before this file existed live in the session docs' own write-ups.
 Newest first. The unnumbered entries at the end were found done while seeding,
 so they are not carried.
+
+- **N-021** · raised `2026-0922-1713-plugin-types-and-releases` ·
+  closed 2026-09-24, cats-todo `52539fe` + gonotes `08eb409` (no session doc) —
+  cats-todo sends an info prompt to the pane typed `notes_mgr` in `pane.list`
+  (`pickNotesPane`, own workspace first), never by plugin id. The intake
+  contract is a pasted `<!-- cats-note v1 -->` envelope through
+  `pane.send_input`: a sentinel line, YAML frontmatter, then the markdown body.
+  cats' paste encoding brings it to the TUI whole as a bracketed paste, and
+  gonotes' root Update opens it as an unsaved note form. No cats change was
+  needed. `tools.types` (N-035) is what types a `gonotes` started from a shell
+  as `notes_mgr` too.
 
 - **N-036** · raised `2026-0924-1953-context-usage-warn-demotion-tool-types` ·
   closed 2026-09-24, `2026-0924-2005-no-such-pane-exited-panes` — Not a pane-close race, but
