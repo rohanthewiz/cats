@@ -1241,6 +1241,13 @@ func NewError(paneID uint32, msg string) Error {
 	return Error{Type: MsgError, PaneID: paneID, Message: msg}
 }
 
+// ErrNoSuchPane is the error message a command addressed to a pane the daemon
+// no longer holds gets back. It is a wire string, not a Go error, because the
+// orchestrator matches on it: the read pump drops a pane from the map at PTY
+// EOF, before its pane_exited reaches the orchestrator, so a command sent in
+// that window lands here by construction and is moot rather than a fault.
+const ErrNoSuchPane = "no such pane"
+
 // --- Frame / cell wire types ------------------------------------------------
 //
 // Shaped to drop straight into Rust wire::FrameData / CellData compositing.

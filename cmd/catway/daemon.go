@@ -1414,6 +1414,19 @@ func (d *daemon) dispatch(mt orchestration.MessageType, payload []byte) {
 		if err := json.Unmarshal(payload, &ev); err != nil {
 			return
 		}
+		// "no such pane" is informational and never toasted. The sends that
+		// can target an exited pane are gated on rt.exited, so what is left is
+		// the window between the daemon's read pump dropping the pane at PTY
+		// EOF and its pane_exited reaching the loop: a keystroke, resize or
+		// scroll sent in that window addresses a PTY that is already gone, and
+		// there is nothing to do about it. As a WARN it showed up in daemons.log
+		// in bursts (three in 8 days, all for one pane), and every one also
+		// toasted a bare "error: no such pane" in the window. A read/capture
+		// caught in the same window still fails, by its own timeout.
+		if ev.Message == orchestration.ErrNoSuchPane {
+			log.Printf("catway: daemon error (pane %d): %s", ev.PaneID, ev.Message)
+			return
+		}
 		dlog.Warnf("catway: daemon error (pane %d): %s", ev.PaneID, ev.Message)
 		o.post(func() { o.broadcast(browserproto.NewError(ev.PaneID, ev.Message)) })
 	}

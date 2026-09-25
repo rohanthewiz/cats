@@ -1246,7 +1246,12 @@ func (o *orch) syncDaemon() {
 		switch {
 		case !rt.created:
 			o.createPane(rt)
-		case changed:
+		case changed && rt.exited == nil:
+			// An exited pane stays on screen (the reaper's countdown), so any
+			// layout change reaches it here, but the daemon dropped its PTY
+			// at EOF and would answer "no such pane". The new grid is still
+			// recorded above, so a respawn (createPane) spawns at the right
+			// size.
 			r := orchestration.NewResize(pid, cols, rows)
 			r.CellWidthPx, r.CellHeightPx = o.cellW, o.cellH
 			o.hostOf(rt).send(r)
@@ -1712,6 +1717,9 @@ func (o *orch) BroadcastFlags() {
 // StartRead registers an in-flight read (app.Backend) and asks the daemon to
 // extract the selection. The pane_selection reply completes r in resolvePending.
 func (o *orch) StartRead(r app.Responder, p app.ReadParams) {
+	if o.failExited(r, p.Pane) {
+		return
+	}
 	o.registerPending(r, paneKey(p.Pane, reqSelection))
 	o.hostForPane(p.Pane).send(orchestration.NewRequestSelection(p.Pane,
 		orchestration.SelectionPoint{Row: p.Anchor[0], Col: uint16(p.Anchor[1])},
@@ -1722,8 +1730,25 @@ func (o *orch) StartRead(r app.Responder, p app.ReadParams) {
 // StartCapture registers an in-flight capture (app.Backend) and asks the daemon
 // to extract the pane's buffer text. The pane_text reply completes r.
 func (o *orch) StartCapture(r app.Responder, p app.CaptureParams) {
+	if o.failExited(r, p.Pane) {
+		return
+	}
 	o.registerPending(r, paneKey(p.Pane, reqText))
 	o.hostForPane(p.Pane).send(orchestration.NewRequestText(p.Pane, p.Scope, p.Lines, p.Ansi, p.Unwrap))
+}
+
+// failExited fails r at once when pane has exited, and reports whether it did.
+// The daemon drops an exited pane's PTY and emulator, so a read or capture of
+// it can only come back as a daemon "no such pane" error. That error names no
+// request kind, so it cannot resolve the pending entry, and the caller would
+// sit out the full reqTimeout for a "timed out" that hides the real reason.
+func (o *orch) failExited(r app.Responder, pane uint32) bool {
+	rt := o.panes[pane]
+	if rt == nil || rt.exited == nil {
+		return false
+	}
+	r.Fail(fmt.Sprintf("pane %d has exited", pane))
+	return true
 }
 
 // registerPending enqueues an in-flight request under key and arms its timeout.
@@ -1871,6 +1896,9 @@ func (o *orch) sendStreamSub(pane uint32, enabled bool) {
 func (o *orch) triggerWaiterCheck(pane uint32) {
 	if len(o.waiters[pane]) == 0 || o.waiterCheck[pane] {
 		return
+	}
+	if rt := o.panes[pane]; rt != nil && rt.exited != nil {
+		return // no PTY left to capture; the check would only earn a "no such pane"
 	}
 	d := o.hostForPane(pane)
 	if !d.connected() {
@@ -2266,8 +2294,15 @@ func (o *orch) BroadcastPaneTitle(pane uint32) {
 
 // ScrollPane passes a scrollback delta to the pane's PTY.
 func (o *orch) ScrollPane(pane uint32, delta int) error {
-	if o.panes[pane] == nil {
+	rt := o.panes[pane]
+	if rt == nil {
 		return fmt.Errorf("unknown pane %d", pane)
+	}
+	// The daemon no longer holds an exited pane's emulator, so there is no
+	// scrollback to move. Said here, in the words send_input uses, instead of
+	// as a daemon "no such pane" the caller never sees.
+	if rt.exited != nil {
+		return fmt.Errorf("pane %d has exited", pane)
 	}
 	o.hostForPane(pane).send(orchestration.NewScrollViewport(pane, int32(delta)))
 	return nil
@@ -3186,6 +3221,12 @@ func (o *orch) handleUp(c *client, up any) {
 
 	case *browserproto.Raw:
 		id, ok := o.session.FocusedPaneIn(o.viewWS(c))
+		// The exited check is inputTarget's, which Key/Mouse/Paste go through
+		// and Raw does not; bytes for a dead pane would come back as a daemon
+		// "no such pane".
+		if rt := o.panes[uint32(id)]; ok && rt != nil && rt.exited != nil {
+			ok = false
+		}
 		if ok && len(m.Data) > 0 {
 			o.hostForPane(uint32(id)).send(orchestration.NewInput(uint32(id), m.Data))
 		}

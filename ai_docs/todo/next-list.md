@@ -32,7 +32,7 @@ window were dated by grepping every session doc.
 - Open and Roadmap stay in ID order. New items append to the end of Open (or
   Roadmap, for future work) with the next ID.
 
-**Next ID:** N-039
+**Next ID:** N-040
 
 ## Open
 
@@ -188,12 +188,6 @@ window were dated by grepping every session doc.
   grid (`internal/catsclient/grid.go`) would apply `PaneDiff.Shift` as the
   browser does: scroll the cells up, blank the vacated rows, then the cells.
 
-- **N-036** · raised `2026-0924-1953-context-usage-warn-demotion-tool-types` · value low
-  `catway: daemon error (pane N): no such pane` is still a WARN (3 in 8 days of
-  the installed app's `daemons.log`). It may be a real race between a pane
-  closing and a command addressed to it, so find where it comes from before
-  demoting it (N-006 left it alone for that reason).
-
 - **N-037** · raised `2026-0924-1953-context-usage-warn-demotion-tool-types` · value low
   The context used/window segment on agent rows (`43k/1M`) is claude-only.
   Copilot's `events.jsonl` would need its own reader, if it records usage at
@@ -204,6 +198,13 @@ window were dated by grepping every session doc.
   key→value widget (`33-settings.js` OPTION_TABS). It is file-only plus
   `catctl reload`. Adding it would mean adding `tools` to `optionSections` and
   a map widget.
+
+- **N-039** · raised 2026-09-24, the no-such-pane commit (no session doc) · value low
+  `capture` / `read` of an exited pane now fail at once with "pane N has
+  exited" (they used to time out), but they still cannot return the text. The
+  daemon drops the emulator at PTY EOF. catway's grid mirror (`rt.grid`) still
+  holds the last screen, which is often what you want from a dead pane (the
+  crash message), so serve at least `scope: screen` from it.
 
 ## Roadmap
 
@@ -239,6 +240,20 @@ unchanged.
 Closures before this file existed live in the session docs' own write-ups.
 Newest first. The unnumbered entries at the end were found done while seeding,
 so they are not carried.
+
+- **N-036** · raised `2026-0924-1953-context-usage-warn-demotion-tool-types` ·
+  closed 2026-09-24, the no-such-pane commit — Not a pane-close race, but
+  exited panes. The daemon's read pump drops a pane from its map at PTY EOF,
+  while catway keeps the exited pane on screen for the reaper. Several catway
+  sends had no `rt.exited` check: the reconcile resize (any layout change hit
+  the dead pane), `ScrollPane`, `StartRead` / `StartCapture` (which then sat out
+  the 5s `reqTimeout`, because a daemon error names no request kind), the
+  waiter capture-check, and `Raw` input. All are gated now; read, capture and
+  scroll fail with "pane N has exited". What is left is the gap between EOF and
+  `pane_exited` reaching the loop, which nothing can close. So
+  `orchestration.ErrNoSuchPane` logs as informational and is no longer toasted
+  as "error: no such pane". Other daemon errors stay WARN plus toast. Follow-up
+  in N-039.
 
 - **N-035** · raised 2026-09-24, the `db_client` commit (no session doc) ·
   closed 2026-09-24, `2026-0924-1953-context-usage-warn-demotion-tool-types` — A new config map,

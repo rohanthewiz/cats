@@ -696,7 +696,7 @@ func (h *Host) dispatch(typ MessageType, payload []byte) error {
 				h.emit(NewError(c.PaneID, err.Error()))
 			}
 		} else {
-			h.emit(NewError(c.PaneID, "no such pane"))
+			h.emit(NewError(c.PaneID, ErrNoSuchPane))
 		}
 	case MsgResize:
 		var c Resize
@@ -1520,7 +1520,7 @@ func (h *Host) emitFrame(p *pane) (sent bool, err error) {
 func (h *Host) resizePane(c Resize) error {
 	p := h.getPane(c.PaneID)
 	if p == nil {
-		return errors.New("no such pane")
+		return errors.New(ErrNoSuchPane)
 	}
 	p.ptyMu.Lock()
 	err := pty.Setsize(p.ptmx, &pty.Winsize{Cols: c.Cols, Rows: c.Rows})
@@ -1545,7 +1545,7 @@ func (h *Host) resizePane(c Resize) error {
 func (h *Host) scrollPane(c ScrollViewport) error {
 	p := h.getPane(c.PaneID)
 	if p == nil {
-		return errors.New("no such pane")
+		return errors.New(ErrNoSuchPane)
 	}
 	p.emuMu.Lock()
 	defer p.emuMu.Unlock()
@@ -1566,7 +1566,7 @@ func (h *Host) scrollPane(c ScrollViewport) error {
 func (h *Host) requestSelection(c RequestSelection) error {
 	p := h.getPane(c.PaneID)
 	if p == nil {
-		return errors.New("no such pane")
+		return errors.New(ErrNoSuchPane)
 	}
 	anchor := terminal.SelectionEndpoint{Row: c.Anchor.Row, Col: c.Anchor.Col}
 	cursor := terminal.SelectionEndpoint{Row: c.Cursor.Row, Col: c.Cursor.Col}
@@ -1592,7 +1592,7 @@ func (h *Host) requestSelection(c RequestSelection) error {
 func (h *Host) requestText(c RequestText) error {
 	p := h.getPane(c.PaneID)
 	if p == nil {
-		return errors.New("no such pane")
+		return errors.New(ErrNoSuchPane)
 	}
 	p.emuMu.Lock()
 	var (
