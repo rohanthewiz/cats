@@ -116,7 +116,13 @@ server, web client + Mac server), or
   hyperlinks; window-title and notification passthrough.
 - **Remote access**: shared-password login with HMAC-signed session cookies
   (headless clients use a Bearer token) and optional TLS (self-signed
-  auto-generated, or bring your own cert).
+  auto-generated, or bring your own cert). `catctl pair` puts a single-use QR
+  code on screen so a phone can join without anyone typing the password.
+- **Peer sync**: reconcile workspaces, todo backlogs and plugins with a second
+  cats on another machine, and get a report of what did not carry across.
+  Pairing with `catctl pair peer` gives that machine a sync-only, revocable
+  credential, so no password is copied between them — see
+  [below](#peer-sync--a-second-machine).
 - **Configuration** in JSON (`~/.config/cats/config.json`, edited from the settings screen — ⌘,): server settings,
   theme colors/font, and keybindings — see
   [`config.example.yaml`](config.example.yaml). Theme/keybinding edits apply
@@ -193,6 +199,40 @@ plugin claims in its manifest (`cats-todo add -<TAB>`).
 `catctl integration install claude` installs the cats hook integration
 into an agent's own config tree (offline — no catway needed); `catctl probe`
 is a stdlib-only WebSocket probe for exercising the browser protocol headlessly.
+
+### Peer sync — a second machine
+
+Two cats instances (say a Mac and a Linux box) can reconcile their workspaces,
+cats-todo backlogs and installed plugins. Nothing is ever deleted on either
+side; the report lists what was synced and what was skipped, and why.
+
+Pair them once. On the machine being synced **with**:
+
+```bash
+catctl pair peer laptop               # prints a ready-to-paste command with a cats://peer link
+```
+
+On the other machine, paste it with an id of your choosing (keep the quotes —
+the link contains `&`):
+
+```bash
+catctl attach-peer mini 'cats://peer?f=…&t=…&u=…'
+catctl sync mini todos                # merge backlogs both ways, print the report
+catctl sync mini all pull             # workspaces, todos and plugins, theirs → here
+```
+
+The link holds a five-minute, single-use token, not the password. Redeeming it
+gives this machine a **peer grant**: it survives restarts of both sides, opens
+only the sync routes (never a terminal), and is revocable on its own. On the
+machine that issued it:
+
+```bash
+catctl peer-grants                    # who holds a grant, and when it was last used
+catctl revoke-peer-grant 258e3a60     # cut one peer off; it pairs again to return
+```
+
+The peers dialog (gear menu › *peers / sync…*) accepts the same link. See
+[peer sync](docs/subsystems/peer-sync.md) for what travels and on what terms.
 
 ### Chat side panel — an ACP agent beside the panes
 
