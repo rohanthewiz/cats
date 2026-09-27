@@ -12,6 +12,7 @@ import (
 
 	"github.com/rohanthewiz/cats/internal/app"
 	"github.com/rohanthewiz/cats/internal/browserproto"
+	"github.com/rohanthewiz/cats/internal/config"
 	"github.com/rohanthewiz/cats/internal/layout"
 )
 
@@ -327,6 +328,42 @@ func TestRecordCeilingStopsCaptureAndReportsIt(t *testing.T) {
 	s := recordResult(t, record(t, o, app.RunbookRecordParams{Action: app.RecordStatus}))
 	if s.Steps != 0 || !strings.Contains(s.Note, "ceiling") {
 		t.Fatalf("status = %+v, want nothing captured and the ceiling reported", s)
+	}
+}
+
+// A config.set that only writes the ui section — what ⌘+/⌘- and a sidebar drag
+// send once they settle — is a viewer preference, not a step: it still saves,
+// but the recording does not capture it. A config.set that touches another
+// section is captured whole, ui and all.
+func TestRecordSkipsUIOnlyConfigSet(t *testing.T) {
+	o, _ := newRunbookOrch(t)
+	o.cfg = config.Default()
+	o.cfgPath = filepath.Join(t.TempDir(), "config.json")
+
+	record(t, o, app.RunbookRecordParams{Action: app.RecordStart})
+
+	zoom := app.ConfigSetParams{Options: map[string]json.RawMessage{"ui": json.RawMessage(`{"font_px":18}`)}}
+	if c := dispatch(t, o, app.CmdConfigSet, zoom); c.errMsg != "" {
+		t.Fatalf("ui-only config.set failed: %s", c.errMsg)
+	}
+	if o.cfg.UI.FontPx != 18 {
+		t.Fatalf("font_px = %d, want the pref saved even though it is not recorded", o.cfg.UI.FontPx)
+	}
+	s := recordResult(t, record(t, o, app.RunbookRecordParams{Action: app.RecordStatus}))
+	if s.Steps != 0 {
+		t.Fatalf("captured %v, want the ui-only config.set skipped", s.Commands)
+	}
+
+	mixed := app.ConfigSetParams{Options: map[string]json.RawMessage{
+		"ui":    json.RawMessage(`{"sidebar_width":260}`),
+		"panes": json.RawMessage(`{"reap_exited":"1h"}`),
+	}}
+	if c := dispatch(t, o, app.CmdConfigSet, mixed); c.errMsg != "" {
+		t.Fatalf("mixed config.set failed: %s", c.errMsg)
+	}
+	s = recordResult(t, record(t, o, app.RunbookRecordParams{Action: app.RecordStatus}))
+	if len(s.Commands) != 1 || s.Commands[0] != app.CmdConfigSet {
+		t.Fatalf("captured %v, want the mixed config.set recorded", s.Commands)
 	}
 }
 

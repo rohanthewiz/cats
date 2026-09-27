@@ -152,12 +152,6 @@ window were dated by grepping every session doc.
   (the keys are identical in JSON; the intro says so). Convert them to JSON,
   and decide whether `config.example.yaml` stays as the commented reference.
 
-- **N-032** · raised `2026-0923-1443-settings-json-and-screen` · value low
-  ⌘+/⌘- and sidebar drags now write `ui` prefs via config.set, which is a
-  Recorded command, so zooming while a macro records captures a config.set
-  step. Skip ui-only config.set in the recorder, or don't persist while
-  recording.
-
 - **N-033** · raised `2026-0923-1443-settings-json-and-screen` · value low
   Other open browsers don't pick up a `ui` pref (font size, sidebar width)
   changed elsewhere until they reload; there is no broadcast for it.
@@ -270,6 +264,15 @@ unchanged.
 Closures before this file existed live in the session docs' own write-ups.
 Newest first. The unnumbered entries at the end were found done while seeding,
 so they are not carried.
+
+- **N-032** · raised `2026-0923-1443-settings-json-and-screen` ·
+  closed 2026-09-26. The macro recorder now drops a config.set whose only
+  content is the `ui` options section (`viewerPrefsOnly` in
+  `cmd/catway/record.go`), so a ⌘+/⌘- zoom or a sidebar drag during a
+  recording is still saved but no longer becomes a step. A config.set that
+  carries ui together with another section is still recorded whole, because
+  steps keep their params exactly as sent. Persisting stays on during a
+  recording, so no preference is lost.
 
 - **N-003** · raised `2026-0905-1938-plugin-panes-in-the-agents-section` ·
   closed 2026-09-26, `2026-0926-2256-n003-hand-started-plugin-rows`. cathost's

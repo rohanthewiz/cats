@@ -166,6 +166,10 @@ func (m *macroRecorder) Commit(seq int64, params json.RawMessage, result any) {
 	if st == nil {
 		return
 	}
+	if viewerPrefsOnly(st.cmd, params) {
+		m.drop(seq)
+		return
+	}
 	if len(params) > 0 {
 		if err := json.Unmarshal(params, &st.params); err != nil {
 			m.drop(seq)
@@ -189,6 +193,47 @@ func (m *macroRecorder) Commit(seq int64, params json.RawMessage, result any) {
 	// moment it moves. Announcing from Begin would show a step that a Fail is
 	// about to take away again.
 	m.changed()
+}
+
+// viewerPrefsOnly reports whether a call is a config.set that writes nothing
+// but the "ui" section — the font size and sidebar width the page mirrors into
+// config.json when ⌘+/⌘- or a gutter drag comes to rest (33-settings.js
+// persistUIPref).
+//
+// Those writes are how a viewer's window looks, not something done to the
+// session, so they fail the Recorded rule ("would replaying this do again what
+// was done"): a macro recorded while somebody zoomed would otherwise replay the
+// zoom level into every run. They also arrive unasked — debounced side effects
+// of a keystroke or a drag, not a command the user issued while recording.
+//
+// Why here and not at either of the other two places it could go:
+//   - Not in the command table. Recorded is per command, and config.set as a
+//     whole must stay recorded — a theme switch or a panes change is a real
+//     step. The distinction lives in the params, which only exist at Commit.
+//   - Not in the page (skip persisting while recording). The preference would
+//     then be lost for any zoom made during a recording, and a second browser
+//     or catctl issuing the same ui-only write would still be captured.
+//
+// Only a PURE ui write is skipped. A settings-screen save that carries ui
+// alongside another section is recorded whole: the recorder keeps a step's
+// params exactly as sent (see recordDecoder), and stripping one section out of
+// them would make the step something the user never called.
+//
+// A body that does not decode is left to Commit's own handling rather than
+// guessed at here.
+func viewerPrefsOnly(cmd string, params json.RawMessage) bool {
+	if cmd != app.CmdConfigSet || len(params) == 0 {
+		return false
+	}
+	var p app.ConfigSetParams
+	if err := json.Unmarshal(params, &p); err != nil {
+		return false
+	}
+	if p.Theme != nil || len(p.CopyMode) > 0 || len(p.Options) != 1 {
+		return false
+	}
+	_, ok := p.Options["ui"]
+	return ok
 }
 
 // Abort releases the slot of a command that failed. A macro is a replay of what
