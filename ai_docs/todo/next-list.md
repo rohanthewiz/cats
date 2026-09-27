@@ -32,7 +32,7 @@ window were dated by grepping every session doc.
 - Open and Roadmap stay in ID order. New items append to the end of Open (or
   Roadmap, for future work) with the next ID.
 
-**Next ID:** N-041
+**Next ID:** N-042
 
 ## Open
 
@@ -78,6 +78,10 @@ window were dated by grepping every session doc.
   - the flag menu's **note…** row (`2026-0924-1126-flag-note-menuitem-consolidation`):
     on a workspace and on a pane, it opens the flag dialog preset to ▤ note,
     keeps any existing note text, and no "flag with a note…" row is left.
+  - the paw click (`2026-0926-2108-paw-click-opens-todo-pane`): clicking a
+    workspace row's paw reveals its first todo-manager pane, across tabs and
+    from another workspace; a locked row answers with a toast; the row does
+    not also switch workspace.
   - the sidebar's section splitters (`2026-0924-1144-sidebar-section-splitters-v0.3.0`):
     drag the seam above Panes and Agents with real rows, check the grip goes
     inert under a folded section, and that a trackpad drag inside the
@@ -202,6 +206,12 @@ window were dated by grepping every session doc.
   the other catway, which stays live until someone runs `revoke-peer-grant`
   there (catway logs a reminder). A self-revoke route (`POST /peer/v1/unpair`,
   authenticated by the grant itself) would make detach clean up both ends.
+
+- **N-041** · raised `2026-0926-2108-paw-click-opens-todo-pane` · value low
+  The global paw on the WORKSPACES heading is still not clickable. Workspace
+  rows' paws now jump to their first todo pane (`gotoTodoPane`); the heading's
+  could do the same for the first global manager (`isGlobalTodoTitle`), as
+  long as it respects the lock on that manager's workspace.
 
 ## Roadmap
 
