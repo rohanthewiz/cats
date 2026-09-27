@@ -265,7 +265,8 @@ so they are not carried.
   `tls.sans` and `ui`). `make dist` now ships `config.example.json` beside it.
 
 - **N-007** · raised `2026-0914-0158-catway-restart-cats-todo-release` ·
-  closed 2026-09-26. Each window now remembers the URL of a navigation that
+  closed 2026-09-26, `2026-0926-2308-n032-n007-recorder-ui-prefs-and-blank-windows`.
+  Each window now remembers the URL of a navigation that
   failed with a network error (`failedURL` in `cmd/catapp/window_darwin.m`,
   cleared when a load finishes; cancelled loads are ignored). `catwayBack`
   clears the overlay and then reloads those windows
@@ -275,7 +276,8 @@ so they are not carried.
   being saved as the primary view.
 
 - **N-032** · raised `2026-0923-1443-settings-json-and-screen` ·
-  closed 2026-09-26. The macro recorder now drops a config.set whose only
+  closed 2026-09-26, `2026-0926-2308-n032-n007-recorder-ui-prefs-and-blank-windows`.
+  The macro recorder now drops a config.set whose only
   content is the `ui` options section (`viewerPrefsOnly` in
   `cmd/catway/record.go`), so a ⌘+/⌘- zoom or a sidebar drag during a
   recording is still saved but no longer becomes a step. A config.set that
