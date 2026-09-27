@@ -32,7 +32,7 @@ window were dated by grepping every session doc.
 - Open and Roadmap stay in ID order. New items append to the end of Open (or
   Roadmap, for future work) with the next ID.
 
-**Next ID:** N-049
+**Next ID:** N-050
 
 ## Open
 
@@ -205,13 +205,18 @@ window were dated by grepping every session doc.
   reopened. Also start once without Go on PATH to see the retry and give-up
   warnings, and the plugins dialog's "could not be installed" row after each
   failed start (N-046 checked that row only against a hand-written state file).
+  The toolbar's "!" mark (N-048) should appear on its own once the failed
+  pass ends, with the page already open. That push at the end of the seed
+  pass has only been exercised by unit tests.
 
-- **N-048** · raised `2026-0926-2329-n046-failed-default-plugin-notice` · value low
-  A failed default plugin is only visible once the plugins dialog is opened.
-  A fresh-install user who never opens it still does not learn why cats-todo
-  is missing. The toolbar's plugins button could carry a warning mark (as it
-  carries the update count) while `plugin.list` has `failed_defaults`, or the
-  first connect after a failed seed could raise one toast.
+- **N-049** · raised `2026-0926-2351-n047-n048-script-plugins-and-failed-default-mark` · value low
+  The plugins dialog's failed-default row is probably hard to see on light
+  themes; it has not been looked at on one. It draws its avatar and edge as
+  `--warn` on a `--warn` tint (`.row.plg.dflt` in `css/21-plugins.css`).
+  Every built-in theme's `--warn` is a light-to-mid amber, and the toolbar
+  chip drawn the same way nearly vanished on a pale toolbar in the N-048 live
+  check. The chip moved to a solid `--warn` fill with fixed near-black ink. The row could use the same
+  treatment, or a dedicated `--warn-fg` theme token could be added.
 
 ## Roadmap
 
@@ -248,8 +253,23 @@ Closures before this file existed live in the session docs' own write-ups.
 Newest first. The unnumbered entries at the end were found done while seeding,
 so they are not carried.
 
+- **N-048** · raised `2026-0926-2329-n046-failed-default-plugin-notice` ·
+  closed 2026-09-26, `2026-0926-2351-n047-n048-script-plugins-and-failed-default-mark`. The toolbar's plugins button now carries a "!" mark
+  (a `.w` slot beside the update count, `--warn` on a warn tint) while any
+  default plugin failed to install. Its tooltip names the plugin. The mark
+  was chosen over a toast: it stays until the cause is dealt with, and does
+  not repeat on every connect. It is a
+  new browser message, `plugin_notice {failed_defaults: [ids]}`, broadcast on
+  change and in the connect burst. catway caches the ids
+  (`orch.failedDefaults`) and re-reads them off the loop at the end of the
+  seed pass (so a first start's failure shows without waiting for a poll)
+  and on `plugin.list`, `dismiss_default`, `uninstall` and `check_updates`.
+  The last one is the page's hourly cadence, which catches a catctl install
+  in a tab; the dialog's install button also triggers the post-update
+  rechecks. A failed read keeps the last answer.
+
 - **N-047** · raised `2026-0926-2256-n003-hand-started-plugin-rows` ·
-  closed 2026-09-26. `pane_job` now also carries the head of the job leader's
+  closed 2026-09-26, `2026-0926-2351-n047-n048-script-plugins-and-failed-default-mark`. `pane_job` now also carries the head of the job leader's
   argv (`Argv`, at most `JobArgvMax` = 4 entries, `detect.ProcessArgs`). When
   the exe is not inside any plugin dir, catway resolves each argv entry
   (relative ones against the pane's cwd) and matches it against the installed
