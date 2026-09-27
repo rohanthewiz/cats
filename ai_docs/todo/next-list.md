@@ -32,7 +32,7 @@ window were dated by grepping every session doc.
 - Open and Roadmap stay in ID order. New items append to the end of Open (or
   Roadmap, for future work) with the next ID.
 
-**Next ID:** N-050
+**Next ID:** N-051
 
 ## Open
 
@@ -209,7 +209,7 @@ window were dated by grepping every session doc.
   pass ends, with the page already open. That push at the end of the seed
   pass has only been exercised by unit tests.
 
-- **N-050** · raised 2026-09-26, the `N-049` commit (no session doc) · value low
+- **N-050** · raised `2026-0927-0000-n049-failed-default-tile-contrast` · value low
   Amber *text* in the plugins dialog is faint on the light themes and on
   solarized-dark, which shares solarized-light's #b58900. The failed-default
   row's error line (`.l2.warn`, 11px) measures 2.2:1 on solarized-light,
@@ -261,7 +261,7 @@ Newest first. The unnumbered entries at the end were found done while seeding,
 so they are not carried.
 
 - **N-049** · raised `2026-0926-2351-n047-n048-script-plugins-and-failed-default-mark` ·
-  closed 2026-09-26, the `N-049` commit (no session doc). The failed-default
+  closed 2026-09-27, `2026-0927-0000-n049-failed-default-tile-contrast`. The failed-default
   row's "!" tile now uses the toolbar mark's treatment: solid --warn with the
   fixed near-black ink `#1b1606` (`.row.plg.dflt .av` in `css/21-plugins.css`).
   The old tile was --warn on an 18% tint, which measured 2.2:1 on
