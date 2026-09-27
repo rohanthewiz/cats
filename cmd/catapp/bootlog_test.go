@@ -5,6 +5,8 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -247,6 +249,70 @@ func TestTranscriptReadsAsALog(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Errorf("the transcript is missing %q:\n%s", want, got)
 		}
+	}
+}
+
+// launchWriting simulates one launch: a fresh log (a fresh process) whose
+// transcript lands at path and carries marker, so a test can tell the kept
+// generations apart by content.
+func launchWriting(path, marker string) *bootLog {
+	b := &bootLog{t0: time.Now(), nextID: 1, logPath: path}
+	b.okDetail(b.begin("starting catway"), marker)
+	b.writeTranscript()
+	return b
+}
+
+func readOrEmpty(path string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	return string(data)
+}
+
+func TestTranscriptKeepsEarlierLaunches(t *testing.T) {
+	path := filepath.Join(t.TempDir(), bootLogFile)
+	// One launch more than is kept, so the oldest must fall off the end.
+	for i := 1; i <= bootLogKeep+1; i++ {
+		launchWriting(path, fmt.Sprintf("launch-%d", i))
+	}
+
+	// boot.log is the newest; boot.log.N is N launches before it.
+	newest := bootLogKeep + 1
+	for gen := 0; gen < bootLogKeep; gen++ {
+		name := path
+		if gen > 0 {
+			name = fmt.Sprintf("%s.%d", path, gen)
+		}
+		want := fmt.Sprintf("launch-%d", newest-gen)
+		if got := readOrEmpty(name); !strings.Contains(got, want) {
+			t.Errorf("%s should hold %s, got:\n%s", filepath.Base(name), want, got)
+		}
+	}
+	if _, err := os.Stat(fmt.Sprintf("%s.%d", path, bootLogKeep)); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("boot.log.%d exists, want only %d generations kept (err=%v)", bootLogKeep, bootLogKeep, err)
+	}
+}
+
+func TestTranscriptRotatesOncePerLaunch(t *testing.T) {
+	// fail() and finish() both write the transcript. A second write in the
+	// same launch must replace boot.log, not push the launch's own first
+	// draft into boot.log.1 over the previous launch's record.
+	path := filepath.Join(t.TempDir(), bootLogFile)
+	launchWriting(path, "previous-launch")
+
+	b := launchWriting(path, "this-launch")
+	b.note("catway", "one more line")
+	b.writeTranscript()
+
+	if got := readOrEmpty(path + ".1"); !strings.Contains(got, "previous-launch") {
+		t.Errorf("boot.log.1 should still be the previous launch, got:\n%s", got)
+	}
+	if got := readOrEmpty(path); !strings.Contains(got, "one more line") {
+		t.Errorf("boot.log should be this launch's latest write, got:\n%s", got)
+	}
+	if _, err := os.Stat(path + ".2"); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("boot.log.2 exists after two launches (err=%v), want the second write not to rotate", err)
 	}
 }
 

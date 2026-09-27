@@ -4,7 +4,9 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
@@ -35,7 +37,9 @@ import (
 //	     └─ boot.ok(id) ──────────────► entry{state: ok, end: +503ms}
 //
 // The same record is written to boot.log beside app.json when startup ends, so
-// a launch that was merely slow can still be looked at afterwards.
+// a launch that was merely slow can still be looked at afterwards. The previous
+// launches' records are kept as boot.log.1 (the one before) … boot.log.4, so a
+// launch that went wrong can be compared with one that did not.
 //
 // The log is a package-level singleton (boot) because its writers are spread
 // across the whole launcher — main, supervise, shellenv, the cgo callbacks the
@@ -108,6 +112,11 @@ type bootLog struct {
 	// default beside app.json; a test points it at a temp file so running the
 	// suite cannot clobber the record of the user's last real launch.
 	logPath string
+	// rotated is set once this launch has shifted the previous transcripts
+	// along. Both fail() and finish() write the transcript, so without it a
+	// launch that wrote twice would push its own first draft into boot.log.1
+	// and lose the oldest real launch to it.
+	rotated bool
 }
 
 // boot is the launcher's startup log. Created at package init so t0 is as close
@@ -381,12 +390,22 @@ func (b *bootLog) transcript() string {
 	return sb.String()
 }
 
-// writeTranscript saves the log beside app.json, replacing the previous
-// launch's. Best-effort by design: it is called from the failure path, where
-// the error we already have is the one worth reporting.
+// bootLogKeep is how many launches' transcripts are kept: boot.log (this one)
+// and boot.log.1 … boot.log.4 (the ones before, newest first). A transcript is
+// a few KB, so the count is about how far back a comparison is ever useful —
+// "the launch before it worked" — not about space.
+const bootLogKeep = 5
+
+// writeTranscript saves the log beside app.json. The first write of a launch
+// first moves the previous launches' transcripts along one generation; later
+// writes in the same launch just replace boot.log. Best-effort by design: it is
+// called from the failure path, where the error we already have is the one
+// worth reporting.
 func (b *bootLog) writeTranscript() {
 	b.mu.Lock()
 	path := b.transcriptPath()
+	rotate := !b.rotated
+	b.rotated = true
 	b.mu.Unlock()
 	if path == "" {
 		return
@@ -395,8 +414,37 @@ func (b *bootLog) writeTranscript() {
 		log.Printf("boot: could not create %s: %v", filepath.Dir(path), err)
 		return
 	}
+	if rotate {
+		rotateTranscripts(path, bootLogKeep)
+	}
 	if err := os.WriteFile(path, []byte(b.transcript()), 0o600); err != nil {
 		log.Printf("boot: could not write %s: %v", path, err)
+	}
+}
+
+// rotateTranscripts shifts path → path.1 → … → path.<keep-1>, dropping the
+// oldest, so path is free for this launch:
+//
+//	boot.log.3 ──▶ boot.log.4   (the old .4 is replaced, i.e. dropped)
+//	boot.log.2 ──▶ boot.log.3
+//	boot.log.1 ──▶ boot.log.2
+//	boot.log   ──▶ boot.log.1
+//
+// Renames run oldest first so each target is already vacated (or is the one
+// being dropped — rename replaces it). A missing generation is normal (the
+// first few launches, or one whose app-data dir was cleared) and just skipped.
+// Any other failure is logged and the shift carries on: at worst a generation
+// is overwritten, which is what happened to every launch before this existed.
+func rotateTranscripts(path string, keep int) {
+	for i := keep - 1; i >= 1; i-- {
+		from := path
+		if i > 1 {
+			from = fmt.Sprintf("%s.%d", path, i-1)
+		}
+		to := fmt.Sprintf("%s.%d", path, i)
+		if err := os.Rename(from, to); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			log.Printf("boot: could not move %s to %s: %v", from, to, err)
+		}
 	}
 }
 

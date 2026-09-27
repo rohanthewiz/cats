@@ -114,7 +114,8 @@ becomes a window. The last two steps come from outside this process: a
 reports its socket and its first layout — which is what actually closes the
 window. A page that does not report (an older `catway`, a login form) ends
 startup 3 s after it loads instead. The whole record is written to
-`~/Library/Application Support/cats/boot.log` at the end of every launch.
+`~/Library/Application Support/cats/boot.log` at the end of every launch; the
+four launches before it are kept as `boot.log.1` (the newest) … `boot.log.4`.
 
 ## Design decisions specific to this mode
 

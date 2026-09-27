@@ -117,6 +117,8 @@ that is going nowhere.
 
 The same record is written to `~/Library/Application Support/cats/boot.log`
 after every launch, so a launch that was merely slow can be read afterwards.
+The four launches before it are kept as `boot.log.1` (the one before) …
+`boot.log.4`, so a bad launch can be diffed against one that worked.
 `go run ./cmd/catapp` from a terminal logs the same lines as they happen.
 
 ## Clipboard does not work
