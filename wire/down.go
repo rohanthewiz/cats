@@ -957,6 +957,39 @@ func NewRunbookRuns(runs []RunbookRun) RunbookRuns {
 	return RunbookRuns{T: MsgRunbookRuns, Runs: runs}
 }
 
+// PluginNotice is the plugin state a client should flag without being asked:
+// today, the default plugins the first-run seed could not install
+// (plugin.list's failed_defaults, by id). The browser draws it as a warning
+// chip on the toolbar's plugins button, so a fresh-install user who never
+// opens the plugins dialog still learns that cats-todo is missing and where
+// to look for why.
+//
+// A broadcast rather than a field the client polls plugin.list for, because
+// the moment it changes is not one any client can see coming: the seed runs
+// in the background after catway starts, and on a first start it finishes
+// (or fails) a clone and a build after the page has already connected. Sent
+// on every change and once in the connect burst, empty included, for the
+// reason Record is: a window reconnecting across a dismiss must turn its mark
+// off.
+//
+// Only ids travel. The error and build output that explain a failure are the
+// dialog's to show (plugin.list), and a chip needs only "how many" and
+// "which" for its tooltip.
+type PluginNotice struct {
+	T              Type     `json:"t"`
+	FailedDefaults []string `json:"failed_defaults"`
+}
+
+// NewPluginNotice builds the message. A nil slice is normalised to an empty
+// one, as in NewRunbookRuns: the empty notice is the one that retracts the
+// mark and should not be the odd shape on the wire.
+func NewPluginNotice(failedDefaults []string) PluginNotice {
+	if failedDefaults == nil {
+		failedDefaults = []string{}
+	}
+	return PluginNotice{T: MsgPluginNotice, FailedDefaults: failedDefaults}
+}
+
 // CmdResult is the reply to a Cmd, always sent when the command carried an id.
 // Data is command-specific (e.g. ReadResult for "read").
 type CmdResult struct {

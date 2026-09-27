@@ -75,6 +75,11 @@ const (
 	// and marks only the runs it started itself, which is the UI it had before
 	// this existed.
 	MsgRunbookRuns Type = "runbook_runs"
+	// MsgPluginNotice flags plugin state the user has not asked about (a
+	// default plugin that failed to install). Added within protocol v1: an
+	// old client ignores the type and shows the notice only in the plugins
+	// dialog, which is the UI it had before this existed.
+	MsgPluginNotice Type = "plugin_notice"
 	// Chat surface (the ACP side panel). Added within protocol v1: an old
 	// client ignores unknown types, and a new client learns the server serves
 	// chat from CapChat rather than by probing.
@@ -144,6 +149,7 @@ var msgTypes = map[reflect.Type]Type{
 	reflect.TypeOf(History{}):       MsgHistory,
 	reflect.TypeOf(Record{}):        MsgRecord,
 	reflect.TypeOf(RunbookRuns{}):   MsgRunbookRuns,
+	reflect.TypeOf(PluginNotice{}):  MsgPluginNotice,
 	reflect.TypeOf(ChatState{}):     MsgChatState,
 	reflect.TypeOf(ChatSnapshot{}):  MsgChatSnapshot,
 	reflect.TypeOf(ChatRowMsg{}):    MsgChatRow,
@@ -310,6 +316,8 @@ func DecodeDown(data []byte) (any, error) {
 		return decodeAs[Record](data)
 	case MsgRunbookRuns:
 		return decodeAs[RunbookRuns](data)
+	case MsgPluginNotice:
+		return decodeAs[PluginNotice](data)
 	case MsgChatState:
 		return decodeAs[ChatState](data)
 	case MsgChatSnapshot:

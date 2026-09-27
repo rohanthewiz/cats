@@ -264,8 +264,10 @@
     tick(PLUGIN_CHECK_FIRST_MS);
   }
 
-  // pluginRecheckSoon follows an update tab. There is no event for "the catctl
-  // tab finished", so a few spaced rechecks stand in for one: an update is
+  // pluginRecheckSoon follows an update tab (and a failed default's install
+  // tab, whose landing clears the toolbar's warning mark the same way). There
+  // is no event for "the catctl tab finished", so a few spaced rechecks stand
+  // in for one: an update is
   // usually seconds of git plus a build of up to a few minutes, and whichever
   // recheck lands after HEAD moved clears the badge. The ones before it are
   // cache hits and cost nothing.
@@ -284,17 +286,45 @@
     return n;
   }
 
-  // paintPluginBadge writes the count into the toolbar button's .n span (a
-  // server-rendered slot, hidden while empty) and says it in the tooltip too,
-  // since a bare number on a button is only obvious once you know what it counts.
+  // ---- Plugin notice (failed default plugins) ----
+  //
+  // plugin_notice carries the ids of the default plugins the first-run seed
+  // could not install. The server pushes it whenever that changes and once
+  // per connect (cmd/catway/plugins.go), so this is a mirror, never a query.
+  // It is the toolbar's half of the dialog's failed-default rows: the rows
+  // say why, the mark says "look here" to a user who has no reason to open
+  // the dialog, the one a fresh install without Go leaves wondering where
+  // cats-todo went.
+  let pluginFailedDefaults = []; // ids, in the server's order
+
+  function applyPluginNotice(msg) {
+    pluginFailedDefaults = msg.failed_defaults || [];
+    paintPluginBadge();
+  }
+
+  // paintPluginBadge draws both of the plugins button's marks and its tooltip:
+  //
+  //   ⧉ plugins [!] [2]
+  //             │    └ .n — updates available (accent chip, a count)
+  //             └ .w — a default plugin could not be installed (warn chip)
+  //
+  // Both slots are server-rendered and hidden while empty. The warning is a
+  // bare "!" rather than a count: it is rarely more than one plugin, and the
+  // tooltip names each one. Both are said in the tooltip, since a mark on a
+  // button is only obvious once you know what it means.
   function paintPluginBadge() {
     const n = pluginUpdateCount();
     const el = pluginsBtnEl.querySelector(".n");
     if (el) el.textContent = n ? String(n) : "";
     pluginsBtnEl.classList.toggle("has-updates", n > 0);
-    pluginsBtnEl.title = n
-      ? "plugins — " + n + (n === 1 ? " update" : " updates") + " available"
-      : "plugins — install, run, update";
+    const failed = pluginFailedDefaults.map((id) => pluginDisplayName({ id }));
+    const w = pluginsBtnEl.querySelector(".w");
+    if (w) w.textContent = failed.length ? "!" : "";
+    pluginsBtnEl.classList.toggle("has-failed", failed.length > 0);
+    const lines = [];
+    if (failed.length) lines.push(failed.join(", ") + " could not be installed — open for details");
+    if (n) lines.push(n + (n === 1 ? " update" : " updates") + " available");
+    pluginsBtnEl.title = lines.length ? "plugins — " + lines.join("\n") : "plugins — install, run, update";
   }
 
   // pluginUpdateTarget is how an available update names where it goes: the
@@ -614,8 +644,13 @@
         const install = document.createElement("button"); install.className = "hot";
         install.textContent = "install";
         install.title = "catctl plugin install " + f.source + " — runs in a new tab";
-        install.addEventListener("click", () =>
-          pluginCatctlTab(info.catctl, "plugin install", ["install", f.source]));
+        // The rechecks after the tab (as for an update) are what clear the
+        // toolbar mark once the install lands: catway does not see a catctl
+        // install, but the update check re-reads the notice (plugins.go).
+        install.addEventListener("click", () => {
+          pluginCatctlTab(info.catctl, "plugin install", ["install", f.source]);
+          pluginRecheckSoon();
+        });
         acts.appendChild(install);
         const dismiss = document.createElement("button");
         dismiss.textContent = "dismiss";

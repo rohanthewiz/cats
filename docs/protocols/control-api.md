@@ -756,6 +756,11 @@ attempt's `error` and `output` tail. `plugin.dismiss_default {"id":…}` drops o
 from the seed's state: the notice goes away and no retry follows. Dismissing an
 id the server does not know succeeds.
 
+The same ids are pushed to every browser as the `plugin_notice` message (see
+the browser protocol), which puts a warning mark on the toolbar's plugins
+button. A user who never opens the dialog then still learns that a default
+plugin is missing.
+
 The worktree commands act on the machine the addressed pane is on — `worktree.remove`
 on the one its workspace's checkout belongs to — because git is a subprocess
 acting on a filesystem. `worktree.list` reports that machine as `host`, and every

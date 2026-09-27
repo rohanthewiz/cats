@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -79,6 +80,7 @@ func (o *orch) StartPluginList(r app.Responder) {
 		if err != nil {
 			dlog.Warnf("catway: plugin.list: default plugins: %v", err)
 		}
+		readOK := err == nil
 		for _, f := range failed {
 			res.FailedDefaults = append(res.FailedDefaults, wire.PluginFailedDefault{
 				ID:       f.ID,
@@ -89,8 +91,89 @@ func (o *orch) StartPluginList(r app.Responder) {
 				Output:   f.Output,
 			})
 		}
-		o.post(func() { r.OK(res) })
+		// The read just done is the freshest there is, so the toolbar mark
+		// follows it: opening the dialog after a catctl install (or uninstall)
+		// in some tab is also what brings every window's mark up to date.
+		ids := failedDefaultIDs(failed)
+		o.post(func() {
+			if readOK {
+				o.setFailedDefaults(ids)
+			}
+			r.OK(res)
+		})
 	}()
+}
+
+// ---- The plugin notice (toolbar mark) ----
+//
+// failedDefaults is the loop's copy of which default plugins the first-run
+// seed could not install, broadcast to every window as plugin_notice so the
+// toolbar's plugins button can carry a warning mark without anyone opening
+// the dialog (a fresh-install user without Go otherwise never learns why
+// cats-todo is missing).
+//
+// It is a cache of disk state (.cats-defaults.json filtered by what is
+// installed), and the disk is read only off the loop, at the moments the
+// answer can change:
+//
+//	seed pass ends ───────────────┐
+//	plugin.list (dialog opens) ───┤
+//	plugin.dismiss_default ───────┼─▶ read off-loop ─▶ post ─▶ setFailedDefaults
+//	plugin.uninstall ─────────────┤                            (broadcast if changed)
+//	plugin.check_updates ─────────┘
+//
+// The last one is the page's background cadence (connect, hourly, and a few
+// rechecks after an install tab), which is what catches changes made by other
+// processes: a `catctl plugin install` in a tab, a catctl uninstall. A read
+// that fails keeps the last answer rather than clearing the mark: a transient
+// error is not news that the plugin got installed.
+
+// pluginNoticeMsg is the plugin_notice message for the current state. The
+// connect burst sends it unconditionally (see catway.go).
+func (o *orch) pluginNoticeMsg() wire.PluginNotice {
+	return wire.NewPluginNotice(o.failedDefaults)
+}
+
+// setFailedDefaults records a fresh read and broadcasts it when it differs
+// from what windows were last told. Loop goroutine.
+func (o *orch) setFailedDefaults(ids []string) {
+	if slices.Equal(ids, o.failedDefaults) {
+		return
+	}
+	o.failedDefaults = ids
+	o.broadcast(o.pluginNoticeMsg())
+}
+
+// refreshPluginNotice re-reads the failed defaults off the loop and posts the
+// answer. For callers with no read of their own to piggyback on (the end of
+// the seed pass).
+func (o *orch) refreshPluginNotice() {
+	go func() {
+		if ids, ok := readFailedDefaultIDs(); ok {
+			o.post(func() { o.setFailedDefaults(ids) })
+		}
+	}()
+}
+
+// readFailedDefaultIDs is plugin.FailedDefaults reduced to ids; ok is false
+// when the state could not be read (logged here, once per read).
+func readFailedDefaultIDs() (ids []string, ok bool) {
+	failed, err := plugin.FailedDefaults()
+	if err != nil {
+		dlog.Warnf("catway: default plugins: %v", err)
+		return nil, false
+	}
+	return failedDefaultIDs(failed), true
+}
+
+// failedDefaultIDs keeps FailedDefaults' order (the state file's), so two
+// reads of an unchanged file compare equal and broadcast nothing.
+func failedDefaultIDs(failed []plugin.FailedDefault) []string {
+	var ids []string
+	for _, f := range failed {
+		ids = append(ids, f.ID)
+	}
+	return ids
 }
 
 // StartPluginDismissDefault answers plugin.dismiss_default. It runs off the
@@ -103,7 +186,13 @@ func (o *orch) StartPluginDismissDefault(r app.Responder, p wire.PluginDismissDe
 			o.post(func() { r.Fail(err.Error()) })
 			return
 		}
-		o.post(func() { r.OK(nil) })
+		ids, ok := readFailedDefaultIDs()
+		o.post(func() {
+			if ok {
+				o.setFailedDefaults(ids)
+			}
+			r.OK(nil)
+		})
 	}()
 }
 
@@ -116,7 +205,15 @@ func (o *orch) StartPluginUninstall(r app.Responder, p app.PluginUninstallParams
 			o.post(func() { r.Fail(err.Error()) })
 			return
 		}
-		o.post(func() { r.OK(app.PluginUninstallResult{Message: msg}) })
+		// Uninstall forgets a default it removes (plugin.forgetDefault), so
+		// the notice can change here too.
+		ids, ok := readFailedDefaultIDs()
+		o.post(func() {
+			if ok {
+				o.setFailedDefaults(ids)
+			}
+			r.OK(app.PluginUninstallResult{Message: msg})
+		})
 	}()
 }
 
@@ -204,7 +301,17 @@ func (o *orch) StartPluginCheckUpdates(r app.Responder, p app.PluginCheckUpdates
 				res.Available++
 			}
 		}
-		o.post(func() { r.OK(res) })
+		// The update check is the page's one background cadence (on connect,
+		// hourly, and after an install or update tab), so it also re-reads the
+		// notice: that is what clears the mark after `catctl plugin install`
+		// in a tab, which catway otherwise never hears about.
+		ids, ok := readFailedDefaultIDs()
+		o.post(func() {
+			if ok {
+				o.setFailedDefaults(ids)
+			}
+			r.OK(res)
+		})
 	}()
 }
 

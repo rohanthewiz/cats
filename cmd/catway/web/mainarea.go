@@ -63,10 +63,12 @@ func (StatusBar) Render(b *element.Builder) (x any) {
 		// a server-rendered .n span, empty (and hidden by :empty) until
 		// js/30-plugins.js learns that upstream has something newer. Rendered
 		// here rather than created client-side so the idle and badged button
-		// are the same DOM shape.
+		// are the same DOM shape. The .w span is its warning twin, filled
+		// while a default plugin could not be installed (plugin_notice).
 		b.SpanClass("tbtn", "id", "pluginsbtn", "title", "plugins — install, run, update").R(
 			b.SpanClass("tmk").T("⧉"),
 			b.T("plugins"),
+			b.SpanClass("w").R(),
 			b.SpanClass("n").R(),
 		),
 		nl(b, 4),

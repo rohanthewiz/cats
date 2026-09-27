@@ -137,6 +137,11 @@
       // with nobody watching — which is the case a query could never have
       // caught, since the file on disk does not change while it runs.
       case "runbook_runs": applyRunbookRuns(msg); break;
+      // …and so is a default plugin that failed to install: the seed runs in
+      // the background and can fail minutes after this page connected, so
+      // the server pushes the list (and once in the connect burst) rather
+      // than the page polling for it.
+      case "plugin_notice": applyPluginNotice(msg); break;
       case "usage": renderUsage(msg); break;
       case "clipboard": // OSC 52 write from a pane app — no user activation
         try { clipWrite(b64decode(msg.data)).catch(() => {}); } catch (e) {}

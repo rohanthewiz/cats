@@ -78,6 +78,7 @@ func TestRoundTrip(t *testing.T) {
 		{"error", NewError(pane, "pane gone"), DecodeDown},
 		{"shutdown", NewShutdown(), DecodeDown},
 		{"update_ready", NewUpdateReady("1.2.3", "brew upgrade cats"), DecodeDown},
+		{"plugin_notice", NewPluginNotice([]string{"rohanthewiz.cats-todo"}), DecodeDown},
 		// An account reading: percentages with resets, a scoped weekly row, and
 		// the host group's two windows — percentages with a figure beside them
 		// and no reset, which no rate-limit window has.
@@ -343,13 +344,13 @@ func TestMarshalStampsEveryType(t *testing.T) {
 		"welcome", "layout", "agents", "ws_git", "hosts", "pane_title", "pane_cwd", "pane_branch", "pane_agent",
 		"pane_modes", "pane_exited", "pane_respawned", "pane_frame", "pane_diff", "clipboard", "notify",
 		"title", "error", "shutdown", "update_ready", "theme", "usage", "clients", "cmd_result", "history",
-		"record", "runbook_runs", "chat_state", "chat_snapshot", "chat_row", "chat_delta", "chat_perm"} {
+		"record", "runbook_runs", "plugin_notice", "chat_state", "chat_snapshot", "chat_row", "chat_delta", "chat_perm"} {
 		if !seen[Type(name)] {
 			t.Errorf("decoders know %q but msgTypes does not stamp it", name)
 		}
 	}
-	if len(seen) != 41 {
-		t.Errorf("msgTypes has %d distinct types, want 41; update this test with the decoders", len(seen))
+	if len(seen) != 42 {
+		t.Errorf("msgTypes has %d distinct types, want 42; update this test with the decoders", len(seen))
 	}
 }
 

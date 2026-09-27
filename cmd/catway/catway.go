@@ -289,6 +289,10 @@ type orch struct {
 	// runbook executor builds one per step — and a recorder that lived there
 	// would record whichever caller happened to hold the instance it was set on.
 	macro *macroRecorder
+	// failedDefaults is the plugin_notice state (plugins.go): ids of the
+	// default plugins the first-run seed could not install, as last read off
+	// disk. nil until the first read, which the end of the seed pass makes.
+	failedDefaults []string
 	// ledger is the command history (ledger.go), nil when disabled or when its
 	// store could not be opened. openCmds holds the commands that have started
 	// and not yet ended, keyed by pane — a pane runs one foreground command at a
@@ -3090,6 +3094,10 @@ func (o *orch) registerConn(c *client, init *browserproto.Init) {
 	// `deploy` has no other way to learn it, and one reconnecting across the END
 	// of a run would keep a row marked for a run that finished while it was away.
 	o.send(c, o.runbookRunsMsg())
+	// The plugin notice, always, for the same reason as the two above: a
+	// window reconnecting across a dismiss (or an install) has a mark to turn
+	// off.
+	o.send(c, o.pluginNoticeMsg())
 	if o.chat != nil {
 		// The whole chat model in one message — a client joining
 		// mid-conversation (or mid-permission-prompt) starts converged.

@@ -422,7 +422,13 @@ func main() {
 	// First-run plugin seed (cats-todo on a fresh install). Background, and
 	// started only now that every fatal startup check has passed, so a catway
 	// that is about to exit never begins a clone. See seedDefaultPlugins.
-	go seedDefaultPlugins()
+	// When the pass ends, every window is told what failed (plugin_notice):
+	// on a first start that is minutes after the page connected, and nothing
+	// else would bring the toolbar mark up until the hourly update check.
+	go func() {
+		seedDefaultPlugins()
+		o.refreshPluginNotice()
+	}()
 	if err := s.Run(); err != nil {
 		dlog.Fatalf("catway: %v", err)
 	}

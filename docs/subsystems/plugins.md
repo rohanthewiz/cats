@@ -519,6 +519,13 @@ flowchart TD
   any further retries. `catctl plugin list` prints the same notice under its
   listing. Uninstalling a default also forgets it, so a default installed by
   hand while still pending does not come back on the next start.
+* **The toolbar flags them too.** While any default is in that notice, the
+  toolbar's plugins button carries a "!" mark, and its tooltip names the
+  plugin. catway pushes the list to every window (`plugin_notice`) when the
+  seed pass ends, so on a first start the mark appears as soon as the
+  failure happens, without the dialog being opened. It clears on dismiss, on
+  uninstall, and after an install from the dialog, once the rechecks that
+  follow the install tab see the plugin present.
 * **Opt out** by setting `CATS_NO_DEFAULT_PLUGINS=1` in catway's environment.
   An opted-out start writes no state, so removing the variable later still
   seeds a machine that has no plugins.
