@@ -238,6 +238,13 @@ Closures before this file existed live in the session docs' own write-ups.
 Newest first. The unnumbered entries at the end were found done while seeding,
 so they are not carried.
 
+- **N-004** · raised `2026-0910-1855-startup-window-boot-log` ·
+  closed 2026-09-26 (cats `05f21d7`). The first transcript write of a launch
+  shifts `boot.log` into `boot.log.1` … `boot.log.4`. It happens once per
+  process, so the second write from `fail()` or `finish()` cannot push out the
+  previous launch. There is still no "copy this log" button: the splash has no
+  bridges, and the path is already in the failure footer.
+
 - **N-041** · raised `2026-0926-2108-paw-click-opens-todo-pane` ·
   closed 2026-09-26, `2026-0926-2119-n041-global-paw-click` (cats `4117bba`) —
   the heading paw calls `gotoGlobalTodoPane`, which reveals (`agent.focus`) a
@@ -379,10 +386,3 @@ so they are not carried.
   obsolete. The plugin relaunch now lives in N-001.
 - `make jstest` failing on `main` over `openPeersDialog` (found
   `2026-0918-1901`): passes now.
-
-- **N-004** · raised `2026-0910-1855-startup-window-boot-log` ·
-  closed 2026-09-26 (cats `05f21d7`). The first transcript write of a launch
-  shifts `boot.log` into `boot.log.1` … `boot.log.4`. It happens once per
-  process, so the second write from `fail()` or `finish()` cannot push out the
-  previous launch. There is still no "copy this log" button: the splash has no
-  bridges, and the path is already in the failure footer.
