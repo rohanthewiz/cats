@@ -32,7 +32,7 @@ window were dated by grepping every session doc.
 - Open and Roadmap stay in ID order. New items append to the end of Open (or
   Roadmap, for future work) with the next ID.
 
-**Next ID:** N-051
+**Next ID:** N-052
 
 ## Open
 
@@ -209,21 +209,23 @@ window were dated by grepping every session doc.
   pass ends, with the page already open. That push at the end of the seed
   pass has only been exercised by unit tests.
 
-- **N-050** · raised `2026-0927-0000-n049-failed-default-tile-contrast` · value low
-  Amber *text* in the plugins dialog is faint on the light themes and on
-  solarized-dark, which shares solarized-light's #b58900. The failed-default
-  row's error line (`.l2.warn`, 11px) measures 2.2:1 on solarized-light,
-  2.9:1 on corporate and 3.1:1 on solarized-dark. Its "not installed" pill
-  (`.pill.st.missing`, 10px, --warn on a 12% tint) measures 2.0, 2.5 and
-  2.7:1. The same two classes also draw a missing plugin's pill and the
-  "couldn't check for updates" line on installed rows, and
-  `.plg-head .chk.warn` draws the header's "update check failed". The other
-  dark themes are 4.3:1 or better. N-049 fixed only the "!" tile, which could
-  take a solid fill; text cannot. Mixing --warn toward --fg-strong in CSS
-  reaches about 4.5:1 at 50%, but turns solarized-light's amber an olive
-  (#5e6021) and the dark themes' a beige. A `--warn-fg` theme key is the
-  likely fix: derived from --warn so the other themes and sparse user themes
-  are unchanged, and authored by those three built-ins.
+- **N-051** · raised the `N-050` commit (no session doc) · value low
+  `--warn-fg` (N-050) is used only in the plugins dialog. Twelve rules
+  elsewhere still draw amber *text* in `--warn`. On solarized-light,
+  corporate and solarized-dark that text reads at about 2.2 to 3.3:1:
+  - sidebar usage list (`06-usage.css`: `.gsum`, `.gleft.soon`, `.uval`,
+    `.ureset.soon`)
+  - agent age (`11-agentlist.css` `.aage.stale-idle`)
+  - pane state (`10-panelist.css` `.st-working`)
+  - pane header agent and mode (`12-main.css` `.info .agent`, `.info .mode`)
+  - runbook trigger (`29-runbooks.css` `.rtrig`)
+  - record button count (`24-toolbar.css` `#recbtn.on.empty .n`)
+  - peers dialog (`30-peers.css` `.hint.warn`, `.row.skipped .kind`)
+
+  Each theme's `--panel` and `--chrome` sit at least as far from its
+  `--warn-fg` as `--panel2` does, so a swap should hold 4.5:1. The pane
+  header's agent colour is a state colour chosen to sit beside the others on
+  the strip, so check it there before changing it.
 
 ## Roadmap
 
@@ -259,6 +261,21 @@ unchanged.
 Closures before this file existed live in the session docs' own write-ups.
 Newest first. The unnumbered entries at the end were found done while seeding,
 so they are not carried.
+
+- **N-050** · raised `2026-0927-0000-n049-failed-default-tile-contrast` ·
+  closed 2026-09-27, the `N-050` commit (no session doc). A new theme key,
+  `warn-fg`, is derived from `warn` (`internal/theme/theme.go`). Three
+  built-ins author a darker or lighter shade: solarized-light `#694f00`,
+  corporate `#734e00`, solarized-dark `#f2b700`. The plugins dialog's amber
+  text now uses it: `.l2.warn`, `.pill.st.missing` and `.plg-head .chk.warn`.
+  The pill's tint and border stay `--warn`. On the three themes the text now
+  reads at 4.8 to 6.0:1 (was 2.0 to 3.3:1), and every other theme is
+  unchanged. `TestBuiltinWarnFgContrast` holds every built-in's `warn-fg` to
+  4.5:1 on `panel2`. The key is also added to the `:root` fallback and to
+  docs/reference/configuration.md. Checked in a headless-Chrome render,
+  before and after, on corporate, both solarized themes and cats-green.
+  cool-blue's pill stays at 4.35:1, since its `warn` is already pale. Other
+  `--warn` text in the app is N-051.
 
 - **N-049** · raised `2026-0926-2351-n047-n048-script-plugins-and-failed-default-mark` ·
   closed 2026-09-27, `2026-0927-0000-n049-failed-default-tile-contrast`. The failed-default

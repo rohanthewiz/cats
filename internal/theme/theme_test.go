@@ -1,6 +1,7 @@
 package theme
 
 import (
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -222,4 +223,53 @@ func TestDarkBG(t *testing.T) {
 			t.Errorf("DarkBG(%q) = %v, want %v", bg, got, want)
 		}
 	}
+}
+
+// Every built-in's warn-fg reads as small text on the dialog surface. warn-fg
+// exists because some palettes' --warn does not (solarized-light's #b58900 is
+// ~2.4:1 on its panel2), so the floor is WCAG AA for body text. panel2 is the
+// modal surface; the plugins dialog's row and pill tints move a few percent
+// toward warn itself, which is why the authored values aim above the floor.
+func TestBuiltinWarnFgContrast(t *testing.T) {
+	for _, b := range BuiltIns() {
+		n := Normalize(b)
+		got, ok := contrastRatio(n.Colors["warn-fg"], n.Colors["panel2"])
+		if !ok {
+			t.Errorf("builtin %s: warn-fg %q or panel2 %q is not hex", b.Name, n.Colors["warn-fg"], n.Colors["panel2"])
+			continue
+		}
+		if got < 4.5 {
+			t.Errorf("builtin %s: warn-fg %s on panel2 %s is %.2f:1, want ≥4.5",
+				b.Name, n.Colors["warn-fg"], n.Colors["panel2"], got)
+		}
+	}
+}
+
+// contrastRatio is the WCAG 2 ratio between two hex colours: relative
+// luminance from linearised sRGB, then (lighter+0.05)/(darker+0.05).
+func contrastRatio(a, b string) (float64, bool) {
+	la, ok1 := relLuminance(a)
+	lb, ok2 := relLuminance(b)
+	if !ok1 || !ok2 {
+		return 0, false
+	}
+	if la < lb {
+		la, lb = lb, la
+	}
+	return (la + 0.05) / (lb + 0.05), true
+}
+
+func relLuminance(hex string) (float64, bool) {
+	r, g, b, ok := parseHex(hex)
+	if !ok {
+		return 0, false
+	}
+	lin := func(v int) float64 {
+		c := float64(v) / 255
+		if c <= 0.04045 {
+			return c / 12.92
+		}
+		return math.Pow((c+0.055)/1.055, 2.4)
+	}
+	return 0.2126*lin(r) + 0.7152*lin(g) + 0.0722*lin(b), true
 }

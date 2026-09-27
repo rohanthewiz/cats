@@ -42,6 +42,10 @@ func builtins() []Theme {
 				"branch": "#ea9a4e",
 				"todo":   "#f0dfa0", "ok": "#6ac47a", "warn": "#e0b64e", "err": "#e57373",
 				"done": "#00ccf5",
+				// Amber text needs no separate shade here: #e0b64e is ~7:1 on
+				// panel2 already. Authored only because this theme carries
+				// the full key set.
+				"warn-fg": "#e0b64e",
 				// The six agent identity hues, hand-picked rather than derived:
 				// this is the one theme required to author the full key set, and
 				// identity colours only do their job if they're separated on the
@@ -104,6 +108,9 @@ func builtins() []Theme {
 				"branch":     "#e07a3c", // solarized orange lifted: #cb4b16 itself is too dim on base02
 				"todo":       "#cb4b16", "ok": "#859900", "warn": "#b58900", "err": "#dc322f",
 				"done": "#6c71c4", "accent-fg": "#fdf6e3", "fg-strong": "#eee8d5",
+				// Solarized yellow is a mid-tone, and on base02 it is only
+				// ~3:1 as text. Same hue lifted to ~5.8:1.
+				"warn-fg": "#f2b700",
 			},
 		},
 		{
@@ -120,6 +127,9 @@ func builtins() []Theme {
 				"branch": "#a8420f",
 				"todo":   "#b58900", "ok": "#859900", "warn": "#b58900", "err": "#dc322f",
 				"done": "#6c71c4", "accent-fg": "#fdf6e3",
+				// The same yellow as text lands near 2.4:1 on the base2
+				// panels. Same hue taken dark (~5.7:1 on #e4ddc8).
+				"warn-fg":   "#694f00",
 				"fg-strong": "#073642", "fg-bright": "#002b36",
 				"err-bg": "#f6d7cd", "err-fg": "#a4321f",
 			},
@@ -195,6 +205,9 @@ func builtins() []Theme {
 				"branch": "#a8480c",
 				"todo":   "#9a6700", "ok": "#1e8e5a", "warn": "#b07800", "err": "#cc3d3d",
 				"done": "#0e8a9e", "accent-fg": "#ffffff",
+				// The ledger amber as text is ~3:1 on #e4e7ed; taken dark
+				// to ~6:1, and darker than the #9a6700 todo mark.
+				"warn-fg":   "#734e00",
 				"fg-strong": "#14181f", "fg-bright": "#000000",
 				"err-bg": "#f5dada", "err-fg": "#a02c2c",
 			},

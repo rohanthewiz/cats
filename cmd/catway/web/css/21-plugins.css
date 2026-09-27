@@ -27,7 +27,7 @@
   .plg-head .chk { margin-left:auto; display:flex; align-items:center; gap:6px;
     font-weight:400; font-size:11px; color:var(--muted); }
   .plg-head .chk.hot { color:var(--accent); font-weight:600; }
-  .plg-head .chk.warn { color:var(--warn); }
+  .plg-head .chk.warn { color:var(--warn-fg); }
   .plg-head .recheck { background:none; border:1px solid transparent; color:var(--muted);
     border-radius:4px; font:inherit; font-size:13px; line-height:1; padding:2px 5px; cursor:pointer; }
   .plg-head .recheck:hover:not(:disabled) { border-color:var(--line); color:var(--fg-bright); }
@@ -86,7 +86,11 @@
   .row.plg .l2 { color:var(--muted); font-size:11px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
   .row.plg .l2.new { color:var(--accent); }
   .row.plg .l2.err { color:var(--err); }
-  .row.plg .l2.warn { color:var(--warn); }
+  /* Warn *text* (here, the pill below and the header's .chk.warn) is
+     --warn-fg, not --warn: the darkest built-in ambers read at 2-3:1 as 10-11px
+     text on the dialog, and --warn-fg is authored per theme to hold 4.5:1.
+     Tints, edges and fills stay --warn, where the hue is the signal. */
+  .row.plg .l2.warn { color:var(--warn-fg); }
   .row.plg .l2.path { font-family:var(--mono, monospace); font-size:10.5px; }
 
   /* Pills: version, type, status, and the update target. Small caps-free
@@ -100,7 +104,7 @@
     background:color-mix(in srgb, var(--done) 12%, transparent); }
   .row.plg .pill.st.broken { color:var(--err); border-color:color-mix(in srgb, var(--err) 45%, transparent);
     background:color-mix(in srgb, var(--err) 12%, transparent); }
-  .row.plg .pill.st.missing { color:var(--warn); border-color:color-mix(in srgb, var(--warn) 45%, transparent);
+  .row.plg .pill.st.missing { color:var(--warn-fg); border-color:color-mix(in srgb, var(--warn) 45%, transparent);
     background:color-mix(in srgb, var(--warn) 12%, transparent); }
   .row.plg .pill.new { color:var(--accent-fg); background:var(--accent); border-color:var(--accent); font-weight:600; }
 

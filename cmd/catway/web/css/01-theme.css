@@ -87,6 +87,10 @@
     --accent-fg:#0e1a13;
     /* The link-error banner's own surface — red-tinted, unlike --err text. */
     --err-bg:#2a1c1c; --err-fg:#ffd7d7;
+    /* Amber *text* on a panel. --warn is the fill/edge colour; on the darkest
+       ambers it is too faint as small text, so those themes author a shade of
+       their own. Here it is the same amber. */
+    --warn-fg:#e0b64e;
     /* Translucent washes. hover flashes icon buttons; the rest paint the
        canvas overlays (drag selection, copy-mode cursor, scrollbar thumb),
        read from JS via getComputedStyle so themes reach the canvas too. */

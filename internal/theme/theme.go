@@ -71,6 +71,7 @@ var requiredKeys = []string{"bg", "fg", "muted", "line", "accent", "ok", "warn",
 //	muted ── ws-heading ─┬─ branch   (sparse themes only; built-ins author an orange)
 //	                     └─ agent-3
 //	 accent ─ heading · accent-dim(α) · done · sel-fill(α) · cm-cursor(α) · scroll-thumb(α)
+//	 warn ─ todo · warn-fg        err ─ err-fg
 //	 agent-1..6 ← accent · done · ws-heading · heading · ok · todo (the palette's own hues)
 var derivations = []struct {
 	key   string
@@ -133,6 +134,16 @@ var derivations = []struct {
 	{"chrome-fg-dim", "fg", 0},
 	{"err-bg", "panel2", 0},
 	{"err-fg", "err", 0},
+	// Amber *text* on a panel surface (the plugins dialog's error lines and
+	// "not installed" pills). --warn itself stays the fill/edge/tint colour;
+	// this is the same amber taken far enough from the panel to read as 10-11px
+	// text. It copies warn verbatim because on most palettes warn already
+	// holds 4.5:1 against panel2. The three built-ins where it doesn't
+	// (solarized-light, corporate, solarized-dark: darkest ambers, or a dark
+	// amber on a mid-dark teal) author their own. A derivation can't compute
+	// one: it only copies a key, and which way to move (darker or lighter)
+	// depends on the surface, not on warn.
+	{"warn-fg", "warn", 0},
 	{"hover", "fg", 0.16},
 	{"sel-fill", "accent", 0.30},
 	{"cm-cursor", "accent", 0.95},

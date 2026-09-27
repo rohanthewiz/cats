@@ -695,6 +695,7 @@ required in a custom theme — every other key is derived from them when absent
 | `todo` | the workspace to-do reminder mark |
 | `done` | the unseen-completion marker on a pane whose agent finished while you were elsewhere |
 | `err-bg` / `err-fg` | the link-error banner's surface and text |
+| `warn-fg` | amber text on a panel, such as the plugins dialog's install errors (defaults to `warn`; set it when `warn` is too faint as small text on `panel2`) |
 | `hover` | the translucent wash on hovered icon buttons |
 | `sel-fill` / `cm-cursor` | drag-selection wash and copy-mode cursor outline (canvas) |
 | `scroll-thumb` / `scroll-thumb-idle` | the scrollback scrollbar's thumb, scrolled and at rest |
