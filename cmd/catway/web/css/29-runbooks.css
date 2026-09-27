@@ -23,7 +23,7 @@
      suspended after a runaway, already running, or switched off in the config —
      all of it invisible daemon state, and all of it the answer to "why did my
      runbook stop firing?". The row cannot hold the reason; the title does. */
-  #rb-list li.trig-off .rtrig { color:var(--warn); opacity:1; }
+  #rb-list li.trig-off .rtrig { color:var(--warn-fg); opacity:1; }
   #rb-list .rsteps { flex:none; margin-left:auto; color:var(--muted);
     font-size:calc(9px * var(--sb-scale)); font-variant-numeric:tabular-nums; }
   /* A file that would not parse. It is listed rather than skipped — a runbook

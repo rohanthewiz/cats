@@ -11,7 +11,7 @@
   .modal.peers-sync label.check .sub { color:var(--muted); font-size:11px; margin-left:auto; text-align:right; }
   .modal.peers-sync .field { margin-top:10px; }
   .modal.peers-sync select { width:100%; background:var(--panel); color:var(--fg); border:1px solid var(--line); border-radius:5px; padding:5px 8px; font:inherit; }
-  .modal .hint.warn { color:var(--warn); }
+  .modal .hint.warn { color:var(--warn-fg); }
   .modal .hint.err { color:var(--err); margin-bottom:8px; }
   .modal.peers-report { width:720px; }
   .modal.peers-report .body { padding:8px 14px; }
@@ -20,7 +20,7 @@
   .modal.peers-report .row { cursor:default; }
   .modal.peers-report .row .kind { width:60px; }
   .modal.peers-report .row.synced .kind { color:var(--accent); }
-  .modal.peers-report .row.skipped .kind { color:var(--warn); }
+  .modal.peers-report .row.skipped .kind { color:var(--warn-fg); }
   .modal.peers-report .row.failed .kind { color:var(--err); }
   .modal.peers-report .row .lbl { flex:none; max-width:45%; }
   .modal.peers-report .row .sub { white-space:normal; }

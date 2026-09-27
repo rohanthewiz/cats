@@ -71,9 +71,19 @@
   #pane-list .ttl { color:var(--muted); overflow:hidden; text-overflow:ellipsis; }
   #pane-list .ag, #agent-list .aname, #plugin-list .aname { margin-left:auto; }
   .ag, .adot, .aname { font-size:calc(11px * var(--sb-scale)); }
-  .st-working { color:var(--warn); } .st-blocked { color:var(--err); }
+  /* "working" as text (a pane row's agent label, the pane header's state word)
+     is --warn-fg: the darkest built-in ambers are 2-3:1 as 11px text, and
+     --warn-fg is authored per theme to hold 4.5:1. The markers below keep
+     --warn. */
+  .st-working { color:var(--warn-fg); } .st-blocked { color:var(--err); }
   .st-idle { color:var(--ok); } .st-unknown { color:var(--muted); }
   .st-done { color:var(--done); } /* finished off-screen, not yet seen */
+  /* The state markers (agent-list dots, tab marks, the workspace "●N" badge)
+     stay --warn. They sit in a row beside the ok/err/done markers, where the
+     hue is the signal. On solarized-light, --warn-fg's dark amber would drift
+     toward the olive of its ok green. The selectors are the same set that
+     pulses below. */
+  .adot.st-working, .tmark.st-working, #ws-list .st-working { color:var(--warn); }
   /* A working agent's dot breathes: the one state that is mid-change, so it is
      the one marker that moves. Only the dots pulse — the agent-name text in a
      pane row shares .st-working and would be hard to read blinking. */

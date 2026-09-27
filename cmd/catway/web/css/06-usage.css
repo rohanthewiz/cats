@@ -23,7 +23,7 @@
      colors its hidden meter would have taken. */
   #usage-list li.ugrp .gsum { text-transform:none; letter-spacing:0; font-weight:400;
     color:var(--muted); font-variant-numeric:tabular-nums; }
-  #usage-list li.ugrp.high .gsum { color:var(--warn); }
+  #usage-list li.ugrp.high .gsum { color:var(--warn-fg); }
   #usage-list li.ugrp.crit .gsum { color:var(--err); }
   /* The time left in the quoted window, parenthesised after the reading. It keeps
      the muted color through .high and .crit — the color in this header means "how
@@ -41,7 +41,7 @@
      make it impossible to tell which one is speaking. Specificity carries it
      over the muted rule above and over .high/.crit, both of which paint .gsum
      rather than this span. */
-  #usage-list li.ugrp .gsum .gleft.soon { color:var(--warn); opacity:1; }
+  #usage-list li.ugrp .gsum .gleft.soon { color:var(--warn-fg); opacity:1; }
   #usage-list li.ugrp .car { font-size:calc(10px * var(--sb-scale)); }
   #usage-list .urow { display:flex; align-items:baseline; gap:6px; }
   /* Body weight and body color: with a genuinely bold heading now above them,
@@ -51,7 +51,7 @@
   /* The reading sits hard right against the window name, and is the one thing
      in the row worth reading at a glance when the bar is only a hint. */
   #usage-list .uval { margin-left:auto; color:var(--muted); font-variant-numeric:tabular-nums; }
-  #usage-list li.high .uval { color:var(--warn); }
+  #usage-list li.high .uval { color:var(--warn-fg); }
   #usage-list li.crit .uval { color:var(--err); }
   #usage-list .ureset { color:var(--muted); font-size:calc(9px * var(--sb-scale)); opacity:.8; }
   /* The unfolded half of the same warning: a countdown inside its row's horizon
@@ -59,7 +59,7 @@
      the spent-color, so a row can legitimately show an amber clock beside a
      calm percentage — that pairing ("barely used, nearly over") is exactly the
      one the color exists to catch. */
-  #usage-list .ureset.soon { color:var(--warn); opacity:1; }
+  #usage-list .ureset.soon { color:var(--warn-fg); opacity:1; }
   #usage-list .umeter { margin-top:3px; height:4px; border-radius:2px; background:var(--panel2);
                         overflow:hidden; }
   #usage-list .umeter > i { display:block; height:100%; width:0; background:var(--accent);

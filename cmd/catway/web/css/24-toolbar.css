@@ -35,7 +35,7 @@
   /* Nothing captured yet is worth saying out loud rather than showing as a bare
      0 — it is the state the user most needs to notice, because it usually means
      the thing they are doing is not going through the command vocabulary. */
-  #recbtn.on.empty .n { color:var(--warn); }
+  #recbtn.on.empty .n { color:var(--warn-fg); }
   @keyframes recpulse { 0%,100% { opacity:1; } 50% { opacity:.25; } }
   /* Reduced-motion readers get the state without the blink: the fill, the tint
      and the count all still say it. */

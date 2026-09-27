@@ -32,7 +32,7 @@ window were dated by grepping every session doc.
 - Open and Roadmap stay in ID order. New items append to the end of Open (or
   Roadmap, for future work) with the next ID.
 
-**Next ID:** N-052
+**Next ID:** N-053
 
 ## Open
 
@@ -209,23 +209,23 @@ window were dated by grepping every session doc.
   pass ends, with the page already open. That push at the end of the seed
   pass has only been exercised by unit tests.
 
-- **N-051** · raised `2026-0927-0014-n050-warn-fg-theme-key` · value low
-  `--warn-fg` (N-050) is used only in the plugins dialog. Twelve rules
-  elsewhere still draw amber *text* in `--warn`. On solarized-light,
-  corporate and solarized-dark that text reads at about 2.2 to 3.3:1:
-  - sidebar usage list (`06-usage.css`: `.gsum`, `.gleft.soon`, `.uval`,
-    `.ureset.soon`)
-  - agent age (`11-agentlist.css` `.aage.stale-idle`)
-  - pane state (`10-panelist.css` `.st-working`)
-  - pane header agent and mode (`12-main.css` `.info .agent`, `.info .mode`)
-  - runbook trigger (`29-runbooks.css` `.rtrig`)
-  - record button count (`24-toolbar.css` `#recbtn.on.empty .n`)
-  - peers dialog (`30-peers.css` `.hint.warn`, `.row.skipped .kind`)
+- **N-052** · raised `2026-0927-0024-n051-warn-fg-text-app-wide` · value low
+  The other agent-state words are still faint as text on the three themes
+  N-050/N-051 fixed for amber. "idle" (`--ok`), "blocked" (`--err`) and "done"
+  (`--done`) colour the pane header's state word (`.st-*` in
+  `10-panelist.css`) and a pane row's agent label. They read at 1.8 to 4.3:1:
+  - solarized-light: ok 2.1-2.6, err 3.1-3.8, done 2.9-3.6
+  - corporate: ok 3.0-3.6, err 3.5-4.3, done 2.9-3.6
+  - solarized-dark: ok 2.6-4.1, err 1.8-2.8, done 1.9-3.0
 
-  Each theme's `--panel` and `--chrome` sit at least as far from its
-  `--warn-fg` as `--panel2` does, so a swap should hold 4.5:1. The pane
-  header's agent colour is a state colour chosen to sit beside the others on
-  the strip, so check it there before changing it.
+  The ranges run from the focused header (`--chrome-focus`, worst) to the
+  sidebar (`--panel`). "working" is now the only state word at 4.5:1 or
+  better. `--err-fg` already exists but is the banner's ink on `--err-bg`, so
+  it may not be the right shade for panel text. The state dots stay on the
+  base hues either way, as `.st-working`'s markers do. Also seen:
+  solarized-light's folded usage group now shows its `.high` reading in
+  `#694f00`, close to the `#6f5f2a` group heading beside it. It still
+  stands apart from the grey resting state.
 
 ## Roadmap
 
@@ -261,6 +261,24 @@ unchanged.
 Closures before this file existed live in the session docs' own write-ups.
 Newest first. The unnumbered entries at the end were found done while seeding,
 so they are not carried.
+
+- **N-051** · raised `2026-0927-0014-n050-warn-fg-theme-key` ·
+  closed 2026-09-27, `2026-0927-0024-n051-warn-fg-text-app-wide`. The twelve
+  amber text rules now use `--warn-fg`. They are the usage list's `.gsum`,
+  `.gleft.soon`, `.uval` and `.ureset.soon`, `.aage.stale-idle`,
+  `.st-working`, the pane header's `.info .agent` and `.info .mode`, `.rtrig`,
+  `#recbtn.on.empty .n`, and the peers dialog's `.hint.warn` and
+  `.row.skipped .kind`. `.st-working` also colours the state markers (the
+  agent-list dots, tab marks and the workspace "●N" badge). A new rule keeps
+  those on `--warn`, since the hue is their signal, and a dark
+  `#694f00` dot would drift toward solarized-light's olive ok. On the three
+  themes the text now reads at 4.5 to 7.2:1 (was 2.1 to 4.1:1). The floor is
+  solarized-dark's focused header: `--chrome-focus` is closer to `--warn-fg`
+  than `--panel2` is, so the item's premise was slightly off, but it still
+  clears 4.5:1. The pane header's agent name and "working" moved together,
+  and stay distinct from the bold orange branch. Checked in a headless-Chrome
+  render, before and after, on corporate, both solarized themes and
+  cats-green. cats-green is pixel-identical.
 
 - **N-050** · raised `2026-0927-0000-n049-failed-default-tile-contrast` ·
   closed 2026-09-27, `2026-0927-0014-n050-warn-fg-theme-key`. A new theme key,

@@ -36,7 +36,7 @@
      literal fallback for engines without color-mix. */
   :is(#agent-list, #plugin-list) .aage.stale { opacity:1; }
   :is(#agent-list, #plugin-list) .aage.stale .anum { font-weight:700; }
-  :is(#agent-list, #plugin-list) .aage.stale-idle { color:var(--warn); }
+  :is(#agent-list, #plugin-list) .aage.stale-idle { color:var(--warn-fg); }
   :is(#agent-list, #plugin-list) .aage.stale-done { color:#b04a4a; }
   :is(#agent-list, #plugin-list) .aage.stale-done { color:color-mix(in srgb, var(--err) 65%, #6b0f10); }
   /* An agent whose workspace is locked steps back the same way its workspace row
