@@ -124,6 +124,37 @@
     if (first) sendCmd("agent.focus", { pane: first.pane });
   }
 
+  // gotoGlobalTodoPane is the heading paw's click: reveal a cats-todo manager
+  // showing the global backlog. Unlike a workspace row's paw, which has exactly
+  // one workspace's panes to pick from, the global count is the same list seen
+  // from wherever a global manager happens to be open (workspaceRollups takes
+  // the max, not the sum, for that reason), so any such pane is as good as any
+  // other. That freedom is spent on two preferences, in order:
+  //
+  //   1. a manager in the workspace this window is viewing — the jump is then a
+  //      focus (and at most a tab switch) rather than a workspace switch;
+  //   2. otherwise the first in inventory order, as the row paws use.
+  //
+  // Managers in a locked workspace are passed over rather than refused
+  // outright: the lock forbids switching to *that* workspace, not reaching the
+  // global list, so a manager elsewhere still answers the click. Only when every
+  // global manager sits behind a lock does the click toast, naming the first
+  // one's workspace so the way out (unlock it) is concrete. Resolved at click
+  // time from the live inventory, for the same reason gotoTodoPane is.
+  function gotoGlobalTodoPane() {
+    const cur = layoutMsg && layoutMsg.workspaces.find((x) => x.active);
+    let pick = null, lockedWS = "";
+    for (const pi of paneInv) {
+      if (!pi.handle || !isGlobalTodoTitle(pi.title) || !todoOpenCount(pi.title)) continue;
+      const ws = wsOf(pi.handle);
+      if (wsLocked(ws)) { if (!lockedWS) lockedWS = ws; continue; }
+      if (cur && ws === cur.id) { pick = pi; break; }
+      if (!pick) pick = pi;
+    }
+    if (pick) { sendCmd("agent.focus", { pane: pick.pane }); return; }
+    if (lockedWS) toast(wsName(lockedWS) + " is locked — unlock it to reach the global todos");
+  }
+
   // wsFlaggedPanes: the flags pinned to panes *inside* this workspace. The
   // workspace row shows only its own flag, so a note left on a pane two tabs
   // away is otherwise invisible from here — which is exactly the thing a flag
@@ -722,7 +753,13 @@
     wsGlobalTodoEl.innerHTML = "";
     const gmark = todoMark(globalTodos);
     if (gmark) {
-      gmark.title = globalTodos === 1 ? "1 unfinished global todo" : globalTodos + " unfinished global todos";
+      gmark.title = (globalTodos === 1 ? "1 unfinished global todo" : globalTodos + " unfinished global todos") +
+        " — click to open the todo pane";
+      // Clickable like the row paws (gotoGlobalTodoPane). No propagation to
+      // stop here: the heading has no press gesture of its own, and the fold
+      // pair in .hctl is a sibling, not an ancestor.
+      gmark.classList.add("jump");
+      pressActivate(gmark, () => gotoGlobalTodoPane());
       wsGlobalTodoEl.appendChild(gmark);
     }
     // Two shelves, in the order attention runs: the workspaces still in play,
