@@ -36,7 +36,21 @@ func (windowBackendUI) catwayRestarting() {
 	evalInWindows(backendOverlayJS("Restarting catway…", "", false))
 }
 
-func (windowBackendUI) catwayBack() { evalInWindows(backendClearJS()) }
+// catwayBack clears the overlay from every page and retries every window that
+// has no page at all. The second half is not covered by the first: a window
+// opened or reloaded while catway was down failed its load, so there is no
+// document for the clearing script (or the page's own reconnect loop) to run
+// in, and it would stay blank until the user reloaded it by hand. Both run in
+// the same main-thread hop, since window state is main-thread-only.
+func (windowBackendUI) catwayBack() {
+	js := backendClearJS()
+	onMainThread(func() {
+		if windows != nil {
+			windows.evalAll(js)
+			windows.reloadFailed()
+		}
+	})
+}
 
 // evalInWindows hops to the main thread (the supervisor is on its own goroutine)
 // and runs js in every window.

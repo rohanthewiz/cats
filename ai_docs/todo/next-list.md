@@ -89,13 +89,6 @@ window were dated by grepping every session doc.
     inert under a folded section, and that a trackpad drag inside the
     WKWebView keeps the row-resize cursor for the whole drag.
 
-- **N-007** · raised `2026-0914-0158-catway-restart-cats-todo-release` · value low
-  A window opened or reloaded while catway is down stays blank after
-  recovery. `catwayBack` only evaluates JS in existing pages
-  (`cmd/catapp/backenddown.go`), and a failed load leaves no page to run it
-  in. The fix would reload windows that have no loaded URL on `catwayBack`.
-  Minor, because automatic restarts take well under a second.
-
 - **N-008** · raised `2026-0914-0158-catway-restart-cats-todo-release` · value low
   `waitReady` (`cmd/catapp/supervise.go`) has no caller: it is only a wrapper
   over `waitReadyOrExit(…, nil)`. Remove it or leave it. It is a candidate for
@@ -264,6 +257,16 @@ unchanged.
 Closures before this file existed live in the session docs' own write-ups.
 Newest first. The unnumbered entries at the end were found done while seeding,
 so they are not carried.
+
+- **N-007** · raised `2026-0914-0158-catway-restart-cats-todo-release` ·
+  closed 2026-09-26. Each window now remembers the URL of a navigation that
+  failed with a network error (`failedURL` in `cmd/catapp/window_darwin.m`,
+  cleared when a load finishes; cancelled loads are ignored). `catwayBack`
+  clears the overlay and then reloads those windows
+  (`catsReloadFailedWindows`), so a window opened or reloaded during an
+  outage comes up once catway is back. The restore list also falls back to
+  that URL, so a window that never loaded keeps its workspace instead of
+  being saved as the primary view.
 
 - **N-032** · raised `2026-0923-1443-settings-json-and-screen` ·
   closed 2026-09-26. The macro recorder now drops a config.set whose only

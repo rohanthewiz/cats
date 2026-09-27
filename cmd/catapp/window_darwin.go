@@ -13,6 +13,7 @@ void  catsOpenHTMLWindow(const char *html, const char *title);
 void  catsShowHTMLInKeyWindow(const char *html, const char *title);
 void  catsNavigateAll(const char *url, const char *title);
 void  catsEvalAll(const char *js);
+void  catsReloadFailedWindows(void);
 void  catsEvalKeyWindow(const char *js);
 void  catsZoomKeyWindow(int delta);
 void  catsSetWindowTitle(const char *title);
@@ -321,6 +322,11 @@ func (m *winManager) evalAll(js string) {
 	defer C.free(unsafe.Pointer(cJS))
 	C.catsEvalAll(cJS)
 }
+
+// reloadFailed loads again every window whose last navigation failed — a window
+// opened or reloaded while catway was down, which has no page for evalAll to
+// reach. Main thread only.
+func (m *winManager) reloadFailed() { C.catsReloadFailedWindows() }
 
 // --- cgo exports (called from window_darwin.m) ---------------------------------
 

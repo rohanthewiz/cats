@@ -54,6 +54,14 @@ static const CGFloat kDefaultH = 820;
                                                       WKScriptMessageHandler,
                                                       WKScriptMessageHandlerWithReply>
 @property(nonatomic, strong) WKWebView *web;
+// failedURL is the page this window was asked to show and could not load — set
+// when a navigation fails, cleared when one finishes. A window opened or
+// reloaded while catway is down has no document to run the backend overlay's
+// scripts in, so this is how catsReloadFailedWindows knows it has something to
+// retry once catway is back, and how the restore list still knows which
+// workspace a blank window was meant to show. copy, not strong: under MRC the
+// synthesized setter is what retains and releases it.
+@property(nonatomic, copy) NSURL *failedURL;
 @end
 
 // gWindows holds a strong reference to every open controller: an
@@ -279,20 +287,52 @@ static WKWebViewConfiguration *catsConfig(CatsWindowController *owner) {
 // load at all fails it. Both are ignored once startup is over
 // (splash_darwin.go), so ordinary navigation later costs nothing.
 
+//
+// The same two callbacks also keep failedURL, which outlives startup: it is what
+// lets a window that could not load be retried when catway comes back.
+
 - (void)webView:(WKWebView *)webView didFinishNavigation:(WKNavigation *)navigation {
+    self.failedURL = nil;
     catappWindowDidLoad();
 }
 
 - (void)webView:(WKWebView *)webView
     didFailProvisionalNavigation:(WKNavigation *)navigation
                        withError:(NSError *)error {
+    [self noteFailedLoad:error];
     catappWindowLoadFailed((char *)[[error localizedDescription] UTF8String]);
 }
 
 - (void)webView:(WKWebView *)webView
     didFailNavigation:(WKNavigation *)navigation
             withError:(NSError *)error {
+    [self noteFailedLoad:error];
     catappWindowLoadFailed((char *)[[error localizedDescription] UTF8String]);
+}
+
+// noteFailedLoad records which URL a failed navigation was for, so it can be
+// loaded again on catwayBack.
+//
+// Only network failures count. A cancelled load (NSURLErrorCancelled) is one a
+// newer navigation superseded — that navigation reports its own outcome, and
+// retrying the cancelled one later would drag the window back to where it was.
+// WebKitErrorDomain failures (a policy decision, an unsupported content type)
+// would fail the same way on a retry, so they are not worth one.
+//
+// The URL comes from the error rather than webView.URL: after a failed
+// provisional load, webView.URL is still whatever page was committed before —
+// nil for a new window, which is exactly the case this is for.
+- (void)noteFailedLoad:(NSError *)error {
+    if (![error.domain isEqualToString:NSURLErrorDomain] || error.code == NSURLErrorCancelled) {
+        return;
+    }
+    NSURL *url = error.userInfo[NSURLErrorFailingURLErrorKey];
+    if (![url isKindOfClass:[NSURL class]]) {
+        url = self.web.URL;
+    }
+    if (url) {
+        self.failedURL = url;
+    }
 }
 
 // --- lifetime -------------------------------------------------------------------
@@ -308,6 +348,7 @@ static WKWebViewConfiguration *catsConfig(CatsWindowController *owner) {
     [ucc removeScriptMessageHandlerForName:@"catsBoot"];
     self.web.UIDelegate = nil;
     self.web.navigationDelegate = nil;
+    self.failedURL = nil; // releases it; there is no dealloc to do so
     [gWindows removeObject:self];
     // Closing a window closes nothing in the session — the workspace it showed
     // keeps running on the server. All that changes here is the restore list.
@@ -512,6 +553,21 @@ void catsEvalAll(const char *cJS) {
     }
 }
 
+// catsReloadFailedWindows loads again every window whose last navigation failed
+// (see failedURL) — the catwayBack half the overlay script cannot do, because a
+// window whose first load failed has no page for a script to run in. A window
+// that loaded fine is left alone: its page is still running and reconnects its
+// own WebSocket.
+void catsReloadFailedWindows(void) {
+    @autoreleasepool {
+        for (CatsWindowController *wc in gWindows) {
+            if (wc.failedURL) {
+                [wc.web loadRequest:[NSURLRequest requestWithURL:wc.failedURL]];
+            }
+        }
+    }
+}
+
 // catsWindowsJSON snapshots the open windows for the restore list: the
 // workspace each is showing (read off its live URL, which the page keeps in
 // step with its view) and its frame. The caller owns the returned string.
@@ -519,7 +575,10 @@ char *catsWindowsJSON(void) {
     @autoreleasepool {
         NSMutableArray *out = [NSMutableArray array];
         for (CatsWindowController *wc in gWindows) {
-            NSURL *url = wc.web.URL;
+            // A window that never loaded has no URL of its own; the one it
+            // failed to load still says which workspace it is for, and saving
+            // it as "" would reopen it on the primary view instead.
+            NSURL *url = wc.web.URL ?: wc.failedURL;
             NSString *ws = @"";
             if (url) {
                 NSURLComponents *c = [NSURLComponents componentsWithURL:url
