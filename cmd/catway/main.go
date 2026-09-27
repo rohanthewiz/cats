@@ -419,6 +419,10 @@ func main() {
 			log.Printf("catway: host %s [%s] %s%s", h.ID, h.DisplayLabel(), h.Addr, def)
 		}
 	}
+	// First-run plugin seed (cats-todo on a fresh install). Background, and
+	// started only now that every fatal startup check has passed, so a catway
+	// that is about to exit never begins a clone. See seedDefaultPlugins.
+	go seedDefaultPlugins()
 	if err := s.Run(); err != nil {
 		dlog.Fatalf("catway: %v", err)
 	}

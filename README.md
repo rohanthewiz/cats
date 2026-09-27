@@ -50,10 +50,14 @@ catctl integration install shell                     # prompt marks for the comm
 catctl integration install claude                    # richer agent state via hooks
 ```
 
-**Install the [`cats-todo`](https://github.com/rohanthewiz/cats-todo) plugin**
-— it is the recommended companion, and the reference plugin. Keep a backlog of
-prompts per-project or globally, then *drop* one into a Claude Code session,
-either an existing agent pane or a fresh tab that launches the agent for you:
+**The [`cats-todo`](https://github.com/rohanthewiz/cats-todo) plugin** is the
+recommended companion, and the reference plugin. Keep a backlog of prompts
+per-project or globally, then *drop* one into a Claude Code session, either an
+existing agent pane or a fresh tab that launches the agent for you. A fresh
+install gets it automatically: catway installs it in the background on first
+start (it needs `git` and `go`; set `CATS_NO_DEFAULT_PLUGINS=1` to skip it).
+It stays an ordinary plugin you can update or uninstall. On an existing install,
+or after uninstalling it:
 
 ```bash
 catctl plugin install rohanthewiz/cats-todo

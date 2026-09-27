@@ -97,7 +97,7 @@ func Update(id string, out io.Writer) (inst Installed, updated bool, err error) 
 		return rollback(fmt.Errorf("updated plugin %s no longer supports this platform (supports: %s)",
 			id, strings.Join(m.Platforms, ", ")))
 	}
-	if err := runBuild(inst.Dir, m.Build, out); err != nil {
+	if err := runBuild(inst.Dir, m.Build, out, false); err != nil {
 		return rollback(err)
 	}
 

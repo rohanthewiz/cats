@@ -3,14 +3,18 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/rohanthewiz/cats/internal/app"
+	"github.com/rohanthewiz/cats/internal/dlog"
 	"github.com/rohanthewiz/cats/internal/plugin"
 )
 
@@ -246,4 +250,54 @@ func catctlPath() string {
 		}
 	}
 	return "catctl"
+}
+
+// seedDefaultPlugins runs the first-run plugin seed (plugin.SeedDefaults) and
+// logs what it did. It runs once per catway start, on its own goroutine:
+// seeding is a git clone plus a `go build`, seconds to a minute of work that
+// must never hold up the server coming up. Nothing waits on it. The browser
+// reads plugin.list on demand (dialog open, picker open), so a plugin that
+// lands mid-session simply shows up the next time either is opened.
+//
+// It lives in catway, not in catapp or an installer script, because catway is
+// the one process every kind of cats install runs: the Mac app, `make local`,
+// a dist tarball on a Linux server. Plugins also live on catway's side of the
+// wire, so a thin client pointed at a remote server seeds that server, which
+// is where the plugin would run.
+func seedDefaultPlugins() {
+	var out bytes.Buffer
+	outcomes, err := plugin.SeedDefaults(plugin.Defaults, &out)
+	if err != nil {
+		dlog.Warnf("catway: default plugins: %v", err)
+		return
+	}
+	for _, o := range outcomes {
+		switch {
+		case o.Installed:
+			log.Printf("catway: installed default plugin %s v%s", o.Source, o.Version)
+		case o.Present:
+			// Installed by other means since the seed was planned. Not news.
+		case o.GaveUp:
+			dlog.Warnf("catway: default plugin %s not installed after %d attempts, giving up (install it later with `catctl plugin install %s`): %v%s",
+				o.Source, o.Attempt, o.Source, o.Err, outputTail(out.String()))
+		default:
+			dlog.Warnf("catway: default plugin %s not installed (attempt %d, will retry on next start): %v%s",
+				o.Source, o.Attempt, o.Err, outputTail(out.String()))
+		}
+	}
+}
+
+// outputTail keeps the last few lines of clone/build output for a log line:
+// enough to show why a build failed (e.g. `go: command not found`) without
+// pasting the whole build into daemons.log.
+func outputTail(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	lines := strings.Split(s, "\n")
+	if len(lines) > 4 {
+		lines = lines[len(lines)-4:]
+	}
+	return " | " + strings.Join(lines, " | ")
 }

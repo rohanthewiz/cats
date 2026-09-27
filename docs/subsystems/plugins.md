@@ -324,6 +324,7 @@ A build step runs in the plugin root with the host's environment, plus:
 |-|-|
 | `CATS_PLUGIN_INSTALL_CWD` | the directory the user ran the installer *from* |
 | stdin | the host's terminal — **only** when the host has one |
+| `CATS_PLUGIN_BUILD_HEADLESS` | `1` on a headless install (below); absent otherwise |
 
 Both exist so a build step can do first-run setup in the user's project. The
 step's own working directory is the plugin root, so without
@@ -337,6 +338,18 @@ immediate EOF it would otherwise get. Design a step to work either way — check
 whether stdin is a terminal, and fall back to printing instructions. The host's
 own `git` calls keep the old no-stdin behavior, so a private-repo clone still
 fails fast instead of stalling at an invisible credential prompt.
+
+**Headless installs.** catway installs plugins with no person watching in two
+places: the [default-plugin seed](#default-plugins-on-a-fresh-install) and a
+peer sync. Their build steps get no stdin and no `CATS_PLUGIN_INSTALL_CWD`, even
+when catway itself was started from a terminal, because catway's working
+directory is not a project the user chose. They get
+`CATS_PLUGIN_BUILD_HEADLESS=1` instead. The output goes to a log or a sync
+report, not to someone reading along. A one-time step should therefore do
+nothing and *not* record itself as done, so it still runs on the first install
+or update a person watches. Missing stdin alone does not tell you this: a
+scripted install with stdin redirected has no terminal either, but its user
+does read the output.
 
 ## Writing a plugin
 
@@ -450,6 +463,59 @@ and **clones**.
 A relative path resolves against the **focused pane's cwd**. So with a pane
 sitting next to a `cats-todo` checkout, `./cats-todo` links it in place, and
 `../cats-todo` works from inside a sibling project.
+
+### Default plugins on a fresh install
+
+A fresh install gets [`cats-todo`](#cats-todo-the-reference-plugin) without
+being asked. It is still an ordinary plugin: catway runs the same install
+`catctl plugin install rohanthewiz/cats-todo` does, so it can be updated or
+uninstalled like any other. The set lives in `plugin.Defaults`
+(`internal/plugin/defaults.go`).
+
+```mermaid
+flowchart TD
+  START["catway start<br/>(background goroutine)"]
+  OPT{"CATS_NO_DEFAULT_PLUGINS set?"}
+  STATE{".cats-defaults.json<br/>in the plugins root?"}
+  ROOT{"plugins root exists?"}
+  EXIST["existing install:<br/>record 'nothing pending'"]
+  FRESH["fresh install:<br/>record every default as pending"]
+  RUN["install each pending default (headless)<br/>success or already present → done<br/>failure → retry next start, up to 3 attempts"]
+  NONE["nothing"]
+
+  START --> OPT
+  OPT -->|"yes"| NONE
+  OPT -->|"no"| STATE
+  STATE -->|"yes"| RUN
+  STATE -->|"no"| ROOT
+  ROOT -->|"yes"| EXIST
+  ROOT -->|"no"| FRESH --> RUN
+```
+
+* **"Fresh" means no plugins root.** The root exists once anything has been
+  installed or linked. An upgrading user who once uninstalled cats-todo still
+  has it, so the plugin does not come back. The same holds after the seed
+  itself: uninstall a default and later starts leave it alone.
+* **The state file is written before the first attempt.** Install creates the
+  root, so without the file a seed that failed offline would look like an
+  existing install on the next start and never retry.
+* **Headless build.** A seed install is a
+  [headless install](#build-step-environment). cats-todo's one-time "set up a
+  backlog here?" offer sees `CATS_PLUGIN_BUILD_HEADLESS` and holds off without
+  using up its one chance, so the question comes on the first cats-todo install
+  or update the user watches (e.g. an update from the plugins dialog).
+* **It needs what a manual install needs.** That is `git`, plus `go` for
+  cats-todo's build. A machine without Go fails the build three times (one
+  attempt per catway start), and the seed then gives up. Each failure is a
+  warning in the daemon log with the build output's last lines. The install can
+  be run by hand later.
+* **Opt out** by setting `CATS_NO_DEFAULT_PLUGINS=1` in catway's environment.
+  An opted-out start writes no state, so removing the variable later still
+  seeds a machine that has no plugins.
+
+The seed runs in catway, not in the Mac app or an installer script, because
+catway is the one process every kind of install runs, and plugins live on its
+side of the wire. A thin client pointed at a remote server seeds that server.
 
 ## CLI
 
@@ -647,6 +713,11 @@ pane or a fresh tab that launches the agent first.
 catctl plugin install rohanthewiz/cats-todo
 catctl plugin run rohanthewiz.cats-todo
 ```
+
+A fresh cats install seeds it automatically (see
+[Default plugins on a fresh install](#default-plugins-on-a-fresh-install)), so
+the install line is only needed on a machine that predates that, or after
+uninstalling it.
 
 Its [`cats-plugin.toml`](https://github.com/rohanthewiz/cats-todo/blob/main/cats-plugin.toml)
 is the reference manifest. It lives in its own repo precisely to prove the plugin

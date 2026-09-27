@@ -744,6 +744,7 @@ an arrow key. Apply with `catctl reload`.
 | `CATS_CONTROL_SOCKET` | `catway`, `catctl` | control socket path. Injected into every pane |
 | `CATS_CATCTL` | `catway` | where to find `catctl` when spawning plugin operations |
 | `CATS_PLUGINS_DIR` | plugin host | override the plugins root |
+| `CATS_NO_DEFAULT_PLUGINS` | `catway` | non-empty: skip installing the default plugins (cats-todo) on a fresh install |
 | `CATS_AGENT_DETECTION_MANIFEST_CATALOG_URL` | `cathost` | override the manifest catalog URL |
 | `XDG_CONFIG_HOME` | config, plugins | config home |
 | `XDG_STATE_HOME` | persistence, manifests | state home |

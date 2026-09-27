@@ -22,6 +22,21 @@ import (
 // only an invisible directory rather than a half-usable plugin. The .git dir
 // is kept: it is the provenance a future `plugin update` would pull on.
 func Install(source, ref string, out io.Writer) (Installed, error) {
+	return install(source, ref, out, false)
+}
+
+// InstallHeadless is Install for a caller that is a daemon, with no person
+// watching the build: the first-run seed (defaults.go) and a peer sync
+// (internal/peersync), both running inside catway. The build steps get no
+// terminal even when catway has one, no invoking directory, and
+// HeadlessEnvVar, so a step can hold back anything it only wants to do in
+// front of a person. See runBuildStep.
+func InstallHeadless(source, ref string, out io.Writer) (Installed, error) {
+	return install(source, ref, out, true)
+}
+
+// install is the shared body of Install and InstallHeadless.
+func install(source, ref string, out io.Writer, headless bool) (Installed, error) {
 	if _, err := exec.LookPath("git"); err != nil {
 		return Installed{}, fmt.Errorf("git is required to install plugins: %w", err)
 	}
@@ -69,7 +84,7 @@ func Install(source, ref string, out io.Writer) (Installed, error) {
 		return Installed{}, occupiedErr(dest, m.ID)
 	}
 
-	if err := runBuild(tmp, m.Build, out); err != nil {
+	if err := runBuild(tmp, m.Build, out, headless); err != nil {
 		return Installed{}, err
 	}
 
@@ -119,7 +134,7 @@ func Link(dir string, out io.Writer) (Installed, error) {
 		// the reason a developer re-links); anything else is a conflict.
 		if fi.Mode()&os.ModeSymlink != 0 {
 			if target, _ := os.Readlink(entry); target == abs {
-				if err := runBuild(abs, m.Build, out); err != nil {
+				if err := runBuild(abs, m.Build, out, false); err != nil {
 					return Installed{}, err
 				}
 				return loadAndSyncBin(root, m.ID, out)
@@ -128,7 +143,7 @@ func Link(dir string, out io.Writer) (Installed, error) {
 		return Installed{}, occupiedErr(entry, m.ID)
 	}
 
-	if err := runBuild(abs, m.Build, out); err != nil {
+	if err := runBuild(abs, m.Build, out, false); err != nil {
 		return Installed{}, err
 	}
 	if err := os.Symlink(abs, entry); err != nil {
@@ -223,12 +238,25 @@ func expandTilde(path string) string {
 // step to guess. A step that does not care simply ignores it.
 const InstallCwdEnvVar = "CATS_PLUGIN_INSTALL_CWD"
 
+// HeadlessEnvVar is set to "1" for the build steps of a headless install (see
+// InstallHeadless), and absent otherwise.
+//
+// A step can already see that stdin is not a terminal, but that alone does
+// not say *why*. A scripted `catctl plugin install` with stdin redirected
+// also has no terminal, and its user reads the output. A headless install's
+// output goes to a daemon log that nobody reads as it happens. A one-time
+// step, such as cats-todo's "set up a backlog here?" offer, should print its
+// hint in the first case. In the second it should stay quiet and not mark
+// itself done, so the offer survives to the first install a person watches.
+const HeadlessEnvVar = "CATS_PLUGIN_BUILD_HEADLESS"
+
 // runBuild executes the manifest's [[build]] steps in order, in the plugin
 // root, streaming output to out. Steps run with the host's environment — a
-// plugin build needs the same PATH/toolchain the user has.
-func runBuild(dir string, steps []BuildStep, out io.Writer) error {
+// plugin build needs the same PATH/toolchain the user has. headless withholds
+// the terminal and the invoking directory (see runBuildStep).
+func runBuild(dir string, steps []BuildStep, out io.Writer, headless bool) error {
 	for i, st := range steps {
-		if err := runBuildStep(dir, st.Command, out); err != nil {
+		if err := runBuildStep(dir, st.Command, out, headless); err != nil {
 			return fmt.Errorf("build step %d (%s): %w", i+1, strings.Join(st.Command, " "), err)
 		}
 	}
@@ -248,11 +276,23 @@ func runBuild(dir string, steps []BuildStep, out io.Writer) error {
 // git keeps the old no-stdin behavior deliberately: with a terminal attached,
 // a clone of a private repo would sit at a credential prompt inside what the
 // user experiences as "catctl is installing", rather than failing fast.
-func runBuildStep(dir string, argv []string, out io.Writer) error {
+//
+// A headless step gets neither, and gets HeadlessEnvVar instead. The case is
+// catway installing in the background (the default-plugin seed, a peer sync).
+// catway started from a dev terminal *has* a terminal, and a step prompting on
+// it would stall the install on a question nobody sees. And catway's working
+// directory is wherever the daemon happened to start, not a project the user
+// picked, so passing it on would aim a step's project setup at a directory
+// the user never chose.
+func runBuildStep(dir string, argv []string, out io.Writer, headless bool) error {
 	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Dir = dir
 	if out != nil {
 		cmd.Stdout, cmd.Stderr = out, out
+	}
+	if headless {
+		cmd.Env = append(os.Environ(), HeadlessEnvVar+"=1")
+		return cmd.Run() // nil Stdin = /dev/null: a reading step sees EOF at once
 	}
 	if wd, err := os.Getwd(); err == nil {
 		cmd.Env = append(os.Environ(), InstallCwdEnvVar+"="+wd)

@@ -38,6 +38,12 @@ func collectPlugins() ([]PluginEntry, error) {
 // The tail of a failed build goes into the item's detail so the report says
 // what went wrong without the user having to re-run the install by hand.
 //
+// The install is headless (plugin.InstallHeadless). This runs inside catway,
+// answering a peer's HTTP request, so no one is at a terminal to answer a
+// build step's question. A catway started from a terminal would otherwise
+// hand that terminal to the step, and the sync would hang on a prompt nobody
+// sees.
+//
 // What is deliberately NOT done:
 //
 //   - A plugin present on both sides is left alone, whatever the versions.
@@ -79,7 +85,7 @@ func applyPlugins(incoming []PluginEntry, rep *ApplyReport) {
 			continue
 		}
 		var out bytes.Buffer
-		inst, err := plugin.Install(in.Source, in.Ref, &out)
+		inst, err := plugin.InstallHeadless(in.Source, in.Ref, &out)
 		if err != nil {
 			st := StatusFailed
 			if strings.Contains(err.Error(), "does not support this platform") {
