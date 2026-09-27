@@ -331,9 +331,10 @@ type PluginPane struct {
 	Tab       int    `json:"tab"`
 	// Plugin is the launcher's CATS_PLUGIN_ID ("rohanthewiz.cats-todo"): the
 	// row's identity and the key its group is cut on. Never a manifest name —
-	// catway does not read manifests. An editor pane (editor.agents) started
-	// outside the plugin host has no launch id and carries its agent label
-	// ("ced") instead.
+	// catway does not take it from a manifest's name field. A plugin typed at
+	// a shell prompt has no launch id and carries the id of the installed
+	// plugin its running executable lives in; an editor pane (editor.agents)
+	// matched by neither carries its agent label ("ced") instead.
 	Plugin string `json:"plugin"`
 	// Type is the plugin's declared kind (PluginType*), which decides the
 	// section the row lands in. The launch's CATS_PLUGIN_TYPE, except that an

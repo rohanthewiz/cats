@@ -106,6 +106,25 @@ func ProcessCwd(pid int) string {
 	return dir
 }
 
+// ProcessExe returns the absolute path of the executable pid is running, or ""
+// when it cannot be read. /proc/<pid>/exe is the kernel's own link to the
+// exec'd file, so symlinks along the way (a ~/.cats/bin link, a dev-linked
+// plugin dir) are already resolved — which is what lets the orchestrator
+// recognise a plugin binary by where it lives rather than by what it was
+// called. A binary replaced since it started (a rebuild under a running
+// plugin) reads as "<path> (deleted)"; the suffix is dropped because the path
+// is still the right answer to "which plugin is this".
+func ProcessExe(pid int) string {
+	if pid <= 0 {
+		return ""
+	}
+	exe, err := os.Readlink("/proc/" + strconv.Itoa(pid) + "/exe")
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSuffix(exe, " (deleted)")
+}
+
 // procPgrp reads the process group from /proc/<pid>/stat (field 5, after comm).
 func procPgrp(pid int) int {
 	data, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/stat")

@@ -157,6 +157,16 @@ type paneRuntime struct {
 	// with no agent that is nonetheless not just a prompt.
 	job     bool
 	execCmd bool
+	// jobExe is the executable pane_job last named for the foreground job
+	// ("" with no job, or from a daemon that predates the field). handPlugin
+	// and handPluginType are the installed plugin that executable lives in,
+	// if any — a plugin typed at a prompt rather than launched, which has no
+	// recorded PluginID (handplugin.go). Runtime-only: they describe the job
+	// running now and are re-learned from the daemon's replay after a
+	// catway restart.
+	jobExe         string
+	handPlugin     string
+	handPluginType string
 }
 
 // orch is the WS2 orchestrator: a single event-loop actor (run) that owns all
@@ -1578,6 +1588,10 @@ func (o *orch) resyncPane(pid uint32) {
 // they carry no agent state: everything that counts attention off this rollup
 // reads Items and must keep seeing only the things that have a state to count.
 //
+// A plugin typed at a prompt has no PluginID; it is matched by its foreground
+// job's executable instead (paneRuntime.plugin, handplugin.go), and from there
+// on is filed exactly like a launched one.
+//
 // A pane can only be in one of them. A plugin that runs an agent is reported as
 // the agent, because the agent row is strictly the more informative of the two:
 // it says what the pane is doing right now, while the plugin row could only say
@@ -1613,7 +1627,7 @@ func (o *orch) agentsMsg() browserproto.Agents {
 					continue
 				}
 				agent, state := rt.effectiveAgent()
-				plug, declared := panePlugin(tab, id)
+				plug, declared := rt.plugin(panePlugin(tab, id))
 				typ, editor := o.resolvePluginType(ed, agent, declared)
 				if agent == "" || editor {
 					if plug == "" && editor {
@@ -2402,7 +2416,7 @@ func (o *orch) PaneMeta(pane uint32) app.PaneMeta {
 	// editor by it. PluginType is how a client tells that editor from an
 	// agent it can hand a prompt to (PaneMeta.IsDropAgent).
 	var declared string
-	meta.Plugin, declared = o.session.PanePlugin(layout.PaneID(pane))
+	meta.Plugin, declared = rt.plugin(o.session.PanePlugin(layout.PaneID(pane)))
 	meta.PluginType, _ = o.resolvePluginType(o.EditorConfig(), agent, declared)
 	return meta
 }

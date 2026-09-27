@@ -1332,13 +1332,10 @@ func (d *daemon) dispatch(mt orchestration.MessageType, payload []byte) {
 		if err := json.Unmarshal(payload, &ev); err != nil {
 			return
 		}
-		// Runtime state only: nothing is drawn for it, and the one reader is
-		// PaneActivity (clean.go) on the loop goroutine.
-		o.post(func() {
-			if rt := o.panes[ev.PaneID]; rt != nil {
-				rt.job = ev.Busy
-			}
-		})
+		// Runtime state: busy feeds PaneActivity (clean.go), and the job's
+		// executable is how a plugin typed at a prompt is recognised
+		// (handplugin.go) — the one part of it that is drawn.
+		o.post(func() { o.applyPaneJob(ev) })
 
 	case orchestration.MsgPaneAgentSession:
 		var ev orchestration.PaneAgentSession

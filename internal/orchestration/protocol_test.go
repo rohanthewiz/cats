@@ -160,7 +160,7 @@ func TestCodecRoundTrip(t *testing.T) {
 		NewPaneSelection(42, "hello world"),
 		NewPaneText(42, "scrollback"),
 		NewPaneBranch(42, "feature/remote"),
-		NewPaneJob(42, true),
+		NewPaneJob(42, true, "/usr/bin/make"),
 		NewPaneModes(42, terminal.InputModes{
 			BracketedPaste: true, MouseMode: terminal.MouseAnyMotion,
 			MouseEncoding: terminal.MouseEncodingSGR, KittyKeyboardFlags: 5,

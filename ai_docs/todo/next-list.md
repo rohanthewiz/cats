@@ -32,7 +32,7 @@ window were dated by grepping every session doc.
 - Open and Roadmap stay in ID order. New items append to the end of Open (or
   Roadmap, for future work) with the next ID.
 
-**Next ID:** N-047
+**Next ID:** N-048
 
 ## Open
 
@@ -88,12 +88,6 @@ window were dated by grepping every session doc.
     drag the seam above Panes and Agents with real rows, check the grip goes
     inert under a folded section, and that a trackpad drag inside the
     WKWebView keeps the row-resize cursor for the whole drag.
-
-- **N-003** · raised `2026-0905-1938-plugin-panes-in-the-agents-section` · value low
-  A plugin started by hand from a shell (e.g. `cats-todo` typed at a prompt)
-  has no `CATS_PLUGIN_ID`, so it gets no row in PLUGINS. Editors are the
-  exception since `2026-0922-1713`: `editor.agents` types them `editor` however
-  they were started.
 
 - **N-007** · raised `2026-0914-0158-catway-restart-cats-todo-release` · value low
   A window opened or reloaded while catway is down stays blank after
@@ -235,6 +229,13 @@ window were dated by grepping every session doc.
   plugins dialog could show a "cats-todo could not be installed: …" line from
   `.cats-defaults.json`'s `last_error`, with the install button next to it.
 
+- **N-047** · raised `2026-0926-2256-n003-hand-started-plugin-rows` · value low
+  A plugin whose `bin` entry is a script, typed at a prompt, still gets no
+  PLUGINS row. Its job leader's executable is the interpreter (`/bin/sh`,
+  `python`, …), not a file under the plugin dir, so `pluginForExe` never
+  matches. The fix would also report the leader's argv and match a script path
+  in it. Every plugin shipped today is a Go binary.
+
 ## Roadmap
 
 Wanted, but not next. Items move here from Open (or straight here when raised
@@ -269,6 +270,15 @@ unchanged.
 Closures before this file existed live in the session docs' own write-ups.
 Newest first. The unnumbered entries at the end were found done while seeding,
 so they are not carried.
+
+- **N-003** · raised `2026-0905-1938-plugin-panes-in-the-agents-section` ·
+  closed 2026-09-26, `2026-0926-2256-n003-hand-started-plugin-rows`. cathost's
+  `pane_job` now carries the foreground job leader's executable (`Exe`,
+  `detect.ProcessExe`), and catway matches it by path prefix against each
+  installed plugin's resolved dir (`cmd/catway/handplugin.go`). The match is
+  runtime-only and lasts while the job runs. A recorded launch id outranks it,
+  and `pane.list` reads the same answer. Script-based plugins are still
+  missed (N-047).
 
 - **N-005** · raised `2026-0913-2313-catway-cathost-write-deadlock` ·
   closed 2026-09-26, `2026-0926-2143-n005-close-freeze-trigger-moot`, as

@@ -147,6 +147,18 @@ func ProcessCwd(pid int) string {
 	return C.GoString(&buf[0])
 }
 
+// ProcessExe returns the absolute path of the executable pid is running, or ""
+// when it cannot be read. proc_pidpath reports the vnode the kernel actually
+// exec'd, so symlinks along the way (a ~/.cats/bin link, a dev-linked plugin
+// dir) are already resolved — which is what lets the orchestrator recognise a
+// plugin binary by where it lives rather than by what it was called.
+func ProcessExe(pid int) string {
+	if pid <= 0 {
+		return ""
+	}
+	return procPath(pid)
+}
+
 // identifyPid checks a process's comm, exec-path basename, and argv for an agent.
 func identifyPid(pid int) string {
 	cands := make([]string, 0, 8)

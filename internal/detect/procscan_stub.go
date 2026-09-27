@@ -15,3 +15,7 @@ func ForegroundPGID(fd uintptr) int { return -1 }
 // ProcessCwd is unsupported on this platform; panes fall back to whatever cwd
 // their shell reports over OSC 7.
 func ProcessCwd(pid int) string { return "" }
+
+// ProcessExe is unsupported on this platform; a pane's foreground job is then
+// never matched to a plugin, and only launched plugin panes get a row.
+func ProcessExe(pid int) string { return "" }

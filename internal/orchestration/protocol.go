@@ -814,14 +814,24 @@ type PaneAgentSession struct {
 // pane at its prompt costs nothing extra. A platform without the probe
 // (detect's stub) never reports one, and the orchestrator's default of "no
 // job" stands — clean there trusts the agent detection alone.
+//
+// Exe is the executable the job's process-group leader is running (the
+// program the shell exec'd for the command line, symlinks resolved), "" when
+// there is no job or it could not be read. It lets the orchestrator recognise
+// a plugin binary typed at a prompt — a launch it never saw, so no
+// CATS_PLUGIN_ID was recorded — by matching the path against its installed
+// plugin dirs. The daemon only reports the path; which plugins exist is the
+// orchestrator's knowledge. omitempty, so a no-job report is byte-identical
+// to the old shape and an orchestrator that predates the field ignores it.
 type PaneJob struct {
 	Type   MessageType `json:"type"`
 	PaneID uint32      `json:"pane_id"`
 	Busy   bool        `json:"busy"`
+	Exe    string      `json:"exe,omitempty"`
 }
 
-func NewPaneJob(id uint32, busy bool) PaneJob {
-	return PaneJob{Type: MsgPaneJob, PaneID: id, Busy: busy}
+func NewPaneJob(id uint32, busy bool, exe string) PaneJob {
+	return PaneJob{Type: MsgPaneJob, PaneID: id, Busy: busy, Exe: exe}
 }
 
 func NewPaneAgentSession(id uint32, agent, sessionID string) PaneAgentSession {

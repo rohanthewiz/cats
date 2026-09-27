@@ -4,6 +4,7 @@ package main
 
 import (
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -284,5 +285,146 @@ func TestCreatePaneRecordsAndClearsThePluginIdentity(t *testing.T) {
 	<-synced
 	if id, typ := o.session.PanePlugin(pid); id != "" || typ != "" {
 		t.Fatalf("a pane respawned as a shell still claims plugin %q (%q)", id, typ)
+	}
+}
+
+// writeInstalledPlugin lays out one plugin under a scratch plugins root (or, with
+// linkTo set, a checkout elsewhere plus the root's symlink to it, which is what
+// `catctl plugin link` leaves behind) and returns the directory holding its bin/.
+func writeInstalledPlugin(t *testing.T, root, id, typ, linkTo string) string {
+	t.Helper()
+	dir := filepath.Join(root, id)
+	if linkTo != "" {
+		dir = linkTo
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "bin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifest := "id = \"" + id + "\"\nversion = \"1.0\"\n"
+	if typ != "" {
+		manifest += "type = \"" + typ + "\"\n"
+	}
+	if err := os.WriteFile(filepath.Join(dir, plugin.ManifestName), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if linkTo != "" {
+		if err := os.Symlink(linkTo, filepath.Join(root, id)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return dir
+}
+
+// realPath is the kernel's view of a path — what the daemon's exe report
+// carries — so a test's temp dir behind macOS's /var symlink compares the way a
+// live process path would.
+func realPath(t *testing.T, p string) string {
+	t.Helper()
+	r, err := filepath.EvalSymlinks(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return r
+}
+
+// A running executable belongs to the installed plugin whose (resolved) dir
+// contains it: an installed plugin by its entry under the root, a dev-linked one
+// by its checkout. A path that merely shares a name prefix with a plugin dir is
+// not inside it, and a binary elsewhere on disk is nobody's.
+func TestPluginForExeMatchesByLocation(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "plugins")
+	t.Setenv(plugin.DirEnvVar, root)
+	todo := writeInstalledPlugin(t, root, "rohanthewiz.cats-todo", "todos_mgr", "")
+	checkout := filepath.Join(t.TempDir(), "ced-checkout")
+	writeInstalledPlugin(t, root, "rohanthewiz.ced", "editor", checkout)
+
+	installed, err := plugin.List()
+	if err != nil || len(installed) != 2 {
+		t.Fatalf("plugin.List: %v %+v", err, installed)
+	}
+	cases := []struct {
+		name, exe, id, typ string
+	}{
+		{"installed", filepath.Join(realPath(t, todo), "bin", "cats-todo"), "rohanthewiz.cats-todo", "todos_mgr"},
+		{"linked", filepath.Join(realPath(t, checkout), "bin", "ced"), "rohanthewiz.ced", "editor"},
+		{"name-prefix sibling", realPath(t, todo) + "-other/bin/cats-todo", "", ""},
+		{"elsewhere", "/usr/bin/make", "", ""},
+		{"empty", "", "", ""},
+	}
+	for _, c := range cases {
+		if id, typ := pluginForExe(installed, c.exe); id != c.id || typ != c.typ {
+			t.Errorf("%s: pluginForExe(%q) = %q %q, want %q %q", c.name, c.exe, id, typ, c.id, c.typ)
+		}
+	}
+}
+
+// A plugin typed at a shell prompt has no launch record, so it is recognised by
+// the executable its foreground job runs: the pane gets a plugin row (and
+// pane.list the plugin pair) while that job runs, loses both the moment the job
+// ends, and a recorded launch identity always outranks the match.
+func TestAgentsRollupListsHandStartedPlugins(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "plugins")
+	t.Setenv(plugin.DirEnvVar, root)
+	todo := writeInstalledPlugin(t, root, "rohanthewiz.cats-todo", "todos_mgr", "")
+	exe := filepath.Join(realPath(t, todo), "bin", "cats-todo")
+
+	o, err := newOrch(filepath.Join(t.TempDir(), "s.sock"), t.TempDir())
+	if err != nil {
+		t.Fatalf("newOrch: %v", err)
+	}
+	pid := layout.PaneID(o.session.AllPaneIDs()[0])
+	o.syncDaemon()
+	rt := o.panes[uint32(pid)]
+
+	// An unrelated job first: busy, but nobody's plugin — no row.
+	o.applyPaneJob(orchestration.PaneJob{PaneID: uint32(pid), Busy: true, Exe: "/usr/bin/make"})
+	time.Sleep(20 * time.Millisecond) // the lookup finds nothing and posts nothing
+	if got := o.agentsMsg().Plugins; len(got) != 0 {
+		t.Fatalf("a non-plugin job produced plugin rows: %+v", got)
+	}
+
+	// The plugin typed at the prompt.
+	o.applyPaneJob(orchestration.PaneJob{PaneID: uint32(pid), Busy: true, Exe: exe})
+	waitFor(t, o, func() bool { return rt.handPlugin != "" })
+	rows := o.agentsMsg().Plugins
+	if len(rows) != 1 || rows[0].Plugin != "rohanthewiz.cats-todo" || rows[0].Type != "todos_mgr" || rows[0].Pane != uint32(pid) {
+		t.Fatalf("hand-started plugin rows: %+v", rows)
+	}
+	if meta := o.PaneMeta(uint32(pid)); meta.Plugin != "rohanthewiz.cats-todo" || meta.PluginType != "todos_mgr" {
+		t.Fatalf("pane.list disagrees with the rollup: %+v", meta)
+	}
+	// Nothing durable was written: the match describes the running job only.
+	if id, _ := o.session.PanePlugin(pid); id != "" {
+		t.Fatalf("hand-started match leaked into the durable launch record: %q", id)
+	}
+
+	// A recorded launch identity wins over the match.
+	o.session.SetPanePlugin(pid, "acme.launched", "notes_mgr")
+	if rows := o.agentsMsg().Plugins; len(rows) != 1 || rows[0].Plugin != "acme.launched" {
+		t.Fatalf("launch record should outrank the job match: %+v", rows)
+	}
+	o.session.SetPanePlugin(pid, "", "")
+
+	// Back at the prompt: the row goes, synchronously.
+	o.applyPaneJob(orchestration.PaneJob{PaneID: uint32(pid), Busy: false})
+	if rows := o.agentsMsg().Plugins; len(rows) != 0 {
+		t.Fatalf("plugin row outlived its job: %+v", rows)
+	}
+
+	// A lookup that lands after the pane moved on is dropped: start the plugin,
+	// end it before pumping the mailbox, and the late answer must not revive
+	// the row.
+	o.applyPaneJob(orchestration.PaneJob{PaneID: uint32(pid), Busy: true, Exe: exe})
+	o.applyPaneJob(orchestration.PaneJob{PaneID: uint32(pid), Busy: false})
+	deadline := time.Now().Add(200 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		select {
+		case fn := <-o.mailbox:
+			fn()
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+	if rt.handPlugin != "" {
+		t.Fatalf("a stale lookup revived the match: %q", rt.handPlugin)
 	}
 }

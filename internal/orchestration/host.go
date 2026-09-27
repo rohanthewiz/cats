@@ -138,9 +138,11 @@ type pane struct {
 	hasSession       bool // a pane_agent_session has been emitted at least once
 	// Foreground-job state, as last reported via pane_job (detectPump writes,
 	// resync reads). hasJob is set once a job has ever been reported, so a
-	// pane that has only ever sat at its prompt replays nothing.
-	lastJob bool
-	hasJob  bool
+	// pane that has only ever sat at its prompt replays nothing. lastJobExe is
+	// the job leader's executable ("" whenever lastJob is false).
+	lastJob    bool
+	lastJobExe string
+	hasJob     bool
 	// Branch state, written by the branch pump and read by resync. branchCwd is
 	// the directory lastBranch was resolved for, which is what separates "we
 	// already answered this" from "the pane moved" — the throttle only applies
@@ -265,13 +267,17 @@ func (p *pane) setAgentMeta(agent, state string, visBlocker, visWorking bool) {
 // what the client has been told. The starting state is "no job" and is never
 // announced: the first emission is the first job, and going back to none
 // after that IS news (the build finished), so it is emitted too.
-func (p *pane) setJobMeta(busy bool) (changed bool) {
+//
+// The executable is part of the state: a job whose leader was first read
+// mid-fork (still the shell's own image) and then again after its exec is a
+// change worth reporting even though busy never moved.
+func (p *pane) setJobMeta(busy bool, exe string) (changed bool) {
 	p.metaMu.Lock()
 	defer p.metaMu.Unlock()
-	if busy == p.lastJob {
+	if busy == p.lastJob && exe == p.lastJobExe {
 		return false
 	}
-	p.lastJob = busy
+	p.lastJob, p.lastJobExe = busy, exe
 	p.hasJob = true
 	return true
 }
@@ -990,7 +996,7 @@ func (h *Host) resyncPane(p *pane) {
 	vb, vw, hasAgent := p.lastVisBlocker, p.lastVisWorking, p.hasAgent
 	branch, hasBranch := p.lastBranch, p.hasBranch
 	sessAgent, sessID, hasSession := p.lastSessionAgent, p.lastSessionID, p.hasSession
-	job, hasJob := p.lastJob, p.hasJob
+	job, jobExe, hasJob := p.lastJob, p.lastJobExe, p.hasJob
 	p.metaMu.Unlock()
 	if cwd != "" {
 		h.emit(NewPaneCwd(p.id, cwd))
@@ -1018,7 +1024,7 @@ func (h *Host) resyncPane(p *pane) {
 	// deciding what is idle must not be left with the answer from before it
 	// reconnected.
 	if hasJob {
-		h.emit(NewPaneJob(p.id, job))
+		h.emit(NewPaneJob(p.id, job, jobExe))
 	}
 }
 
@@ -1254,6 +1260,10 @@ func (h *Host) detectPump(p *pane) {
 	var lastSessionCheck time.Time
 	var acquisitionStartedAt time.Time
 	var hasAcquisition bool
+	// jobExe is the foreground job leader's executable as of the last process
+	// probe ("" with no job). Kept across ticks for the same reason agentPids
+	// is: the probe that reads it is throttled.
+	var jobExe string
 
 	for {
 		sleep := detectInterval
@@ -1299,8 +1309,15 @@ func (h *Host) detectPump(p *pane) {
 		// busy on its own. noPGID (probe unsupported or failed) reads as no
 		// job rather than as a job that never ends.
 		jobRunning := foregroundPgid > 0 && foregroundPgid != p.childPid()
-		if p.setJobMeta(jobRunning) {
-			h.emit(NewPaneJob(p.id, jobRunning))
+		// The job ending is reported on the tick it happens, without waiting
+		// for the throttled probe below: the exe it carried is no longer
+		// running, and "not busy" must not sit behind a probe that may be
+		// seconds away.
+		if !jobRunning {
+			jobExe = ""
+			if p.setJobMeta(false, "") {
+				h.emit(NewPaneJob(p.id, false, ""))
+			}
 		}
 
 		var acquisitionAge time.Duration
@@ -1340,6 +1357,24 @@ func (h *Host) detectPump(p *pane) {
 			if changed {
 				agentChanged = prevAgent != presence.currentAgent()
 			}
+			// Which program the job is, read off the group leader (its pid IS
+			// the pgid). Read here, under the probe's throttle, rather than on
+			// every tick: a group change always forces a probe, and a group
+			// no agent was found in opens the acquisition window, whose fast
+			// re-probes repeat the read for the next few seconds. That
+			// repetition is what corrects a read that landed between the
+			// shell's fork and the child's exec — the leader briefly still
+			// runs the shell's image — without a dedicated retry.
+			if jobRunning {
+				jobExe = detect.ProcessExe(foregroundPgid)
+			}
+		}
+		// A running job is reported after the probe, so the first report of
+		// a new job already names its program when the probe could read it.
+		// A job whose group changed ran the probe this tick (group changes
+		// always do), so jobExe is never a previous job's.
+		if jobRunning && p.setJobMeta(true, jobExe) {
+			h.emit(NewPaneJob(p.id, true, jobExe))
 		}
 
 		agent := presence.currentAgent()

@@ -1206,7 +1206,9 @@ type PaneMeta struct {
 	// machine is actually holding the PTY.
 	Host string `json:"host,omitempty"`
 	// Plugin is the CATS_PLUGIN_ID the pane was launched with ("" for a pane
-	// no plugin started). PluginType is what kind of tool is running in it
+	// no plugin started). A plugin typed at a shell prompt, which carries no
+	// launch id, is reported by the installed plugin its foreground job's
+	// executable lives in, for as long as that job runs. PluginType is what kind of tool is running in it
 	// (PluginType*), and is the field a client reads to tell an agent it can
 	// hand a prompt to from a tool that only happens to report over the hook
 	// API: an editor pane carries Agent "ced" (pane.open_file finds it by that
