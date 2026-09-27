@@ -239,7 +239,8 @@ Newest first. The unnumbered entries at the end were found done while seeding,
 so they are not carried.
 
 - **N-004** · raised `2026-0910-1855-startup-window-boot-log` ·
-  closed 2026-09-26 (cats `05f21d7`). The first transcript write of a launch
+  closed 2026-09-26, `2026-0926-2136-n004-boot-log-rotation` (cats `05f21d7`).
+  The first transcript write of a launch
   shifts `boot.log` into `boot.log.1` … `boot.log.4`. It happens once per
   process, so the second write from `fail()` or `finish()` cannot push out the
   previous launch. There is still no "copy this log" button: the splash has no
