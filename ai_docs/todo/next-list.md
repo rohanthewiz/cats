@@ -81,7 +81,9 @@ window were dated by grepping every session doc.
   - the paw click (`2026-0926-2108-paw-click-opens-todo-pane`): clicking a
     workspace row's paw reveals its first todo-manager pane, across tabs and
     from another workspace; a locked row answers with a toast; the row does
-    not also switch workspace.
+    not also switch workspace. The heading's paw (`2026-0926-2119-n041-global-paw-click`)
+    reveals a global manager, preferring one in the viewed workspace and
+    skipping locked workspaces.
   - the sidebar's section splitters (`2026-0924-1144-sidebar-section-splitters-v0.3.0`):
     drag the seam above Panes and Agents with real rows, check the grip goes
     inert under a folded section, and that a trackpad drag inside the
@@ -207,12 +209,6 @@ window were dated by grepping every session doc.
   there (catway logs a reminder). A self-revoke route (`POST /peer/v1/unpair`,
   authenticated by the grant itself) would make detach clean up both ends.
 
-- **N-041** · raised `2026-0926-2108-paw-click-opens-todo-pane` · value low
-  The global paw on the WORKSPACES heading is still not clickable. Workspace
-  rows' paws now jump to their first todo pane (`gotoTodoPane`); the heading's
-  could do the same for the first global manager (`isGlobalTodoTitle`), as
-  long as it respects the lock on that manager's workspace.
-
 ## Roadmap
 
 Wanted, but not next. Items move here from Open (or straight here when raised
@@ -247,6 +243,13 @@ unchanged.
 Closures before this file existed live in the session docs' own write-ups.
 Newest first. The unnumbered entries at the end were found done while seeding,
 so they are not carried.
+
+- **N-041** · raised `2026-0926-2108-paw-click-opens-todo-pane` ·
+  closed 2026-09-26, `2026-0926-2119-n041-global-paw-click` (cats `4117bba`) —
+  the heading paw calls `gotoGlobalTodoPane`, which reveals (`agent.focus`) a
+  global manager: one in the viewed workspace first, else the first in
+  inventory order. Managers in locked workspaces are skipped; if all are locked,
+  the click shows a toast.
 
 - **N-011** · raised `2026-0916-1547-peer-sync` ·
   closed 2026-09-25, `2026-0925-1102-n011-peer-pairing` (cats `6d01456`) —
