@@ -49,6 +49,11 @@
      opts back out of the heading's uppercase tracking: the superscript is a
      count, not part of the label. */
   #ws-global-todo { display:inline-flex; margin-left:7px; letter-spacing:0; }
+  /* A row's paw is clickable — it opens the workspace's todo manager — so it
+     takes the pointer, even on a locked row whose cursor:default (below) it
+     would otherwise inherit: the click there answers with a toast, which is
+     still a button responding. */
+  #ws-list li .todo-mark.jump { cursor:pointer; }
   /* A locked workspace — one no plugin or agent may be launched into — reads as
      set aside: the row steps back, and a padlock next to the name says why it
      did. The lock itself is exempt from the dimming, being the one thing in the

@@ -90,9 +90,38 @@
       if (!pi.handle || isGlobalTodoTitle(pi.title)) continue;
       const n = todoOpenCount(pi.title);
       if (!n || wsOf(pi.handle) !== id) continue;
-      out.push({ ref: paneRef(pi.handle, pi.pane), n });
+      out.push({ ref: paneRef(pi.handle, pi.pane), pane: pi.pane, n });
     }
     return out;
+  }
+
+  // gotoTodoPane is the paw print's click: reveal the workspace's first pane
+  // that is advertising unfinished todos. "First" is inventory order (the order
+  // pane.list walks the session — tab by tab, pane by pane), which is the order
+  // the PANES section and the hover card's itemized list show them in, so the
+  // pane a click lands on is the one listed first.
+  //
+  // agent.focus rather than pane.focus for the same reason the PANES rows use
+  // it: the manager may sit on another tab of the workspace, or the paw may be
+  // on a workspace other than the one in view, and only agent.focus reveals a
+  // pane across both (RevealPaneView).
+  //
+  // Resolved at click time rather than captured when the row was drawn: the
+  // inventory is re-fetched under a stationary pointer, and a manager closed or
+  // cleared since the render must not be the target. A paw whose panes all went
+  // away in that window does nothing — the next render removes the paw itself.
+  //
+  // A locked workspace refuses the jump, as the AGENTS rows do: the reveal is a
+  // workspace switch, and the row's own click already refuses that. Global
+  // managers are never the target: wsTodoPanes excludes them, since their count
+  // is the heading's paw, not this row's.
+  function gotoTodoPane(w) {
+    if (wsLocked(w.id)) {
+      toast((w.name || w.id) + " is locked — unlock it to reach its todos");
+      return;
+    }
+    const first = wsTodoPanes(w.id)[0];
+    if (first) sendCmd("agent.focus", { pane: first.pane });
   }
 
   // wsFlaggedPanes: the flags pinned to panes *inside* this workspace. The
@@ -796,8 +825,27 @@
         if (win) li.appendChild(win);
         // The todo mark sits with the name — it says something about the project,
         // not about a pane — while the agent counts stay pinned to the right edge.
+        //
+        // The paw is also a shortcut to the backlog: a click on it opens the
+        // workspace's todo manager (gotoTodoPane). The press is kept from
+        // reaching the row, whose own mousedown would otherwise arm the
+        // switch-or-reorder gesture and send a workspace.focus alongside the
+        // reveal — two commands racing for one viewport. Stopping it also
+        // skips the row's hideTip, so that is called here instead. The cost is
+        // that a drag starting on the paw does not reorder; the rest of the row
+        // still does.
         const todo = todoMark(todos.get(w.id) || 0);
-        if (todo) li.appendChild(todo);
+        if (todo) {
+          todo.classList.add("jump");
+          todo.title += " — click to open the todo pane";
+          todo.addEventListener("mousedown", (e) => {
+            if (e.button !== 0) return; // right-click still reaches the row's menu
+            e.stopPropagation();
+            hideTip();
+          });
+          pressActivate(todo, () => gotoTodoPane(w));
+          li.appendChild(todo);
+        }
         const sum = workspaceSummary(states.get(w.id));
         if (sum) {
           const s = document.createElement("span"); s.className = "sum"; s.appendChild(sum);
