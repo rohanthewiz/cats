@@ -32,7 +32,7 @@ window were dated by grepping every session doc.
 - Open and Roadmap stay in ID order. New items append to the end of Open (or
   Roadmap, for future work) with the next ID.
 
-**Next ID:** N-044
+**Next ID:** N-047
 
 ## Open
 
@@ -213,6 +213,27 @@ window were dated by grepping every session doc.
   refuses them. A linked checkout that is behind its own upstream (ced, when
   its origin has moved on) could still get a quiet "behind origin" hint. That
   needs a fetch in the developer's own repo, which is why it was left out.
+
+- **N-044** · raised `2026-0926-2226-default-plugin-seed-cats-todo` · value medium
+  Push cats-todo `56c5c4d` and cut v0.42.1. Fresh installs clone cats-todo's
+  default branch, so until the headless-offer fix is on GitHub the automatic
+  install still spends the one-time "set up a backlog here?" offer on
+  catway's log.
+
+- **N-045** · raised `2026-0926-2226-default-plugin-seed-cats-todo` · value medium
+  Watch the default-plugin seed through a real catway start. It has only run
+  as a direct `SeedDefaults` call against a scratch root. Start a catway (and
+  the rebuilt Cats.app) with `CATS_PLUGINS_DIR` pointing at a directory that
+  does not exist yet, then confirm the install log line in `daemons.log` and
+  that cats-todo shows in the plugins dialog and picker once they are
+  reopened. Also start once without Go on PATH to see the retry and give-up
+  warnings.
+
+- **N-046** · raised `2026-0926-2226-default-plugin-seed-cats-todo` · value low
+  A default plugin that failed to seed is only reported in the daemon log. A
+  fresh-install user without Go never learns why cats-todo is missing. The
+  plugins dialog could show a "cats-todo could not be installed: …" line from
+  `.cats-defaults.json`'s `last_error`, with the install button next to it.
 
 ## Roadmap
 
