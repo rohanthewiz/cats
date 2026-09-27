@@ -209,7 +209,7 @@ window were dated by grepping every session doc.
   pass ends, with the page already open. That push at the end of the seed
   pass has only been exercised by unit tests.
 
-- **N-051** · raised the `N-050` commit (no session doc) · value low
+- **N-051** · raised `2026-0927-0014-n050-warn-fg-theme-key` · value low
   `--warn-fg` (N-050) is used only in the plugins dialog. Twelve rules
   elsewhere still draw amber *text* in `--warn`. On solarized-light,
   corporate and solarized-dark that text reads at about 2.2 to 3.3:1:
@@ -263,7 +263,7 @@ Newest first. The unnumbered entries at the end were found done while seeding,
 so they are not carried.
 
 - **N-050** · raised `2026-0927-0000-n049-failed-default-tile-contrast` ·
-  closed 2026-09-27, the `N-050` commit (no session doc). A new theme key,
+  closed 2026-09-27, `2026-0927-0014-n050-warn-fg-theme-key`. A new theme key,
   `warn-fg`, is derived from `warn` (`internal/theme/theme.go`). Three
   built-ins author a darker or lighter shade: solarized-light `#694f00`,
   corporate `#734e00`, solarized-dark `#f2b700`. The plugins dialog's amber
