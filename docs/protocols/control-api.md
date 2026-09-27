@@ -714,7 +714,7 @@ new panes rather than a location.
 | `peer.list` / `peer.sync` | `peers` / `sync <peer> [workspaces\|todos\|plugins\|all ...] [pull\|push\|both]` |
 | `peer.attach` / `peer.detach` | `attach-peer <id> <url> [token_file] [label...]` / `detach-peer <id>` |
 | `theme.list` / `theme.save` / `theme.delete` | — |
-| `plugin.list` / `plugin.uninstall` / `plugin.check_updates` | — |
+| `plugin.list` / `plugin.uninstall` / `plugin.check_updates` / `plugin.dismiss_default` | — |
 | `path.list` | — |
 | `ui.notify` / `ui.action` | `notify <title...>` / — |
 | `ledger.list` | `history [count]` |
@@ -747,6 +747,14 @@ cache. Each entry carries a `status` — `available`, `current`, `skipped` (link
 broken, or no git history) or `error` (with a `reason`) — plus short commits,
 versions and `latest_subject`; `available` is the count, for badges. Treat an
 unknown status like `skipped`.
+
+`plugin.list` also carries `failed_defaults` when a default plugin (one a fresh
+install seeds, such as cats-todo) failed to install and is still missing. Each
+entry has the `id`, the `source` to pass to `catctl plugin install`, `attempts`,
+`gave_up` (false while the next server start will retry), and the last
+attempt's `error` and `output` tail. `plugin.dismiss_default {"id":…}` drops one
+from the seed's state: the notice goes away and no retry follows. Dismissing an
+id the server does not know succeeds.
 
 The worktree commands act on the machine the addressed pane is on — `worktree.remove`
 on the one its workspace's checkout belongs to — because git is a subprocess

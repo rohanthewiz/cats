@@ -430,7 +430,9 @@ The web UI has the same surface: the toolbar's **⧉ plugins** (also in the ⌘K
 palette) lists installed plugins with run / update / uninstall per row and an
 **add…** prompt. It also checks each plugin's git remote in the background: a
 count on the toolbar button says how many have an update waiting, and those rows
-show where the update goes (`↑ v0.4.0`, or the new commit and its subject). Uninstall resolves over the §7 `plugin.list`/`plugin.uninstall`
+show where the update goes (`↑ v0.4.0`, or the new commit and its subject). If
+a default plugin failed to install on first run (cats-todo needs Go to build),
+the dialog says why, with **install** and **dismiss** next to it. Uninstall resolves over the §7 `plugin.list`/`plugin.uninstall`
 commands; install, link and rebuild spawn `catctl plugin …` in a fresh tab so
 the git + build output streams live in a pane (the server resolves the catctl
 path — override with `CATS_CATCTL` if it lives somewhere unusual).

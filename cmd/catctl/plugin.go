@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/rohanthewiz/cats/internal/app"
@@ -234,6 +235,10 @@ func pluginList(args []string) int {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
+	// Failed defaults print after the list either way. With no plugins at all
+	// they are the likeliest reason the list is empty, so they must not hide
+	// behind the early return.
+	defer printFailedDefaults()
 	if len(plugins) == 0 {
 		fmt.Println("no plugins installed (try `catctl plugin install <owner/repo>`)")
 		return 0
@@ -260,6 +265,27 @@ func pluginList(args []string) int {
 		}
 	}
 	return 0
+}
+
+// printFailedDefaults is the CLI face of the plugins dialog's failure
+// notices: default plugins the first-run seed could not install, with the
+// command that retries by hand. Read errors are dropped. This is a footnote to
+// the listing, and catway already logs a corrupt state file.
+func printFailedDefaults() {
+	failed, _ := plugin.FailedDefaults()
+	for _, f := range failed {
+		when := "will retry on the next catway start"
+		if f.GaveUp {
+			when = "gave up"
+		}
+		fmt.Printf("\ndefault plugin %s could not be installed (%d attempts, %s): %s\n", f.ID, f.Attempts, when, f.Err)
+		if f.Output != "" {
+			for _, l := range strings.Split(f.Output, "\n") {
+				fmt.Printf("  | %s\n", l)
+			}
+		}
+		fmt.Printf("  install it with `catctl plugin install %s`\n", f.Source)
+	}
 }
 
 const pluginRunUsage = "usage: catctl plugin run <id> [action] [--all]"

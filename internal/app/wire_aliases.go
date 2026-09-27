@@ -127,6 +127,10 @@ type (
 	WorktreeOpenParams       = wire.WorktreeOpenParams
 	WorktreeOpenResult       = wire.WorktreeOpenResult
 	WorktreeRemoveParams     = wire.WorktreeRemoveParams
+
+	// Added by hand: aliasgen no longer exists. Kept in a separate gofmt
+	// alignment section so the generated lines above stay as they were.
+	PluginDismissDefaultParams = wire.PluginDismissDefaultParams
 )
 
 // Constants.
@@ -228,6 +232,10 @@ const (
 	RecordStop            = wire.RecordStop
 	SplitH                = wire.SplitH
 	SplitV                = wire.SplitV
+
+	// Added by hand, as PluginDismissDefaultParams above. Dispatch's cases
+	// must be Cmd* identifiers (TestCommandSpecsRouted).
+	CmdPluginDismissDefault = wire.CmdPluginDismissDefault
 )
 
 // Functions, as values: callers use them exactly as before.

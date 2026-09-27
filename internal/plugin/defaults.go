@@ -1,12 +1,15 @@
 package plugin
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 )
 
 // Default plugins: the ones a fresh cats install gets without being asked.
@@ -77,15 +80,46 @@ const maxSeedAttempts = 3
 // defaultsState is the state file's shape. An empty Pending list means the
 // seed is finished for good, whether by success, by giving up, or because the
 // machine was judged an existing install.
+//
+// Failed holds the defaults the seed gave up on. The seed itself never reads
+// it again; it is kept so the plugins dialog can tell the user why a default
+// is missing (FailedDefaults). Without it, the one user who most needs the
+// explanation, the fresh install with no Go toolchain, would find the reason
+// only in daemons.log. An entry leaves Failed when the user dismisses it
+// (DismissDefault) or installs and later uninstalls the plugin (Uninstall
+// calls forgetDefault).
 type defaultsState struct {
 	Pending []pendingDefault `json:"pending"`
+	Failed  []pendingDefault `json:"failed,omitempty"`
 }
 
 type pendingDefault struct {
 	DefaultPlugin
 	Attempts  int    `json:"attempts,omitempty"`
 	LastError string `json:"last_error,omitempty"`
+	// LastOutput is the tail of the failed attempt's clone/build output. The
+	// error alone often names only the step ("build step 1 (sh -c …): exit
+	// status 127"), while the line that explains it ("go: not found") is in
+	// the output.
+	LastOutput string `json:"last_output,omitempty"`
 }
+
+// defaultsMu serializes read-modify-write passes over the state file within
+// one process. The seed runs on its own goroutine at catway start and holds
+// the lock for its whole pass (installs included, up to a minute), so a
+// dismiss sent from the dialog meanwhile waits rather than having its write
+// overwritten by the seed's final one. Readers (FailedDefaults) take no lock:
+// writes are temp-file + rename, so a read sees one whole version or the
+// other.
+//
+// catctl is a separate process and is not covered. The only thing it writes
+// is forgetDefault on uninstall, and a lost write there costs at most one
+// stale notice, which the presence filter in FailedDefaults mostly hides.
+var defaultsMu sync.Mutex
+
+// seedOutputTailLines bounds LastOutput. A notice line and its tooltip have
+// room for a few lines, and the state file should not carry a whole build log.
+const seedOutputTailLines = 6
 
 // SeedOutcome says what happened to one default on this pass, for the
 // caller's log.
@@ -120,6 +154,9 @@ func SeedDefaults(defaults []DefaultPlugin, out io.Writer) ([]SeedOutcome, error
 		return nil, err
 	}
 	statePath := filepath.Join(root, defaultsStateName)
+
+	defaultsMu.Lock()
+	defer defaultsMu.Unlock()
 
 	st, err := readDefaultsState(statePath)
 	switch {
@@ -157,15 +194,28 @@ func SeedDefaults(defaults []DefaultPlugin, out io.Writer) ([]SeedOutcome, error
 			continue
 		}
 
+		// The attempt's output goes to the caller as before, and a copy is kept
+		// here so a failure can record its tail (LastOutput).
+		var attemptOut bytes.Buffer
+		w := io.Writer(&attemptOut)
+		if out != nil {
+			w = io.MultiWriter(out, &attemptOut)
+		}
+
 		p.Attempts++
-		inst, err := InstallHeadless(p.Source, "", out)
+		inst, err := InstallHeadless(p.Source, "", w)
 		o := SeedOutcome{Source: p.Source, Attempt: p.Attempts, Err: err}
 		if err == nil {
 			o.Installed, o.Version = true, inst.Version
-		} else if p.Attempts >= maxSeedAttempts {
+			outcomes = append(outcomes, o)
+			continue
+		}
+		p.LastError = err.Error()
+		p.LastOutput = tailLines(attemptOut.String(), seedOutputTailLines)
+		if p.Attempts >= maxSeedAttempts {
 			o.GaveUp = true
+			st.Failed = append(dropDefault(st.Failed, p.ID), p)
 		} else {
-			p.LastError = err.Error()
 			still = append(still, p)
 		}
 		outcomes = append(outcomes, o)
@@ -173,6 +223,131 @@ func SeedDefaults(defaults []DefaultPlugin, out io.Writer) ([]SeedOutcome, error
 
 	st.Pending = still
 	return outcomes, writeDefaultsState(statePath, st)
+}
+
+// FailedDefault is a default plugin the seed tried and failed to install,
+// for the plugins dialog and `catctl plugin list`.
+type FailedDefault struct {
+	ID       string
+	Source   string
+	Attempts int
+	// GaveUp is false while the seed will still retry on a later catway start,
+	// true once it has stopped trying.
+	GaveUp bool
+	Err    string // the last attempt's error
+	Output string // the tail of the last attempt's clone/build output
+}
+
+// FailedDefaults lists the defaults whose seeding failed and that are still
+// not installed: both the ones pending a retry (after at least one failed
+// attempt) and the ones the seed gave up on. A default that is present, by
+// whatever route it got there, is left out, since there is nothing left to
+// explain. No state file, or the opt-out, means an empty answer.
+//
+// It only reads. It takes no lock and is cheap enough to run on every
+// plugin.list.
+func FailedDefaults() ([]FailedDefault, error) {
+	if os.Getenv(NoDefaultsEnvVar) != "" {
+		return nil, nil
+	}
+	root, err := Root()
+	if err != nil {
+		return nil, err
+	}
+	st, err := readDefaultsState(filepath.Join(root, defaultsStateName))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	var res []FailedDefault
+	add := func(p pendingDefault, gaveUp bool) {
+		if p.Attempts == 0 {
+			return // planned but never tried, e.g. the first pass is still running
+		}
+		if _, err := os.Lstat(filepath.Join(root, p.ID)); err == nil {
+			return
+		}
+		res = append(res, FailedDefault{
+			ID: p.ID, Source: p.Source, Attempts: p.Attempts, GaveUp: gaveUp,
+			Err: p.LastError, Output: p.LastOutput,
+		})
+	}
+	for _, p := range st.Pending {
+		add(p, false)
+	}
+	for _, p := range st.Failed {
+		add(p, true)
+	}
+	return res, nil
+}
+
+// DismissDefault drops a default from the seed's state, pending or given up.
+// It is the "I don't want this one" answer to a failure notice: the notice
+// goes away and, if the seed was still going to retry, it no longer will.
+// Dismissing an id the state does not hold is not an error, so a second
+// window's dismiss of the same notice succeeds quietly.
+func DismissDefault(id string) error {
+	root, err := Root()
+	if err != nil {
+		return err
+	}
+	defaultsMu.Lock()
+	defer defaultsMu.Unlock()
+	return forgetDefaultLocked(filepath.Join(root, defaultsStateName), id)
+}
+
+// forgetDefault is DismissDefault for Uninstall. Uninstalling a default is
+// the same choice as dismissing it, and it closes a gap: a default installed
+// by hand while still pending, then uninstalled before the next catway start,
+// would otherwise be seeded straight back in.
+func forgetDefault(root, id string) error {
+	defaultsMu.Lock()
+	defer defaultsMu.Unlock()
+	return forgetDefaultLocked(filepath.Join(root, defaultsStateName), id)
+}
+
+func forgetDefaultLocked(statePath, id string) error {
+	st, err := readDefaultsState(statePath)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil // never seeded here; nothing to forget
+	}
+	if err != nil {
+		return fmt.Errorf("default plugins: %s: %w", statePath, err)
+	}
+	pending, failed := dropDefault(st.Pending, id), dropDefault(st.Failed, id)
+	if len(pending) == len(st.Pending) && len(failed) == len(st.Failed) {
+		return nil // not a default this machine was seeding; leave the file alone
+	}
+	st.Pending, st.Failed = pending, failed
+	return writeDefaultsState(statePath, st)
+}
+
+// dropDefault returns ps without the entry for id. It builds a new slice so
+// the caller can compare lengths to learn whether anything was removed.
+func dropDefault(ps []pendingDefault, id string) []pendingDefault {
+	var out []pendingDefault
+	for _, p := range ps {
+		if p.ID != id {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// tailLines keeps the last n lines of s, with surrounding blank space trimmed.
+func tailLines(s string, n int) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	lines := strings.Split(s, "\n")
+	if len(lines) > n {
+		lines = lines[len(lines)-n:]
+	}
+	return strings.Join(lines, "\n")
 }
 
 func readDefaultsState(path string) (defaultsState, error) {

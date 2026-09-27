@@ -509,6 +509,16 @@ flowchart TD
   attempt per catway start), and the seed then gives up. Each failure is a
   warning in the daemon log with the build output's last lines. The install can
   be run by hand later.
+* **Failures are shown, not just logged.** Each failed attempt records its
+  error and the tail of its output in the state file, and a default the seed
+  gave up on moves to a `failed` list there instead of disappearing. Until the
+  plugin is present, the plugins dialog shows it above the installed ones
+  ("cats-todo could not be installed: …", with the output's last line) with
+  **install**, which runs `catctl plugin install <source>` in a tab, and
+  **dismiss** (`plugin.dismiss_default`), which forgets the default and stops
+  any further retries. `catctl plugin list` prints the same notice under its
+  listing. Uninstalling a default also forgets it, so a default installed by
+  hand while still pending does not come back on the next start.
 * **Opt out** by setting `CATS_NO_DEFAULT_PLUGINS=1` in catway's environment.
   An opted-out start writes no state, so removing the variable later still
   seeds a machine that has no plugins.
@@ -549,7 +559,7 @@ update / uninstall, plus an **add…** prompt.
 flowchart TD
   UI["plugins dialog"]
   INSTANT{"instant or long-running?"}
-  CMD["over the control protocol:<br/>plugin.list · plugin.uninstall · plugin.check_updates"]
+  CMD["over the control protocol:<br/>plugin.list · plugin.uninstall · plugin.check_updates<br/>plugin.dismiss_default"]
   SPAWN["spawn 'catctl plugin ...' in a fresh tab<br/>so git + build output streams live"]
 
   UI --> INSTANT

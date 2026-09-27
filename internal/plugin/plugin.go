@@ -209,16 +209,22 @@ func Uninstall(id string) (string, error) {
 	// cleans up. The farm is a convenience: a failure here must not block
 	// getting rid of the plugin itself.
 	_ = RemoveBinLinks(id)
+	// Once the plugin is gone, the seed must not bring it back: removing a
+	// default is a choice (see forgetDefault). Best effort, like the bin links.
+	// The plugin is already removed, and a stale seed record is not worth
+	// reporting that removal as failed.
 	if fi.Mode()&os.ModeSymlink != 0 {
 		target, _ := os.Readlink(entry)
 		if err := os.Remove(entry); err != nil {
 			return "", err
 		}
+		_ = forgetDefault(root, id)
 		return fmt.Sprintf("unlinked %s (checkout left in place at %s)", id, target), nil
 	}
 	if err := os.RemoveAll(entry); err != nil {
 		return "", err
 	}
+	_ = forgetDefault(root, id)
 	return fmt.Sprintf("removed %s", id), nil
 }
 

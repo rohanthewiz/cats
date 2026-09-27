@@ -192,6 +192,11 @@ type Backend interface {
 	// is waiting. Off-loop for the same reason, and more so: it is network
 	// work, bounded by a timeout but still seconds long on a slow remote.
 	StartPluginCheckUpdates(r Responder, p PluginCheckUpdatesParams)
+	// StartPluginDismissDefault drops a failed default plugin from the
+	// first-run seed's state (plugin.dismiss_default). A small file write, but
+	// it can wait behind a seed pass still running at startup, so it resolves
+	// off the loop too.
+	StartPluginDismissDefault(r Responder, p PluginDismissDefaultParams)
 
 	// StartPathList answers the start-path picker's directory listing. Off-loop
 	// like the commands above — a listing can land on a cold network mount — and
@@ -1232,6 +1237,18 @@ func (d *Dispatcher) dispatch(name string, dec ParamDecoder, r Responder) {
 			return
 		}
 		d.backend.StartPluginCheckUpdates(r, p) // async: the git remote round trips resolve r later
+
+	case CmdPluginDismissDefault:
+		var p PluginDismissDefaultParams
+		if err := dec.Decode(&p); err != nil {
+			bad(err)
+			return
+		}
+		if p.ID == "" {
+			r.Fail("plugin.dismiss_default: id is required")
+			return
+		}
+		d.backend.StartPluginDismissDefault(r, p) // async: the state-file write resolves r later
 
 	case CmdPathList:
 		var p PathListParams

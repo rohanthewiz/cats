@@ -128,6 +128,10 @@ const (
 	// anything, and changes nothing itself — so, unlike update, it is a
 	// one-shot command the dialog can run in the background.
 	CmdPluginCheckUpdates = "plugin.check_updates"
+	// plugin.dismiss_default answers a "default plugin could not be
+	// installed" notice (PluginListResult.FailedDefaults) with "I don't want
+	// it": the notice goes away and the first-run seed stops retrying it.
+	CmdPluginDismissDefault = "plugin.dismiss_default"
 
 	// Path listing (the start-path picker in the new-workspace dialog): one
 	// directory's subdirectories plus the user's frecency-ranked recent
@@ -447,6 +451,9 @@ var commandSpecs = []CommandSpec{
 	// Not Recorded: a check is a query, and replaying one from a runbook would
 	// do nothing but touch the network.
 	{Name: CmdPluginCheckUpdates, Params: PluginCheckUpdatesParams{}, Result: PluginCheckUpdatesResult{}, ReplyRequired: true},
+	// Not Recorded: dismissing a notice is housekeeping on this machine's
+	// seed state, not a step a runbook would want to repeat.
+	{Name: CmdPluginDismissDefault, Params: PluginDismissDefaultParams{}, ParamsRequired: true},
 
 	// Path listing.
 	{Name: CmdPathList, Params: PathListParams{}, Result: PathListResult{}, ReplyRequired: true},
@@ -1863,9 +1870,38 @@ func IsAgentPluginType(t string) bool { return t == PluginTypeAgent }
 // best resolution of the catctl binary (PATH first, then a sibling of the
 // server executable) — the dialog spawns `catctl plugin install/update` tabs
 // and the browser has no way to resolve host paths itself.
+//
+// FailedDefaults lists the default plugins (the ones a fresh install seeds,
+// e.g. cats-todo) whose install failed and that are still not installed. It
+// is how a user without, say, a Go toolchain learns why cats-todo never
+// appeared, instead of that reason living only in the daemon log. Omitted
+// when there is nothing to report.
 type PluginListResult struct {
-	Catctl  string       `json:"catctl"`
-	Plugins []PluginInfo `json:"plugins"`
+	Catctl         string                `json:"catctl"`
+	Plugins        []PluginInfo          `json:"plugins"`
+	FailedDefaults []PluginFailedDefault `json:"failed_defaults,omitempty"`
+}
+
+// PluginFailedDefault is one default plugin the first-run seed could not
+// install. Source is what `catctl plugin install` takes, so a front-end can
+// offer the install again. GaveUp is false while the seed will still retry
+// on the next server start, true once it has stopped. Error is the last
+// attempt's error and Output the tail of its clone/build output, which is
+// often where the actual reason is ("go: command not found").
+type PluginFailedDefault struct {
+	ID       string `json:"id"`
+	Source   string `json:"source"`
+	Attempts int    `json:"attempts"`
+	GaveUp   bool   `json:"gave_up,omitempty"`
+	Error    string `json:"error,omitempty"`
+	Output   string `json:"output,omitempty"`
+}
+
+// PluginDismissDefaultParams: plugin.dismiss_default. ID is the failed
+// default's id (PluginFailedDefault.ID). Dismissing an id the server does not
+// know about succeeds, so two windows dismissing the same notice both do.
+type PluginDismissDefaultParams struct {
+	ID string `json:"id"`
 }
 
 // PluginUninstallParams: plugin.uninstall — remove an installed plugin's

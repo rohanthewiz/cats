@@ -5,6 +5,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"github.com/rohanthewiz/cats/wire"
 	"log"
 	"os"
 	"os/exec"
@@ -70,7 +71,39 @@ func (o *orch) StartPluginList(r app.Responder) {
 			}
 			res.Plugins = append(res.Plugins, info)
 		}
+		// Failed defaults ride along on every list so the dialog can say why
+		// a default plugin is missing. The read is best effort: a corrupt
+		// state file is already reported by the seed at startup, and it must
+		// not stop the dialog from listing the plugins that do work.
+		failed, err := plugin.FailedDefaults()
+		if err != nil {
+			dlog.Warnf("catway: plugin.list: default plugins: %v", err)
+		}
+		for _, f := range failed {
+			res.FailedDefaults = append(res.FailedDefaults, wire.PluginFailedDefault{
+				ID:       f.ID,
+				Source:   f.Source,
+				Attempts: f.Attempts,
+				GaveUp:   f.GaveUp,
+				Error:    f.Err,
+				Output:   f.Output,
+			})
+		}
 		o.post(func() { r.OK(res) })
+	}()
+}
+
+// StartPluginDismissDefault answers plugin.dismiss_default. It runs off the
+// loop because DismissDefault waits for a seed pass that is still running
+// (see plugin.defaultsMu), and on a fresh install's first start that pass can
+// last as long as a clone plus a build.
+func (o *orch) StartPluginDismissDefault(r app.Responder, p wire.PluginDismissDefaultParams) {
+	go func() {
+		if err := plugin.DismissDefault(p.ID); err != nil {
+			o.post(func() { r.Fail(err.Error()) })
+			return
+		}
+		o.post(func() { r.OK(nil) })
 	}()
 }
 

@@ -141,8 +141,18 @@ func TestSeedDefaultsRetriesThenGivesUp(t *testing.T) {
 		if last && len(st.Pending) != 0 {
 			t.Fatalf("still pending after giving up: %+v", st.Pending)
 		}
+		if last && (len(st.Failed) != 1 || !strings.Contains(st.Failed[0].LastError, "clone")) {
+			t.Fatalf("failed after giving up = %+v, want one entry with the clone error", st.Failed)
+		}
 		if !last && (len(st.Pending) != 1 || !strings.Contains(st.Pending[0].LastError, "clone")) {
 			t.Fatalf("pass %d pending = %+v, want one entry with the clone error", attempt, st.Pending)
+		}
+		// Every failed pass is visible to the dialog, retrying or not. The
+		// output tail carries git's own complaint, which the error does not.
+		fs, err := FailedDefaults()
+		if err != nil || len(fs) != 1 || fs[0].ID != "acme.gone" || fs[0].GaveUp != last ||
+			fs[0].Attempts != attempt || fs[0].Output == "" {
+			t.Fatalf("pass %d FailedDefaults = %+v, %v", attempt, fs, err)
 		}
 	}
 	if outs, _ := SeedDefaults(defs, nil); outs != nil {
@@ -189,5 +199,92 @@ func TestInstallIsNotHeadless(t *testing.T) {
 	}
 	if b, err := os.ReadFile(filepath.Join(root, "acme.seed", ".install-cwd")); err != nil || len(b) == 0 {
 		t.Fatalf("install cwd seen by build = %q (%v), want the host's directory", b, err)
+	}
+}
+
+// Dismissing a failure notice clears it and stops any further retries. A
+// second dismiss of the same id is not an error.
+func TestDismissDefault(t *testing.T) {
+	t.Setenv(NoDefaultsEnvVar, "")
+	root := testRoot(t)
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gone := DefaultPlugin{ID: "acme.gone", Source: "/nonexistent"}
+	other := DefaultPlugin{ID: "acme.other", Source: "/nonexistent"}
+	if err := writeDefaultsState(filepath.Join(root, defaultsStateName), defaultsState{
+		Pending: []pendingDefault{{DefaultPlugin: gone, Attempts: 1, LastError: "clone: boom"}},
+		Failed:  []pendingDefault{{DefaultPlugin: other, Attempts: 3, LastError: "build: no go"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if fs, err := FailedDefaults(); err != nil || len(fs) != 2 || fs[0].GaveUp || !fs[1].GaveUp {
+		t.Fatalf("FailedDefaults = %+v, %v; want one retrying, one given up", fs, err)
+	}
+
+	for i := 0; i < 2; i++ {
+		if err := DismissDefault("acme.gone"); err != nil {
+			t.Fatalf("dismiss %d: %v", i+1, err)
+		}
+	}
+	st := readSeedState(t, root)
+	if len(st.Pending) != 0 || len(st.Failed) != 1 || st.Failed[0].ID != "acme.other" {
+		t.Fatalf("state after dismiss = %+v", st)
+	}
+	// Nothing left pending, so the next start does not clone.
+	if outs, err := SeedDefaults(nil, nil); err != nil || outs != nil {
+		t.Fatalf("seed after dismiss = %+v, %v; want nothing done", outs, err)
+	}
+	if err := DismissDefault("acme.other"); err != nil {
+		t.Fatal(err)
+	}
+	if fs, _ := FailedDefaults(); len(fs) != 0 {
+		t.Fatalf("FailedDefaults after dismissing both = %+v", fs)
+	}
+}
+
+// A failed default that is installed by other means drops out of the notices,
+// and uninstalling it afterwards forgets it, so neither the notice nor the
+// seed brings it back.
+func TestFailedDefaultInstalledThenUninstalled(t *testing.T) {
+	t.Setenv(NoDefaultsEnvVar, "")
+	root := testRoot(t)
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	demo := DefaultPlugin{ID: "acme.demo", Source: "/nonexistent"}
+	if err := writeDefaultsState(filepath.Join(root, defaultsStateName), defaultsState{
+		Pending: []pendingDefault{{DefaultPlugin: demo, Attempts: 1, LastError: "clone: boom"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Link(writePlugin(t, validManifest), nil); err != nil {
+		t.Fatalf("link: %v", err)
+	}
+	if fs, err := FailedDefaults(); err != nil || len(fs) != 0 {
+		t.Fatalf("FailedDefaults with the plugin present = %+v, %v; want none", fs, err)
+	}
+
+	if _, err := Uninstall("acme.demo"); err != nil {
+		t.Fatal(err)
+	}
+	if st := readSeedState(t, root); len(st.Pending) != 0 || len(st.Failed) != 0 {
+		t.Fatalf("state after uninstall = %+v; want the default forgotten", st)
+	}
+	if fs, _ := FailedDefaults(); len(fs) != 0 {
+		t.Fatalf("FailedDefaults after uninstall = %+v; want none", fs)
+	}
+}
+
+// With no state file (never seeded, or an existing install that predates the
+// seed) there is nothing to report and nothing to dismiss.
+func TestFailedDefaultsNoState(t *testing.T) {
+	t.Setenv(NoDefaultsEnvVar, "")
+	testRoot(t)
+	if fs, err := FailedDefaults(); err != nil || fs != nil {
+		t.Fatalf("FailedDefaults = %+v, %v; want nothing", fs, err)
+	}
+	if err := DismissDefault("acme.demo"); err != nil {
+		t.Fatalf("dismiss without state: %v", err)
 	}
 }

@@ -330,19 +330,31 @@
   // Layout (one row per plugin; the dialog re-renders in place when a check
   // lands, so opening it never waits on the network):
   //
-  //   plugins  4                      1 update available · 2m ago   ↻
-  //   ┌──┐ cats-todo  v0.41.1  todos_mgr  ↑ 9bfe73e     rohanthewiz.cats-todo
-  //   │ C│ 78c85ac → 9bfe73e · fix(form): a click in the…   [run][update][…]
+  //   plugins  2                      1 update available · 2m ago   ↻
+  //   ┌──┐ cats-todo  not installed · gave up          rohanthewiz.cats-todo
+  //   │ !│ cats-todo could not be installed: build step 1 (sh -c …): exit…
+  //   └──┘ sh: go: command not found                        [install][dismiss]
+  //   ┌──┐ cats-git  v0.1.0  git  ↑ 9bfe73e               rohanthewiz.cats-git
+  //   │ C│ 78c85ac → 9bfe73e · fix(log): keep the cursor…    [run][update][…]
   //   └──┘
   //   ┌──┐ ced  v0.9.0  editor  linked
   //   │ C│ /Users/ro/projs/go/ced                           [run][rebuild][…]
   //   └──┘
-  //                                   [close] [update all (2)] [add…]
+  //                                                      [close] [add…]
+  //
+  // (update all joins the footer once more than one update is waiting.)
+  //
+  // The first kind of row is a default plugin the first-run seed failed to
+  // install (plugin.list's failed_defaults), drawn above the installed ones
+  // and not counted in the header. A fresh install is where it matters:
+  // without it, a user with no Go toolchain finds cats-todo simply absent,
+  // with the reason only in the daemon log.
   function openPluginsDialog() {
     sendCmdAwait("plugin.list", {}, (res) => {
       if (!res.ok) { toast("plugins: " + (res.error || "unknown")); return; }
       const info = res.data || {};
       const plugins = info.plugins || [];
+      const failedDefaults = info.failed_defaults || [];
       let checking = false;
       let checkFailed = false;
       let ov = null;
@@ -356,6 +368,9 @@
         if (!ov || modalEl !== ov) return; // the dialog closed while a check was out
         paintStatus();
         listEl.textContent = "";
+        // Failure notices go first. They explain a gap in the list below, and
+        // in the fresh-install case the list below is empty.
+        for (const f of failedDefaults) listEl.appendChild(failedDefaultRow(f));
         if (!plugins.length) {
           const e = document.createElement("div"); e.className = "empty";
           e.textContent = "no plugins installed — add… one from GitHub or a local checkout";
@@ -537,6 +552,80 @@
           actBtn("rebuild", "", () => pluginCatctlTab(info.catctl, "rebuild " + p.id, ["link", p.dir]));
         }
         actBtn(p.linked ? "unlink" : "uninstall", "danger", () => confirmUninstallPlugin(p));
+        row.appendChild(acts);
+        return row;
+      };
+
+      // failedDefaultRow draws a default plugin that could not be installed,
+      // in the same card anatomy as an installed plugin's row so the list
+      // reads as one set: "!" tile, name and id, the error, then the output
+      // line that usually says *why* (git's or the build's own complaint;
+      // the error alone often names just the failing step).
+      //
+      // install re-runs the same `catctl plugin install <source>` the seed
+      // ran, in a tab, so this time the user watches the output. Once the
+      // plugin is present the notice drops out of plugin.list by itself.
+      // dismiss is "I don't want it": the server forgets the default, which
+      // also stops the seed from retrying it on the next start.
+      const failedDefaultRow = (f) => {
+        const row = document.createElement("div");
+        row.className = "row plg dflt";
+        const when = f.gave_up
+          ? "gave up after " + f.attempts + (f.attempts === 1 ? " attempt" : " attempts")
+          : "failed " + f.attempts + (f.attempts === 1 ? " time" : " times") + " · retries when cats restarts";
+        row.title = [
+          "default plugin " + f.id + " could not be installed (" + when + ")",
+          f.error, f.output, "source: " + f.source,
+        ].filter(Boolean).join("\n");
+
+        const av = document.createElement("span"); av.className = "av"; av.textContent = "!";
+        row.appendChild(av);
+
+        const main = document.createElement("div"); main.className = "main";
+        const l1 = document.createElement("div"); l1.className = "l1";
+        const nm = document.createElement("span"); nm.className = "nm";
+        nm.textContent = pluginDisplayName({ id: f.id });
+        l1.appendChild(nm);
+        const pill = document.createElement("span"); pill.className = "pill st missing";
+        pill.textContent = f.gave_up ? "not installed · gave up" : "not installed · will retry";
+        l1.appendChild(pill);
+        if (f.id !== nm.textContent) {
+          const pid = document.createElement("span"); pid.className = "pid";
+          pid.textContent = f.id;
+          l1.appendChild(pid);
+        }
+        main.appendChild(l1);
+
+        const l2 = document.createElement("div"); l2.className = "l2 warn";
+        l2.textContent = nm.textContent + " could not be installed: " + (f.error || "unknown error");
+        main.appendChild(l2);
+        // The output's last line, when there is one: the build's final word
+        // is usually the reason ("go: command not found"). The full tail is
+        // in the tooltip.
+        const lastOut = (f.output || "").trim().split("\n").pop();
+        if (lastOut) {
+          const l3 = document.createElement("div"); l3.className = "l2 path";
+          l3.textContent = lastOut;
+          main.appendChild(l3);
+        }
+        row.appendChild(main);
+
+        const acts = document.createElement("div"); acts.className = "acts";
+        const install = document.createElement("button"); install.className = "hot";
+        install.textContent = "install";
+        install.title = "catctl plugin install " + f.source + " — runs in a new tab";
+        install.addEventListener("click", () =>
+          pluginCatctlTab(info.catctl, "plugin install", ["install", f.source]));
+        acts.appendChild(install);
+        const dismiss = document.createElement("button");
+        dismiss.textContent = "dismiss";
+        dismiss.title = "hide this notice and stop retrying the install";
+        dismiss.addEventListener("click", () =>
+          sendCmdAwait("plugin.dismiss_default", { id: f.id }, (res) => {
+            if (!res.ok) { toast("dismiss failed: " + (res.error || "unknown")); return; }
+            openPluginsDialog(); // refresh the list in place
+          }));
+        acts.appendChild(dismiss);
         row.appendChild(acts);
         return row;
       };

@@ -32,7 +32,7 @@ window were dated by grepping every session doc.
 - Open and Roadmap stay in ID order. New items append to the end of Open (or
   Roadmap, for future work) with the next ID.
 
-**Next ID:** N-048
+**Next ID:** N-049
 
 ## Open
 
@@ -203,13 +203,8 @@ window were dated by grepping every session doc.
   does not exist yet, then confirm the install log line in `daemons.log` and
   that cats-todo shows in the plugins dialog and picker once they are
   reopened. Also start once without Go on PATH to see the retry and give-up
-  warnings.
-
-- **N-046** · raised `2026-0926-2226-default-plugin-seed-cats-todo` · value low
-  A default plugin that failed to seed is only reported in the daemon log. A
-  fresh-install user without Go never learns why cats-todo is missing. The
-  plugins dialog could show a "cats-todo could not be installed: …" line from
-  `.cats-defaults.json`'s `last_error`, with the install button next to it.
+  warnings, and the plugins dialog's "could not be installed" row after each
+  failed start (N-046 checked that row only against a hand-written state file).
 
 - **N-047** · raised `2026-0926-2256-n003-hand-started-plugin-rows` · value low
   A plugin whose `bin` entry is a script, typed at a prompt, still gets no
@@ -217,6 +212,13 @@ window were dated by grepping every session doc.
   `python`, …), not a file under the plugin dir, so `pluginForExe` never
   matches. The fix would also report the leader's argv and match a script path
   in it. Every plugin shipped today is a Go binary.
+
+- **N-048** · raised `2026-0926-2329-n046-failed-default-plugin-notice` · value low
+  A failed default plugin is only visible once the plugins dialog is opened.
+  A fresh-install user who never opens it still does not learn why cats-todo
+  is missing. The toolbar's plugins button could carry a warning mark (as it
+  carries the update count) while `plugin.list` has `failed_defaults`, or the
+  first connect after a failed seed could raise one toast.
 
 ## Roadmap
 
@@ -252,6 +254,20 @@ unchanged.
 Closures before this file existed live in the session docs' own write-ups.
 Newest first. The unnumbered entries at the end were found done while seeding,
 so they are not carried.
+
+- **N-046** · raised `2026-0926-2226-default-plugin-seed-cats-todo` ·
+  closed 2026-09-26, `2026-0926-2329-n046-failed-default-plugin-notice`. The
+  seed now records each failed attempt's error and
+  output tail, and keeps defaults it gave up on in a `failed` list in
+  `.cats-defaults.json` instead of dropping them. `plugin.list` carries them as
+  `failed_defaults` (`plugin.FailedDefaults`, filtered to ones still not
+  installed). The plugins dialog shows a warning row per failure, above the
+  installed plugins, with **install** (a `catctl plugin install` tab) and
+  **dismiss** (new `plugin.dismiss_default` command, which also stops retries).
+  `catctl plugin list` prints the same notice. `plugin.Uninstall` now forgets a
+  default too, closing a gap where a default installed by hand while pending,
+  then uninstalled, was seeded back on the next start. Checked in a scratch
+  catway with a fake failed state: the row renders and dismiss clears it.
 
 - **N-031** · raised `2026-0923-1443-settings-json-and-screen` ·
   closed 2026-09-26. `docs/reference/configuration.md` now shows every

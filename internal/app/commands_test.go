@@ -66,6 +66,8 @@ type fakeBackend struct {
 	lastPeerSync   Responder
 	lastPeerSyncP  PeerSyncParams
 	lastPlgUninP   PluginUninstallParams
+	lastPlgDismiss Responder
+	lastPlgDismP   PluginDismissDefaultParams
 	lastPlgCheck   Responder
 	lastPlgCheckP  PluginCheckUpdatesParams
 	lastPathList   Responder
@@ -306,6 +308,11 @@ func (b *fakeBackend) StartPluginUninstall(r Responder, p PluginUninstallParams)
 	b.rec("plgUninstall")
 	b.lastPlgUnins = r
 	b.lastPlgUninP = p
+}
+func (b *fakeBackend) StartPluginDismissDefault(r Responder, p PluginDismissDefaultParams) {
+	b.rec("plgDismiss")
+	b.lastPlgDismiss = r
+	b.lastPlgDismP = p
 }
 func (b *fakeBackend) StartPluginCheckUpdates(r Responder, p PluginCheckUpdatesParams) {
 	b.rec("plgCheck")
@@ -1060,6 +1067,30 @@ func TestDispatchPluginUninstall(t *testing.T) {
 	}
 	if h.b.lastPlgUnins != Responder(r) || h.b.lastPlgUninP.ID != "acme.todo" {
 		t.Fatalf("plugin.uninstall not forwarded: %+v", h.b.lastPlgUninP)
+	}
+}
+
+// plugin.dismiss_default requires an id (fails before the backend) and
+// otherwise forwards its params, resolving asynchronously.
+func TestDispatchPluginDismissDefault(t *testing.T) {
+	h := newCmdHarness(t)
+	r := h.resp()
+	h.d.Dispatch(CmdPluginDismissDefault, params(t, PluginDismissDefaultParams{}), r)
+	if !r.failCall || !strings.Contains(r.errMsg, "id is required") {
+		t.Fatalf("empty id: fail=%v msg=%q", r.failCall, r.errMsg)
+	}
+	if h.b.lastPlgDismiss != nil {
+		t.Fatalf("missing id must not reach the backend")
+	}
+
+	h = newCmdHarness(t)
+	r = h.resp()
+	h.d.Dispatch(CmdPluginDismissDefault, params(t, PluginDismissDefaultParams{ID: "acme.todo"}), r)
+	if r.okCall || r.failCall {
+		t.Fatalf("plugin.dismiss_default must not resolve synchronously")
+	}
+	if h.b.lastPlgDismiss != Responder(r) || h.b.lastPlgDismP.ID != "acme.todo" {
+		t.Fatalf("plugin.dismiss_default not forwarded: %+v", h.b.lastPlgDismP)
 	}
 }
 
