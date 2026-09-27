@@ -144,8 +144,9 @@ make dist
 ```
 
 Produces `dist/cats_<version>_<goos>_<goarch>.tar.gz` containing `catway`,
-`cathost`, `catctl`, `config.example.yaml` and `README.md`. Version comes from
-`git describe --tags --always --dirty`.
+`cathost`, `catctl`, `config.example.json` (the defaults),
+`config.example.yaml` (the annotated reference) and `README.md`. Version comes
+from `git describe --tags --always --dirty`.
 
 ## macOS app bundles
 

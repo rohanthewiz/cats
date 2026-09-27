@@ -1,14 +1,18 @@
-# cats catway configuration — the annotated reference, in the legacy YAML form.
+# cats catway configuration — the annotated reference, in YAML.
 #
-# The live config is JSON: ~/.config/cats/config.json (defaults in
-# config.example.json; edit it from Settings — ⌘, / Ctrl+,). This file keeps
-# the per-key commentary JSON cannot carry, and the keys are identical. It is
-# still accepted as-is via `catway --config <path>.yaml` / CATS_CONFIG, and a
-# config.yaml at the default location is migrated to config.json on first start. Every field is optional — omit anything
-# you don't want to change and the built-in default is used. For the server
-# settings a command-line flag still wins over this file, which wins over the
-# default (flag > config > default). The theme and keybindings have no flags and
-# come from this file alone.
+# The live config is JSON: ~/.config/cats/config.json, edited from Settings
+# (⌘, / Ctrl+,). JSON has no comments, so this file is where every key's
+# commentary lives; the keys are identical in both formats. Its siblings:
+#   config.example.json          every default, exactly as catway saves it
+#   docs/reference/configuration.md   the same sections, with JSON examples
+#
+# This file is also a working config as-is: `catway --config <path>.yaml` (or
+# CATS_CONFIG) reads and writes YAML, and a config.yaml at the default location
+# is migrated to config.json on first start. Every field is optional — omit
+# anything you don't want to change and the built-in default is used. For the
+# server settings a command-line flag still wins over this file, which wins over
+# the default (flag > config > default). The theme and keybindings have no flags
+# and come from this file alone.
 #
 # Edit-and-reload: after changing theme or keybindings, run `catctl reload`
 # (server.reload_config) to re-render the served page — no restart needed. The
@@ -25,13 +29,17 @@ server:
   # Extra WebSocket Origins accepted beyond same-origin — needed when a reverse
   # proxy or relay serves the UI under a different host. Full origins or bare
   # host[:port] authorities. Empty ⇒ strict same-origin only.
-  # allowed_origins: ["https://home.relay.herdr.dev"]
+  # allowed_origins: ["https://home.relay.example"]
   # The shared secret is NOT read from this file — set CATS_PASSWORD or pass
   # --password so it never lands in a committed config.
   tls:
     enabled: false                     # true ⇒ HTTPS (auto self-signed unless cert/key given)
     cert: ""                           # operator PEM (cert + key must be set together)
     key: ""
+    # sans: ["devbox.lan", "10.0.0.7"]  # extra names/IPs for the AUTO-generated
+    #                                   # cert (a LAN name, a relay hostname).
+    #                                   # Implies TLS; ignored with operator PEMs.
+    #                                   # Adding one re-mints the certificate.
 
 # Hosts: the cathosts this catway attaches to. Panes carry a host, so a roster
 # with more than one entry means panes on different machines side by side in the
@@ -285,3 +293,11 @@ runbooks:
   triggers: true                       # false stops every `on:` clause from
                                        # firing, without touching the files or
                                        # the ability to run them by hand.
+
+# --- Front-end preferences ----------------------------------------------------
+# Preferences that follow you between browsers. You rarely write these by hand:
+# ⌘+/⌘- and dragging the sidebar gutter save them. Unset means each browser
+# keeps its own.
+# ui:
+#   font_px: 14                        # 9–32
+#   sidebar_width: 260                 # at least 150

@@ -11,8 +11,13 @@ peers keep their own dialogs.
 - **Migration.** A pre-JSON `config.yaml` at the default location is converted
   to `config.json` on first start and left in place — after that it is no
   longer read. An explicit `--config something.yaml` is still read and written
-  as YAML. The section examples below are written in YAML for readability; the
-  keys are identical in JSON.
+  as YAML, with the same keys.
+- **Examples.** Each section below shows a fragment of the top-level object —
+  paste it inside the file's outer `{ }`. JSON has no comments, so what a key
+  means lives in the table under its example. Two files in the repo root cover
+  the whole file at once: [`config.example.json`](#reference-files) is every
+  default, and [`config.example.yaml`](#reference-files) is the same settings
+  with a comment on every key.
 - **Shared with the Mac app.** The app keeps its own top-level `app` section
   in the same file (launch mode, saved catways, window layout). catway never
   rewrites it; each process rewrites only its own sections, under a lock.
@@ -69,26 +74,28 @@ server-side with the theme and keybindings injected, re-rendering it is all a
 theme change needs — no restart, no rebuild.
 
 The settings modal in the UI does the same thing through `config.get` /
-`config.set`, which persist the live-appliable sections. `hosts:` has its own
+`config.set`, which persist the live-appliable sections. `hosts` has its own
 pair — `host.attach` / `host.detach` — for the same reason: see
 [editing the roster](#editing-the-roster-without-a-restart).
 
 ## `server`
 
-```yaml
-server:
-  addr: ":8421"
-  cathost_socket: "/tmp/cats-cathost.sock"
-  control_socket: ""                    # "" => CATS_CONTROL_SOCKET or /tmp/cats-control.sock
-  hook_socket: "/tmp/cats-hooks.sock"   # "none" disables
-  auth: "password"                      # "password" | "none"
-  session_ttl: "24h"                    # a Go duration string
-  # allowed_origins: ["https://home.relay.example"]
-  tls:
-    enabled: false
-    cert: ""
-    key: ""
-    sans: []
+```json
+"server": {
+  "addr": ":8421",
+  "cathost_socket": "/tmp/cats-cathost.sock",
+  "control_socket": "",
+  "hook_socket": "/tmp/cats-hooks.sock",
+  "auth": "password",
+  "session_ttl": "24h",
+  "allowed_origins": [],
+  "tls": {
+    "enabled": false,
+    "cert": "",
+    "key": "",
+    "sans": []
+  }
+}
 ```
 
 | Key | Flag | Notes |
@@ -98,7 +105,7 @@ server:
 | `control_socket` | `--control-socket` | empty defers to `$CATS_CONTROL_SOCKET`, then the default |
 | `hook_socket` | `--hook-socket` | `none` disables the hook API entirely |
 | `auth` | `--auth` | `none` skips login. Safe on loopback **only** |
-| `session_ttl` | `--session-ttl` | cookie lifetime |
+| `session_ttl` | `--session-ttl` | login cookie lifetime, as a Go duration string |
 | `allowed_origins` | `--allowed-origins` | extra WebSocket origins beyond same-origin. Full origins or bare `host[:port]`. Empty means strict same-origin |
 | `tls.enabled` | `--tls` | HTTPS. Auto self-signed unless cert/key are given |
 | `tls.cert` / `tls.key` | `--tls-cert` / `--tls-key` | operator PEMs. Both must be set together; either implies `--tls` |
@@ -119,29 +126,31 @@ The cathosts panes can run on. Omit the section — the default — and there is
 exactly one host, `local`, on `server.cathost_socket`: the UI grows no roster and
 no badges, and nothing about a single-machine session changes.
 
-```yaml
-hosts:
-  - id: devbox                                   # letters, digits, . _ -
-    label: "devbox (ssh)"                        # display name; defaults to the id
-    addr: "unix:///tmp/devbox-cathost.sock"
-    # default: true                              # new panes land here instead of local
-
-  - id: box                                      # the native transport: no ssh
-    addr: "tls://box.lan:8422"
-    token_file: "~/.config/cats/box.token"       # must match the daemon's -token-file
-    fingerprint: "dd7d9b31…"                     # printed by cathost at startup
-    # control_relay: true                        # let panes there drive the session
+```json
+"hosts": [
+  {
+    "id": "devbox",
+    "label": "devbox (ssh)",
+    "addr": "unix:///tmp/devbox-cathost.sock"
+  },
+  {
+    "id": "box",
+    "addr": "tls://box.lan:8422",
+    "token_file": "~/.config/cats/box.token",
+    "fingerprint": "dd7d9b31…"
+  }
+]
 ```
 
 | Key | Notes |
 |-----|-------|
-| `id` | how panes name the host; recorded per pane in `session.json` |
-| `label` | display name in the sidebar and in error toasts |
+| `id` | how panes name the host (letters, digits, `.`, `_`, `-`); recorded per pane in `session.json` |
+| `label` | display name in the sidebar and in error toasts. Defaults to the id |
 | `addr` | `unix://path`, `tcp://host:port`, or `tls://host:port` |
-| `default` | where a pane that names no host lands. At most one entry; with none, `local` is the default |
+| `default` | `true` sends a pane that names no host here instead of to `local`. At most one entry; with none, `local` is the default |
 | `control_relay` | let panes on this host reach the control API. **Off by default, and a trust decision** — see below |
-| `token` / `token_file` | credential for a cathost that requires one (set one, not both) |
-| `fingerprint` | pinned TLS certificate for a `tls://` host |
+| `token` / `token_file` | credential for a cathost that requires one (set one, not both). A `token_file` must hold what the daemon's `-token-file` holds |
+| `fingerprint` | pinned TLS certificate for a `tls://` host, as cathost prints it at startup |
 
 The `local` entry is **always synthesized** from `server.cathost_socket`, so this
 list only ever names the extra machines. Listing an entry with `id: local`
@@ -184,7 +193,7 @@ many panes each holds).
 
 ### Editing the roster without a restart
 
-Unlike the rest of the server-side settings, `hosts:` is **live**. Three ways in,
+Unlike the rest of the server-side settings, `hosts` is **live**. Three ways in,
 all of which change the running session *and* rewrite this section of the file,
 so the roster and the config can never disagree:
 
@@ -192,7 +201,7 @@ so the roster and the config can never disagree:
 catctl attach-host devbox unix:///tmp/devbox-cathost.sock "devbox (ssh)"
 catctl detach-host devbox            # refused while it still holds panes
 catctl detach-host devbox force      # …unless you say so; see below
-catctl reload                        # apply a hand-edit of hosts: to the running catway
+catctl reload                        # apply a hand-edit of hosts to the running catway
 ```
 
 In the browser it is the `＋` on the HOSTS section heading (and **attach host…**
@@ -231,11 +240,14 @@ nothing to point it at unless that host's cathost relays the control API back
 (see the [control relay](../protocols/orchestration-seam.md#control-relay)), so a
 pane there is told `CATS_CONTROL_SOCKET=-` and `catctl` explains why.
 
-```yaml
-hosts:
-  - id: devbox
-    addr: "tls://devbox.lan:8422"
-    control_relay: true      # in-pane catctl on devbox drives this session
+```json
+"hosts": [
+  {
+    "id": "devbox",
+    "addr": "tls://devbox.lan:8422",
+    "control_relay": true
+  }
+]
 ```
 
 **What you are granting.** The control API can create panes, run commands in
@@ -266,13 +278,16 @@ orchestrator's config claims.
 
 ## `peers`
 
-```yaml
-peers:
-  - id: home
-    label: "home mini-PC"                       # optional; defaults to the id
-    url: "https://mini.lan:8421"                # that cats' browser address
-    token_file: "~/.config/cats/peers/home.token"   # holds ITS CATS_PASSWORD
-    fingerprint: "dd7d9b31…"                    # its self-signed cert, from its startup log
+```json
+"peers": [
+  {
+    "id": "home",
+    "label": "home mini-PC",
+    "url": "https://mini.lan:8421",
+    "token_file": "~/.config/cats/peers/home.token",
+    "fingerprint": "dd7d9b31…"
+  }
+]
 ```
 
 A peer is another cats whose **backend** this one synchronizes with — see
@@ -283,6 +298,7 @@ second catway with workspaces, backlogs and plugins of its own.
 | Field | Meaning |
 |---|---|
 | `id` | how commands and the dialog name it (letters, digits, `.`, `_`, `-`) |
+| `label` | optional display name; defaults to the id |
 | `url` | scheme, host and port only — the `/peer/v1/*` routes are appended. `https://` for another machine; `http://` is accepted only for loopback (this machine, or the local end of an `ssh -L` tunnel), because the token rides every request |
 | `token` / `token_file` | the peer catway's shared secret, presented as a bearer token. Prefer the file: the settings modal rewrites this config wholesale, so a literal secret here is one commit away from being published. One of the two, not both |
 | `fingerprint` | pins a self-signed certificate by SHA-256 — the value that catway prints at startup under `--tls`. Required in practice for a self-signed peer, since without a pin the standard chain check applies and fails |
@@ -293,30 +309,32 @@ The block is live: `catctl attach-peer <id> <url> [token_file] [label...]` and
 
 ## `persistence`
 
-```yaml
-persistence:
-  enabled: true
-  state_dir: ""            # "" => $XDG_STATE_HOME/cats  (~/.local/state/cats)
-  history_lines: 2000      # scrollback lines captured per pane (0 = whole buffer)
-  resume_agents: true
+```json
+"persistence": {
+  "enabled": true,
+  "state_dir": "",
+  "history_lines": 2000,
+  "resume_agents": true
+}
 ```
 
 | Key | Flag | Notes |
 |-----|------|-------|
 | `enabled` | `--persist` | `--persist=false` disables save and restore |
-| `state_dir` | `--state-dir` | |
-| `history_lines` | — | per-pane scrollback captured for cold-restore seeds |
+| `state_dir` | `--state-dir` | `""` means `$XDG_STATE_HOME/cats` (`~/.local/state/cats`) |
+| `history_lines` | — | per-pane scrollback lines captured for cold-restore seeds. `0` captures the whole buffer |
 | `resume_agents` | — | relaunch supported agent panes into their native conversations on a cold restore |
 
 See [Persistence](../subsystems/persistence.md).
 
 ## `panes`
 
-```yaml
-panes:
-  reap_exited: "4h"        # "off" / "0" / "never" keeps exited panes forever
-  autoclose_exited: "10s"  # a CLEANLY exited pane closes itself after this
-  agent_refresh: "1m"      # how often agent rows re-read model + context use
+```json
+"panes": {
+  "reap_exited": "4h",
+  "autoclose_exited": "10s",
+  "agent_refresh": "1m"
+}
 ```
 
 A pane whose child exits is **kept**: the chrome turns red, the last screen
@@ -393,27 +411,29 @@ The outbound notification bridge. When an agent needs attention, `catway` POSTs
 to an [ntfy](https://ntfy.sh)-shaped webhook so a phone with its screen off gets
 a real system push — not a toast on a screen nobody is looking at.
 
-```yaml
-push:
-  enabled: false
-  url: "https://ntfy.sh/cats-CHANGE-ME-TO-SOMETHING-UNGUESSABLE"
-  kinds: ["attention"]      # any of "attention", "finished", "info"
-  priority:                 # ntfy priority per kind
-    attention: "high"
-    finished: "low"
-  min_interval: "60s"       # debounce per (pane, kind)
-  click_url: "cats://pane/" # deep-link base; the pane handle is appended
-  actions: false            # tappable buttons that answer the agent's prompt
-  action_url: ""            # where a phone reaches this catway; required with actions
+```json
+"push": {
+  "enabled": false,
+  "url": "https://ntfy.sh/cats-CHANGE-ME-TO-SOMETHING-UNGUESSABLE",
+  "kinds": ["attention"],
+  "priority": {
+    "attention": "high",
+    "finished": "low"
+  },
+  "min_interval": "60s",
+  "click_url": "cats://pane/",
+  "actions": false,
+  "action_url": ""
+}
 ```
 
 | Key | Flag | Default | Notes |
 |-----|------|---------|-------|
 | `enabled` | — | `false` | passing `--push-url` turns it on by itself; `--push-url ""` forces it off |
 | `url` | `--push-url` | — | required when enabled. Must be `http`/`https` |
-| `kinds` | — | `["attention"]` | which [notify kinds](../protocols/browser-protocol.md) to forward |
+| `kinds` | — | `["attention"]` | which [notify kinds](../protocols/browser-protocol.md) to forward: any of `attention`, `finished`, `info` |
 | `priority` | — | `attention: high`, `finished: low` | per kind. Accepts ntfy's `min`/`low`/`default`/`high`/`urgent` or `1`–`5` |
-| `min_interval` | — | `60s` | Go duration. `0` disables the debounce |
+| `min_interval` | — | `60s` | Go duration; debounce per (pane, kind). `0` disables the debounce |
 | `click_url` | — | — | tap target; the pane's public handle (`w1:p3`) is appended. Empty means no click action |
 | `actions` | — | `false` | render buttons that answer the agent's prompt from the notification |
 | `action_url` | — | — | the base URL a **phone** reaches this catway at (scheme + host, no path). Required when `actions` is set |
@@ -439,12 +459,13 @@ emergency.
 With `actions: true`, an `attention` push carries the blocked agent's own
 choices as buttons:
 
-```yaml
-push:
-  enabled: true
-  url: "https://ntfy.sh/cats-7f3a91"
-  actions: true
-  action_url: "https://cats.tail1234.ts.net"   # what the PHONE dials
+```json
+"push": {
+  "enabled": true,
+  "url": "https://ntfy.sh/cats-7f3a91",
+  "actions": true,
+  "action_url": "https://cats.tail1234.ts.net"
+}
 ```
 
 When an agent blocks, catway reads that pane's screen, parses the menu out of
@@ -487,10 +508,11 @@ them on [`ui.notify`](../protocols/control-api.md#notifications).
 
 The [command history](../protocols/control-api.md#command-history):
 
-```yaml
-ledger:
-  enabled: true
-  retention: 20000   # records; the oldest go first
+```json
+"ledger": {
+  "enabled": true,
+  "retention": 20000
+}
 ```
 
 | Key | Default | Notes |
@@ -516,9 +538,10 @@ line and a disabled feature, never a failure to start.
 
 One switch, and it is not about running runbooks:
 
-```yaml
-runbooks:
-  triggers: true
+```json
+"runbooks": {
+  "triggers": true
+}
 ```
 
 | Key | Default | Notes |
@@ -547,11 +570,12 @@ control-API commands, so a runbook could otherwise turn its own triggers back on
 
 What cats knows about editors, which is deliberately almost nothing:
 
-```yaml
-editor:
-  agents: ["ced"]     # a pane running one of these agents IS an editor
-  command: ["ced"]    # how to start one when none is running
-  spawn: true         # may pane.open_file start one?
+```json
+"editor": {
+  "agents": ["ced"],
+  "command": ["ced"],
+  "spawn": true
+}
 ```
 
 | Key | Default | Notes |
@@ -569,11 +593,13 @@ adding another editor is one word here and no code anywhere.
 The other tools that report over the [hook API](../protocols/hook-api.md) under
 their own name, typed by that name:
 
-```yaml
-tools:
-  types:
-    dbc: db_client      # the defaults
-    gonotes: notes_mgr
+```json
+"tools": {
+  "types": {
+    "dbc": "db_client",
+    "gonotes": "notes_mgr"
+  }
+}
 ```
 
 A pane's plugin type normally comes from the manifest of the plugin that
@@ -605,9 +631,10 @@ including one this build does not know. Live-reloadable with `catctl reload`.
 
 ## `worktrees`
 
-```yaml
-worktrees:
-  directory: "~/.cats/worktrees"
+```json
+"worktrees": {
+  "directory": "~/.cats/worktrees"
+}
 ```
 
 Where new checkouts are created. Checkouts land at
@@ -627,12 +654,13 @@ picks a theme; `colors` (CSS custom-property names **without** the leading
 `--`) override individual keys of that theme; `font` overrides its font stack.
 Everything you don't name comes from the theme.
 
-```yaml
-theme:
-  name: tokyo-night
-  colors:
-    accent: "#ff9e64"   # just this one key differs from the theme
-  # font: 'JetBrains Mono, monospace'
+```json
+"theme": {
+  "name": "tokyo-night",
+  "colors": {
+    "accent": "#ff9e64"
+  }
+}
 ```
 
 Built-in themes: `cats-green` (the default), `darcula`, `tokyo-night`,
@@ -714,21 +742,23 @@ Keys are DOM `KeyboardEvent.key` values — `"ArrowLeft"`, `"h"`, `"Escape"`,
 `"0"`, `"$"`, `"Enter"`. Only the actions you list are rebound; the rest keep
 their defaults.
 
-```yaml
-keybindings:
-  copy_mode:
-    move-left:  ["ArrowLeft", "h"]
-    move-right: ["ArrowRight", "l"]
-    move-up:    ["ArrowUp", "k"]
-    move-down:  ["ArrowDown", "j"]
-    line-start: ["0", "Home"]
-    line-end:   ["$", "End"]
-    top:        ["g"]
-    bottom:     ["G"]
-    select:     ["v"]
-    rect:       ["r"]
-    yank:       ["y", "Enter"]
-    exit:       ["Escape", "q"]
+```json
+"keybindings": {
+  "copy_mode": {
+    "move-left":  ["ArrowLeft", "h"],
+    "move-right": ["ArrowRight", "l"],
+    "move-up":    ["ArrowUp", "k"],
+    "move-down":  ["ArrowDown", "j"],
+    "line-start": ["0", "Home"],
+    "line-end":   ["$", "End"],
+    "top":        ["g"],
+    "bottom":     ["G"],
+    "select":     ["v"],
+    "rect":       ["r"],
+    "yank":       ["y", "Enter"],
+    "exit":       ["Escape", "q"]
+  }
+}
 ```
 
 Multiple keys per action are allowed — the defaults themselves pair a vim key with
@@ -771,6 +801,16 @@ Injected **into** every pane by `catway`:
 | worktrees | `~/.cats/worktrees/` |
 | `catapp` settings | `~/Library/Application Support/cats/app.json` |
 
-The full annotated example lives at
-[`config.example.yaml`](https://github.com/rohanthewiz/cats/blob/main/config.example.yaml)
-in the repo root.
+## Reference files
+
+Two whole-file examples sit in the repo root. Each has a job the other cannot do:
+
+| File | What it is | Kept honest by |
+|------|------------|----------------|
+| [`config.example.json`](https://github.com/rohanthewiz/cats/blob/main/config.example.json) | every section at its built-in default, exactly as catway would save it | `TestExampleJSON` regenerates it and fails on any difference |
+| [`config.example.yaml`](https://github.com/rohanthewiz/cats/blob/main/config.example.yaml) | the annotated reference: the same keys with a comment on each one, including the optional sections (`hosts`, `peers`) that the JSON file cannot show commented out | `TestExampleConfigParses` loads it against the current schema and checks it still holds the defaults |
+
+The YAML file is not a leftover. JSON has no comments, so it is the one place
+the commentary can sit beside the keys. It ships in the release tarball, which
+has no copy of these docs, and it is also a working config for anyone who
+passes `--config` a `.yaml` path.

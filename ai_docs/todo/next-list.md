@@ -140,11 +140,6 @@ window were dated by grepping every session doc.
   cats-mobile: nothing draws `Session.Plugins` yet. If the phone gets a
   plugins list, split it by `PluginPane.Type` the way the desktop does.
 
-- **N-031** · raised `2026-0923-1443-settings-json-and-screen` · value low
-  `docs/reference/configuration.md` still shows every section example in YAML
-  (the keys are identical in JSON; the intro says so). Convert them to JSON,
-  and decide whether `config.example.yaml` stays as the commented reference.
-
 - **N-033** · raised `2026-0923-1443-settings-json-and-screen` · value low
   Other open browsers don't pick up a `ui` pref (font size, sidebar width)
   changed elsewhere until they reload; there is no broadcast for it.
@@ -257,6 +252,17 @@ unchanged.
 Closures before this file existed live in the session docs' own write-ups.
 Newest first. The unnumbered entries at the end were found done while seeding,
 so they are not carried.
+
+- **N-031** · raised `2026-0923-1443-settings-json-and-screen` ·
+  closed 2026-09-26. `docs/reference/configuration.md` now shows every
+  section example as a JSON fragment. The inline comments those examples
+  carried moved into the tables under them. The custom-theme example stays
+  YAML, because theme files are `.yaml`. `config.example.yaml` **stays** as
+  the commented reference: JSON cannot carry comments, the release tarball has
+  no docs, and `--config x.yaml` is still a supported format. A new
+  "Reference files" section in the doc says what each example file is for.
+  The YAML file's drift is fixed (a pre-rebrand `herdr.dev` origin, missing
+  `tls.sans` and `ui`). `make dist` now ships `config.example.json` beside it.
 
 - **N-007** · raised `2026-0914-0158-catway-restart-cats-todo-release` ·
   closed 2026-09-26. Each window now remembers the URL of a navigation that

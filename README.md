@@ -129,7 +129,9 @@ server, web client + Mac server), or
   [below](#peer-sync--a-second-machine).
 - **Configuration** in JSON (`~/.config/cats/config.json`, edited from the settings screen — ⌘,): server settings,
   theme colors/font, and keybindings — see
-  [`config.example.yaml`](config.example.yaml). Theme/keybinding edits apply
+  [the configuration reference](docs/reference/configuration.md), with every
+  default in [`config.example.json`](config.example.json) and every key
+  commented in [`config.example.yaml`](config.example.yaml). Theme/keybinding edits apply
   with `catctl reload`, no restart.
 
 ## Build & packaging

@@ -111,7 +111,7 @@ local: binaries
 dist: binaries
 	@mkdir -p $(DIST)
 	cp bin/catway bin/cathost bin/catctl $(DIST)/
-	cp config.example.yaml README.md $(DIST)/
+	cp config.example.json config.example.yaml README.md $(DIST)/
 	tar -czf $(DIST).tar.gz -C dist $(notdir $(DIST))
 	@echo "==> $(DIST).tar.gz"
 
