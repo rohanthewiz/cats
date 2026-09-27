@@ -206,13 +206,6 @@ window were dated by grepping every session doc.
   warnings, and the plugins dialog's "could not be installed" row after each
   failed start (N-046 checked that row only against a hand-written state file).
 
-- **N-047** · raised `2026-0926-2256-n003-hand-started-plugin-rows` · value low
-  A plugin whose `bin` entry is a script, typed at a prompt, still gets no
-  PLUGINS row. Its job leader's executable is the interpreter (`/bin/sh`,
-  `python`, …), not a file under the plugin dir, so `pluginForExe` never
-  matches. The fix would also report the leader's argv and match a script path
-  in it. Every plugin shipped today is a Go binary.
-
 - **N-048** · raised `2026-0926-2329-n046-failed-default-plugin-notice` · value low
   A failed default plugin is only visible once the plugins dialog is opened.
   A fresh-install user who never opens it still does not learn why cats-todo
@@ -254,6 +247,17 @@ unchanged.
 Closures before this file existed live in the session docs' own write-ups.
 Newest first. The unnumbered entries at the end were found done while seeding,
 so they are not carried.
+
+- **N-047** · raised `2026-0926-2256-n003-hand-started-plugin-rows` ·
+  closed 2026-09-26. `pane_job` now also carries the head of the job leader's
+  argv (`Argv`, at most `JobArgvMax` = 4 entries, `detect.ProcessArgs`). When
+  the exe is not inside any plugin dir, catway resolves each argv entry
+  (relative ones against the pane's cwd) and matches it against the installed
+  plugins' declared `bin` entries (`pluginForScript`,
+  `cmd/catway/handplugin.go`). An editor or pager holding the script is kept
+  out: the script's own `#!` interpreter (seen through `env`) must match
+  argv[0] by base name. Running a script through a different interpreter
+  than its shebang names (`python3 some.sh`) is therefore not matched.
 
 - **N-046** · raised `2026-0926-2226-default-plugin-seed-cats-todo` ·
   closed 2026-09-26, `2026-0926-2329-n046-failed-default-plugin-notice`. The
@@ -307,8 +311,8 @@ so they are not carried.
   `detect.ProcessExe`), and catway matches it by path prefix against each
   installed plugin's resolved dir (`cmd/catway/handplugin.go`). The match is
   runtime-only and lasts while the job runs. A recorded launch id outranks it,
-  and `pane.list` reads the same answer. Script-based plugins are still
-  missed (N-047).
+  and `pane.list` reads the same answer. Script-based plugins were still
+  missed until N-047.
 
 - **N-005** · raised `2026-0913-2313-catway-cathost-write-deadlock` ·
   closed 2026-09-26, `2026-0926-2143-n005-close-freeze-trigger-moot`, as

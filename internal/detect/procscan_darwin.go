@@ -159,6 +159,20 @@ func ProcessExe(pid int) string {
 	return procPath(pid)
 }
 
+// ProcessArgs returns pid's argv as the kernel recorded it at exec, or nil
+// when it cannot be read. It complements ProcessExe for a job that is a
+// script: the kernel runs a `#!` file by exec'ing its interpreter with the
+// script's path spliced in as an argument, so the executable is /bin/sh (or
+// python, …) and only argv says which file it is running. KERN_PROCARGS2
+// holds the argv the process was started with; a program that rewrites its
+// own argv later is not reflected, which is fine for naming a script.
+func ProcessArgs(pid int) []string {
+	if pid <= 0 {
+		return nil
+	}
+	return procArgv(pid)
+}
+
 // identifyPid checks a process's comm, exec-path basename, and argv for an agent.
 func identifyPid(pid int) string {
 	cands := make([]string, 0, 8)

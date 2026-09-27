@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -73,5 +74,42 @@ func TestProcessExeResolvesALiveProcess(t *testing.T) {
 	}
 	if got := ProcessExe(0); got != "" {
 		t.Fatalf("ProcessExe(0) = %q, want \"\"", got)
+	}
+}
+
+// ProcessArgs reads the argv a live process was started with. For a `#!`
+// script the kernel exec's the interpreter with the script's path spliced in
+// after it, so the path the shell exec'd is in argv even though the executable
+// is the interpreter — which is what the orchestrator matches a script plugin
+// by.
+func TestProcessArgsNamesTheScriptBehindAnInterpreter(t *testing.T) {
+	if got := ProcessArgs(os.Getpid()); !slices.Equal(got, os.Args) {
+		t.Fatalf("ProcessArgs(self) = %q, want %q", got, os.Args)
+	}
+	if got := ProcessArgs(0); got != nil {
+		t.Fatalf("ProcessArgs(0) = %q, want nil", got)
+	}
+
+	script := filepath.Join(t.TempDir(), "plug.sh")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nsleep 5\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(script, "list")
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = cmd.Process.Kill(); _ = cmd.Wait() }()
+	// The fork is done when Start returns; the exec may not be. Poll briefly
+	// for the interpreter's argv rather than the pre-exec image's.
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		args := ProcessArgs(cmd.Process.Pid)
+		if len(args) >= 3 && args[1] == script && args[2] == "list" {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("ProcessArgs(script) = %q, want [<sh> %q list]", args, script)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }

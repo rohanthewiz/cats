@@ -125,6 +125,23 @@ func ProcessExe(pid int) string {
 	return strings.TrimSuffix(exe, " (deleted)")
 }
 
+// ProcessArgs returns pid's argv, or nil when it cannot be read. It
+// complements ProcessExe for a job that is a script: the kernel runs a `#!`
+// file by exec'ing its interpreter with the script's path spliced in as an
+// argument, so the executable is /bin/sh (or python, …) and only argv says
+// which file it is running. /proc/<pid>/cmdline is NUL-separated with a
+// trailing NUL; a kernel thread (or a zombie) has an empty one, read as nil.
+func ProcessArgs(pid int) []string {
+	if pid <= 0 {
+		return nil
+	}
+	data, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/cmdline")
+	if err != nil || len(data) == 0 {
+		return nil
+	}
+	return strings.Split(strings.TrimSuffix(string(data), "\x00"), "\x00")
+}
+
 // procPgrp reads the process group from /proc/<pid>/stat (field 5, after comm).
 func procPgrp(pid int) int {
 	data, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/stat")

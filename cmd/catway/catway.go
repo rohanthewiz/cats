@@ -158,13 +158,16 @@ type paneRuntime struct {
 	job     bool
 	execCmd bool
 	// jobExe is the executable pane_job last named for the foreground job
-	// ("" with no job, or from a daemon that predates the field). handPlugin
-	// and handPluginType are the installed plugin that executable lives in,
+	// ("" with no job, or from a daemon that predates the field), and jobArgv
+	// the head of its argv, which names the script when the executable is an
+	// interpreter. handPlugin and handPluginType are the installed plugin that
+	// job is running (by the executable's location, or the script's),
 	// if any — a plugin typed at a prompt rather than launched, which has no
 	// recorded PluginID (handplugin.go). Runtime-only: they describe the job
 	// running now and are re-learned from the daemon's replay after a
 	// catway restart.
 	jobExe         string
+	jobArgv        []string
 	handPlugin     string
 	handPluginType string
 }

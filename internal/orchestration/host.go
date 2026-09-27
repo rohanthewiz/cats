@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -139,10 +140,12 @@ type pane struct {
 	// Foreground-job state, as last reported via pane_job (detectPump writes,
 	// resync reads). hasJob is set once a job has ever been reported, so a
 	// pane that has only ever sat at its prompt replays nothing. lastJobExe is
-	// the job leader's executable ("" whenever lastJob is false).
-	lastJob    bool
-	lastJobExe string
-	hasJob     bool
+	// the job leader's executable and lastJobArgv the head of its argv (both
+	// empty whenever lastJob is false).
+	lastJob     bool
+	lastJobExe  string
+	lastJobArgv []string
+	hasJob      bool
 	// Branch state, written by the branch pump and read by resync. branchCwd is
 	// the directory lastBranch was resolved for, which is what separates "we
 	// already answered this" from "the pane moved" — the throttle only applies
@@ -268,18 +271,31 @@ func (p *pane) setAgentMeta(agent, state string, visBlocker, visWorking bool) {
 // announced: the first emission is the first job, and going back to none
 // after that IS news (the build finished), so it is emitted too.
 //
-// The executable is part of the state: a job whose leader was first read
-// mid-fork (still the shell's own image) and then again after its exec is a
-// change worth reporting even though busy never moved.
-func (p *pane) setJobMeta(busy bool, exe string) (changed bool) {
+// The executable and argv are part of the state: a job whose leader was first
+// read mid-fork (still the shell's own image) and then again after its exec is
+// a change worth reporting even though busy never moved. argv is compared as
+// the head pane_job carries (callers trim it with jobArgvHead), so a change
+// past that head is not news to anyone.
+func (p *pane) setJobMeta(busy bool, exe string, argv []string) (changed bool) {
 	p.metaMu.Lock()
 	defer p.metaMu.Unlock()
-	if busy == p.lastJob && exe == p.lastJobExe {
+	if busy == p.lastJob && exe == p.lastJobExe && slices.Equal(argv, p.lastJobArgv) {
 		return false
 	}
-	p.lastJob, p.lastJobExe = busy, exe
+	p.lastJob, p.lastJobExe, p.lastJobArgv = busy, exe, argv
 	p.hasJob = true
 	return true
+}
+
+// jobArgvHead trims a job leader's argv to the head pane_job carries
+// (JobArgvMax entries). Copied rather than resliced so the pane's retained
+// state does not pin the full argv's backing array — a glob-expanded command
+// line can hold thousands of entries. nil stays nil (unreadable argv).
+func jobArgvHead(argv []string) []string {
+	if len(argv) == 0 {
+		return nil
+	}
+	return slices.Clone(argv[:min(len(argv), JobArgvMax)])
 }
 
 // setAgentSessionMeta records the last-emitted agent session for resync and
@@ -996,7 +1012,7 @@ func (h *Host) resyncPane(p *pane) {
 	vb, vw, hasAgent := p.lastVisBlocker, p.lastVisWorking, p.hasAgent
 	branch, hasBranch := p.lastBranch, p.hasBranch
 	sessAgent, sessID, hasSession := p.lastSessionAgent, p.lastSessionID, p.hasSession
-	job, jobExe, hasJob := p.lastJob, p.lastJobExe, p.hasJob
+	job, jobExe, jobArgv, hasJob := p.lastJob, p.lastJobExe, p.lastJobArgv, p.hasJob
 	p.metaMu.Unlock()
 	if cwd != "" {
 		h.emit(NewPaneCwd(p.id, cwd))
@@ -1024,7 +1040,7 @@ func (h *Host) resyncPane(p *pane) {
 	// deciding what is idle must not be left with the answer from before it
 	// reconnected.
 	if hasJob {
-		h.emit(NewPaneJob(p.id, job, jobExe))
+		h.emit(NewPaneJob(p.id, job, jobExe, jobArgv))
 	}
 }
 
@@ -1261,9 +1277,11 @@ func (h *Host) detectPump(p *pane) {
 	var acquisitionStartedAt time.Time
 	var hasAcquisition bool
 	// jobExe is the foreground job leader's executable as of the last process
-	// probe ("" with no job). Kept across ticks for the same reason agentPids
-	// is: the probe that reads it is throttled.
+	// probe ("" with no job), and jobArgv the head of its argv, read on the
+	// same probe. Kept across ticks for the same reason agentPids is: the
+	// probe that reads them is throttled.
 	var jobExe string
+	var jobArgv []string
 
 	for {
 		sleep := detectInterval
@@ -1314,9 +1332,9 @@ func (h *Host) detectPump(p *pane) {
 		// running, and "not busy" must not sit behind a probe that may be
 		// seconds away.
 		if !jobRunning {
-			jobExe = ""
-			if p.setJobMeta(false, "") {
-				h.emit(NewPaneJob(p.id, false, ""))
+			jobExe, jobArgv = "", nil
+			if p.setJobMeta(false, "", nil) {
+				h.emit(NewPaneJob(p.id, false, "", nil))
 			}
 		}
 
@@ -1365,16 +1383,20 @@ func (h *Host) detectPump(p *pane) {
 			// repetition is what corrects a read that landed between the
 			// shell's fork and the child's exec — the leader briefly still
 			// runs the shell's image — without a dedicated retry.
+			//
+			// argv rides along for a job that is a script (the exe is then
+			// its interpreter); the same mid-fork correction applies to it.
 			if jobRunning {
 				jobExe = detect.ProcessExe(foregroundPgid)
+				jobArgv = jobArgvHead(detect.ProcessArgs(foregroundPgid))
 			}
 		}
 		// A running job is reported after the probe, so the first report of
 		// a new job already names its program when the probe could read it.
 		// A job whose group changed ran the probe this tick (group changes
 		// always do), so jobExe is never a previous job's.
-		if jobRunning && p.setJobMeta(true, jobExe) {
-			h.emit(NewPaneJob(p.id, true, jobExe))
+		if jobRunning && p.setJobMeta(true, jobExe, jobArgv) {
+			h.emit(NewPaneJob(p.id, true, jobExe, jobArgv))
 		}
 
 		agent := presence.currentAgent()

@@ -823,15 +823,40 @@ type PaneAgentSession struct {
 // plugin dirs. The daemon only reports the path; which plugins exist is the
 // orchestrator's knowledge. omitempty, so a no-job report is byte-identical
 // to the old shape and an orchestrator that predates the field ignores it.
+//
+// Argv is the head of the same leader's argument vector (at most
+// JobArgvMax entries), for the job Exe alone cannot name: a `#!` script. The
+// kernel runs one by exec'ing its interpreter with the script's path spliced
+// in after it —
+//
+//	typed:   cats-notes list
+//	exe:     /bin/sh
+//	argv:    [/bin/sh /Users/x/.cats/bin/cats-notes list]
+//
+// — so the script is found in argv, and the orchestrator matches it there when
+// Exe is nobody's plugin. Only the head is sent: the script sits at argv[1] or
+// argv[2] (after a shebang's one optional argument), and a job's full argv
+// can run to megabytes (a glob-expanded `grep`) that would ride every job
+// start for nothing. omitempty, for the same compatibility as Exe.
 type PaneJob struct {
 	Type   MessageType `json:"type"`
 	PaneID uint32      `json:"pane_id"`
 	Busy   bool        `json:"busy"`
 	Exe    string      `json:"exe,omitempty"`
+	Argv   []string    `json:"argv,omitempty"`
 }
 
-func NewPaneJob(id uint32, busy bool, exe string) PaneJob {
-	return PaneJob{Type: MsgPaneJob, PaneID: id, Busy: busy, Exe: exe}
+// JobArgvMax bounds PaneJob.Argv: interpreter, one shebang argument, the
+// script, and one spare for an `env -S` split that adds a flag.
+const JobArgvMax = 4
+
+// NewPaneJob builds a pane_job report, trimming argv to JobArgvMax so every
+// emitter sends the same bounded shape.
+func NewPaneJob(id uint32, busy bool, exe string, argv []string) PaneJob {
+	if len(argv) > JobArgvMax {
+		argv = argv[:JobArgvMax]
+	}
+	return PaneJob{Type: MsgPaneJob, PaneID: id, Busy: busy, Exe: exe, Argv: argv}
 }
 
 func NewPaneAgentSession(id uint32, agent, sessionID string) PaneAgentSession {

@@ -4,6 +4,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -426,5 +427,139 @@ func TestAgentsRollupListsHandStartedPlugins(t *testing.T) {
 	}
 	if rt.handPlugin != "" {
 		t.Fatalf("a stale lookup revived the match: %q", rt.handPlugin)
+	}
+}
+
+// writeScriptPlugin installs a plugin whose declared bin entry is a `#!` script
+// with the given first line, and returns the script's path under the plugin
+// dir.
+func writeScriptPlugin(t *testing.T, root, id, typ, shebang string) string {
+	t.Helper()
+	dir := filepath.Join(root, id)
+	if err := os.MkdirAll(filepath.Join(dir, "bin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifest := "id = \"" + id + "\"\nversion = \"1.0\"\ntype = \"" + typ + "\"\nbin = [\"./bin/" + filepath.Base(id) + "\"]\n"
+	if err := os.WriteFile(filepath.Join(dir, plugin.ManifestName), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	script := filepath.Join(dir, "bin", filepath.Base(id))
+	if err := os.WriteFile(script, []byte(shebang+"\necho hi\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return script
+}
+
+// A script plugin's job runs its interpreter, so it is recognised by the
+// script argv names instead: through the bin-farm link, relative to the
+// shell's cwd, or after an env shebang's flags. Only a declared bin entry
+// counts, and only when argv[0] is the interpreter its `#!` line names — an
+// editor or pager holding the same file is reading it, not running it.
+func TestPluginForScriptMatchesARunningBinEntry(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "plugins")
+	t.Setenv(plugin.DirEnvVar, root)
+	notes := writeScriptPlugin(t, root, "acme.notes", "notes_mgr", "#!/bin/sh")
+	py := writeScriptPlugin(t, root, "acme.pytool", "py_mgr", "#!/usr/bin/env -S python3 -u")
+	other := filepath.Join(filepath.Dir(notes), "helper.sh")
+	if err := os.WriteFile(other, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// What the shell exec's for a typed name: the bin farm's link.
+	farm := filepath.Join(t.TempDir(), "bin")
+	if err := os.MkdirAll(farm, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(farm, "notes")
+	if err := os.Symlink(notes, link); err != nil {
+		t.Fatal(err)
+	}
+
+	installed, err := plugin.List()
+	if err != nil || len(installed) != 2 {
+		t.Fatalf("plugin.List: %v %+v", err, installed)
+	}
+	pluginDir := filepath.Dir(filepath.Dir(notes))
+	cases := []struct {
+		name string
+		argv []string
+		cwd  string
+		id   string
+	}{
+		{"typed via the bin farm", []string{"/bin/sh", link, "list"}, "", "acme.notes"},
+		{"relative to the shell's cwd", []string{"sh", "./bin/acme.notes"}, pluginDir, "acme.notes"},
+		{"shebang argument first", []string{"/bin/sh", "-e", notes}, "", "acme.notes"},
+		{"env -S split", []string{"python3", "-u", py}, "", "acme.pytool"},
+		{"read by an editor", []string{"vim", notes}, "", ""},
+		{"wrong interpreter", []string{"python3", notes}, "", ""},
+		{"not a bin entry", []string{"/bin/sh", other}, "", ""},
+		{"relative with no cwd", []string{"sh", "./bin/acme.notes"}, "", ""},
+		{"no script", []string{"/bin/sh"}, "", ""},
+		{"nothing", nil, "", ""},
+	}
+	for _, c := range cases {
+		if id, _ := pluginForScript(installed, c.argv, c.cwd); id != c.id {
+			t.Errorf("%s: pluginForScript(%q) = %q, want %q", c.name, c.argv, id, c.id)
+		}
+	}
+}
+
+// The interpreter a `#!` line names, looking through env to the program it
+// exec's; "" for anything that is not a shebang script.
+func TestShebangInterpreter(t *testing.T) {
+	dir := t.TempDir()
+	cases := map[string]string{
+		"#!/bin/sh\n":                         "/bin/sh",
+		"#! /bin/bash -e\n":                   "/bin/bash",
+		"#!/usr/bin/env python3\n":            "python3",
+		"#!/usr/bin/env -S deno run -A\n":     "deno",
+		"#!/usr/bin/env -u HOME FOO=1 node\n": "node",
+		"#!/usr/bin/env\n":                    "",
+		"package main\n":                      "",
+		"":                                    "",
+		"#!/bin/sh":                           "/bin/sh", // no trailing newline
+	}
+	i := 0
+	for body, want := range cases {
+		i++
+		p := filepath.Join(dir, fmt.Sprintf("s%d", i))
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if got := shebangInterpreter(p); got != want {
+			t.Errorf("shebangInterpreter(%q) = %q, want %q", body, got, want)
+		}
+	}
+	if got := shebangInterpreter(filepath.Join(dir, "missing")); got != "" {
+		t.Errorf("missing file: %q", got)
+	}
+}
+
+// End to end through applyPaneJob: a script plugin typed at a prompt reports
+// its interpreter as the exe, and the row comes from argv. A later report for
+// the same exe with different argv (the next `sh` job) re-resolves rather
+// than keeping the old answer.
+func TestAgentsRollupListsHandStartedScriptPlugins(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "plugins")
+	t.Setenv(plugin.DirEnvVar, root)
+	notes := writeScriptPlugin(t, root, "acme.notes", "notes_mgr", "#!/bin/sh")
+
+	o, err := newOrch(filepath.Join(t.TempDir(), "s.sock"), t.TempDir())
+	if err != nil {
+		t.Fatalf("newOrch: %v", err)
+	}
+	pid := layout.PaneID(o.session.AllPaneIDs()[0])
+	o.syncDaemon()
+	rt := o.panes[uint32(pid)]
+
+	o.applyPaneJob(orchestration.PaneJob{PaneID: uint32(pid), Busy: true, Exe: "/bin/sh", Argv: []string{"/bin/sh", notes, "list"}})
+	waitFor(t, o, func() bool { return rt.handPlugin != "" })
+	if rows := o.agentsMsg().Plugins; len(rows) != 1 || rows[0].Plugin != "acme.notes" || rows[0].Type != "notes_mgr" {
+		t.Fatalf("hand-started script plugin rows: %+v", rows)
+	}
+
+	// Same interpreter, another script: the match must go, synchronously.
+	o.applyPaneJob(orchestration.PaneJob{PaneID: uint32(pid), Busy: true, Exe: "/bin/sh", Argv: []string{"/bin/sh", "/tmp/elsewhere.sh"}})
+	if rows := o.agentsMsg().Plugins; len(rows) != 0 {
+		t.Fatalf("a different sh job kept the plugin row: %+v", rows)
 	}
 }

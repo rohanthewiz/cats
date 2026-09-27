@@ -3,6 +3,7 @@ package orchestration
 import (
 	"bytes"
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 
@@ -160,7 +161,7 @@ func TestCodecRoundTrip(t *testing.T) {
 		NewPaneSelection(42, "hello world"),
 		NewPaneText(42, "scrollback"),
 		NewPaneBranch(42, "feature/remote"),
-		NewPaneJob(42, true, "/usr/bin/make"),
+		NewPaneJob(42, true, "/usr/bin/make", []string{"make", "-j8", "all", "test", "install"}),
 		NewPaneModes(42, terminal.InputModes{
 			BracketedPaste: true, MouseMode: terminal.MouseAnyMotion,
 			MouseEncoding: terminal.MouseEncodingSGR, KittyKeyboardFlags: 5,
@@ -235,6 +236,17 @@ func TestCodecRoundTrip(t *testing.T) {
 			}
 			if pt.PaneID != 42 || pt.Text != "scrollback" {
 				t.Errorf("pane_text round-trip wrong: %+v", pt)
+			}
+		case MsgPaneJob:
+			// argv arrives trimmed to its head: the constructor bounds it, so
+			// no emitter can ship a glob-expanded command line.
+			var pj PaneJob
+			if err := json.Unmarshal(payload, &pj); err != nil {
+				t.Fatalf("decode pane_job: %v", err)
+			}
+			if pj.PaneID != 42 || !pj.Busy || pj.Exe != "/usr/bin/make" ||
+				!slices.Equal(pj.Argv, []string{"make", "-j8", "all", "test"}) {
+				t.Errorf("pane_job round-trip wrong: %+v", pj)
 			}
 		case MsgPaneModes:
 			var pm PaneModes
