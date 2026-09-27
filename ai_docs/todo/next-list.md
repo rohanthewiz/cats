@@ -95,11 +95,6 @@ window were dated by grepping every session doc.
   exception since `2026-0922-1713`: `editor.agents` types them `editor` however
   they were started.
 
-- **N-005** · raised `2026-0913-2313-catway-cathost-write-deadlock` · value low
-  Confirm the freeze trigger with logs. The autoclose reflow after a clean
-  agent exit is still only inferred from timestamps. It needs a recurrence;
-  stalls, drops, unexpected exits and restarts now land in `daemons.log`.
-
 - **N-007** · raised `2026-0914-0158-catway-restart-cats-todo-release` · value low
   A window opened or reloaded while catway is down stays blank after
   recovery. `catwayBack` only evaluates JS in existing pages
@@ -237,6 +232,16 @@ unchanged.
 Closures before this file existed live in the session docs' own write-ups.
 Newest first. The unnumbered entries at the end were found done while seeding,
 so they are not carried.
+
+- **N-005** · raised `2026-0913-2313-catway-cathost-write-deadlock` ·
+  closed 2026-09-26 as moot, with no recurrence. `daemons.log` (kept since
+  2026-09-14) has no stall, ping-timeout, drop, unexpected-exit or restart
+  line; every daemon pid change follows a normal launch. Confirming the
+  trigger would change nothing: bounded β writes (`0236300`) turn a
+  recurrence into a stall warning and a reconnect instead of a freeze. The
+  confirmation would not have been conclusive anyway. A successful auto-close
+  is a routine `log.Printf` (`cmd/catway/reap.go`) that the launcher drops, so
+  a stall line would still have to be matched to the agent exit by timestamp.
 
 - **N-004** · raised `2026-0910-1855-startup-window-boot-log` ·
   closed 2026-09-26, `2026-0926-2136-n004-boot-log-rotation` (cats `05f21d7`).
