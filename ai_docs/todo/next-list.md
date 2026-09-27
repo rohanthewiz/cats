@@ -234,14 +234,15 @@ Newest first. The unnumbered entries at the end were found done while seeding,
 so they are not carried.
 
 - **N-005** · raised `2026-0913-2313-catway-cathost-write-deadlock` ·
-  closed 2026-09-26 as moot, with no recurrence. `daemons.log` (kept since
+  closed 2026-09-26, `2026-0926-2143-n005-close-freeze-trigger-moot`, as
+  moot, with no recurrence. `daemons.log` (kept since
   2026-09-14) has no stall, ping-timeout, drop, unexpected-exit or restart
   line; every daemon pid change follows a normal launch. Confirming the
   trigger would change nothing: bounded β writes (`0236300`) turn a
   recurrence into a stall warning and a reconnect instead of a freeze. The
   confirmation would not have been conclusive anyway. A successful auto-close
-  is a routine `log.Printf` (`cmd/catway/reap.go`) that the launcher drops, so
-  a stall line would still have to be matched to the agent exit by timestamp.
+  logs nothing (`fireAutoclose`, `cmd/catway/reap.go`), so a stall line would
+  still have to be matched to the agent exit by timestamp.
 
 - **N-004** · raised `2026-0910-1855-startup-window-boot-log` ·
   closed 2026-09-26, `2026-0926-2136-n004-boot-log-rotation` (cats `05f21d7`).
