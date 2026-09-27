@@ -209,14 +209,21 @@ window were dated by grepping every session doc.
   pass ends, with the page already open. That push at the end of the seed
   pass has only been exercised by unit tests.
 
-- **N-049** · raised `2026-0926-2351-n047-n048-script-plugins-and-failed-default-mark` · value low
-  The plugins dialog's failed-default row is probably hard to see on light
-  themes; it has not been looked at on one. It draws its avatar and edge as
-  `--warn` on a `--warn` tint (`.row.plg.dflt` in `css/21-plugins.css`).
-  Every built-in theme's `--warn` is a light-to-mid amber, and the toolbar
-  chip drawn the same way nearly vanished on a pale toolbar in the N-048 live
-  check. The chip moved to a solid `--warn` fill with fixed near-black ink. The row could use the same
-  treatment, or a dedicated `--warn-fg` theme token could be added.
+- **N-050** · raised 2026-09-26, the `N-049` commit (no session doc) · value low
+  Amber *text* in the plugins dialog is faint on the light themes and on
+  solarized-dark, which shares solarized-light's #b58900. The failed-default
+  row's error line (`.l2.warn`, 11px) measures 2.2:1 on solarized-light,
+  2.9:1 on corporate and 3.1:1 on solarized-dark. Its "not installed" pill
+  (`.pill.st.missing`, 10px, --warn on a 12% tint) measures 2.0, 2.5 and
+  2.7:1. The same two classes also draw a missing plugin's pill and the
+  "couldn't check for updates" line on installed rows, and
+  `.plg-head .chk.warn` draws the header's "update check failed". The other
+  dark themes are 4.3:1 or better. N-049 fixed only the "!" tile, which could
+  take a solid fill; text cannot. Mixing --warn toward --fg-strong in CSS
+  reaches about 4.5:1 at 50%, but turns solarized-light's amber an olive
+  (#5e6021) and the dark themes' a beige. A `--warn-fg` theme key is the
+  likely fix: derived from --warn so the other themes and sparse user themes
+  are unchanged, and authored by those three built-ins.
 
 ## Roadmap
 
@@ -252,6 +259,21 @@ unchanged.
 Closures before this file existed live in the session docs' own write-ups.
 Newest first. The unnumbered entries at the end were found done while seeding,
 so they are not carried.
+
+- **N-049** · raised `2026-0926-2351-n047-n048-script-plugins-and-failed-default-mark` ·
+  closed 2026-09-26, the `N-049` commit (no session doc). The failed-default
+  row's "!" tile now uses the toolbar mark's treatment: solid --warn with the
+  fixed near-black ink `#1b1606` (`.row.plg.dflt .av` in `css/21-plugins.css`).
+  The old tile was --warn on an 18% tint, which measured 2.2:1 on
+  solarized-light, 2.7:1 on corporate and 3.3:1 on solarized-dark. The solid
+  tile is 4.8:1 or better on every built-in. The tint ring was dropped, since
+  it matched the fill. The row's --warn edge and tint are unchanged: they
+  frame the row, and the tile is what the eye lands on. Checked in a headless-Chrome render of the real
+  stylesheets under corporate, solarized-light and cats-green, before and
+  after. The claude-in-chrome screenshots could not be used: that browser
+  force-darkens pages, so light themes came out inverted. The row's amber
+  text is still faint on the light themes and solarized-dark, raised as
+  N-050.
 
 - **N-048** · raised `2026-0926-2329-n046-failed-default-plugin-notice` ·
   closed 2026-09-26, `2026-0926-2351-n047-n048-script-plugins-and-failed-default-mark`. The toolbar's plugins button now carries a "!" mark

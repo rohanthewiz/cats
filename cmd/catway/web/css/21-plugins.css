@@ -54,8 +54,17 @@
     background:color-mix(in srgb, var(--warn) 7%, transparent);
     box-shadow:inset 3px 0 0 var(--warn); }
   .modal.plugins .row.plg.dflt:hover { background:color-mix(in srgb, var(--warn) 13%, var(--panel2)); }
-  .row.plg.dflt .av { background:color-mix(in srgb, var(--warn) 18%, var(--panel)); color:var(--warn);
-    box-shadow:inset 0 0 0 1px var(--warn); }
+  /* The "!" tile is the toolbar mark's treatment (#pluginsbtn .w in
+     24-toolbar.css): solid --warn with the same fixed near-black ink. It was
+     --warn on an 18% --warn tint with a --warn ring. That holds 5:1 or better
+     on most dark themes, but falls to 3.3:1 on solarized-dark and to 2.7:1 and
+     2.2:1 on corporate and solarized-light, whose ambers are the darkest.
+     Solid fill is 4.8:1 (corporate's #b07800) or better on every built-in,
+     and no token could serve as the ink (see the toolbar rule). The ring is
+     dropped: on a solid tile it would be the same colour as the fill, so the
+     base tile's bottom shade is kept instead. The row's edge and tint stay
+     --warn; they are the frame, and the tile is what the eye lands on. */
+  .row.plg.dflt .av { background:var(--warn); color:#1b1606; }
 
   /* Monogram tile on the plugin's hash hue (--av, set inline). The glyph is
      drawn in the page background colour, which contrasts with every agent hue
