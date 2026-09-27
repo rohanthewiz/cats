@@ -32,7 +32,7 @@ window were dated by grepping every session doc.
 - Open and Roadmap stay in ID order. New items append to the end of Open (or
   Roadmap, for future work) with the next ID.
 
-**Next ID:** N-042
+**Next ID:** N-044
 
 ## Open
 
@@ -197,6 +197,22 @@ window were dated by grepping every session doc.
   the other catway, which stays live until someone runs `revoke-peer-grant`
   there (catway logs a reminder). A self-revoke route (`POST /peer/v1/unpair`,
   authenticated by the grant itself) would make detach clean up both ends.
+
+- **N-042** · raised `2026-0926-2211-plugin-update-checks` · value medium
+  Plugin update checks: drive the parts that were only reasoned about. The
+  badge, dialog rows and ↻ were checked in a browser on a dev catway (light
+  theme). Not run: a real **update** from the dialog, and whether the badge
+  then clears by itself via the +30s/+90s/+4m rechecks (skipped so the
+  installed cats-todo wasn't changed mid-session); **update all** with two or
+  more pending; the dark theme; and the reinstalled Cats.app. cats-todo is
+  behind upstream right now (78c85ac → 9bfe73e), so updating it is the natural
+  test.
+
+- **N-043** · raised `2026-0926-2211-plugin-update-checks` · value low
+  Linked plugins are skipped by the update check, because `plugin update`
+  refuses them. A linked checkout that is behind its own upstream (ced, when
+  its origin has moved on) could still get a quiet "behind origin" hint. That
+  needs a fetch in the developer's own repo, which is why it was left out.
 
 ## Roadmap
 
