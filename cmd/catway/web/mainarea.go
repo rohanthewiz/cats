@@ -59,7 +59,16 @@ func (StatusBar) Render(b *element.Builder) (x any) {
 		nl(b, 4),
 		tbtn(b, "palhint", "command palette (⌘K / Ctrl+Alt+K)", "⌘K", "palette"),
 		nl(b, 4),
-		tbtn(b, "pluginsbtn", "plugins — install, run, update", "⧉", "plugins"),
+		// Plugins carries an update count the way rec carries its step count:
+		// a server-rendered .n span, empty (and hidden by :empty) until
+		// js/30-plugins.js learns that upstream has something newer. Rendered
+		// here rather than created client-side so the idle and badged button
+		// are the same DOM shape.
+		b.SpanClass("tbtn", "id", "pluginsbtn", "title", "plugins — install, run, update").R(
+			b.SpanClass("tmk").T("⧉"),
+			b.T("plugins"),
+			b.SpanClass("n").R(),
+		),
 		nl(b, 4),
 		tbtn(b, "chatbtn", "chat — AI agent side panel", "✦", "chat"),
 		nl(b, 4),

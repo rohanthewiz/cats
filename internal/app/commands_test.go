@@ -66,6 +66,8 @@ type fakeBackend struct {
 	lastPeerSync   Responder
 	lastPeerSyncP  PeerSyncParams
 	lastPlgUninP   PluginUninstallParams
+	lastPlgCheck   Responder
+	lastPlgCheckP  PluginCheckUpdatesParams
 	lastPathList   Responder
 	lastPathP      PathListParams
 	lastFileStatP  FileStatParams
@@ -304,6 +306,11 @@ func (b *fakeBackend) StartPluginUninstall(r Responder, p PluginUninstallParams)
 	b.rec("plgUninstall")
 	b.lastPlgUnins = r
 	b.lastPlgUninP = p
+}
+func (b *fakeBackend) StartPluginCheckUpdates(r Responder, p PluginCheckUpdatesParams) {
+	b.rec("plgCheck")
+	b.lastPlgCheck = r
+	b.lastPlgCheckP = p
 }
 func (b *fakeBackend) PeerList(r Responder) {
 	b.rec("peerList")
@@ -1053,6 +1060,31 @@ func TestDispatchPluginUninstall(t *testing.T) {
 	}
 	if h.b.lastPlgUnins != Responder(r) || h.b.lastPlgUninP.ID != "acme.todo" {
 		t.Fatalf("plugin.uninstall not forwarded: %+v", h.b.lastPlgUninP)
+	}
+}
+
+// plugin.check_updates is result-only (no reply channel → no network traffic),
+// takes optional params, and forwards them verbatim to resolve asynchronously.
+func TestDispatchPluginCheckUpdates(t *testing.T) {
+	silent := newCmdHarness(t)
+	r := &fakeResponder{log: silent.log, wants: false}
+	silent.d.Dispatch(CmdPluginCheckUpdates, noParams(), r)
+	if len(*silent.log) != 0 || silent.b.lastPlgCheck != nil {
+		t.Fatalf("reply-less plugin.check_updates should do nothing, log=%v", *silent.log)
+	}
+
+	h := newCmdHarness(t)
+	rr := h.resp()
+	h.d.Dispatch(CmdPluginCheckUpdates, noParams(), rr)
+	if rr.okCall || rr.failCall || h.b.lastPlgCheck != Responder(rr) {
+		t.Fatalf("bare plugin.check_updates must forward and not resolve synchronously")
+	}
+
+	h = newCmdHarness(t)
+	rr = h.resp()
+	h.d.Dispatch(CmdPluginCheckUpdates, params(t, PluginCheckUpdatesParams{IDs: []string{"a"}, Force: true}), rr)
+	if p := h.b.lastPlgCheckP; !p.Force || len(p.IDs) != 1 || p.IDs[0] != "a" {
+		t.Fatalf("plugin.check_updates params not forwarded: %+v", p)
 	}
 }
 

@@ -181,100 +181,393 @@
       onConfirm: () => sendCmdAwait("plugin.uninstall", { id: p.id }, (res) => {
         if (!res.ok) { toast("uninstall failed: " + (res.error || "unknown")); return; }
         toast((res.data && res.data.message) || (p.id + " uninstalled"));
+        // A removed plugin has no update to offer; drop it from the badge now
+        // rather than at the next background check.
+        pluginUpdates.delete(p.id);
+        paintPluginBadge();
         openPluginsDialog(); // refresh the list in place
       }),
     });
   }
 
+  // ---- Plugin update checks ----
+  //
+  // plugin.check_updates asks each installed plugin's git remote whether
+  // `plugin update` would change anything (internal/plugin/check.go). The page
+  // keeps the last answer here so two surfaces can read it: the toolbar's
+  // plugins button (a count badge — the "let me know" part, visible without
+  // opening anything) and the dialog's rows (which update, to what).
+  //
+  // When it asks:
+  //
+  //   connect ──8s──▶ check ──1h──▶ check ──1h──▶ …   (background, cached)
+  //   dialog opens ─▶ check                           (cached)
+  //   ↻ in dialog ──▶ check {force}                   (bypasses the cache)
+  //   update tab ───▶ check at +30s, +90s, +4m        (badge clears on its own)
+  //
+  // Every ask but ↻ is answered from the server's cache while it is fresh
+  // (cmd/catway/plugins.go), so the polling is nearly free and several windows
+  // share one round of network traffic. The cache is keyed by the installed
+  // commit, which is what lets the post-update rechecks work without any
+  // invalidation: the update moves HEAD, the next ask misses and re-checks.
+  let pluginUpdates = new Map(); // id → PluginUpdateInfo from the last answer
+  let pluginUpdatesAt = 0;       // when that answer arrived (ms), 0 = never
+  let pluginCheckBusy = false;
+  let pluginCheckWaiters = [];   // callbacks of asks that joined an in-flight check
+  let pluginCheckTimer = null;
+  const PLUGIN_CHECK_FIRST_MS = 8000;         // let the connect burst settle first
+  const PLUGIN_CHECK_EVERY_MS = 60 * 60 * 1000;
+  // A cmd_result callback dies with its socket, so a check sent just before a
+  // disconnect would never answer and busy would latch for the page's life.
+  // The guard releases it; it only has to exceed the server's worst case
+  // (a few 20s-timeout rounds across the worker pool).
+  const PLUGIN_CHECK_GUARD_MS = 90 * 1000;
+
+  // checkPluginUpdates runs (or joins) a check and calls done(res) with the
+  // cmd_result — or null when the guard fired. A second ask while one is in
+  // flight joins it rather than sending another, even a forced one: the reply
+  // already on its way is at most seconds old, which is all ↻ asks for.
+  function checkPluginUpdates(force, done) {
+    if (done) pluginCheckWaiters.push(done);
+    if (pluginCheckBusy) return;
+    pluginCheckBusy = true;
+    let settled = false;
+    const finish = (res) => {
+      if (settled) return; // the guard and a late reply can both arrive
+      settled = true;
+      clearTimeout(guard);
+      pluginCheckBusy = false;
+      if (res && res.ok) {
+        const d = res.data || {};
+        pluginUpdates = new Map((d.plugins || []).map((i) => [i.id, i]));
+        pluginUpdatesAt = Date.now();
+      }
+      paintPluginBadge();
+      const waiters = pluginCheckWaiters; pluginCheckWaiters = [];
+      for (const fn of waiters) fn(res);
+    };
+    const guard = setTimeout(() => finish(null), PLUGIN_CHECK_GUARD_MS);
+    sendCmdAwait("plugin.check_updates", force ? { force: true } : {}, finish);
+  }
+
+  // schedulePluginUpdateChecks (re)starts the background cadence; the session
+  // calls it on every socket open, so a reconnect restarts the clock instead of
+  // stacking a second timer chain on the first.
+  function schedulePluginUpdateChecks() {
+    clearTimeout(pluginCheckTimer);
+    const tick = (delay) => {
+      pluginCheckTimer = setTimeout(() => {
+        checkPluginUpdates(false);
+        tick(PLUGIN_CHECK_EVERY_MS);
+      }, delay);
+    };
+    tick(PLUGIN_CHECK_FIRST_MS);
+  }
+
+  // pluginRecheckSoon follows an update tab. There is no event for "the catctl
+  // tab finished", so a few spaced rechecks stand in for one: an update is
+  // usually seconds of git plus a build of up to a few minutes, and whichever
+  // recheck lands after HEAD moved clears the badge. The ones before it are
+  // cache hits and cost nothing.
+  function pluginRecheckSoon() {
+    for (const ms of [30e3, 90e3, 240e3]) setTimeout(() => checkPluginUpdates(false), ms);
+  }
+
+  function pluginUpdateInfo(id) { return pluginUpdates.get(id) || null; }
+  function pluginHasUpdate(id) {
+    const u = pluginUpdates.get(id);
+    return !!u && u.status === "available";
+  }
+  function pluginUpdateCount() {
+    let n = 0;
+    for (const u of pluginUpdates.values()) if (u.status === "available") n++;
+    return n;
+  }
+
+  // paintPluginBadge writes the count into the toolbar button's .n span (a
+  // server-rendered slot, hidden while empty) and says it in the tooltip too,
+  // since a bare number on a button is only obvious once you know what it counts.
+  function paintPluginBadge() {
+    const n = pluginUpdateCount();
+    const el = pluginsBtnEl.querySelector(".n");
+    if (el) el.textContent = n ? String(n) : "";
+    pluginsBtnEl.classList.toggle("has-updates", n > 0);
+    pluginsBtnEl.title = n
+      ? "plugins — " + n + (n === 1 ? " update" : " updates") + " available"
+      : "plugins — install, run, update";
+  }
+
+  // pluginUpdateTarget is how an available update names where it goes: the
+  // upstream version when the manifest was bumped, else the upstream commit —
+  // new commits under an unchanged version string are still an update, and
+  // repeating the same "v0.41.1" on both sides of the arrow would read as none.
+  function pluginUpdateTarget(u) {
+    if (u.latest_version && u.latest_version !== u.current_version) return "v" + u.latest_version;
+    return u.latest_commit || "new commits";
+  }
+
+  // pluginAvatarVar picks one of the six agent hues for a plugin's monogram,
+  // hashed from the id so a plugin keeps its colour across sessions and
+  // machines. The agent palette is reused rather than inventing six more
+  // colours: it is already tuned to sit on the panel background in every theme.
+  function pluginAvatarVar(id) {
+    let h = 0;
+    for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
+    return "var(--agent-" + (1 + (h % 6)) + ")";
+  }
+
+  // pluginDisplayName is the manifest name, falling back to the id's last
+  // dotted segment — "rohanthewiz.cats-todo" reads as "cats-todo". The full id
+  // is still on the row (small, muted) because it is what the CLI takes.
+  function pluginDisplayName(p) {
+    if (p.name) return p.name;
+    const dot = p.id.lastIndexOf(".");
+    return dot >= 0 ? p.id.slice(dot + 1) : p.id;
+  }
+
+  // ---- Plugins dialog ----
+  //
+  // Layout (one row per plugin; the dialog re-renders in place when a check
+  // lands, so opening it never waits on the network):
+  //
+  //   plugins  4                      1 update available · 2m ago   ↻
+  //   ┌──┐ cats-todo  v0.41.1  todos_mgr  ↑ 9bfe73e     rohanthewiz.cats-todo
+  //   │ C│ 78c85ac → 9bfe73e · fix(form): a click in the…   [run][update][…]
+  //   └──┘
+  //   ┌──┐ ced  v0.9.0  editor  linked
+  //   │ C│ /Users/ro/projs/go/ced                           [run][rebuild][…]
+  //   └──┘
+  //                                   [close] [update all (2)] [add…]
   function openPluginsDialog() {
     sendCmdAwait("plugin.list", {}, (res) => {
       if (!res.ok) { toast("plugins: " + (res.error || "unknown")); return; }
       const info = res.data || {};
       const plugins = info.plugins || [];
-      openOverlay((ov) => {
-        const m = document.createElement("div"); m.className = "modal pal plugins";
-        const h = document.createElement("header"); h.textContent = "plugins"; m.appendChild(h);
-        const listEl = document.createElement("div"); listEl.className = "list"; m.appendChild(listEl);
+      let checking = false;
+      let checkFailed = false;
+      let ov = null;
+      let listEl, statusEl, recheckBtn, btnsEl;
+
+      // paint redraws everything that depends on the update answer: the
+      // header's summary, every row, and the footer (update all appears and
+      // disappears with the count). Rows are rebuilt rather than patched — a
+      // plugin list is a handful of rows, and rebuilding keeps one code path.
+      const paint = () => {
+        if (!ov || modalEl !== ov) return; // the dialog closed while a check was out
+        paintStatus();
+        listEl.textContent = "";
         if (!plugins.length) {
           const e = document.createElement("div"); e.className = "empty";
-          e.textContent = "no plugins installed";
+          e.textContent = "no plugins installed — add… one from GitHub or a local checkout";
           listEl.appendChild(e);
         }
-        for (const p of plugins) {
-          const row = document.createElement("div"); row.className = "row";
-          row.title = [p.broken || p.description, p.dir].filter(Boolean).join("\n");
-          // The status tag exists only when there is a status: the default
-          // installed case appends nothing, so the label starts at the row's
-          // left edge instead of after an empty reserved column (see the
-          // .modal.plugins .kind rule).
-          const status = pluginStatus(p);
-          if (status) {
-            const kind = document.createElement("span"); kind.className = "kind";
-            kind.textContent = status;
-            row.appendChild(kind);
-          }
-          const lbl = document.createElement("span"); lbl.className = "lbl";
-          // The declared type sits in brackets after the version, as
-          // `catctl plugin list` prints it, and only when there is one.
-          lbl.textContent = p.broken ? p.id : p.id + " v" + (p.version || "?") +
-            (p.type ? " [" + p.type + "]" : "") +
-            (p.name && p.name !== p.id ? " — " + p.name : "");
-          row.appendChild(lbl);
-          // A linked row shows its checkout inline: for a local plugin *where*
-          // it lives is the identifying fact (which worktree am I linked to?),
-          // whereas an installed plugin's dir is always the plugins root and
-          // says nothing — that one stays in the tooltip.
-          if (p.linked && p.dir) {
-            const sub = document.createElement("span"); sub.className = "sub";
-            sub.textContent = p.dir;
-            row.appendChild(sub);
-          }
-          const acts = document.createElement("div"); acts.className = "acts";
-          const actBtn = (label, cls, fn, tip) => {
-            const b = document.createElement("button");
-            b.textContent = label; if (cls) b.className = cls;
-            if (tip) b.title = tip;
-            b.addEventListener("click", fn);
-            acts.appendChild(b);
-          };
-          if (!p.broken && (p.actions || []).length) {
-            actBtn("run", "", (e) => pluginPickAction(p, e, (a) => pluginRunAction(p, a)));
-            // The fan-out is its own button rather than a row in run's menu:
-            // launching here is by far the common case, and folding both targets
-            // into one menu would charge every multi-workspace session an extra
-            // click for it. It appears only when there is more than one
-            // workspace — with a single workspace it is the same launch under a
-            // longer name, and offering it would be inventing a decision.
-            if (((layoutMsg && layoutMsg.workspaces) || []).length > 1) {
-              actBtn("run all", "", (e) => pluginPickAction(p, e, (a) => pluginRunActionAll(p, a)),
-                "start in all workspaces (locked and sleeping ones are skipped)");
-            }
-          }
-          if (!p.broken && !p.linked) {
-            actBtn("update", "", () => pluginCatctlTab(info.catctl, "update " + p.id, ["update", p.id]));
-          }
-          if (!p.broken && p.linked && p.dir) {
-            // The linked analogue of update. `plugin link` on the same checkout
-            // is idempotent and re-runs the manifest's build steps, which is
-            // exactly how a developer picks up their edits — update refuses on
-            // linked plugins by design, there being no remote to pull from.
-            // p.dir is the resolved symlink target, so no cwd is needed.
-            actBtn("rebuild", "", () => pluginCatctlTab(info.catctl, "rebuild " + p.id, ["link", p.dir]));
-          }
-          actBtn(p.linked ? "unlink" : "uninstall", "danger", () => confirmUninstallPlugin(p));
-          row.appendChild(acts);
-          listEl.appendChild(row);
+        for (const p of plugins) listEl.appendChild(pluginRow(p));
+        paintButtons();
+      };
+
+      const paintStatus = () => {
+        statusEl.textContent = "";
+        statusEl.className = "chk";
+        const n = plugins.filter((p) => pluginHasUpdate(p.id)).length;
+        if (checking) {
+          const s = document.createElement("span"); s.className = "spin";
+          statusEl.appendChild(s);
+          statusEl.appendChild(document.createTextNode("checking for updates…"));
+        } else if (n) {
+          statusEl.classList.add("hot");
+          statusEl.textContent = "↑ " + n + (n === 1 ? " update" : " updates") + " available";
+        } else if (checkFailed) {
+          statusEl.classList.add("warn");
+          statusEl.textContent = "update check failed";
+        } else if (pluginUpdatesAt) {
+          statusEl.textContent = "all up to date · " + fmtAge(Date.now() - pluginUpdatesAt);
         }
-        const btns = document.createElement("div"); btns.className = "btns";
-        btns.appendChild(mkModalBtn("close", "", closeModal));
-        btns.appendChild(mkModalBtn("add…", "primary", () => pluginInstallDialog(info.catctl)));
-        m.appendChild(btns);
+        recheckBtn.disabled = checking;
+      };
+
+      const paintButtons = () => {
+        btnsEl.textContent = "";
+        btnsEl.appendChild(mkModalBtn("close", "", closeModal));
+        // update all only when it saves clicks: with one update pending, the
+        // row's own highlighted button is the same action in the same place.
+        const pending = plugins.filter((p) => !p.broken && !p.linked && pluginHasUpdate(p.id));
+        if (pending.length > 1) {
+          btnsEl.appendChild(mkModalBtn("update all (" + pending.length + ")", "", () => {
+            pluginCatctlTab(info.catctl, "update plugins", ["update"].concat(pending.map((p) => p.id)));
+            pluginRecheckSoon();
+          }));
+        }
+        btnsEl.appendChild(mkModalBtn("add…", "primary", () => pluginInstallDialog(info.catctl)));
+      };
+
+      // runCheck asks for a fresh answer and repaints when it lands. The first
+      // paint does not wait: rows render from the last known answer (the
+      // background check usually has one) and the spinner says a newer one is
+      // on its way.
+      const runCheck = (force) => {
+        if (!plugins.some((p) => !p.broken && !p.linked)) return; // nothing checkable
+        checking = true;
+        checkFailed = false;
+        paint();
+        checkPluginUpdates(force, (r) => {
+          checking = false;
+          checkFailed = !(r && r.ok);
+          paint();
+        });
+      };
+
+      const pluginRow = (p) => {
+        const u = pluginUpdateInfo(p.id);
+        const hasUpd = pluginHasUpdate(p.id);
+        const row = document.createElement("div");
+        row.className = "row plg" + (hasUpd ? " upd" : "") + (p.broken ? " broken" : "");
+
+        // The tooltip carries the long-form facts a row has no room for: the
+        // description in full, where it lives, and what the last check said.
+        const tip = [p.broken || p.description, p.id, p.dir];
+        if (p.source) tip.push("source: " + p.source + (p.ref ? " @ " + p.ref : ""));
+        if (u && u.status === "available") {
+          tip.push("update: " + (u.current_commit || "?") + " → " + (u.latest_commit || "?") +
+            (u.latest_subject ? " — " + u.latest_subject : ""));
+        } else if (u && u.status === "error") {
+          tip.push("update check failed: " + u.reason);
+        }
+        if (u && u.checked_at) tip.push("checked " + fmtAge(Date.now() - u.checked_at));
+        row.title = tip.filter(Boolean).join("\n");
+
+        // Monogram: first letter of the display name on the plugin's hash hue.
+        // A broken plugin gets a neutral "!" instead — its colour identity is
+        // less important than the fact that it cannot run.
+        const av = document.createElement("span"); av.className = "av";
+        av.textContent = p.broken ? "!" : (pluginDisplayName(p)[0] || "?").toUpperCase();
+        if (!p.broken) av.style.setProperty("--av", pluginAvatarVar(p.id));
+        row.appendChild(av);
+
+        const main = document.createElement("div"); main.className = "main";
+        const l1 = document.createElement("div"); l1.className = "l1";
+        const pill = (text, cls) => {
+          const s = document.createElement("span"); s.className = "pill " + cls;
+          s.textContent = text; l1.appendChild(s);
+        };
+        const nm = document.createElement("span"); nm.className = "nm";
+        nm.textContent = p.broken ? p.id : pluginDisplayName(p);
+        l1.appendChild(nm);
+        if (!p.broken) {
+          pill("v" + (p.version || "?"), "ver");
+          if (p.type) pill(p.type, "typ");
+        }
+        // Status pills, same rule as before: only when there is a status, so
+        // the plain installed case adds nothing.
+        const status = pluginStatus(p);
+        if (status) pill(status, "st " + status);
+        if (hasUpd) pill("↑ " + pluginUpdateTarget(u), "new");
+        else if (checking && !p.broken && !p.linked) {
+          const s = document.createElement("span"); s.className = "spin"; l1.appendChild(s);
+        }
+        // The full id trails the name as the part that gives way first (see
+        // .pid in 21-plugins.css): the name is what you scan for, the id is
+        // what you would type.
+        if (!p.broken && p.id !== nm.textContent) {
+          const pid = document.createElement("span"); pid.className = "pid";
+          pid.textContent = p.id;
+          l1.appendChild(pid);
+        }
+        main.appendChild(l1);
+
+        // Second line: the one fact most worth reading for this row's state.
+        // An update outranks the description (it is news; the description is
+        // not), a linked plugin's checkout path outranks it too (which
+        // worktree am I linked to? — the identifying fact for a dev link), and
+        // a broken one shows its error.
+        const l2 = document.createElement("div"); l2.className = "l2";
+        if (p.broken) {
+          l2.classList.add("err"); l2.textContent = p.broken;
+        } else if (hasUpd) {
+          l2.classList.add("new");
+          const from = u.current_commit || "", to = u.latest_commit || "";
+          l2.textContent = (from && to ? from + " → " + to : "update available") +
+            (u.latest_subject ? " · " + u.latest_subject : "");
+        } else if (p.linked && p.dir) {
+          l2.classList.add("path"); l2.textContent = p.dir;
+        } else if (u && u.status === "error") {
+          l2.classList.add("warn"); l2.textContent = "couldn't check for updates: " + u.reason;
+        } else {
+          l2.textContent = p.description || "";
+        }
+        if (l2.textContent) main.appendChild(l2);
+        row.appendChild(main);
+
+        const acts = document.createElement("div"); acts.className = "acts";
+        const actBtn = (label, cls, fn, tip) => {
+          const b = document.createElement("button");
+          b.textContent = label; if (cls) b.className = cls;
+          if (tip) b.title = tip;
+          b.addEventListener("click", fn);
+          acts.appendChild(b);
+        };
+        if (!p.broken && (p.actions || []).length) {
+          actBtn("run", "", (e) => pluginPickAction(p, e, (a) => pluginRunAction(p, a)));
+          // The fan-out is its own button rather than a row in run's menu:
+          // launching here is by far the common case, and folding both targets
+          // into one menu would charge every multi-workspace session an extra
+          // click for it. It appears only when there is more than one
+          // workspace — with a single workspace it is the same launch under a
+          // longer name, and offering it would be inventing a decision.
+          if (((layoutMsg && layoutMsg.workspaces) || []).length > 1) {
+            actBtn("run all", "", (e) => pluginPickAction(p, e, (a) => pluginRunActionAll(p, a)),
+              "start in all workspaces (locked and sleeping ones are skipped)");
+          }
+        }
+        if (!p.broken && !p.linked) {
+          // Highlighted when upstream has something: the row's call to action
+          // should be the button that acts on the news it is showing.
+          const updTip = hasUpd ? "update to " + pluginUpdateTarget(u)
+            : (u && u.status === "current") ? "already up to date — re-checks upstream and re-syncs bin links" : "";
+          actBtn("update", hasUpd ? "hot" : "", () => {
+            pluginCatctlTab(info.catctl, "update " + p.id, ["update", p.id]);
+            pluginRecheckSoon();
+          }, updTip);
+        }
+        if (!p.broken && p.linked && p.dir) {
+          // The linked analogue of update. `plugin link` on the same checkout
+          // is idempotent and re-runs the manifest's build steps, which is
+          // exactly how a developer picks up their edits — update refuses on
+          // linked plugins by design, there being no remote to pull from.
+          // p.dir is the resolved symlink target, so no cwd is needed.
+          actBtn("rebuild", "", () => pluginCatctlTab(info.catctl, "rebuild " + p.id, ["link", p.dir]));
+        }
+        actBtn(p.linked ? "unlink" : "uninstall", "danger", () => confirmUninstallPlugin(p));
+        row.appendChild(acts);
+        return row;
+      };
+
+      ov = openOverlay((ov) => {
+        const m = document.createElement("div"); m.className = "modal pal plugins";
+        const h = document.createElement("header"); h.className = "plg-head";
+        const title = document.createElement("span"); title.textContent = "plugins";
+        h.appendChild(title);
+        if (plugins.length) {
+          const cnt = document.createElement("span"); cnt.className = "cnt";
+          cnt.textContent = String(plugins.length);
+          h.appendChild(cnt);
+        }
+        statusEl = document.createElement("span"); statusEl.className = "chk";
+        h.appendChild(statusEl);
+        recheckBtn = document.createElement("button"); recheckBtn.className = "recheck";
+        recheckBtn.textContent = "↻";
+        recheckBtn.title = "check for updates now";
+        recheckBtn.addEventListener("click", () => runCheck(true));
+        h.appendChild(recheckBtn);
+        m.appendChild(h);
+        listEl = document.createElement("div"); listEl.className = "list"; m.appendChild(listEl);
+        btnsEl = document.createElement("div"); btnsEl.className = "btns"; m.appendChild(btnsEl);
         m.addEventListener("keydown", (e) => {
           e.stopPropagation();
           if (e.key === "Escape") { e.preventDefault(); closeModal(); }
         });
         ov.appendChild(m);
       });
+      paint();
+      runCheck(false);
     });
   }
-

@@ -29,6 +29,10 @@
       // The server assumes a fresh connection is in front; correct it straight
       // away if this window actually reconnected while in the background.
       if (!winFocused) sendMsg({ t: "focus", focused: false });
+      // Plugin update checks ride the connection: the first one waits for the
+      // connect burst to settle, then hourly (30-plugins.js). Restarted per
+      // open so a reconnect never stacks a second timer chain.
+      schedulePluginUpdateChecks();
     };
     ws.onmessage = (ev) => onMessage(JSON.parse(ev.data));
     ws.onclose = () => {

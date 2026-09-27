@@ -113,6 +113,12 @@ func Update(id string, out io.Writer) (inst Installed, updated bool, err error) 
 	return fresh, true, nil
 }
 
+// HeadCommit reports the commit an installed plugin's tree is at. Exported for
+// callers that cache per-commit facts (the server's update-check cache): the
+// commit, not the manifest version, is what changes on every update, so it is
+// the honest cache key.
+func HeadCommit(inst Installed) (string, error) { return gitHead(inst.Dir) }
+
 // gitHead returns dir's current commit sha. Unlike runStep (which streams),
 // this captures output — the sha is data the updater compares, not progress
 // the user watches.

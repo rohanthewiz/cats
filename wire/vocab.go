@@ -123,6 +123,11 @@ const (
 	// than hiding minutes of subprocess work behind a single cmd_result.
 	CmdPluginList      = "plugin.list"
 	CmdPluginUninstall = "plugin.uninstall"
+	// plugin.check_updates is the read-only half of update: it asks each
+	// installed plugin's git remote whether `plugin update` would change
+	// anything, and changes nothing itself — so, unlike update, it is a
+	// one-shot command the dialog can run in the background.
+	CmdPluginCheckUpdates = "plugin.check_updates"
 
 	// Path listing (the start-path picker in the new-workspace dialog): one
 	// directory's subdirectories plus the user's frecency-ranked recent
@@ -439,6 +444,9 @@ var commandSpecs = []CommandSpec{
 	// Plugins.
 	{Name: CmdPluginList, Result: PluginListResult{}, ReplyRequired: true},
 	{Name: CmdPluginUninstall, Params: PluginUninstallParams{}, Result: PluginUninstallResult{}, ParamsRequired: true, Recorded: true},
+	// Not Recorded: a check is a query, and replaying one from a runbook would
+	// do nothing but touch the network.
+	{Name: CmdPluginCheckUpdates, Params: PluginCheckUpdatesParams{}, Result: PluginCheckUpdatesResult{}, ReplyRequired: true},
 
 	// Path listing.
 	{Name: CmdPathList, Params: PathListParams{}, Result: PathListResult{}, ReplyRequired: true},
@@ -1868,6 +1876,51 @@ type PluginUninstallParams struct {
 // human-readable outcome line the CLI prints.
 type PluginUninstallResult struct {
 	Message string `json:"message"`
+}
+
+// PluginCheckUpdatesParams: plugin.check_updates. IDs narrows the check to
+// those plugins (empty = every installed one). Force bypasses the server's
+// result cache — the dialog's "check now" — which otherwise answers repeat
+// asks from memory so that several windows, each polling on its own timer,
+// cost one round of git remote traffic rather than one per window.
+type PluginCheckUpdatesParams struct {
+	IDs   []string `json:"ids,omitempty"`
+	Force bool     `json:"force,omitempty"`
+}
+
+// Plugin update-check statuses (PluginUpdateInfo.Status). A client must treat
+// an unknown value like PluginUpdateSkipped — no badge — so a later status can
+// be added without an older front-end mislabelling it.
+const (
+	PluginUpdateAvailable = "available" // upstream ref ≠ installed commit
+	PluginUpdateCurrent   = "current"   // upstream ref = installed commit
+	PluginUpdateSkipped   = "skipped"   // linked / broken / no git history
+	PluginUpdateError     = "error"     // remote unreachable; Reason says why
+)
+
+// PluginUpdateInfo is one plugin's check result. Commits are short SHAs, for
+// display; LatestVersion and LatestSubject are best effort (read from the
+// upstream commit, "" when that read failed), so a front-end must be ready to show an
+// available update with no version to name. CheckedAt is Unix milliseconds —
+// how stale a cached answer is.
+type PluginUpdateInfo struct {
+	ID             string `json:"id"`
+	Status         string `json:"status"`
+	Reason         string `json:"reason,omitempty"`
+	CurrentVersion string `json:"current_version,omitempty"`
+	LatestVersion  string `json:"latest_version,omitempty"`
+	CurrentCommit  string `json:"current_commit,omitempty"`
+	LatestCommit   string `json:"latest_commit,omitempty"`
+	LatestSubject  string `json:"latest_subject,omitempty"` // upstream commit's subject line, best effort
+	CheckedAt      int64  `json:"checked_at"`
+}
+
+// PluginCheckUpdatesResult is CmdResult.Data for plugin.check_updates.
+// Available is the count of Status == available, precomputed because the
+// toolbar badge wants exactly that number and nothing else.
+type PluginCheckUpdatesResult struct {
+	Plugins   []PluginUpdateInfo `json:"plugins"`
+	Available int                `json:"available"`
 }
 
 // --- Path listing params & results (§7, start-path picker) --------------------

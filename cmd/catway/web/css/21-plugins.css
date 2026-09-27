@@ -1,21 +1,107 @@
   /* ---- Plugins dialog ----
-     Reuses the palette list chrome, but rows are inert info lines whose
+     Reuses the palette list chrome, but rows are inert info cards whose
      affordances are the per-row action buttons (run / update / uninstall) —
-     smaller than the footer .btns so a row stays one compact line. */
-  .modal.plugins { width:620px; } /* room for id + version + name before the three buttons */
+     smaller than the footer .btns so the buttons never outweigh the row.
+
+     Row anatomy (js/30-plugins.js pluginRow):
+
+       ┌──┐  name  [v1.2.0] [type] [linked] [↑ v1.3.0]   owner.id  │ run  update  uninstall
+       │ N│  second line: update subject / checkout path / error / description
+       └──┘
+     .av      .main (.l1 over .l2)                                  .acts
+
+     Width grows past the generic modal cap: two-line rows with three buttons
+     need the room, and a clipped plugin name is the one thing this dialog must
+     never show. */
+  .modal.plugins { width:680px; max-width:calc(100vw - 32px); }
+  .modal.plugins .list { max-height:56vh; padding:6px; }
   .modal.plugins .row { cursor:default; }
-  /* The status tag only renders when there is a status (linked/broken), so it
-     hugs its text instead of reserving the palette's 52px kind slot — which,
-     for the common installed case, was 52px of nothing pushing the label into
-     truncation. */
-  .modal.plugins .row .kind { width:auto; }
-  /* The linked-checkout path uses .sub, which now has a second caller (the
-     palette's runbook entries) and so lives with the rest of the row chrome in
-     20-palette.css. It still truncates before the label does, which is what
-     keeps a deep path from pushing the buttons off the row. */
+
+  /* Header: title, a count chip, the update summary pushed right, and ↻.
+     The .modal header rule is a plain text strip; this one is a flex row so
+     the summary can sit against the recheck button. */
+  .modal.plugins header.plg-head { display:flex; align-items:center; gap:8px; }
+  .plg-head .cnt { font-size:10px; font-weight:600; color:var(--muted); background:var(--panel);
+    border:1px solid var(--line); border-radius:9px; padding:0 6px; line-height:15px;
+    font-variant-numeric:tabular-nums; }
+  .plg-head .chk { margin-left:auto; display:flex; align-items:center; gap:6px;
+    font-weight:400; font-size:11px; color:var(--muted); }
+  .plg-head .chk.hot { color:var(--accent); font-weight:600; }
+  .plg-head .chk.warn { color:var(--warn); }
+  .plg-head .recheck { background:none; border:1px solid transparent; color:var(--muted);
+    border-radius:4px; font:inherit; font-size:13px; line-height:1; padding:2px 5px; cursor:pointer; }
+  .plg-head .recheck:hover:not(:disabled) { border-color:var(--line); color:var(--fg-bright); }
+  .plg-head .recheck:disabled { opacity:.4; cursor:default; }
+
+  /* A row is a card: the palette's baseline-aligned one-liner becomes a
+     centered two-liner, with a hairline between cards so the list reads as a
+     set of things rather than one block of text. */
+  .modal.plugins .row.plg { align-items:center; gap:10px; padding:8px 10px; border-radius:6px;
+    border:1px solid transparent; }
+  .modal.plugins .row.plg + .row.plg { margin-top:2px; }
+  .modal.plugins .row.plg:hover { background:var(--chrome-focus); }
+  /* An update-bearing row is marked at its edge, not flooded: a left rule in
+     the accent plus the faintest tint, so it stands out in a list of eight
+     without making the other seven look disabled. */
+  .modal.plugins .row.plg.upd { border-color:color-mix(in srgb, var(--accent) 35%, transparent);
+    background:color-mix(in srgb, var(--accent) 7%, transparent);
+    box-shadow:inset 3px 0 0 var(--accent); }
+  .modal.plugins .row.plg.upd:hover { background:color-mix(in srgb, var(--accent) 13%, var(--panel2)); }
+
+  /* Monogram tile on the plugin's hash hue (--av, set inline). The glyph is
+     drawn in the page background colour, which contrasts with every agent hue
+     in every theme without a per-theme foreground. */
+  .row.plg .av { flex:none; width:28px; height:28px; border-radius:7px; display:flex;
+    align-items:center; justify-content:center; font-weight:700; font-size:13px;
+    background:var(--av, var(--muted)); color:var(--bg);
+    box-shadow:inset 0 -2px 0 rgba(0,0,0,.18); }
+  .row.plg.broken .av { background:var(--err-bg); color:var(--err); box-shadow:inset 0 0 0 1px var(--err); }
+
+  .row.plg .main { flex:1 1 auto; min-width:0; display:flex; flex-direction:column; gap:2px; }
+  .row.plg .l1 { display:flex; align-items:center; gap:6px; min-width:0; }
+  .row.plg .nm { color:var(--fg-strong); font-weight:600; white-space:nowrap; flex:none; }
+  /* The trailing id is the part that gives way (flex 0 1 auto, min-width:0),
+     for the reason .sub does in 20-palette.css: a clipped id still reads, a
+     clipped name does not. */
+  .row.plg .pid { color:var(--muted); font-size:10px; opacity:.75; margin-left:2px;
+    flex:0 1 auto; min-width:0; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+  .row.plg .l2 { color:var(--muted); font-size:11px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+  .row.plg .l2.new { color:var(--accent); }
+  .row.plg .l2.err { color:var(--err); }
+  .row.plg .l2.warn { color:var(--warn); }
+  .row.plg .l2.path { font-family:var(--mono, monospace); font-size:10.5px; }
+
+  /* Pills: version, type, status, and the update target. Small caps-free
+     chips with a tinted fill; the fill comes from the pill's own colour via
+     color-mix so every theme tints them consistently. */
+  .row.plg .pill { flex:none; font-size:10px; line-height:15px; padding:0 6px; border-radius:8px;
+    white-space:nowrap; border:1px solid var(--line); color:var(--muted); background:var(--panel); }
+  .row.plg .pill.ver { font-variant-numeric:tabular-nums; font-family:var(--mono, monospace); }
+  .row.plg .pill.typ { color:var(--fg-soft); }
+  .row.plg .pill.st.linked { color:var(--done); border-color:color-mix(in srgb, var(--done) 45%, transparent);
+    background:color-mix(in srgb, var(--done) 12%, transparent); }
+  .row.plg .pill.st.broken { color:var(--err); border-color:color-mix(in srgb, var(--err) 45%, transparent);
+    background:color-mix(in srgb, var(--err) 12%, transparent); }
+  .row.plg .pill.new { color:var(--accent-fg); background:var(--accent); border-color:var(--accent); font-weight:600; }
+
+  /* The checking spinner: a quarter-lit ring. Shared by the header summary
+     and the per-row slot where the update pill will land. */
+  .modal.plugins .spin { flex:none; width:9px; height:9px; border-radius:50%;
+    border:1.5px solid var(--line); border-top-color:var(--accent); animation:plgspin .8s linear infinite; }
+  @keyframes plgspin { to { transform:rotate(360deg); } }
+  @media (prefers-reduced-motion:reduce) { .modal.plugins .spin { animation:none; border-color:var(--accent); opacity:.6; } }
+
+  /* Per-row action buttons. Still .pal-scoped (not .plugins) because the
+     original rules were, and nothing else in the palette renders .acts. */
   .pal .row .acts { margin-left:auto; display:flex; gap:4px; flex:none; }
   .pal .row .acts button { background:var(--panel); color:var(--fg); border:1px solid var(--line);
-    border-radius:4px; padding:1px 8px; font:inherit; font-size:11px; cursor:pointer; }
+    border-radius:4px; padding:2px 9px; font:inherit; font-size:11px; cursor:pointer; }
   .pal .row .acts button:hover { border-color:var(--accent); color:var(--fg-bright); }
   .pal .row .acts button.danger:hover { border-color:var(--err); background:var(--err); }
-
+  /* The update button when there is an update: the row's call to action. */
+  .pal .row .acts button.hot { background:var(--accent); border-color:var(--accent); color:var(--accent-fg); font-weight:600; }
+  .pal .row .acts button.hot:hover { filter:brightness(1.1); color:var(--accent-fg); }
+  /* The danger button stays quiet until hovered — uninstall is the rarest
+     action on the row and should not compete with run and update. */
+  .modal.plugins .row .acts button.danger { color:var(--muted); }
+  .modal.plugins .row .acts button.danger:hover { color:var(--fg-bright); }

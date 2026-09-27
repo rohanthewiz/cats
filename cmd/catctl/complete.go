@@ -323,6 +323,7 @@ func completePlugin(rest []string, cur string) ([]candidate, string) {
 			{"install", "install from GitHub (owner/repo) or a git URL"},
 			{"link", "register a local checkout (dev mode)"},
 			{"update", "re-fetch the recorded source and rebuild"},
+			{"check", "report which plugins have an update waiting"},
 			{"uninstall", "remove an installed plugin"},
 			{"list", "list installed plugins and their actions"},
 			{"run", "launch an action in a new tab"},
@@ -339,10 +340,13 @@ func completePlugin(rest []string, cur string) ([]candidate, string) {
 		if len(pos) == 1 {
 			return nil, dirDirs
 		}
-	case "update", "uninstall":
+	case "uninstall":
 		if len(pos) == 1 {
 			return filter(installedPlugins(), cur), dirNoFiles
 		}
+	case "update", "check":
+		// Both take any number of ids, so every slot offers the set.
+		return filter(installedPlugins(), cur), dirNoFiles
 	case "run":
 		// --all is offered at every slot: it is positionless, so a user who
 		// reaches for it after typing the id should still find it.

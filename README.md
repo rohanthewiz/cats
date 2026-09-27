@@ -413,6 +413,7 @@ Install, link, list, update and uninstall are **offline** — no running
 catctl plugin install rohanthewiz/cats-todo     # clone from GitHub + build
 catctl plugin install <git-url> --ref v0.1.0    # pin a branch or tag
 catctl plugin link ./cats-todo                  # dev mode: symlink a checkout
+catctl plugin check                             # which plugins have an update waiting
 catctl plugin update rohanthewiz.some-plugin    # fetch recorded source + rebuild
 catctl plugin list                              # ids, versions, actions
 catctl plugin run rohanthewiz.cats-todo         # launch in a new tab
@@ -421,7 +422,9 @@ catctl plugin uninstall rohanthewiz.cats-todo
 
 The web UI has the same surface: the toolbar's **⧉ plugins** (also in the ⌘K
 palette) lists installed plugins with run / update / uninstall per row and an
-**add…** prompt. Uninstall resolves over the §7 `plugin.list`/`plugin.uninstall`
+**add…** prompt. It also checks each plugin's git remote in the background: a
+count on the toolbar button says how many have an update waiting, and those rows
+show where the update goes (`↑ v0.4.0`, or the new commit and its subject). Uninstall resolves over the §7 `plugin.list`/`plugin.uninstall`
 commands; install, link and rebuild spawn `catctl plugin …` in a fresh tab so
 the git + build output streams live in a pane (the server resolves the catctl
 path — override with `CATS_CATCTL` if it lives somewhere unusual).

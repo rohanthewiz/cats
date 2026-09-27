@@ -10,6 +10,7 @@ package main
 // crosses the socket.
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -36,6 +37,8 @@ func runPluginCmd(args []string, socket string) int {
 		return pluginLink(args[1:])
 	case "update":
 		return pluginUpdate(args[1:])
+	case "check":
+		return pluginCheck(args[1:])
 	case "uninstall":
 		return pluginUninstall(args[1:])
 	case "list":
@@ -101,25 +104,110 @@ func pluginLink(args []string) int {
 	return 0
 }
 
-// pluginUpdate refreshes an installed plugin from its recorded source. Fully
+// pluginUpdate refreshes installed plugins from their recorded sources. Fully
 // offline with respect to the cats server (it never dials the socket), though
-// it does hit the plugin's git remote.
+// it does hit each plugin's git remote.
+//
+// Several ids update in sequence, which is what the plugins dialog's "update
+// all" runs in one tab. Sequential, not parallel: each update streams git and
+// build output, and interleaved build logs from several plugins would be
+// unreadable in the one pane they share. A failure does not stop the rest —
+// Update already rolls a failed plugin back to its previous version, so moving
+// on leaves nothing half-done — but it does make the exit status 1, so a
+// script (or the tab's exited chrome) still sees that something went wrong.
 func pluginUpdate(args []string) int {
-	if len(args) != 1 {
-		fmt.Fprintln(os.Stderr, "usage: catctl plugin update <id>")
+	if len(args) == 0 {
+		fmt.Fprintln(os.Stderr, "usage: catctl plugin update <id>...")
 		return 2
 	}
-	inst, updated, err := plugin.Update(args[0], os.Stdout)
+	failed := 0
+	for i, id := range args {
+		if len(args) > 1 {
+			if i > 0 {
+				fmt.Println()
+			}
+			fmt.Printf("── %s ──\n", id)
+		}
+		inst, updated, err := plugin.Update(id, os.Stdout)
+		switch {
+		case err != nil:
+			fmt.Fprintln(os.Stderr, err)
+			failed++
+		case !updated:
+			fmt.Printf("%s is already up to date (v%s)\n", inst.ID, inst.Version)
+		default:
+			fmt.Printf("updated %s to v%s (%s)\n", inst.ID, inst.Version, inst.Dir)
+		}
+	}
+	if failed > 0 {
+		if len(args) > 1 {
+			fmt.Fprintf(os.Stderr, "%d of %d updates failed\n", failed, len(args))
+		}
+		return 1
+	}
+	return 0
+}
+
+// pluginCheck reports, without changing anything, which installed plugins
+// have an update waiting upstream — the CLI face of plugin.check_updates.
+// Offline like the rest of the family: it asks each plugin's git remote
+// directly rather than the server, so it works with no cats running and never
+// sees the server's cache. Exit 0 either way (an available update is news,
+// not an error); 1 only when a remote could not be asked.
+func pluginCheck(args []string) int {
+	plugins, err := plugin.List()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
-	if !updated {
-		fmt.Printf("%s is already up to date (v%s)\n", inst.ID, inst.Version)
-		return 0
+	want := map[string]bool{}
+	for _, id := range args {
+		want[id] = true
 	}
-	fmt.Printf("updated %s to v%s (%s)\n", inst.ID, inst.Version, inst.Dir)
+	failed, available := 0, 0
+	for _, p := range plugins {
+		if len(want) > 0 && !want[p.ID] {
+			continue
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		c := plugin.CheckUpdate(ctx, p)
+		cancel()
+		switch c.Status {
+		case plugin.UpdateAvailable:
+			available++
+			to := "v" + c.RemoteVersion
+			if c.RemoteVersion == "" || c.RemoteVersion == c.LocalVersion {
+				// Same version string (or none readable) but a different
+				// commit: name the commits, since the versions cannot say it.
+				to = shortSHA(c.RemoteSHA) + " (from " + shortSHA(c.LocalSHA) + ")"
+			}
+			fmt.Printf("%s v%s → %s  update available\n", c.ID, c.LocalVersion, to)
+			if c.RemoteSubject != "" {
+				fmt.Printf("    %s\n", c.RemoteSubject)
+			}
+		case plugin.UpToDate:
+			fmt.Printf("%s v%s  up to date\n", c.ID, c.LocalVersion)
+		case plugin.UpdateSkipped:
+			fmt.Printf("%s  skipped (%s)\n", c.ID, c.Reason)
+		default:
+			failed++
+			fmt.Printf("%s  check failed: %s\n", c.ID, c.Reason)
+		}
+	}
+	if available > 0 {
+		fmt.Printf("\n%d update(s) available — catctl plugin update <id>...\n", available)
+	}
+	if failed > 0 {
+		return 1
+	}
 	return 0
+}
+
+func shortSHA(s string) string {
+	if len(s) > 7 {
+		return s[:7]
+	}
+	return s
 }
 
 func pluginUninstall(args []string) int {
@@ -341,7 +429,8 @@ func printPluginHelp() {
 	fmt.Fprint(os.Stderr, `catctl plugin commands:
   catctl plugin install <owner/repo|git-url> [--ref <branch|tag>]
   catctl plugin link <dir>          register a local checkout (dev mode)
-  catctl plugin update <id>         fetch the recorded source and rebuild
+  catctl plugin update <id>...      fetch the recorded source and rebuild
+  catctl plugin check [id...]       report which plugins have an update waiting
   catctl plugin uninstall <id>
   catctl plugin list
   catctl plugin run <id> [action]   launch an action in a new tab (needs a running server)

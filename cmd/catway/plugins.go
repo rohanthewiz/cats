@@ -3,9 +3,12 @@
 package main
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync"
+	"time"
 
 	"github.com/rohanthewiz/cats/internal/app"
 	"github.com/rohanthewiz/cats/internal/plugin"
@@ -17,7 +20,7 @@ import (
 // onto the loop, so a slow disk (or a large plugin dir removal) can never stall
 // the orchestrator.
 //
-// Only list and uninstall live here. install/update are deliberately NOT server
+// list, uninstall and check_updates live here. install/update are deliberately NOT server
 // commands: they shell out to git and a build whose live output the user wants
 // to watch, so the dialog spawns them as `catctl plugin …` in a fresh tab via
 // tab.create — a pane is the streaming surface the app already has, and the
@@ -78,6 +81,150 @@ func (o *orch) StartPluginUninstall(r app.Responder, p app.PluginUninstallParams
 		}
 		o.post(func() { r.OK(app.PluginUninstallResult{Message: msg}) })
 	}()
+}
+
+// Update checks. Each one is a git round trip per plugin, and the front-end
+// asks on every connect, on an hourly timer, and whenever the dialog opens —
+// from every window. The cache below is what makes that polling free: an ask
+// inside the TTL is answered from memory, so N windows cost one round of
+// remote traffic per TTL, not N.
+//
+// Entries are keyed by plugin id but only honored while the installed commit
+// and pinned ref still match what was checked. That is what makes the cache
+// safe to keep across an update: `catctl plugin update` moves HEAD, the next
+// ask sees a different commit and re-checks, and the "update available" badge
+// clears without anyone having to invalidate anything.
+const (
+	// pluginCheckTTL: how long a verdict stands. Plugin releases are a
+	// days-scale event; half an hour keeps the badge timely without polling
+	// GitHub from every server all day.
+	pluginCheckTTL = 30 * time.Minute
+	// pluginCheckErrTTL: failures age out faster, so a laptop that was offline
+	// when it woke up does not show "check failed" for the next half hour.
+	pluginCheckErrTTL = 2 * time.Minute
+	// pluginCheckTimeout bounds one plugin's whole check (ls-remote plus the
+	// optional version fetch). A hung remote must still produce an answer.
+	pluginCheckTimeout = 20 * time.Second
+	// pluginCheckWorkers caps concurrent git processes: enough to make a
+	// dozen plugins finish in a couple of round trips, not so many that a big
+	// plugin set fans out into a burst of simultaneous fetches.
+	pluginCheckWorkers = 4
+)
+
+type pluginCheckEntry struct {
+	commit string // installed HEAD when checked
+	ref    string // pinned ref when checked
+	at     time.Time
+	info   app.PluginUpdateInfo
+}
+
+var pluginChecks = struct {
+	sync.Mutex
+	m map[string]pluginCheckEntry
+}{m: map[string]pluginCheckEntry{}}
+
+// StartPluginCheckUpdates answers plugin.check_updates: every installed plugin
+// (or just p.IDs) gets a verdict, from the cache when a fresh one exists and
+// from its git remote otherwise (always, with p.Force). Linked and broken
+// entries are answered as skipped without touching git or the cache.
+func (o *orch) StartPluginCheckUpdates(r app.Responder, p app.PluginCheckUpdatesParams) {
+	go func() {
+		plugins, err := plugin.List()
+		if err != nil {
+			o.post(func() { r.Fail(err.Error()) })
+			return
+		}
+		want := map[string]bool{}
+		for _, id := range p.IDs {
+			want[id] = true
+		}
+		var targets []plugin.Installed
+		for _, inst := range plugins {
+			if len(want) == 0 || want[inst.ID] {
+				targets = append(targets, inst)
+			}
+		}
+
+		// Results land by index so the reply keeps List's sorted order no
+		// matter which worker finishes first.
+		infos := make([]app.PluginUpdateInfo, len(targets))
+		sem := make(chan struct{}, pluginCheckWorkers)
+		var wg sync.WaitGroup
+		for i, inst := range targets {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				sem <- struct{}{}
+				defer func() { <-sem }()
+				infos[i] = checkPluginCached(inst, p.Force)
+			}()
+		}
+		wg.Wait()
+
+		res := app.PluginCheckUpdatesResult{Plugins: infos}
+		for _, info := range infos {
+			if info.Status == plugin.UpdateAvailable {
+				res.Available++
+			}
+		}
+		o.post(func() { r.OK(res) })
+	}()
+}
+
+// checkPluginCached is one plugin's verdict, reusing a cached one when it is
+// still fresh and still about the same commit + ref (see the cache note).
+func checkPluginCached(inst plugin.Installed, force bool) app.PluginUpdateInfo {
+	// Nothing to compare against → no git, no cache entry; CheckUpdate
+	// classifies these without I/O beyond a stat.
+	if inst.Err != nil || inst.Linked {
+		return pluginUpdateInfo(plugin.CheckUpdate(context.Background(), inst), time.Now())
+	}
+	commit, _ := plugin.HeadCommit(inst) // "" on failure simply never matches a cached entry
+	if !force && commit != "" {
+		pluginChecks.Lock()
+		e, ok := pluginChecks.m[inst.ID]
+		pluginChecks.Unlock()
+		ttl := pluginCheckTTL
+		if e.info.Status == plugin.UpdateCheckFailed {
+			ttl = pluginCheckErrTTL
+		}
+		if ok && e.commit == commit && e.ref == inst.Ref && time.Since(e.at) < ttl {
+			return e.info
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), pluginCheckTimeout)
+	defer cancel()
+	now := time.Now()
+	info := pluginUpdateInfo(plugin.CheckUpdate(ctx, inst), now)
+	if commit != "" {
+		pluginChecks.Lock()
+		pluginChecks.m[inst.ID] = pluginCheckEntry{commit: commit, ref: inst.Ref, at: now, info: info}
+		pluginChecks.Unlock()
+	}
+	return info
+}
+
+// pluginUpdateInfo shapes a host verdict for the wire: SHAs shortened to the
+// 7 characters git itself shows, the check time in Unix ms.
+func pluginUpdateInfo(c plugin.UpdateCheck, at time.Time) app.PluginUpdateInfo {
+	short := func(sha string) string {
+		if len(sha) > 7 {
+			return sha[:7]
+		}
+		return sha
+	}
+	return app.PluginUpdateInfo{
+		ID:             c.ID,
+		Status:         c.Status,
+		Reason:         c.Reason,
+		CurrentVersion: c.LocalVersion,
+		LatestVersion:  c.RemoteVersion,
+		CurrentCommit:  short(c.LocalSHA),
+		LatestCommit:   short(c.RemoteSHA),
+		LatestSubject:  c.RemoteSubject,
+		CheckedAt:      at.UnixMilli(),
+	}
 }
 
 // catctlPath resolves the catctl binary the plugins dialog spawns for

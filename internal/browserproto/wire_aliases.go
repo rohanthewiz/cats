@@ -112,6 +112,9 @@ type (
 	PluginPane               = wire.PluginPane
 	PluginUninstallParams    = wire.PluginUninstallParams
 	PluginUninstallResult    = wire.PluginUninstallResult
+	PluginCheckUpdatesParams = wire.PluginCheckUpdatesParams
+	PluginCheckUpdatesResult = wire.PluginCheckUpdatesResult
+	PluginUpdateInfo         = wire.PluginUpdateInfo
 	Raw                      = wire.Raw
 	ReadParams               = wire.ReadParams
 	ReadResult               = wire.ReadResult
@@ -237,6 +240,7 @@ const (
 	CmdPathList           = wire.CmdPathList
 	CmdPluginList         = wire.CmdPluginList
 	CmdPluginUninstall    = wire.CmdPluginUninstall
+	CmdPluginCheckUpdates = wire.CmdPluginCheckUpdates
 	CmdRead               = wire.CmdRead
 	CmdRunbookList        = wire.CmdRunbookList
 	CmdRunbookRecord      = wire.CmdRunbookRecord

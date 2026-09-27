@@ -337,7 +337,7 @@ also available as data — `app.CommandSpecs()`, described in
 [Protocols](index.md#the-command-table-as-data) — which is what a generated
 client is emitted from. The one worth knowing before writing a client: the
 commands marked `ReplyRequired` there (`read`, `capture`,
-`pane.wait_for_output`, `worktree.list`, `plugin.list`, `path.list`,
+`pane.wait_for_output`, `worktree.list`, `plugin.list`, `plugin.check_updates`, `path.list`,
 `config.get`, `theme.list`) are **silently dropped** when sent without a reply
 channel, since a result with nowhere to go is not worth producing.
 
@@ -714,7 +714,7 @@ new panes rather than a location.
 | `peer.list` / `peer.sync` | `peers` / `sync <peer> [workspaces\|todos\|plugins\|all ...] [pull\|push\|both]` |
 | `peer.attach` / `peer.detach` | `attach-peer <id> <url> [token_file] [label...]` / `detach-peer <id>` |
 | `theme.list` / `theme.save` / `theme.delete` | — |
-| `plugin.list` / `plugin.uninstall` | — |
+| `plugin.list` / `plugin.uninstall` / `plugin.check_updates` | — |
 | `path.list` | — |
 | `ui.notify` / `ui.action` | `notify <title...>` / — |
 | `ledger.list` | `history [count]` |
@@ -737,6 +737,16 @@ Only the *instant* plugin verbs are commands. `install` and `update` shell out t
 git and a build, whose output you want to **watch**, so the UI launches those as
 `catctl plugin …` in a fresh tab rather than hiding minutes of subprocess work
 behind one `cmd_result`.
+
+`plugin.check_updates` is the read-only half of update, which is why it *is* a
+command: it asks each installed plugin's git remote whether `plugin update` would
+change anything (`git ls-remote`, plus a one-commit fetch to read the upstream
+manifest's version and commit subject when it would) and changes nothing.
+`{"ids":[…]}` narrows it, `{"force":true}` skips the server's 30-minute result
+cache. Each entry carries a `status` — `available`, `current`, `skipped` (linked,
+broken, or no git history) or `error` (with a `reason`) — plus short commits,
+versions and `latest_subject`; `available` is the count, for badges. Treat an
+unknown status like `skipped`.
 
 The worktree commands act on the machine the addressed pane is on — `worktree.remove`
 on the one its workspace's checkout belongs to — because git is a subprocess

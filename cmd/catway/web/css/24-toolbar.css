@@ -40,3 +40,14 @@
   /* Reduced-motion readers get the state without the blink: the fill, the tint
      and the count all still say it. */
   @media (prefers-reduced-motion:reduce) { #recbtn.on .g { animation:none; } }
+
+  /* ---- Plugin update count ----
+     The plugins item's .n slot (server-rendered, empty until js/30-plugins.js
+     learns of an update) becomes a small filled accent chip. A number rather
+     than the gear's dot: "2" says how much is waiting, and the plugins dialog
+     it opens lists exactly those two. Empty, it takes no gap (see #recbtn .n). */
+  #pluginsbtn .n:empty { display:none; }
+  #pluginsbtn .n { min-width:15px; height:15px; box-sizing:border-box; padding:0 4px; border-radius:8px;
+    background:var(--accent); color:var(--accent-fg); font-size:10px; font-weight:700; line-height:15px;
+    text-align:center; font-variant-numeric:tabular-nums; }
+  #pluginsbtn.has-updates { color:var(--fg-soft); }

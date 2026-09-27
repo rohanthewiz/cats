@@ -188,6 +188,10 @@ type Backend interface {
 	// host dependency for fakes.
 	StartPluginList(r Responder)
 	StartPluginUninstall(r Responder, p PluginUninstallParams)
+	// StartPluginCheckUpdates asks each plugin's git remote whether an update
+	// is waiting. Off-loop for the same reason, and more so: it is network
+	// work, bounded by a timeout but still seconds long on a slow remote.
+	StartPluginCheckUpdates(r Responder, p PluginCheckUpdatesParams)
 
 	// StartPathList answers the start-path picker's directory listing. Off-loop
 	// like the commands above — a listing can land on a cold network mount — and
@@ -1217,6 +1221,17 @@ func (d *Dispatcher) dispatch(name string, dec ParamDecoder, r Responder) {
 			return
 		}
 		d.backend.StartPluginUninstall(r, p) // async: the directory removal resolves r later
+
+	case CmdPluginCheckUpdates:
+		if !r.WantsReply() {
+			return // a check yields only a result; with no reply channel it would be network traffic for nobody
+		}
+		var p PluginCheckUpdatesParams
+		if err := decodeOptional(dec, &p); err != nil {
+			bad(err)
+			return
+		}
+		d.backend.StartPluginCheckUpdates(r, p) // async: the git remote round trips resolve r later
 
 	case CmdPathList:
 		var p PathListParams

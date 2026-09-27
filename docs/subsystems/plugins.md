@@ -457,13 +457,14 @@ sitting next to a `cats-todo` checkout, `./cats-todo` links it in place, and
 catctl plugin install rohanthewiz/cats-todo     # clone from GitHub + build
 catctl plugin install <git-url> --ref v0.1.0    # pin a branch or tag
 catctl plugin link ./cats-todo                  # dev mode: symlink a checkout
+catctl plugin check                             # which plugins have an update waiting
 catctl plugin update rohanthewiz.some-plugin    # fetch recorded source + rebuild
 catctl plugin list                              # ids, versions, actions
 catctl plugin run rohanthewiz.cats-todo         # launch in a new tab
 catctl plugin uninstall rohanthewiz.cats-todo
 ```
 
-Install, link, list, update and uninstall are **offline** — they need no running
+Install, link, list, check, update and uninstall are **offline** — they need no running
 `catway`. Only `run` dials the control socket, and only to issue `tab.create` —
 plus one `workspace.list` first when it is given `--all`, the CLI twin of the
 plugins dialog's **run all** button (see [Where an action starts](#where-an-action-starts)
@@ -482,7 +483,7 @@ update / uninstall, plus an **add…** prompt.
 flowchart TD
   UI["plugins dialog"]
   INSTANT{"instant or long-running?"}
-  CMD["over the control protocol:<br/>plugin.list · plugin.uninstall"]
+  CMD["over the control protocol:<br/>plugin.list · plugin.uninstall · plugin.check_updates"]
   SPAWN["spawn 'catctl plugin ...' in a fresh tab<br/>so git + build output streams live"]
 
   UI --> INSTANT
@@ -495,6 +496,39 @@ build, whose output you want to **watch** — hiding minutes of subprocess work
 behind a single `cmd_result` would be worse than a pane you can read. The server
 resolves the `catctl` path itself; override it with `CATS_CATCTL` if it lives
 somewhere unusual.
+
+### Update checks
+
+The dialog knows when upstream has moved. `plugin.check_updates` asks each
+installed plugin's git remote whether `plugin update` would change anything —
+without changing anything itself:
+
+1. `git ls-remote origin <ref>` (the pinned ref, or the remote's `HEAD`) gives
+   the upstream commit. Annotated tags are compared by their peeled commit, so a
+   tag pin does not read as permanently stale. Equal to the installed `HEAD` →
+   up to date.
+2. Otherwise a one-commit `fetch --no-write-fetch-head` reads the upstream
+   manifest's `version` and the commit subject, so the row can say
+   `↑ v0.4.0` — or, when the version string did not change, the new commit —
+   followed by what the commit says. No ref, index or working-tree file moves.
+
+git runs with prompts disabled (`GIT_TERMINAL_PROMPT=0`, ssh `BatchMode`) and a
+20-second timeout per plugin, so a private repo without cached credentials or a
+hung remote shows up as *couldn't check*, never as a stalled dialog. Linked and
+broken plugins are skipped.
+
+The browser checks shortly after connecting, then hourly, and again whenever the
+dialog opens; **↻** in the dialog header forces a fresh check. The server caches
+each verdict for 30 minutes (2 for failures), keyed by the installed commit — so
+polling from several windows costs one round of remote traffic, and after an
+update moves `HEAD` the next check misses the cache and the badge clears on its
+own. The toolbar's **⧉ plugins** shows the count; the rows with an update get an
+accent edge, an `↑` pill and a highlighted **update** button, and with two or
+more pending the footer offers **update all**, which runs
+`catctl plugin update <id>...` for them in one tab.
+
+`catctl plugin check [id...]` is the same check from the CLI, straight against
+the remotes (no server, no cache).
 
 Linked rows show their checkout path and swap **update** (there is no remote to
 pull from) for **rebuild** — a re-link that re-runs the build steps to pick up
