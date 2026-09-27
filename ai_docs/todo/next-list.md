@@ -95,12 +95,6 @@ window were dated by grepping every session doc.
   exception since `2026-0922-1713`: `editor.agents` types them `editor` however
   they were started.
 
-- **N-004** · raised `2026-0910-1855-startup-window-boot-log` · value low
-  The boot transcript is one file overwritten per launch (`boot.log`), and the
-  splash has no "copy this log" button (it has no bridges, so the path is in
-  the failure footer instead). Only worth doing if launches ever need
-  comparing.
-
 - **N-005** · raised `2026-0913-2313-catway-cathost-write-deadlock` · value low
   Confirm the freeze trigger with logs. The autoclose reflow after a clean
   agent exit is still only inferred from timestamps. It needs a recurrence;
@@ -385,3 +379,10 @@ so they are not carried.
   obsolete. The plugin relaunch now lives in N-001.
 - `make jstest` failing on `main` over `openPeersDialog` (found
   `2026-0918-1901`): passes now.
+
+- **N-004** · raised `2026-0910-1855-startup-window-boot-log` ·
+  closed 2026-09-26 (cats `05f21d7`). The first transcript write of a launch
+  shifts `boot.log` into `boot.log.1` … `boot.log.4`. It happens once per
+  process, so the second write from `fail()` or `finish()` cannot push out the
+  previous launch. There is still no "copy this log" button: the splash has no
+  bridges, and the path is already in the failure footer.
