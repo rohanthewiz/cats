@@ -53,7 +53,23 @@
   // in a real browser rather than reasoning it in; the failure is benign
   // (a chord the host keeps is inert here, never a chord that does the
   // wrong thing) but silent, and silent is how ⌘E sat wrong for a day.
-  const CMD_TO_PANE = new Set(["KeyS", "KeyP", "KeyE", "KeyF", "KeyD", "KeyG", "Slash"]);
+  //
+  // ⌘A joined later still, for the editor's select-all, and its cost was
+  // checked on the pane side first, since select-all is the one chord a
+  // shell user might reach for. A shell loses nothing: a legacy pane fails
+  // the kitty gate below and keeps the browser's ⌘A, which on this page
+  // never did what it sounds like anyway. The terminal text is canvas
+  // pixels, so select-all can only reach the DOM, and with a pane focused
+  // that means the empty text sink (42-textsink.js). The only pane that
+  // loses the browser's ⌘A is one that asked for the kitty protocol, and
+  // that pane now gets super+a, which it can bind or ignore. In the
+  // browser, ⌘A lives with ⌘S ⌘P ⌘F under the rule above: a menu item
+  // (Edit ▸ Select All) that is dispatched to the page first, the same
+  // route that lets web editors claim it. In the MAC APP it is the Edit
+  // menu's selectAll:, a nil-target item exactly like the ⌘C / ⌘Z pair
+  // that already falls through to the pane (see the tail of onKey). Per
+  // the lesson above, confirm it by hand in both hosts.
+  const CMD_TO_PANE = new Set(["KeyS", "KeyP", "KeyE", "KeyF", "KeyD", "KeyG", "KeyA", "Slash"]);
 
   // cmdGoesToPane answers "does the focused pane want this ⌘ chord?" —
   // and the answer is no unless that pane ASKED for the kitty keyboard
