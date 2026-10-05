@@ -41,7 +41,13 @@ func builtins() []Theme {
 				// against their pale --chrome strip.
 				"branch": "#ea9a4e",
 				"todo":   "#f0dfa0", "ok": "#6ac47a", "warn": "#e0b64e", "err": "#e57373",
-				"done": "#00ccf5",
+				// A sky blue rather than the old #00ccf5 cyan: at dot size that
+				// cyan read as a near-neighbour of the ok green, so "finished,
+				// not yet seen" and "settled" blurred together in the sidebar.
+				// Pushed ~20° toward blue (hue ≈208°) it separates cleanly from
+				// green while staying saturated and darker than agent-2's pastel
+				// #7fb3ff, so the state dot and the identity name still differ.
+				"done": "#2b9bff",
 				// Amber text needs no separate shade here: #e0b64e is ~7:1 on
 				// panel2 already. Authored only because this theme carries
 				// the full key set.
@@ -55,8 +61,9 @@ func builtins() []Theme {
 				// than sitting in the green-to-red arc.
 				//
 				// All six are held back from the state colours they sit beside
-				// (ok #6ac47a, warn #e0b64e, err #e57373, done #00ccf5): the
-				// amber is browner than warn, the teal duller than done. They
+				// (ok #6ac47a, warn #e0b64e, err #e57373, done #2b9bff): the
+				// amber is browner than warn, the teal duller than done, the
+				// blue paler than done. They
 				// never share a span — state lives in the row's ● — but they do
 				// share a row, and a name that matches a state colour invites
 				// reading it as one.
