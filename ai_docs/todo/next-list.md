@@ -88,6 +88,14 @@ window were dated by grepping every session doc.
     drag the seam above Panes and Agents with real rows, check the grip goes
     inert under a folded section, and that a trackpad drag inside the
     WKWebView keeps the row-resize cursor for the whole drag.
+  - the dropped OSC 52 clear (`2026-1007-1407-osc52-clipboard-clear-ignored`).
+    This needs a new catway only; cathost can keep running. Copy something,
+    run `printf '\033]52;c;\007'` in a pane, and ⌘V should still paste it.
+    `daemons.log` should gain `WARN catway: ignored an OSC 52 clipboard
+    clear from pane N`. Do not try this on the old build: it empties the
+    pasteboard. If "clipboard has no text" recurs with no such line in the
+    log, the 2026-10-05 clear came from outside cats (a password manager's
+    timed clear, say).
 
 - **N-008** · raised `2026-0914-0158-catway-restart-cats-todo-release` · value low
   `waitReady` (`cmd/catapp/supervise.go`) has no caller: it is only a wrapper
