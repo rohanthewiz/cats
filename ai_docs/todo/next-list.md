@@ -32,7 +32,7 @@ window were dated by grepping every session doc.
 - Open and Roadmap stay in ID order. New items append to the end of Open (or
   Roadmap, for future work) with the next ID.
 
-**Next ID:** N-053
+**Next ID:** N-054
 
 ## Open
 
@@ -85,9 +85,18 @@ window were dated by grepping every session doc.
     reveals a global manager, preferring one in the viewed workspace and
     skipping locked workspaces.
   - the sidebar's section splitters (`2026-0924-1144-sidebar-section-splitters-v0.3.0`):
-    drag the seam above Panes and Agents with real rows, check the grip goes
-    inert under a folded section, and that a trackpad drag inside the
-    WKWebView keeps the row-resize cursor for the whole drag.
+    drag the seam above Agents with real rows (the Panes section it used to
+    pair with is gone since `2026-1007-1436-panes-dropdown-in-workspace-rows`;
+    Workspaces now holds the pane rows, so size it with a few dropdowns open),
+    check the grip goes inert under a folded section, and that a trackpad drag
+    inside the WKWebView keeps the row-resize cursor for the whole drag.
+  - the pane dropdowns on workspace rows (`2026-1007-1436-panes-dropdown-in-workspace-rows`),
+    checked so far in headless Chrome only. In the WKWebView: a fresh profile
+    opens only the current workspace's dropdown; the ▶ toggles without
+    switching workspace, starting a drag or renaming; Alt+click opens or shuts
+    every workspace (that ⌥ reaches the page as `altKey`); rows read `p1`
+    while the hover card still says `cats:p1`; and a press on a row in another
+    workspace reveals it.
   - the dropped OSC 52 clear (`2026-1007-1407-osc52-clipboard-clear-ignored`).
     This needs a new catway only; cathost can keep running. Copy something,
     run `printf '\033]52;c;\007'` in a pane, and ⌘V should still paste it.
@@ -234,6 +243,16 @@ window were dated by grepping every session doc.
   solarized-light's folded usage group now shows its `.high` reading in
   `#694f00`, close to the `#6f5f2a` group heading beside it. It still
   stands apart from the grey resting state.
+
+- **N-053** · raised `2026-1007-1436-panes-dropdown-in-workspace-rows` · value low
+  At the 150px minimum sidebar width the section headings run out of room
+  and their right-edge controls clip. WORKSPACES shows ⊞ ⊟ with its ▼ fold
+  arrow cut off, and USAGE wraps its "1m ago" stamp onto a second line and
+  loses its ▼ too. Seen in a headless-Chrome screenshot while checking the
+  pane dropdowns; the headings were not touched by that change, so this
+  predates it. The workspace rows themselves now ellipse the name to keep
+  their caret on screen; the headings may want the same trade (title gives
+  way, controls hold their width).
 
 ## Roadmap
 
