@@ -85,9 +85,10 @@ var derivations = []struct {
 	{"term-bg", "bg", 0},
 	{"term-fg", "fg", 0},
 	{"heading", "accent", 0},
-	// The workspace group headers inside the Panes list: a second tier of
-	// heading, so a theme that doesn't author one falls back to plain muted
-	// label text — which is what those rows were before they were themeable.
+	// The group headers inside the sidebar's Workspaces and Usage lists: a
+	// second tier of heading, so a theme that doesn't author one falls back to
+	// plain muted label text — which is what those rows were before they were
+	// themeable.
 	{"ws-heading", "muted", 0},
 	// The git branch in a pane header. Every built-in authors it as an orange of
 	// its own (see builtin.go) so it stands out from the rest of the strip. This

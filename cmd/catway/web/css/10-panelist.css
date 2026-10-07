@@ -8,68 +8,77 @@
      it reports, it does not warn. */
   #ws-list li.ws .wswin { color:var(--muted); font-size:calc(10px * var(--sb-scale));
     flex:none; margin-left:4px; }
-  #pane-list li, #agent-list li, #plugin-list li { cursor:pointer; }
-  #pane-list li:hover, #agent-list li:hover, #plugin-list li:hover { background:var(--panel2); }
-  #pane-list li.focused { background:var(--chrome-focus); color:var(--fg-strong); }
-  /* The list spans every workspace now, so it carries its own scroll — otherwise
-     a session with a few tabs of panes pushes Agents off the sidebar. */
-  #pane-list { max-height:34vh; overflow-y:auto; }
+  #ws-list li.pn, #agent-list li, #plugin-list li { cursor:pointer; }
+  #ws-list li.pn:hover, #agent-list li:hover, #plugin-list li:hover { background:var(--panel2); }
+
+  /* ---- The pane dropdown under a workspace row ----
+     A workspace row's caret (paneCaretEl) opens that workspace's panes as rows
+     directly beneath it, in the same <ul>:
+
+       ● cats   ⚑        ●1 ●2   ▼
+           p1  vim
+           p2  build  claude
+       ○ api             ●1      ▶
+
+     The caret is pushed hard against the right edge — outboard of the agent
+     rollup, where every other fold control in this sidebar sits — and holds
+     its width; the row's name is what gives way when the column is narrow
+     (below). Muted until hovered, like the heading controls: it is a control
+     on the row, not part of what the row reports. */
+  #ws-list li.ws > .car { margin-left:auto; flex:none; padding:0 2px; cursor:pointer;
+    color:var(--muted); font-size:calc(10px * var(--sb-scale)); }
+  /* After the rollup, the rollup's own margin-left:auto has already done the
+     pushing; a second auto margin would split the free space between them and
+     float the rollup off the edge. Same pairing as .gsum + .car below. */
+  #ws-list li.ws > .sum + .car { margin-left:0; }
+  #ws-list li.ws > .car:hover { color:var(--accent); }
+  /* The row's name ellipses so that its right-edge marks never have to. The
+     row is nowrap and overflow:hidden, and flex items will not shrink past
+     their content by default, so without this a long name at 150px pushed
+     the rollup — and now the caret, the one control on the row that only
+     lives at the edge — out of the clip. min-width:0 makes the name the
+     item that gives. The name span is the row's first child (gitDot). */
+  #ws-list li.ws > span:first-child { min-width:0; overflow:hidden; text-overflow:ellipsis; }
+  /* Pane rows sit indented under their workspace's name, just past where the
+     dot ends, so they read as its children without a tree line to draw. The
+     indent rides --sb-scale with the type, or the rows would drift out from
+     under the name as the sidebar text grows. */
+  #ws-list li.pn { padding-left:calc(22px * var(--sb-scale)); }
+  #ws-list li.pn.focused { background:var(--chrome-focus); color:var(--fg-strong); }
   /* Panes outside the current viewport (another tab or workspace): real, but
      elsewhere — muted handle, and a click reveals rather than focuses. */
-  #pane-list li.off .pub { color:var(--muted); }
-  #pane-list li.off .ttl { opacity:.65; }
-  /* Each workspace's panes sit under their own header row, which doubles as the
-     collapse toggle. It replaces the plain hairline the list used to draw at the
-     boundary: the same visual break, but it now names the group and can fold it.
-     Groups after the first keep the hairline above them, on the header row rather
-     than on the first pane, so a focused pane never paints across the divider. */
+  #ws-list li.pn.off .pub { color:var(--muted); }
+  #ws-list li.pn.off .ttl { opacity:.65; }
+  #ws-list li.pn .pub { color:var(--accent); }
+  #ws-list li.pn .ttl { color:var(--muted); overflow:hidden; text-overflow:ellipsis; }
+
+  /* The shelf headers in the Workspaces list (open / locked / asleep, drawn
+     only when the list is split — see renderWorkspaces). Each doubles as its
+     shelf's fold toggle, and the shelves after the first keep a hairline above
+     them, on the header row rather than on the first row below it, so a
+     focused row never paints across the divider. */
   /* Bold, so the header reads as a heading over its rows rather than as one more
      muted row among them — at this size weight separates the two tiers better than
      the colour alone did.
-     The Workspaces list above splits open from locked with the same kind of header
-     (see renderWorkspaces), so both lists share the style rather than each growing
-     its own copy: a fold header is a fold header wherever it appears. */
-  #pane-list li.wsgrp, #ws-list li.wsgrp { color:var(--ws-heading); font-size:calc(11px * var(--sb-scale)); text-transform:uppercase;
+     The Panes section that used to sit below Workspaces grouped its rows under
+     the same kind of header, which is why this rule lives in this file. */
+  #ws-list li.wsgrp { color:var(--ws-heading); font-size:calc(11px * var(--sb-scale)); text-transform:uppercase;
     letter-spacing:.5px; cursor:pointer; font-weight:600; }
   /* #ws-list li.add.sep: the "+ workspace" row under a split list shares the
      shelf divider, so it reads as the section's action and not the last shelf's
      (see renderWorkspaces). One rule, so the two lines can't drift apart. */
-  #pane-list li.wsgrp.sep, #ws-list li.wsgrp.sep, #ws-list li.add.sep { border-top:1px solid var(--line); margin-top:5px; padding-top:7px; }
-  #pane-list li.wsgrp:hover, #ws-list li.wsgrp:hover { background:var(--panel2); color:var(--fg-soft); }
+  #ws-list li.wsgrp.sep, #ws-list li.add.sep { border-top:1px solid var(--line); margin-top:5px; padding-top:7px; }
+  #ws-list li.wsgrp:hover { background:var(--panel2); color:var(--fg-soft); }
   /* The rollup sits ahead of the caret and the pair is pushed to the right edge. */
-  #pane-list li.wsgrp .gsum, #pane-list li.wsgrp .car,
   #ws-list li.wsgrp .gsum, #ws-list li.wsgrp .car { margin-left:auto; }
-  #pane-list li.wsgrp .gsum + .car, #ws-list li.wsgrp .gsum + .car { margin-left:0; }
+  #ws-list li.wsgrp .gsum + .car { margin-left:0; }
   /* The count is the header's secondary half, so it stays at normal weight — only
-     the workspace name carries the bold. */
-  #pane-list li.wsgrp .gsum, #ws-list li.wsgrp .gsum { text-transform:none; letter-spacing:0; font-weight:400; }
+     the shelf name carries the bold. */
+  #ws-list li.wsgrp .gsum { text-transform:none; letter-spacing:0; font-weight:400; }
   /* The caret tracks its header's size — a step under it, as before, so the
      fold marker stays subordinate to the name it folds. */
-  #pane-list li.wsgrp .car, #ws-list li.wsgrp .car { font-size:calc(10px * var(--sb-scale)); }
-  /* The workspace whose panes are the ones on screen, marked the way the
-     Workspaces list marks the same workspace: ● and the accent. The Panes
-     section pins it to the top regardless of what is running in it, so the mark
-     is what stops the top row reading as "busiest". */
-  #pane-list li.wsgrp.cur { color:var(--accent); }
-  /* The shelf the quiet workspaces fold into, at the foot of the list. Muted and
-     italic — the two marks this sidebar already uses for a row that is a
-     stand-in rather than a thing (#ws-list li.add, #agent-list li.empty) — so a
-     column of workspace names never reads as containing one called "more
-     workspaces". It borrows .wsgrp's caret and hairline because it folds like a
-     header, but drops the uppercase, the tracking and the weight that say "this
-     names a group": it names an absence, and the shouted form of a phrase that
-     long is the loudest thing in the section for the least reason. */
-  #pane-list li.wsgrp.more { color:var(--muted); font-style:italic;
-    text-transform:none; letter-spacing:0; font-weight:400; }
-  #pane-list li.wsgrp.more:hover { color:var(--fg-soft); }
-  /* Narrow sidebar: the label gives way first. The count and the caret are the
-     row's whole function — how much is hidden, and the way to see it — so they
-     hold their width and the phrase ellipses into whatever is left. */
-  #pane-list li.wsgrp.more > span:first-child { min-width:0; overflow:hidden; text-overflow:ellipsis; }
-  #pane-list li.wsgrp.more .gsum, #pane-list li.wsgrp.more .car { flex:0 0 auto; }
-  #pane-list .pub { color:var(--accent); }
-  #pane-list .ttl { color:var(--muted); overflow:hidden; text-overflow:ellipsis; }
-  #pane-list .ag, #agent-list .aname, #plugin-list .aname { margin-left:auto; }
+  #ws-list li.wsgrp .car { font-size:calc(10px * var(--sb-scale)); }
+  #ws-list li.pn .ag, #agent-list .aname, #plugin-list .aname { margin-left:auto; }
   .ag, .adot, .aname { font-size:calc(11px * var(--sb-scale)); }
   /* "working" as text (a pane row's agent label, the pane header's state word)
      is --warn-fg: the darkest built-in ambers are 2-3:1 as 11px text, and
@@ -82,13 +91,16 @@
      stay --warn. They sit in a row beside the ok/err/done markers, where the
      hue is the signal. On solarized-light, --warn-fg's dark amber would drift
      toward the olive of its ok green. The selectors are the same set that
-     pulses below. */
-  .adot.st-working, .tmark.st-working, #ws-list .st-working { color:var(--warn); }
+     pulses below.
+     The badge is reached through .sum, not as any .st-working in #ws-list: the
+     pane rows hang inside that list now, and their agent label is text, which
+     wants --warn-fg like every other "working" label. */
+  .adot.st-working, .tmark.st-working, #ws-list .sum .st-working { color:var(--warn); }
   /* A working agent's dot breathes: the one state that is mid-change, so it is
      the one marker that moves. Only the dots pulse — the agent-name text in a
      pane row shares .st-working and would be hard to read blinking. */
-  .adot.st-working, .tmark.st-working, #ws-list .st-working { animation:dotpulse 1.5s ease-in-out infinite; }
+  .adot.st-working, .tmark.st-working, #ws-list .sum .st-working { animation:dotpulse 1.5s ease-in-out infinite; }
   @keyframes dotpulse { 0%,100% { opacity:1; } 50% { opacity:.3; } }
   @media (prefers-reduced-motion:reduce) {
-    .adot.st-working, .tmark.st-working, #ws-list .st-working { animation:none; }
+    .adot.st-working, .tmark.st-working, #ws-list .sum .st-working { animation:none; }
   }

@@ -1,8 +1,8 @@
   /* ---- User flags (workspace.flag / pane.flag) ----
-     One mark, four places: WORKSPACES rows, AGENTS rows, PANES rows and the
-     pane header. The sidebar wears the bare glyph (the note rides the tooltip,
-     where there is room for it); the header wears glyph + note inline, because
-     that is the pane you are actually looking at.
+     One mark, four places: WORKSPACES rows, the pane rows under them, AGENTS
+     rows and the pane header. The sidebar wears the bare glyph (the note rides
+     the tooltip, where there is room for it); the header wears glyph + note
+     inline, because that is the pane you are actually looking at.
 
      In the sidebar every named kind is drawn as an SVG icon (FLAG_ICONS, the
      .flag-icon rules below), like the padlock and the paw print beside it. The

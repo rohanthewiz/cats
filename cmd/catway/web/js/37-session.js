@@ -9,8 +9,8 @@
     ws.onopen = () => {
       bootPhase("ws-open");
       // A pane.list still in flight when the socket died never gets its callback,
-      // which would leave the single-flight guard latched and freeze the Panes
-      // section for the rest of the session. The reconnect's layout re-queries.
+      // which would leave the single-flight guard latched and freeze the pane
+      // dropdowns for the rest of the session. The reconnect's layout re-queries.
       clearTimeout(paneInvWait); paneInvWait = null;
       paneInvBusy = false; paneInvAgain = false;
       // ?ws=<id> is what makes this window a window: the server treats each

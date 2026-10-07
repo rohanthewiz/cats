@@ -238,9 +238,10 @@ is refused instead of quietly becoming a flag that reads "folloup". The note is
 optional and gets folded to one line.
 
 Flags are durable — they are in the session snapshot and come back after a
-restart — and the sidebar draws them in the WORKSPACES, AGENTS and PANES rows
-plus the pane header, whose chip shows the note inline. `catctl panes` and
-`catctl workspaces` report them as `flag` / `flag_note` / `flag_at_ms`.
+restart — and the sidebar draws them on the WORKSPACES rows, the pane rows under
+them and the AGENTS rows, plus the pane header, whose chip shows the note
+inline. `catctl panes` and `catctl workspaces` report them as `flag` /
+`flag_note` / `flag_at_ms`.
 
 A pane's flag lives on the pane, not on the agent inside it, so it is still
 there after the agent is restarted in place — and a plain shell can wear one too.

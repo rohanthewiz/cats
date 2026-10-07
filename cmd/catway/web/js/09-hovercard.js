@@ -69,7 +69,7 @@
   //
   // The card used to open on the first mousemove over a row, which made a pass
   // through the sidebar a run of popups: crossing WORKSPACES on the way to the
-  // PANES list built and tore down a card per row, each one landing under the
+  // AGENTS list built and tore down a card per row, each one landing under the
   // pointer and covering the rows still to be crossed. A short dwell is what
   // separates "the pointer is on its way past this row" from "the pointer is
   // asking about this row", and it is the same bargain the native tooltips the
@@ -82,7 +82,7 @@
   // The warm window is the other half of that bargain. One dwell per row is the
   // right price for a pointer arriving from somewhere else and the wrong one
   // for a pointer already reading the list: comparing two workspaces, or
-  // walking the PANES list looking for a flag's note, would mean holding still
+  // walking a pane dropdown looking for a flag's note, would mean holding still
   // over every row in turn. So for TIP_WARM_MS after a card comes down, the
   // next row's card opens on contact.
   //
@@ -236,7 +236,7 @@
 
   // Pane-list rows truncate title/agent to fit their narrow column, so the full
   // details are only reachable on hover. Rebuilt on each show since the
-  // underlying pane state is live. row is a renderPaneList row — the merged view
+  // underlying pane state is live. row is a wsPaneRows row — the merged view
   // of one pane, on screen or not; the fields only the viewport has (model, exit
   // code, grid size) come from local pane state and are simply absent for a pane
   // sitting in another tab.
@@ -309,7 +309,7 @@
   // attribute. That is enough to notice something, and not enough to read it:
   // the flag's note, and *which* panes inside the workspace hold the unfinished
   // todos, have nowhere to be said. So a row with any of that gets the same
-  // multi-row card the PANES rows get, built from the same showTip primitive.
+  // multi-row card the pane rows get, built from the same showTip primitive.
   //
   // The card is deliberately conditional (workspaceTipItems returns null for a
   // plain row). A workspace with no annotation has nothing the row does not
@@ -353,7 +353,7 @@
     // Pane flags, one row each up to a few, since the note is the whole point of
     // showing them and notes do not survive being packed into a shared row. Past
     // that the count stands in — a workspace with a dozen flagged panes is a
-    // question for the PANES list, not for a hover card.
+    // question for the workspace's pane dropdown, not for a hover card.
     const MAXF = 4;
     flagged.slice(0, MAXF).forEach((x, i) => {
       const note = x.flag.note || flagLabel(x.flag);

@@ -1714,9 +1714,9 @@ func paneFlag(tab *workspace.Tab, id layout.PaneID) *flags.Flag {
 //
 // Both, because a flag lands in three lists that read from two sources: the
 // layout carries the workspace rows and the active tab's pane headers, and the
-// agents rollup carries the global AGENTS list. The sidebar's PANES rows are the
-// third, and they need nothing here — the browser re-queries pane.list whenever
-// a layout arrives.
+// agents rollup carries the global AGENTS list. The pane rows under each
+// sidebar workspace are the third, and they need nothing here — the browser
+// re-queries pane.list whenever a layout arrives.
 //
 // Deliberately not ApplyModel: nothing structural changed, so there are no PTYs
 // to reconcile, no viewport to recompute, and no frames to resend.

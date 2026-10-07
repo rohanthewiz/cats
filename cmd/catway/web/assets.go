@@ -61,7 +61,7 @@ var cssFiles = []string{
 	"07-workspaces.css", // WORKSPACES rows, todo badge, lock mark
 	"08-hosts.css",      // HOSTS rows
 	"09-history.css",    // HISTORY rows
-	"10-panelist.css",   // workspace-row host/window badges, then PANES rows and agent-state colors
+	"10-panelist.css",   // workspace-row badges, the pane dropdown under each row, shelf headers, agent-state colors
 	"11-agentlist.css",  // AGENTS and PLUGINS rows
 	"12-main.css",       // #main grid, topbar, tabbar, the pane boxes and their headers
 	"13-statusbar.css",  // the toolbar buttons at the top right
@@ -98,7 +98,7 @@ var jsFiles = []string{
 	"05-labels.js",     // model/agent label condensing, hue assignment, path shortening
 	"06-chrome.js",     // the per-pane header
 	"07-workspaces.js", // WORKSPACES: rollups, summaries, todo/lock marks, rows
-	"08-panelist.js",   // PANES: the pane.list inventory, grouped by workspace
+	"08-panelist.js",   // each workspace row's pane dropdown, over the pane.list inventory
 	"09-hovercard.js",  // the pane-row hover card
 	"10-buildbadge.js", // the build hash beside the wordmark
 	"11-drag.js",       // press-to-activate, tab/workspace reorder, pane swap

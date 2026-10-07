@@ -589,8 +589,9 @@ flagged too.
 Every read carries them back: `pane.list` / `pane.get` and `workspace.list` grow
 `flag`, `flag_note` and `flag_at_ms` (Unix milliseconds, when it was last set),
 all omitted when unflagged. The browser draws the mark in four places — the
-WORKSPACES, AGENTS and PANES sidebar rows, and the pane header, whose chip shows
-the note inline and opens the flag menu on a click.
+sidebar's WORKSPACES rows, the pane rows under them and its AGENTS rows, and the
+pane header, whose chip shows the note inline and opens the flag menu on a
+click.
 
 `flag.list` is the cross-cutting read those per-scope lists cannot give you: the
 flagged rows of `workspace.list` and `pane.list`, from every workspace and every

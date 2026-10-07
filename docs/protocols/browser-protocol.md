@@ -169,9 +169,10 @@ reported once, as the agent.
 
 Anything else a front end wants about an off-screen pane it asks for, rather than
 waiting to be told. `pane.list` reports every pane in the session with its live
-title, cwd and agent merged in (`PaneMeta`), which is how catway's sidebar Panes
-section spans all workspaces and tabs while the `layout` message it renders
-viewport state from carries only the active tab.
+title, cwd and agent merged in (`PaneMeta`), which is how the pane dropdown under
+each of catway's sidebar workspaces lists every tab's panes, for every workspace,
+while the `layout` message it renders viewport state from carries only the
+active tab.
 
 ## Multiple connections
 

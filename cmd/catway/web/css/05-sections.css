@@ -85,8 +85,9 @@
     flex:0 0 auto; }
   #sidebar section.sized > h2 { flex:none; }
   /* The list takes whatever the cap leaves after the heading and scrolls in
-     it. max-height:none lifts #pane-list's standing 34vh cap: once the user
-     has chosen a size, that choice is the cap. */
+     it. max-height:none lifts any standing cap a list carries of its own (the
+     Panes section's 34vh was one, before the panes moved into the workspace
+     rows): once the user has chosen a size, that choice is the cap. */
   #sidebar section.sized > ul { flex:0 1 auto; min-height:0; overflow-y:auto; max-height:none; }
   /* Held for the length of a drag, like body.splitting for the column gutter:
      the cursor stays a resize cursor wherever the pointer wanders, and the

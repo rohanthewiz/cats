@@ -55,6 +55,9 @@
         ["hide the sidebar", ["drag its gutter to the left edge"]],
         ["show it again", ["click the handle at the left edge"]],
         ["swap panes", ["drag a pane header or sidebar row onto a pane"]],
+        // The sidebar's pane lists live under each workspace row (08-panelist.js).
+        ["show / hide a workspace's panes", ["▶ at the right of its row"]],
+        ["… every workspace's at once", ["Alt+click the ▶"]],
         ["reorder tabs / workspaces", ["drag"]],
         ["rename pane / tab / workspace", ["double-click its title"]],
         ["scrollback", ["wheel", "drag the scrollbar"]],

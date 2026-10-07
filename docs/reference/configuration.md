@@ -688,7 +688,7 @@ required in a custom theme — every other key is derived from them when absent
 | `chrome` / `chrome-focus` | the per-pane header strip, unfocused and focused |
 | `chrome-fg` / `chrome-fg-dim` | the focused header's text and buttons |
 | `heading` | sidebar section titles |
-| `ws-heading` | the per-workspace group headers inside the sidebar's Panes list (defaults to `muted`) |
+| `ws-heading` | the group headers inside the sidebar's Workspaces and Usage lists (defaults to `muted`) |
 | `branch` | the git branch in a pane's header strip (defaults to `ws-heading`) |
 | `fg-strong` / `fg-soft` / `fg-bright` | the text-emphasis ladder (active labels / hover lift / loudest hover) |
 | `agent-1` … `agent-6` | the identity hues the sidebar's Agents list gives tool names, so two agents on screen are told apart by colour (default to `accent`, `done`, `branch`, `heading`, `ok`, `todo`) |

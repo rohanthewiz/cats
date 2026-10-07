@@ -184,9 +184,9 @@
   // providers and the meters each one reports is the server's to know — this
   // walks the list rather than naming anything in it.
   //
-  // A folded group builds its heading and nothing else, the way renderPaneList
-  // skips a collapsed workspace's rows: the rows and the caption below them are
-  // one subsection, so the caption folds with the numbers it annotates.
+  // A folded group builds its heading and nothing else, the way renderWorkspaces
+  // skips a folded shelf's rows: the rows and the caption below them are one
+  // subsection, so the caption folds with the numbers it annotates.
   function drawUsage() {
     usageListEl.innerHTML = "";
     usageGroupIDs = [];
@@ -251,7 +251,7 @@
   function usageGroupID(g) { return g.id || g.name || "—"; }
 
   // usageGroupEl builds one provider's header row — the click target that folds
-  // and unfolds it, mirroring paneGroupEl.
+  // and unfolds it, mirroring wsGroupEl.
   //
   // Folded, it stands in for the meters it hid by carrying ONE of them (see
   // usageHeadline), and its hover carries all of them (usageGroupTitle). That

@@ -11,9 +11,12 @@
   // paneRef renders a server handle ("w1:p3") for display, swapping the opaque
   // workspace id for the workspace's name ("cats:p3"). Every pane reference the
   // user sees goes through here — the pane header, tooltip, dialog title, agents
-  // rollup, palette, copy-mode bar and the sidebar PANES rows — so one form is
-  // worth learning. Before the first layout arrives there is no name to resolve;
-  // the id stands in, and applyLayout re-renders each header once it does.
+  // rollup, palette, copy-mode bar and the pane hover card — so one form is
+  // worth learning. The one exception is the pane rows in a workspace's
+  // dropdown, which sit under their workspace's own name and so drop it
+  // (paneLocalRef). Before the first layout arrives there is no name to
+  // resolve; the id stands in, and applyLayout re-renders each header once it
+  // does.
   function paneRef(pub, paneID) {
     if (!pub) return "#" + paneID;
     const i = pub.indexOf(":");
@@ -38,8 +41,8 @@
   }
 
   // Is this workspace asleep — kept in the list with no terminal behind it
-  // (workspace.sleep)? Same lookup as the lock, for the same reason: the PANES
-  // section has to know not to list the sleeping workspace's placeholder pane.
+  // (workspace.sleep)? Same lookup as the lock, for the same reason: the pane
+  // dropdown has to know not to list the sleeping workspace's placeholder pane.
   function wsAsleep(id) {
     const w = layoutMsg && layoutMsg.workspaces.find((x) => x.id === id);
     return !!(w && w.asleep);
@@ -68,7 +71,7 @@
   }
 
   // wsOf reads the workspace id out of a pane handle ("w1:p3" -> "w1"). A handle
-  // with no colon is already a workspace id (the fallback rows renderPaneList
+  // with no colon is already a workspace id (the fallback rows wsPaneRows
   // builds before the first inventory lands).
   function wsOf(handle) {
     const i = handle.indexOf(":");
@@ -98,10 +101,10 @@
   // gotoTodoPane is the paw print's click: reveal the workspace's first pane
   // that is advertising unfinished todos. "First" is inventory order (the order
   // pane.list walks the session — tab by tab, pane by pane), which is the order
-  // the PANES section and the hover card's itemized list show them in, so the
+  // the pane dropdown and the hover card's itemized list show them in, so the
   // pane a click lands on is the one listed first.
   //
-  // agent.focus rather than pane.focus for the same reason the PANES rows use
+  // agent.focus rather than pane.focus for the same reason the pane rows use
   // it: the manager may sit on another tab of the workspace, or the paw may be
   // on a workspace other than the one in view, and only agent.focus reveals a
   // pane across both (RevealPaneView).
@@ -289,9 +292,9 @@
   //
   // A flag is a glyph with a meaning plus an optional note, pinned by the user
   // to a workspace or a pane so it can be found again tomorrow. It shows up in
-  // four lists — WORKSPACES rows, AGENTS rows, PANES rows and the pane header —
-  // all of which come through the two functions below, so the mark looks and
-  // reads the same wherever it is drawn.
+  // four places — WORKSPACES rows, the pane rows under them, AGENTS rows and the
+  // pane header — all of which come through the two functions below, so the mark
+  // looks and reads the same wherever it is drawn.
   //
   // FLAG_DEFS mirrors internal/flags. It is duplicated rather than fetched
   // because the browser needs the glyph and the label to *draw a menu* before
@@ -746,6 +749,12 @@
   function renderWorkspaces(msg) {
     wsListEl.innerHTML = "";
     const { states, todos, globalTodos } = workspaceRollups();
+    // Every workspace's pane rows, ready for its dropdown (08-panelist.js). Built
+    // once up here rather than per row, since one pass over the inventory buckets
+    // the lot, and pruned against the same list so a remembered open/shut
+    // choice cannot outlive its workspace.
+    const paneRows = wsPaneRows();
+    prunePanesOpen(msg.workspaces);
     // The global backlog's mark sits on the section heading — the one element
     // scoped to everything, which is what the global list is. Same mark as the
     // rows below so it reads as the same kind of reminder; only the tooltip
@@ -888,6 +897,16 @@
           const s = document.createElement("span"); s.className = "sum"; s.appendChild(sum);
           li.appendChild(s);
         }
+        // The pane dropdown's caret, outboard of everything: the far right edge
+        // is where every fold control in this sidebar sits (the shelf headers'
+        // carets, each heading's ⊞ ⊟ ▼), so the arrow is found where the eye
+        // already looks for one. Drawn only when there is something to drop
+        // down — a sleeping workspace has no panes worth listing (wsPaneRows),
+        // and in the instant before the first inventory lands an off-screen
+        // workspace has none known yet; that caret appears with the snapshot.
+        const rows = paneRows.get(w.id) || [];
+        const panesOpen = rows.length > 0 && wsPanesAreOpen(w);
+        if (rows.length) li.appendChild(paneCaretEl(w, rows, panesOpen));
         // A locked workspace does not take a click-to-switch: the lock says "leave
         // this one alone", and the sidebar is the one place a switch happens by
         // accident (a click meant for the row's name or its lock). The toast is not
@@ -897,7 +916,7 @@
         // keyboard still switch, so this narrows the accident, not the workspace.
         li.addEventListener("dblclick", () => renameWorkspace(w));
         li.addEventListener("contextmenu", (e) => { e.preventDefault(); openCtx(e.clientX, e.clientY, wsMenuItems(w)); });
-        // Hover card, same as the PANES rows: the row's marks (flag, paw print)
+        // Hover card, same as the pane rows: the row's marks (flag, paw print)
         // are 12px glyphs, and the note and the itemized todos only fit here.
         // showWorkspaceTip is a no-op for a row with neither, so passing over a
         // plain list pops nothing up. Hidden on mousedown as well as mouseleave:
@@ -943,6 +962,14 @@
           },
         }));
         wsListEl.appendChild(li);
+        // The open dropdown's rows follow their workspace row as siblings in
+        // the same <ul>, not as a nested list inside it. The row is a single
+        // flex line whose hover, focus colour and drag all assume it is one
+        // line; a nested <ul> would have to opt out of every one of those. As
+        // siblings they cost the reorder drag nothing either: it measures
+        // only li.ws (itemSel above), so a drop between two workspaces lands
+        // after the first one's panes, which is where the eye puts that gap.
+        if (panesOpen) for (const row of rows) wsListEl.appendChild(paneRowEl(row));
       }
     });
     // The add row goes with the list. Folding a shelf leaves it — the section is
@@ -997,9 +1024,8 @@
   }
 
   // wsGroupEl builds one shelf's header: what it holds, how many, and the caret
-  // that folds it. The count rides the header in both states for the reason
-  // paneGroupEl's rollup does — folded it stands in for the rows it hides, open
-  // it saves counting them by eye.
+  // that folds it. The count rides the header in both states — folded it stands
+  // in for the rows it hides, open it saves counting them by eye.
   function wsGroupEl(g, sep) {
     const collapsed = wsCollapsed.has(g.id);
     const li = document.createElement("li");
@@ -1027,9 +1053,11 @@
   }
 
   // The Workspaces heading's controls: the same pair, in the same right-edge
-  // position, that Usage and Panes carry. They act on whatever the last render
-  // said was foldable — the shelves when the list is split, the list itself as
-  // WS_ALL when it isn't — so ⊟ always folds something and ⊞ always has it back.
+  // position, that Usage carries. They fold shelves, not pane dropdowns — those
+  // have their own all-at-once gesture, Alt on any caret (togglePanes). The pair
+  // acts on whatever the last render said was foldable — the shelves when the
+  // list is split, the list itself as WS_ALL when it isn't — so ⊟ always folds
+  // something and ⊞ always has it back.
   //
   // Rewriting the whole set from wsGroupIDs is what keeps the two spellings apart:
   // ⊟ over a flat list drops any stale open/locked ids, and ⊟ over a split one

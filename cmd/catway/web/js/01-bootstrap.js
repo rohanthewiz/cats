@@ -24,7 +24,6 @@
   const wsListEl = document.getElementById("ws-list");
   const wsGlobalTodoEl = document.getElementById("ws-global-todo");
   const wsCountEl = document.getElementById("ws-count");
-  const paneListEl = document.getElementById("pane-list");
   const agentListEl = document.getElementById("agent-list");
   const pluginSecEl = document.getElementById("sec-plugins");
   const pluginListEl = document.getElementById("plugin-list");
@@ -132,43 +131,47 @@
   // message leaves every row in.
   let wsGit = new Map();
   // Last pane.list snapshot: every pane in the session, across all workspaces and
-  // tabs (the Panes sidebar section, see renderPaneList). The layout message can't
-  // serve it — it carries the active tab's panes alone — so this is a query result
-  // held between refreshes. busy/again/wait coalesce refresh requests so a chatty
+  // tabs (the workspace rows' pane dropdowns, see wsPaneRows). The layout message
+  // can't serve it — it carries the active tab's panes alone — so this is a query
+  // result held between refreshes. busy/again/wait coalesce refresh requests so a chatty
   // pane can't queue one round trip per title change (refreshPaneList).
   let paneInv = [], paneInvBusy = false, paneInvAgain = false, paneInvWait = null;
   const SVGNS = "http://www.w3.org/2000/svg"; // createElementNS: SVG isn't HTML
-  // Workspace ids whose pane group is folded shut in the sidebar, and the ids the
-  // last render actually drew (what collapse-all/expand-all act on). Which groups
-  // you keep open is a per-browser display preference like the font size, so it
-  // persists in localStorage rather than in the session the server owns.
-  const PGRP_KEY = "cats.panes.collapsed";
-  let paneCollapsed = new Set(), paneGroupIDs = [];
+  // Each workspace row's pane dropdown, open or shut, by workspace id — but only
+  // for the workspaces the user has actually toggled. An id that is absent means
+  // "not chosen", which wsPanesAreOpen reads as "open if it is the workspace this
+  // window is showing". That is why this is a map of booleans rather than a set
+  // of open ids: a set cannot tell "shut on purpose" from "never touched", and
+  // the default only applies to the second. Which dropdowns you keep open is a
+  // per-browser display preference like the font size, so it persists in
+  // localStorage rather than in the session the server owns.
+  //
+  // The Panes section this replaced kept two keys of its own
+  // (cats.panes.collapsed, cats.panes.moreopen). Neither is carried over: they
+  // recorded folds of a differently-shaped list (groups the user shut, and a
+  // shelf of idle workspaces), and read as dropdown state they would open every
+  // workspace on first load. They are left in storage, unread and harmless.
+  //
+  // A null-prototype object, not {}: lookups here are by an id the server
+  // chose, and on a plain object an id that happened to spell an inherited name
+  // ("constructor") would read back as a function — a truthy "open" nobody set.
+  const PANESOPEN_KEY = "cats.workspaces.panesopen";
+  let wsPanesOpen = Object.create(null);
   try {
-    const raw = JSON.parse(localStorage.getItem(PGRP_KEY));
-    if (Array.isArray(raw)) paneCollapsed = new Set(raw);
-  } catch (e) { /* storage disabled or corrupt — start with everything expanded */ }
-  function savePaneCollapsed() {
-    try { localStorage.setItem(PGRP_KEY, JSON.stringify([...paneCollapsed])); } catch (e) { /* not persisted */ }
+    const raw = JSON.parse(localStorage.getItem(PANESOPEN_KEY));
+    // Shape-checked rather than trusted: an array is an object too, and a
+    // corrupt value should cost the remembered choices, not the sidebar.
+    if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+      for (const [id, v] of Object.entries(raw)) if (typeof v === "boolean") wsPanesOpen[id] = v;
+    }
+  } catch (e) { /* storage disabled or corrupt — every workspace at its default */ }
+  function saveWsPanesOpen() {
+    try { localStorage.setItem(PANESOPEN_KEY, JSON.stringify(wsPanesOpen)); } catch (e) { /* not persisted */ }
   }
-  // Is the "more panes…" shelf at the foot of the Panes section open? That
-  // shelf holds the workspaces with nothing running in them (renderPaneList), and
-  // it is a flag rather than another id in the set above for one reason: it
-  // defaults the other way. A set of collapsed ids says "everything is open until
-  // you fold it", which is right for a group you chose to fold and wrong here —
-  // the whole point of the shelf is that a session's idle workspaces are out of
-  // the way before anyone touches anything. Stored as its own key so that default
-  // survives a browser that has never seen the section.
-  const PMORE_KEY = "cats.panes.moreopen";
-  let paneMoreOpen = false;
-  try { paneMoreOpen = localStorage.getItem(PMORE_KEY) === "1"; } catch (e) { /* storage disabled — shelf starts shut */ }
-  function savePaneMoreOpen() {
-    try { localStorage.setItem(PMORE_KEY, paneMoreOpen ? "1" : "0"); } catch (e) { /* not persisted */ }
-  }
-  // The same arrangement for the Usage section's provider groups, kept separate
-  // from the pane groups rather than merged into one map: the two sections'
-  // group ids come from different namespaces (workspace ids vs. provider ids),
-  // and folding CLAUDE has nothing to do with folding a workspace of panes.
+  // The Usage section's provider groups keep their own set of folded ids, apart
+  // from the pane dropdowns above: the two are keyed from different namespaces
+  // (provider ids vs. workspace ids), and folding CLAUDE has nothing to do with
+  // which workspace's panes are showing.
   const UGRP_KEY = "cats.usage.collapsed";
   let usageCollapsed = new Set(), usageGroupIDs = [];
   try {
@@ -181,8 +184,8 @@
   // And once more for the Workspaces section, whose groups are the two states a
   // workspace can be in rather than a list of ids: WS_OPEN and WS_LOCKED. Its own
   // key for the same reason as above — the namespaces don't overlap, and a folded
-  // "locked" shelf says nothing about which provider or which workspace of panes
-  // you last folded.
+  // "locked" shelf says nothing about which provider you last folded or which
+  // workspace's panes you left showing.
   const WGRP_KEY = "cats.workspaces.collapsed";
   const WS_OPEN = "open", WS_LOCKED = "locked", WS_ASLEEP = "asleep";
   // The third id is not a shelf. With nothing locked there is only one shelf and

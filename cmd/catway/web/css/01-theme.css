@@ -9,7 +9,7 @@
     /* Sidebar section titles pull out of --muted into a medium green so the
        three groups read as dividers rather than as more secondary label text. */
     --heading:#6cbf8d;
-    /* The workspace group headers inside PANES: a tier below --heading, in a
+    /* The group headers inside WORKSPACES and USAGE: a tier below --heading, in a
        greenish brown so they read as group dividers without competing with the
        green section titles. Themes that don't set it get plain --muted. */
     --ws-heading:#a09a62;

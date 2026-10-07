@@ -111,10 +111,10 @@
   // the third control, outboard of whatever pair that section already carries,
   // which hides the section's entire list instead of one group within it.
   //
-  //   PANES                    ⊞ ⊟ ▼      open: the section's own controls, then
-  //     ws-a          3 panes              the arrow hard against the right edge
-  //     α  vim
-  //   PANES                        ▶      folded: the arrow, alone
+  //   WORKSPACES               ⊞ ⊟ ▼      open: the section's own controls, then
+  //     OPEN     2 workspaces              the arrow hard against the right edge
+  //     ● cats
+  //   WORKSPACES                   ▶      folded: the arrow, alone
   //
   // Called last in each heading's setup so the arrow is appended after that
   // section's other buttons — DOM order is the visual order inside .hctl.

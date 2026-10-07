@@ -94,7 +94,6 @@ func TestMarkupCarriesTheIdsTheFrontEndResolves(t *testing.T) {
 		"sec-usage", "usage-hctl", "usage-list",
 		"sec-hosts", "host-hctl", "host-list",
 		"sec-workspaces", "ws-hctl", "ws-list", "ws-count", "ws-global-todo",
-		"sec-panes", "pane-hctl", "pane-list",
 		"sec-agents", "agent-hctl", "agent-list",
 		"sec-plugins", "plug-hctl", "plugin-list",
 		"sec-runbooks", "rb-hctl", "rb-list",

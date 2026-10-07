@@ -86,8 +86,8 @@
 
   // agentSep is the hairline between blocks. An <li> rather than a border on the
   // first row of the next block, because the rows carry a focus/hover background
-  // that would paint across such a border — the same reason the PANES group
-  // headers own their divider instead of leaning on the row below.
+  // that would paint across such a border — the same reason the Workspaces
+  // shelf headers own their divider instead of leaning on the row below.
   function agentSep() {
     const li = document.createElement("li");
     li.className = "sep";

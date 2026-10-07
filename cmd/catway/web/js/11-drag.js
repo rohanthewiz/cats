@@ -1,11 +1,11 @@
   // ---- Sidebar activation: presses, not clicks -------------------------------
   //
-  // Every list in this sidebar is rebuilt wholesale — renderWorkspaces,
-  // renderTabbar, renderPaneList and renderAgents each wipe their container and
-  // re-create every child — and all four run off the agents rollup, which the
-  // server broadcasts on each agent state transition. A busy session therefore
-  // repaints these lists several times a second, while a mouse press is held for
-  // ~100ms.
+  // Every list in this sidebar is rebuilt wholesale — renderWorkspaces (with
+  // the pane rows it hangs under each workspace), renderTabbar and renderAgents
+  // each wipe their container and re-create every child — and all three run off
+  // the agents rollup, which the server broadcasts on each agent state
+  // transition. A busy session therefore repaints these lists several times a
+  // second, while a mouse press is held for ~100ms.
   //
   // That is a lost click. The browser dispatches "click" on the nearest common
   // ancestor of the mousedown and mouseup targets, so when a rebuild lands

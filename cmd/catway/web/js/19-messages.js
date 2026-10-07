@@ -68,7 +68,7 @@
       }
       // A title push is the chattiest message there is — an agent retitles its
       // pane on every spinner tick — and it is only ever sent for panes on
-      // screen, whose rows renderPaneList already reads from local state. So it
+      // screen, whose rows wsPaneRows already reads from local state. So it
       // redraws from what is here and does NOT re-query pane.list: that round
       // trip (and the second full rebuild its reply triggers) could only bring
       // back what this message just delivered.

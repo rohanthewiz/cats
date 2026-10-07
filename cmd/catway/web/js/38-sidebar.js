@@ -161,8 +161,9 @@
   // of per-section heights only makes sense against one window's height, and
   // the Mac app and a browser tab rarely share that.
   //
-  // Stored as { "sec-panes": 220, … } keyed by section id, so a section that is
-  // renamed or removed just leaves an entry nothing reads.
+  // Stored as { "sec-agents": 220, … } keyed by section id, so a section that is
+  // renamed or removed just leaves an entry nothing reads (an old "sec-panes"
+  // entry is exactly that, now the panes live inside Workspaces).
   const SECH_KEY = "cats.section_h";
   let secSizes = {};
   try {

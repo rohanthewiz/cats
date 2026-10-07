@@ -101,8 +101,8 @@
         p.el.remove(); panes.delete(id);
       }
     }
-    // Structure changed: re-render the inventory-fed sections (Workspaces rows
-    // included), then re-query the inventory behind them.
+    // Structure changed: re-render the workspace list (its rows and the pane
+    // dropdowns under them), then re-query the inventory behind it.
     refreshPaneList();
     markFocusedAgent();
     markLockedAgents(); // a lock flip rebroadcasts the layout, not the rollup

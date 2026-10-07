@@ -2,7 +2,7 @@ package web
 
 import "github.com/rohanthewiz/element"
 
-// Sidebar is the left column: the wordmark, then the eight sections the
+// Sidebar is the left column: the wordmark, then the seven sections the
 // front-end fills in.
 //
 // Section order is the session's coordinate system, outermost first. Usage
@@ -26,6 +26,13 @@ import "github.com/rohanthewiz/element"
 // section, split by a hairline, and that made an editor read as an agent.
 // Giving each kind its own heading makes the difference visible.
 //
+// Panes have no section of their own. Each workspace row carries a dropdown
+// of its panes (a caret at the row's right edge, js/08-panelist.js), because a
+// separate Panes section was a second list keyed by the same workspaces, with
+// header rows repeating every name the section above it had just listed. The
+// chain still reads workspace → tab → pane; the pane step now sits inside
+// Workspaces rather than below it.
+//
 // Every section carries an id so its heading's fold arrow has something to hang
 // the .folded class on (initSectionFold in js/), and every heading carries an
 // .hctl even when there is nothing in it but the arrow — Agents has no groups
@@ -47,7 +54,9 @@ func (Sidebar) Render(b *element.Builder) (x any) {
 		nl(b, 2),
 		// Workspaces is the one heading with a second control: #ws-global-todo
 		// is the roll-up of every workspace's open todos, and #ws-count inside
-		// the .hctl is the "n of m shown" the fold arrow acts on.
+		// the .hctl is the "n of m shown" the fold arrow acts on. #ws-list also
+		// holds each workspace's pane rows, under the row whose caret opened
+		// them.
 		b.Section("id", "sec-workspaces").R(
 			b.H2().R(
 				b.T("Workspaces"),
@@ -58,8 +67,6 @@ func (Sidebar) Render(b *element.Builder) (x any) {
 			),
 			b.Ul("id", "ws-list").R(),
 		),
-		nl(b, 2),
-		section(b, "sec-panes", "Panes", "pane-hctl", "pane-list", false),
 		nl(b, 2),
 		section(b, "sec-agents", "Agents", "agent-hctl", "agent-list", false, "none"),
 		nl(b, 2),
@@ -85,14 +92,15 @@ func (Sidebar) Render(b *element.Builder) (x any) {
 	return
 }
 
-// section builds the shape five of the six sidebar sections share: a heading
-// with its fold-control berth, and the <ul> the front-end renders rows into.
+// section builds the shape every sidebar section but Workspaces shares: a
+// heading with its fold-control berth, and the <ul> the front-end renders rows
+// into.
 //
 // emptyRow, when given, is the placeholder the section shows before its first
 // message lands. Only Usage and Agents have one: they are the two sections that
 // are always present, so "nothing here yet" is a real state for them, whereas
-// Hosts and History hide themselves outright and Panes/Workspaces are filled by
-// the first layout, which arrives with the connection.
+// Hosts and History hide themselves outright and Workspaces is filled by the
+// first layout, which arrives with the connection.
 func section(b *element.Builder, secID, title, hctlID, listID string, hidden bool, emptyRow ...string) any {
 	attrs := []string{"id", secID}
 	if hidden {

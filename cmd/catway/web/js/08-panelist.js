@@ -1,8 +1,43 @@
 
-  // The Panes section is the session's whole pane inventory — every workspace and
-  // tab, matching the global Agents rollup below it — so its rows come from the
-  // cached pane.list snapshot rather than from the layout message, which only ever
-  // carries the active tab's panes.
+  // Each workspace row in the sidebar carries a dropdown of its own panes: a
+  // caret at the row's far right folds the list open beneath it. This file is
+  // that dropdown — the rows, the caret that opens them, the open/shut state,
+  // and the inventory they are drawn from. renderWorkspaces (07-workspaces.js)
+  // decides where they go; nothing here touches the DOM outside what it builds.
+  //
+  //   WORKSPACES                  ⊞ ⊟ ▼
+  //     ● cats  ⚑       ●1 ●2   ▼        the caret, hard against the right edge
+  //         p1  vim                       its panes, indented under the name
+  //         p2  build  claude
+  //     ○ api           ●1      ▶        shut: the row alone
+  //     ○ old ☾                            asleep: nothing to list, no caret
+  //     + workspace
+  //
+  // Why the panes moved into the workspace rows instead of keeping a section of
+  // their own: the Panes section was already grouped by workspace, under header
+  // rows that repeated every name the Workspaces section directly above it had
+  // just listed. Two lists keyed the same way meant reading the session twice
+  // (once for the workspace, once more for its panes) and keeping two sets of
+  // folds, shelves and scroll caps in step. Hanging the pane rows off the row
+  // they belong to says the same thing once, in the session's own order.
+  //
+  // What that order gives up is the Panes section's attention sort — the current
+  // workspace pinned first, idle ones folded behind a "more panes…" shelf. The
+  // first half survives as the default open state (wsPanesAreOpen): the
+  // workspace you are in is the one whose dropdown starts open. The second has
+  // nothing left to do — the workspace rows already carry each one's agent
+  // states (the ●N badge), so an idle workspace is one you can see is idle
+  // without opening it, and a shut dropdown costs it no rows at all.
+
+  // wsPaneRows merges the session's pane inventory into display rows and
+  // buckets them by workspace id, in inventory order. Session.ListPanes walks
+  // workspace, then tab, then pane, so each bucket reads tab by tab — the same
+  // order the hover card's itemized lists and the todo paw's jump use.
+  //
+  // The inventory is the cached pane.list snapshot rather than the layout
+  // message, which only ever carries the active tab's panes: a workspace's
+  // dropdown has to list its other tabs too, and other workspaces' dropdowns
+  // have nothing in the layout at all.
   //
   // Per row, two sources are merged. Viewport state (visible / focused) comes from
   // the layout: it is pushed, so a focus move lands without waiting on a query,
@@ -14,20 +49,17 @@
   // agent state when it knows the pane: it carries the seen flag, which is what
   // renders a run that finished off-screen as "done".
   //
-  // Rows are gathered per workspace before any DOM is built: the inventory already
-  // arrives grouped by workspace then tab (Session.ListPanes), so a run of rows
-  // sharing a handle prefix is exactly one group. Each group gets a header row that
-  // folds it — a collapsed group's rows are never built, and its header carries the
-  // rollup they would have shown.
-  function renderPaneList() {
-    paneListEl.innerHTML = "";
+  // Every awake workspace's rows are built on every render, open or shut: the
+  // caret's tooltip counts them, and the merge is a pass over a list already in
+  // memory. Only the DOM is skipped for a shut dropdown (renderWorkspaces).
+  function wsPaneRows() {
     const vis = new Map((layoutMsg ? layoutMsg.panes : []).map((pr) => [pr.pane, pr]));
     // Until the first snapshot lands (page load) the layout's own panes stand in,
-    // so the section is never briefly blank.
+    // so the current workspace's dropdown is never briefly empty.
     const inv = paneInv.length ? paneInv
       : Array.from(vis.values()).map((pr) => ({ pane: pr.pane, handle: pr.pub, focused: pr.focused }));
     const byPane = new Map(agentItems.map((a) => [a.pane, a]));
-    const groups = [];
+    const out = new Map();
     for (const pi of inv) {
       const pr = vis.get(pi.pane), p = panes.get(pi.pane);
       const live = !!(pr && p); // on screen: prefer local state over the snapshot
@@ -52,158 +84,135 @@
       // a round trip later.
       row.flag = flagOf(pr) || flagOf(pi);
 
-      const wsID = row.pub.split(":")[0];
+      const wsID = wsOf(row.pub);
       // A sleeping workspace's one pane is a placeholder with no terminal —
       // the shell it will get on wake. Listing it would offer a row that
-      // cannot be typed into; the WORKSPACES shelf is where a sleeping
-      // workspace is reached.
+      // cannot be typed into; the workspace row itself is how a sleeping
+      // workspace is reached (a click wakes it), so it gets no dropdown.
       if (wsAsleep(wsID)) continue;
-      if (!groups.length || groups[groups.length - 1].ws !== wsID) groups.push({ ws: wsID, rows: [] });
-      groups[groups.length - 1].rows.push(row);
+      let rows = out.get(wsID);
+      if (!rows) out.set(wsID, rows = []);
+      rows.push(row);
     }
-
-    // Two shelves, by whether the workspace is doing anything: the ones with work
-    // in them stay up top, and the rest fold behind a single "more panes…"
-    // row at the foot of the section. The inventory arrives in the session's
-    // workspace order, which is the order the *Workspaces* section wants — a list
-    // you reorder by hand and then read positionally — but Panes is read by
-    // attention, and a session that has collected a dozen workspaces buries the
-    // two you are actually running behind ten headers you never open.
-    //
-    // Active means "at least one pane here has a detected agent", in any state.
-    // Not "an agent that wants something" (blocked/done/working): a workspace
-    // would then drop through the floor the moment its agent went idle, which is
-    // exactly when you are about to type into it. The test is deliberately about
-    // the workspace as a whole rather than the pane — one row per workspace moves,
-    // so the group you were reading does not reshuffle its own rows underneath
-    // you as states change.
-    //
-    // The current workspace is pinned first whatever it holds. Its panes are the
-    // ones on screen, so the group naming them is not something the user should
-    // have to go looking for, and a shell-only workspace you are sitting in is
-    // still the workspace you are sitting in.
-    const aw = activeWorkspace();
-    const curWS = aw ? aw.id : "";
-    const hot = [], cold = [];
-    for (const g of groups) ((g.ws === curWS || g.rows.some((r) => r.agent)) ? hot : cold).push(g);
-    // Stable sort (ES2019+), so this pins the current workspace to the head and
-    // leaves every other pair reading 0 — i.e. in the session's own order.
-    hot.sort((a, b) => (b.ws === curWS) - (a.ws === curWS));
-
-    // Collapse-all/expand-all act on every group, folded shelf or not: the pair
-    // means "the whole section", and a set that quietly skipped the shelf would
-    // leave groups half-folded the next time it was opened.
-    paneGroupIDs = hot.concat(cold).map((g) => g.ws);
-    const emit = (g, sep) => {
-      paneListEl.appendChild(paneGroupEl(g, sep, g.ws === curWS));
-      if (!paneCollapsed.has(g.ws)) for (const row of g.rows) paneListEl.appendChild(paneRowEl(row));
-    };
-    hot.forEach((g, i) => emit(g, i > 0));
-    if (cold.length) {
-      // The shelf row draws the hairline that separates it from the live
-      // workspaces above, so the first group it reveals must not draw a second
-      // one directly beneath it.
-      paneListEl.appendChild(paneMoreEl(cold, hot.length > 0));
-      if (paneMoreOpen) cold.forEach((g, i) => emit(g, i > 0));
-    }
+    return out;
   }
 
   // Count with its noun, singular or plural — "1 agent", "3 panes". Shared by the
-  // group headers and the shelf row below them so the two read as one register.
+  // caret's tooltip and the workspace rows' own wording so the two read as one
+  // register.
   function nOf(c, w) { return c + " " + w + (c === 1 ? "" : "s"); }
 
-  // paneGroupEl builds one workspace's header row: how many of the group's panes
-  // are running an agent, out of how many panes. The rollup rides the header in
-  // both states — collapsed it stands in for the rows it hides, and expanded it
-  // saves counting them by eye, since the agent count is a property of the group
-  // that no single row reports.
+  // wsPanesAreOpen: is this workspace's pane dropdown open?
   //
-  // cur marks the workspace whose panes are the ones on screen. It earns a mark
-  // because the section is no longer in session order: the current workspace is
-  // pinned to the top (renderPaneList) and can sit above workspaces that are
-  // busier than it is, so the first row has to say why it is first. Same ●/accent
-  // the Workspaces section marks the same workspace with, since it is the same
-  // fact being reported twice.
-  function paneGroupEl(g, sep, cur) {
-    const collapsed = paneCollapsed.has(g.ws);
-    const li = document.createElement("li");
-    li.className = "wsgrp" + (sep ? " sep" : "") + (cur ? " cur" : "");
-    const name = document.createElement("span");
-    name.textContent = (cur ? "● " : "") + (wsName(g.ws) || "—");
-    li.appendChild(name);
-    const agents = g.rows.filter((r) => r.agent).length;
-    const s = document.createElement("span");
-    s.className = "gsum";
-    s.textContent = nOf(agents, "agent") + " / " + nOf(g.rows.length, "pane");
-    li.appendChild(s);
-    const car = document.createElement("span");
-    car.className = "car"; car.textContent = collapsed ? "▶" : "▼";
-    li.appendChild(car);
-    li.title = (collapsed ? "expand " : "collapse ") + (wsName(g.ws) || "workspace");
-    // On the press, like the rows it folds: the header is rebuilt on the same
-    // pushes they are, and a fold that has to be clicked twice because a rollup
-    // landed mid-press reads as a stuck group.
-    pressActivate(li, () => {
-      if (collapsed) paneCollapsed.delete(g.ws); else paneCollapsed.add(g.ws);
-      savePaneCollapsed();
-      renderPaneList();
-    });
-    return li;
+  // An explicit choice wins: a caret press records true or false for that
+  // workspace (wsPanesOpen, persisted), and it sticks across renders, switches
+  // and reloads. A workspace nobody has toggled follows the focus instead —
+  // open while it is the workspace this window is showing, shut otherwise.
+  //
+  // That default is the half of the old Panes section's ordering worth keeping
+  // (see the note at the top of this file). Its panes are the ones on screen and
+  // the likeliest target of a click in the sidebar, so an untouched session
+  // opens on exactly one dropdown, the one you are in, and switching workspace
+  // carries it along. Every other workspace is one press away, which is the
+  // same distance its group used to be behind a folded header.
+  function wsPanesAreOpen(w) {
+    const v = wsPanesOpen[w.id];
+    return v === undefined ? !!w.active : v;
   }
 
-  // paneMoreEl builds the one row the idle workspaces fold into: a shelf, not a
-  // group. It is built as a .wsgrp because it does a group header's job at the
-  // tier above — it names what is behind it, counts it, and folds it with the
-  // same caret — and it is set in italics so a list of workspace names is never
-  // mistaken for holding one called "more panes".
+  // togglePanes flips one workspace's dropdown, or, with all set (Alt held on
+  // the press), sets every workspace's to the state this one is flipping to.
+  // Alt is the modifier macOS outline views already give a disclosure triangle
+  // for "more than just this one" (there it opens recursively; a flat list has
+  // no depth, so here it reaches across instead). It stands in for the
+  // expand-all/collapse-all pair the Panes heading used to carry: the
+  // Workspaces heading's ⊞/⊟ already mean "fold the shelves", and a second pair
+  // beside them would be the same two glyphs with a different scope.
   //
-  //   PANES              ⊞ ⊟ ▼
-  //     ● cats   2 agents / 4 panes     the current workspace, pinned
-  //       cats:p2  build   claude
-  //     api      1 agent / 3 panes      still working
-  //   ─────────────────────────────
-  //     more panes…                 7  ▶
+  // Writing every id explicitly, rather than clearing the map back to the
+  // default, is what makes Alt-collapse stick: with the map cleared, the current
+  // workspace would fall straight back to "open because it is current".
+  function togglePanes(w, all) {
+    const open = !wsPanesAreOpen(w);
+    if (all && layoutMsg) for (const x of layoutMsg.workspaces) wsPanesOpen[x.id] = open;
+    else wsPanesOpen[w.id] = open;
+    saveWsPanesOpen();
+    if (layoutMsg) renderWorkspaces(layoutMsg);
+  }
+
+  // prunePanesOpen drops remembered choices for workspaces the session no longer
+  // has. Without it the map only ever grows, and a choice made for a closed
+  // workspace would be inherited by whichever new one is later handed the same
+  // id. Saved only when something was actually dropped, since this runs on every
+  // workspace render and most renders drop nothing.
+  function prunePanesOpen(workspaces) {
+    const live = new Set(workspaces.map((w) => w.id));
+    let dropped = false;
+    for (const id of Object.keys(wsPanesOpen)) {
+      if (!live.has(id)) { delete wsPanesOpen[id]; dropped = true; }
+    }
+    if (dropped) saveWsPanesOpen();
+  }
+
+  // paneCaretEl builds the dropdown arrow at a workspace row's far right.
   //
-  // The label says panes, not workspaces, because panes are what this section
-  // lists and what opening the shelf gives you. The workspace headers behind it
-  // are how those panes are *organized* — the same grouping the rows above use —
-  // not a different kind of thing the row leads to, and a section of panes whose
-  // last row offers "more workspaces" reads as a door out of the section.
+  // Its press must not also reach the row. The row's own mousedown arms the
+  // switch-or-reorder gesture (beginReorderDrag), and a caret that opened the
+  // list AND switched workspace would be two answers to one press. The todo paw
+  // has the same arrangement for the same reason, and, like the paw, takes
+  // hideTip with it, since stopping the press also stops the row's own. The
+  // default is prevented as well, which is what beginReorderDrag would have done
+  // for the row: a press on a glyph is not the start of a text selection. A
+  // double press would reach the row's rename the same way, so dblclick stops
+  // here too. Right-click is left alone: the row's menu is still the menu for
+  // the row the caret sits in.
   //
-  // The tally follows the label: the bare number of panes hidden behind the row.
-  // Not agents — every workspace here is here precisely because it has none, so
-  // that column would be zeroes. Not "7 panes in 3 workspaces" either: the noun
-  // is already in the label this rides, and spelled out twice the row outgrows a
-  // sidebar that goes down to 150px wide, which is the same trade the Workspaces
-  // heading makes with its own folded count. The words, and the workspace count
-  // the digit no longer carries, are in the tooltip for anyone the digit doesn't
-  // reach. It rides both states for the reason the group rollups do — shut, it
-  // stands in for what is hidden; open, it saves counting rows.
-  function paneMoreEl(cold, sep) {
-    const li = document.createElement("li");
-    li.className = "wsgrp more" + (sep ? " sep" : "");
-    const name = document.createElement("span");
-    name.textContent = "more panes…";
-    li.appendChild(name);
-    const panesN = cold.reduce((t, g) => t + g.rows.length, 0);
-    const s = document.createElement("span");
-    s.className = "gsum";
-    s.textContent = String(panesN);
-    li.appendChild(s);
+  // The tooltip carries the counts the old Panes group header showed in full
+  // ("2 agents / 4 panes"). The row has no room left for them at sidebar widths
+  // down to 150px, and the arrow is exactly where someone who wants to know
+  // what is behind it is already pointing.
+  function paneCaretEl(w, rows, open) {
     const car = document.createElement("span");
-    car.className = "car"; car.textContent = paneMoreOpen ? "▼" : "▶";
-    li.appendChild(car);
-    li.title = (paneMoreOpen ? "hide " : "show ") + nOf(panesN, "pane")
-      + " in " + nOf(cold.length, "workspace") + " with no agent running";
-    // On the press, for the same reason every other fold in this list is: the row
-    // is rebuilt on every rollup and title push, and a press that a rebuild
-    // interrupts never becomes a click.
-    pressActivate(li, () => {
-      paneMoreOpen = !paneMoreOpen;
-      savePaneMoreOpen();
-      renderPaneList();
+    car.className = "car";
+    car.textContent = open ? "▼" : "▶";
+    const agents = rows.filter((r) => r.agent).length;
+    car.title = (open ? "hide " : "show ") + nOf(rows.length, "pane")
+      + (agents ? " (" + agents + " running an agent)" : "")
+      + " · Alt+click: every workspace";
+    car.setAttribute("role", "button");
+    car.setAttribute("aria-expanded", open ? "true" : "false");
+    car.addEventListener("mousedown", (e) => {
+      if (e.button !== 0) return; // right-click still reaches the row's menu
+      e.stopPropagation();
+      e.preventDefault();
+      hideTip();
     });
-    return li;
+    car.addEventListener("dblclick", (e) => e.stopPropagation());
+    // On the press, like every other fold in the sidebar: the row is rebuilt on
+    // every rollup and title push, and a press that a rebuild interrupts never
+    // becomes a click. The mouseup event pressActivate hands back is where Alt
+    // is read, so the modifier counts if it is held at release.
+    pressActivate(car, (e) => togglePanes(w, !!(e && e.altKey)));
+    return car;
+  }
+
+  // paneLocalRef is a pane's handle with the workspace taken off — "p3" for
+  // "w1:p3". A dropdown row sits directly under the row naming its workspace,
+  // so the "cats:" every other pane reference carries (paneRef) would only say
+  // again what the row above has just said, once per pane. It also cost the
+  // most where room is scarcest: a long workspace name ran the handle into
+  // the title, and at narrow widths clipped the pane number itself — the one
+  // part of the handle that tells the rows apart.
+  //
+  // Only the row's label drops it. The hover card still names the pane in
+  // full (showPaneTip): it floats free of the list, and it is where you read
+  // a handle off to type into catctl, which wants the whole thing.
+  //
+  // No handle yet (a pane the layout has not named) falls back to paneRef's
+  // own "#id" stand-in, so the two can't disagree about an unnamed pane.
+  function paneLocalRef(pub, paneID) {
+    if (!pub) return paneRef(pub, paneID);
+    return pub.slice(pub.indexOf(":") + 1);
   }
 
   function paneRowEl(row) {
@@ -211,7 +220,7 @@
     li.className = "pn" + (row.visible && row.focused ? " focused" : "") + (row.visible ? "" : " off");
     // No focus marker glyph: li.focused's background says it, and a per-row
     // gutter for a mark only one row ever carries indents the whole list.
-    const pub = document.createElement("span"); pub.className = "pub"; pub.textContent = paneRef(row.pub, row.pane);
+    const pub = document.createElement("span"); pub.className = "pub"; pub.textContent = paneLocalRef(row.pub, row.pane);
     li.appendChild(pub);
     // The flag sits right after the handle, ahead of the title: it is the mark
     // the eye is scanning this list for, and the title is the part that gets
@@ -271,37 +280,16 @@
     return li;
   }
 
-  // The Panes heading's own controls: fold or unfold every workspace group at
-  // once. They act on the groups the last render drew, so a workspace that no
-  // longer has panes doesn't linger in the collapsed set.
+  // refreshPaneList redraws the pane dropdowns now from what the browser already
+  // knows, then re-queries pane.list for the parts only the server has
+  // (off-screen titles, panes that appeared or closed elsewhere). Every caller is
+  // a push that could have changed the inventory; the query is debounced and
+  // single-flight, so a burst of them costs one round trip plus at most one
+  // follow-up.
   //
-  // The "more panes…" shelf moves with them. ⊞ means "show me everything in
-  // this section", and a shelf still holding half the session's panes shut
-  // would make that a lie; ⊟ means the reverse, and leaving the shelf hanging
-  // open over a list of folded headers is the same lie the other way round.
-  (function initPaneHeadingCtl() {
-    const el = document.getElementById("pane-hctl");
-    el.appendChild(mkBtn("⊞", "expand all workspaces", "", () => {
-      paneCollapsed.clear(); savePaneCollapsed();
-      paneMoreOpen = true; savePaneMoreOpen();
-      renderPaneList();
-    }));
-    el.appendChild(mkBtn("⊟", "collapse all workspaces", "", () => {
-      paneCollapsed = new Set(paneGroupIDs); savePaneCollapsed();
-      paneMoreOpen = false; savePaneMoreOpen();
-      renderPaneList();
-    }));
-    initSectionFold("sec-panes", "pane-hctl", "panes");
-  })();
-
-  // refreshPaneList redraws the section now from what the browser already knows,
-  // then re-queries pane.list for the parts only the server has (off-screen
-  // titles, panes that appeared or closed elsewhere). Every caller is a push that
-  // could have changed the inventory; the query is debounced and single-flight, so
-  // a burst of them costs one round trip plus at most one follow-up.
-  //
-  // The workspace rows ride along: their todo marks read the same inventory, so
-  // a manager opening or closing has to reach both sections at once.
+  // The name outlived the Panes section it was written for; every push handler
+  // in 19-messages calls it, and what it means to them — "the inventory may have
+  // moved" — has not changed.
   function refreshPaneList() {
     renderInventoryViews();
     if (paneInvBusy) { paneInvAgain = true; return; }
@@ -316,26 +304,29 @@
     }, 120);
   }
 
-  // The two views the pane inventory feeds: the Panes section, and the todo marks
-  // on the Workspaces rows above it.
+  // What the pane inventory feeds, all of it now drawn by one renderer: the pane
+  // dropdowns under each workspace row, and the todo marks on those rows.
   //
   // Coalesced to one frame, because the callers arrive in bursts. Switching tab
   // lands a layout, an agents rollup, and then pane_title/pane_agent/pane_exited
-  // for every pane that just came into view — each of which asks for these views.
-  // Both are full wipe-and-rebuilds over the whole session's inventory, so
+  // for every pane that just came into view — each of which asks for a redraw.
+  // The list is a full wipe-and-rebuild over the whole session's inventory, so
   // rebuilding per message made a switch cost O(panes in tab × panes in session)
   // to paint the last one anyway. The 120ms query debounce below never covered
   // this; it guards only the round trip.
   //
-  // The same frame also absorbs pushes that only move the Workspaces rows (the
+  // The same frame also absorbs pushes that only move the workspace rows (the
   // client census, git sync, the agents rollup, the host roster): those used to
   // rebuild the section synchronously on arrival, so an agent state change —
   // which lands an agents rollup AND the pane_agent that goes with it — rebuilt
-  // Workspaces three times in one burst. Two flags record which views a frame
-  // owes, so a Workspaces-only push does not drag the Panes rebuild along.
-  let invFrame = 0, invPanesDue = false, invWsDue = false;
+  // the list three times in one burst.
+  //
+  // Two entry points are kept although they now owe the same redraw: the
+  // callers name what changed (the inventory, or only the workspace rows), and
+  // that distinction is free to keep and expensive to rediscover should the two
+  // views ever be drawn separately again.
+  let invFrame = 0;
   function renderInventoryViews() {
-    invPanesDue = true; invWsDue = true;
     scheduleInventoryFrame();
   }
   // renderWorkspacesSoon is renderWorkspaces for pushes: coalesced into the
@@ -343,17 +334,16 @@
   // toggle, a heading control) still call renderWorkspaces directly — the
   // click should answer in the same frame, and it does not arrive in bursts.
   function renderWorkspacesSoon() {
-    invWsDue = true;
     scheduleInventoryFrame();
   }
   function scheduleInventoryFrame() {
     if (invFrame) return;
     invFrame = requestAnimationFrame(() => { invFrame = 0; renderInventoryViewsNow(); });
   }
+  // Before the first layout there is no workspace list to hang anything off, and
+  // nothing is lost by waiting: the layout that brings the list re-queries the
+  // inventory itself (applyLayout → refreshPaneList), which lands back here.
   function renderInventoryViewsNow() {
-    const panesDue = invPanesDue, wsDue = invWsDue;
-    invPanesDue = false; invWsDue = false;
-    if (panesDue) renderPaneList();
-    if (wsDue && layoutMsg) renderWorkspaces(layoutMsg);
+    if (layoutMsg) renderWorkspaces(layoutMsg);
   }
 

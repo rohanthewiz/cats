@@ -4,7 +4,7 @@
   #usage-list li:hover { background:none; }
   #usage-list li.empty { color:var(--muted); font-style:italic; }
   /* A heading over the rows it covers — one per provider, plus the host — in
-     the same register #pane-list's workspace headers use, and with the same job:
+     the same register the Workspaces shelf headers use, and with the same job:
      it names the group and folds it. Flex like .wsgrp so the summary and caret
      can be pushed to the right edge; the padding stays its own — the rows'
      3px/5px is tuned around a meter this has not got. */
@@ -13,9 +13,9 @@
     display:flex; align-items:baseline; gap:6px; cursor:pointer; }
   #usage-list li.ugrp.sep { border-top:1px solid var(--line); margin-top:5px; padding-top:7px; }
   /* Overrides #usage-list li:hover's background:none — these rows ARE clickable,
-     so they take the same hover the pane group headers do. */
+     so they take the same hover the Workspaces shelf headers do. */
   #usage-list li.ugrp:hover { background:var(--panel2); color:var(--fg-soft); }
-  /* Summary then caret, both pinned right, exactly as in #pane-list. */
+  /* Summary then caret, both pinned right, exactly as in #ws-list's shelves. */
   #usage-list li.ugrp .gsum, #usage-list li.ugrp .car { margin-left:auto; }
   #usage-list li.ugrp .gsum + .car { margin-left:0; }
   /* The stand-in reading a folded group shows: the secondary half of the header,
