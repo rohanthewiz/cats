@@ -619,8 +619,11 @@ type PaneDiff struct {
 
 // --- App-level (§5) -------------------------------------------------------------
 
-// Clipboard is an OSC 52 clipboard write from any pane (base64 on the wire);
-// empty data is a clipboard-clear.
+// Clipboard is an OSC 52 clipboard write from any pane (base64 on the wire).
+// Data is never empty. A pane's clipboard-clear (an OSC 52 write with no
+// payload) is dropped at catway rather than relayed, so a program in a pane
+// cannot empty the user's clipboard. A client that somehow receives an empty
+// one should treat it as a no-op, not a clear.
 type Clipboard struct {
 	T    Type   `json:"t"`
 	Data []byte `json:"data"`

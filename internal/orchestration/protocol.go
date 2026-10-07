@@ -872,8 +872,11 @@ func NewPaneAgentSession(id uint32, agent, sessionID string) PaneAgentSession {
 // libghostty-vt drops OSC 52, so the Host reconstructs it from the raw PTY byte
 // stream (as it does OSC 7 cwd) and the orchestrator re-emits it through its own
 // clipboard writer. Data is the decoded clipboard bytes (base64 on the wire); an
-// empty Data is a clipboard-clear. Only the "c"/default selection is forwarded;
-// queries have no reply path and are dropped.
+// empty Data is a clipboard-clear. The Host reports a clear as faithfully as any
+// other write, but catway does not relay it: a pane may set the user's clipboard
+// and may not empty it (see the MsgPaneClipboard case in cmd/catway/daemon.go).
+// Only the "c"/default selection is forwarded; queries have no reply path and are
+// dropped.
 type PaneClipboard struct {
 	Type   MessageType `json:"type"`
 	PaneID uint32      `json:"pane_id"`

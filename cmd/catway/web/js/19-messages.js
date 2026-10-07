@@ -144,6 +144,12 @@
       case "plugin_notice": applyPluginNotice(msg); break;
       case "usage": renderUsage(msg); break;
       case "clipboard": // OSC 52 write from a pane app — no user activation
+        // Empty data would be a pane clearing the clipboard. catway already
+        // drops those (cmd/catway/daemon.go), and this is the wire contract's
+        // "treat it as a no-op" for a page attached to a catway that predates
+        // that rule. Writing "" through the mac bridge runs pbcopy with no
+        // input, which empties the pasteboard and leaves no trace of why.
+        if (!msg.data) break;
         try { clipWrite(b64decode(msg.data)).catch(() => {}); } catch (e) {}
         break;
       case "notify": handleNotify(msg); break;

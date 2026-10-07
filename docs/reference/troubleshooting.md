@@ -132,6 +132,22 @@ This asymmetry is why the native bridge exists — WKWebView is *stricter* than 
 normal browser here (reads resolve empty), so the app cannot rely on the web API at
 all.
 
+### ⌘V says "clipboard has no text" right after a copy
+
+That toast means the pasteboard held no text at all, which a normal copy never
+leaves behind. Something emptied it after the copy. Common causes are a password
+manager's timed clear, or a clipboard utility.
+
+It is **not** a program in a pane. An OSC 52 write with an empty payload
+(`ESC ] 52;c; BEL`) asks the terminal to clear the clipboard, and catway drops
+that request instead of relaying it. A pane can set the clipboard but cannot
+empty it. Each dropped clear is logged as a warning, so you can confirm or rule
+out a pane by checking the daemon log (`daemons.log`, beside `boot.log`):
+
+```text
+WARN catway: ignored an OSC 52 clipboard clear from pane 3 on <host>
+```
+
 ## ⌘+ / ⌘- do not change the font in the app
 
 They do — through the native View menu, not the page. Cocoa resolves those as key

@@ -79,8 +79,9 @@ is the side-by-side comparison.
   their native conversations. See [Persistence](subsystems/persistence.md).
 * **Git worktrees** created per agent or task straight from the UI —
   [Worktrees](subsystems/worktrees.md).
-* **Copy mode** with vim-style rebindable keys, OSC 52 clipboard, OSC 8
-  hyperlinks, window-title and notification passthrough.
+* **Copy mode** with vim-style rebindable keys, OSC 52 clipboard (a pane can
+  set it, never read or clear it), OSC 8 hyperlinks, window-title and
+  notification passthrough.
 * **Remote access** with a shared password, HMAC-signed session cookies, bearer
   tokens for headless clients and optional TLS —
   [Auth and TLS](subsystems/auth-and-tls.md).

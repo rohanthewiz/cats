@@ -1352,6 +1352,31 @@ func (d *daemon) dispatch(mt orchestration.MessageType, payload []byte) {
 		if err := json.Unmarshal(payload, &ev); err != nil {
 			return
 		}
+		// An empty write is a pane asking to CLEAR the clipboard (`ESC ] 52;c;`
+		// with no payload). It stops here instead of being relayed. The clipboard
+		// belongs to the user, not the pane, and a clear relayed to the mac app
+		// runs pbcopy with no input, which leaves the pasteboard with nothing on
+		// it and nothing on screen to explain why. The next ⌘V just says
+		// "clipboard has no text". A copy that goes nowhere costs the program
+		// nothing, while a clear destroys whatever the user last copied
+		// anywhere on the machine, so cats takes the safer side here and gives
+		// up the parity some terminals keep by honouring the clear.
+		//
+		// The filter lives here and not in the Host's OSC 52 parser for two
+		// reasons. cathost is persistent across catway upgrades, so a parser
+		// change would not take effect until that daemon happened to be
+		// restarted, while this handler is in the binary the user just
+		// installed. And the parser stays a faithful decoder of what the child
+		// emitted, which is the job the seam gives it (PaneClipboard's doc).
+		//
+		// WARN rather than an informational line: it is a refused request, and
+		// catapp keeps only WARN and above in its daemon log. That log is
+		// where a "my clipboard vanished" report gets checked for a pane that
+		// tried to clear it.
+		if len(ev.Data) == 0 {
+			dlog.Warnf("catway: ignored an OSC 52 clipboard clear from pane %d on %s", ev.PaneID, d.name())
+			return
+		}
 		o.post(func() { o.broadcast(browserproto.NewClipboard(ev.Data)) })
 
 	case orchestration.MsgPaneExited:

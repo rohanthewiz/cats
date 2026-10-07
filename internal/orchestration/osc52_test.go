@@ -34,6 +34,8 @@ func TestOSC52EmptySelectorForm(t *testing.T) {
 
 func TestOSC52ClearClipboard(t *testing.T) {
 	// `52;c;` (empty payload) is a clipboard-clear: one write of empty bytes.
+	// The parser still reports it, in step with cats's parse; catway is what
+	// declines to relay it (TestPaneClipboardClearIsNotRelayed).
 	got := scan52("\x1b]52;c;\x07")
 	if len(got) != 1 || len(got[0]) != 0 {
 		t.Fatalf("clear should yield one empty write, got %q", got)

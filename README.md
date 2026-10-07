@@ -117,7 +117,10 @@ server, web client + Mac server), or
   their native conversation sessions.
 - **Git worktrees**: create a worktree checkout per agent/task from the UI.
 - **Copy mode** with vim-style, rebindable keys; OSC 52 clipboard; OSC 8
-  hyperlinks; window-title and notification passthrough.
+  hyperlinks; window-title and notification passthrough. A program in a pane
+  can *set* the clipboard through OSC 52 but cannot read it or clear it. An
+  empty OSC 52 write, which some terminals honour as "clear the clipboard",
+  is dropped and logged rather than wiping what you last copied.
 - **Remote access**: shared-password login with HMAC-signed session cookies
   (headless clients use a Bearer token) and optional TLS (self-signed
   auto-generated, or bring your own cert). `catctl pair` puts a single-use QR

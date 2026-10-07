@@ -193,7 +193,10 @@ make the honest path look more privileged than the dishonest one. The socket's
 **Why read-only, and only here.** OSC 52 already gives a program running inside a
 pane a working clipboard *write* path, and it is write-only by design: a terminal
 that answered clipboard reads would let anything that can print bytes exfiltrate
-the clipboard. The read path therefore stays off the terminal stream entirely.
+the clipboard. (The write path is narrower than OSC 52 allows, too. An empty
+write, which is OSC 52's clear, is dropped at catway, so a pane can replace the
+clipboard but not empty it.) The read path therefore stays off the terminal
+stream entirely.
 The browser needs none of this either — it has `navigator.clipboard`, and in the
 mac app catapp's native bridge, for its own machine's clipboard.
 

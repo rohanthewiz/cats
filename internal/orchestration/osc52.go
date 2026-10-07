@@ -89,7 +89,10 @@ func (s *osc52Scanner) reset() {
 // other selections (p/q/s/0-7), queries (`?`, which have no reply path here),
 // and payloads that are not valid standard base64. An empty payload (`52;c;`)
 // decodes to an empty slice — a clipboard-clear. Mirrors cats's
-// parse_osc52_clipboard_write.
+// parse_osc52_clipboard_write, the clear included. Whether to honour a clear is
+// a policy question, not a parsing one, so the decoder reports it faithfully and
+// catway is the one that drops it (the MsgPaneClipboard case in
+// cmd/catway/daemon.go). That keeps this parse and its Rust twin in step.
 func parseOSC52Clipboard(body []byte) ([]byte, bool) {
 	rest, ok := bytes.CutPrefix(body, []byte("52;"))
 	if !ok {

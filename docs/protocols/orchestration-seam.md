@@ -107,7 +107,7 @@ without racing the daemon's own post-hello replay. Unknown pane ids are ignored.
 | `pane_branch` | `pane_id`, `branch` | v3. The git branch of the pane's cwd — `""` outside a repository, `@<sha>` while detached. Resolved **daemon-side**, because the cwd is a path on the daemon's filesystem |
 | `pane_agent` | `pane_id`, agent label, state, visibility flags | `""` = plain shell; state is `idle` / `working` / `blocked` / `unknown` |
 | `pane_agent_session` | `pane_id`, agent label, `session_id` | Which conversation the pane's agent process is in, traced from its pid to the agent's own registry of live processes (`~/.claude/sessions/<pid>.json`). Resolved **daemon-side** — the pids and the registry are on the machine the agent runs on. `""` = no answer; an empty agent retracts it. Additive: a peer that does not know the type ignores it |
-| `pane_clipboard` | `pane_id`, `data` (base64) | reconstructed OSC 52; empty data = clear |
+| `pane_clipboard` | `pane_id`, `data` (base64) | reconstructed OSC 52; empty data = clear, which catway drops rather than relaying |
 | `pane_title` | `pane_id`, `title` | OSC 0/2; empty = clear |
 | `pane_selection` | `pane_id`, `text` | reply to `request_selection`, one per request |
 | `pane_text` | `pane_id`, `text` | reply to `request_text`, one per request |
