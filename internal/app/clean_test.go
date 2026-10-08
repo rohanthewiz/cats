@@ -332,3 +332,89 @@ func TestRestoreHealsSleepingActive(t *testing.T) {
 		t.Fatal("every workspace asleep: the active one was not woken")
 	}
 }
+
+// Closing the active workspace when its neighbour in the list is asleep lands
+// on an awake workspace, not the sleeping one. The reported case: w1 awake,
+// w2 asleep, w3 (a worktree, last in the list, active) removed. Plain index
+// arithmetic made w2 active, and the window showed a pane with no terminal.
+func TestCloseWorkspaceSkipsSleepingNeighbour(t *testing.T) {
+	h := newCleanHarness(t)
+	first := h.s.Workspaces()[0].ID
+	if _, err := h.ws.Sleep(workspace.SpawnSpec{}); err != nil {
+		t.Fatal(err)
+	}
+	last, err := h.s.CreateWorkspace()
+	if err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	if h.s.ActiveWorkspaceID() != last {
+		t.Fatalf("active = %s, want the new %s", h.s.ActiveWorkspaceID(), last)
+	}
+	r := h.resp()
+
+	h.d.Dispatch(CmdWorkspaceClose, params(t, WorkspaceParams{ID: last}), r)
+
+	if !r.okCall {
+		t.Fatalf("close failed: %q", r.errMsg)
+	}
+	if got := h.s.ActiveWorkspaceID(); got != first {
+		t.Fatalf("active after close = %s, want the awake %s (not the sleeping %s)", got, first, h.ws.ID)
+	}
+	if !h.ws.Asleep {
+		t.Fatal("the sleeping neighbour was woken; an awake workspace was available")
+	}
+	// Nothing is left for the runtime's backstop to do.
+	if h.d.WakeActiveIfAsleep() {
+		t.Fatal("WakeActiveIfAsleep woke something with an awake workspace active")
+	}
+
+	// The same holds when the sleeping workspace sits AFTER the closed one:
+	// nearest awake prefers later, then earlier, skipping sleepers both ways.
+	mid, err := h.s.CreateWorkspace() // w1, w2(asleep), mid
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.s.MoveWorkspace(mid, 1); err != nil { // w1, mid, w2(asleep)
+		t.Fatal(err)
+	}
+	if err := h.s.CloseWorkspace(&mid); err != nil {
+		t.Fatal(err)
+	}
+	if got := h.s.ActiveWorkspaceID(); got != first {
+		t.Fatalf("active after closing a middle workspace = %s, want %s", got, first)
+	}
+}
+
+// When the closed workspace was the last one awake, the session has nowhere
+// awake to land; the model leaves the sleeper active and the runtime's
+// WakeActiveIfAsleep wakes it, resuming its parked agents as a focus would.
+func TestWakeActiveIfAsleepAfterLastAwakeCloses(t *testing.T) {
+	h := newCleanHarness(t)
+	first := h.s.Workspaces()[0].ID
+	if _, err := h.s.ParkAgentIn(first, workspace.ParkedAgent{Source: "hook", Agent: "claude", Kind: "id", Value: "sess-w1"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.s.SleepWorkspace(first); err != nil {
+		t.Fatalf("sleep w1: %v", err)
+	}
+	if err := h.s.CloseWorkspace(&h.ws.ID); err != nil {
+		t.Fatalf("close the last awake workspace: %v", err)
+	}
+	ws := h.s.ActiveWorkspace()
+	if ws.ID != first || !ws.Asleep {
+		t.Fatalf("active = %s asleep=%v, want the sleeping %s left for the runtime", ws.ID, ws.Asleep, first)
+	}
+
+	if !h.d.WakeActiveIfAsleep() {
+		t.Fatal("WakeActiveIfAsleep did not wake the sleeping active workspace")
+	}
+	if ws.Asleep || ws.ParkedAgents != nil {
+		t.Fatalf("after wake: asleep=%v parked=%v", ws.Asleep, ws.ParkedAgents)
+	}
+	if len(h.b.resumed) != 1 {
+		t.Fatalf("staged resumes = %v, want the parked agent", h.b.resumed)
+	}
+	if h.d.WakeActiveIfAsleep() {
+		t.Fatal("a second WakeActiveIfAsleep reported a wake")
+	}
+}

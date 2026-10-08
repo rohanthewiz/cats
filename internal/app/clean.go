@@ -283,6 +283,16 @@ func (d *Dispatcher) wakeIfAsleep(wsID string) bool {
 	return true
 }
 
+// WakeActiveIfAsleep wakes the session's active workspace when it is asleep,
+// resuming its parked agents, and reports whether it did. The active workspace
+// is only ever asleep after a close took the last awake workspace away (see
+// Session.dropWorkspace) — every other workspace is then asleep, and the one
+// left active is the one the session will show, so it is woken exactly as a
+// click on its sidebar row would wake it. The caller owns the ApplyModel.
+func (d *Dispatcher) WakeActiveIfAsleep() bool {
+	return d.wakeIfAsleep(d.session.ActiveWorkspaceID())
+}
+
 // publicIDs renders pane ids as their public handles ("w2:p3"), for messages.
 func (d *Dispatcher) publicIDs(ids []layout.PaneID) []string {
 	out := make([]string, 0, len(ids))

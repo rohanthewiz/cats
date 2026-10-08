@@ -1526,6 +1526,14 @@ func (o *orch) applyModel() {
 	// "where you were" for persistence and for every caller with no window.
 	// First, because everything below resolves views through it.
 	o.syncPrimaryActive()
+	// A close that took the last awake workspace leaves the session's active
+	// workspace asleep (Session.dropWorkspace prefers an awake neighbour, but
+	// there was none). Every close funnels through here (workspace.close,
+	// tab.close, pane.close, the worktree remove, the reaper and auto-close),
+	// so this is the one place the gap is closed for all of them: wake it, as
+	// clicking its row would, before syncDaemon realizes the placeholder and
+	// the parked agents' panes. A no-op on every ordinary apply.
+	app.NewDispatcher(o.session, o).WakeActiveIfAsleep()
 	o.syncDaemon()
 	added, perClient := o.refreshViewport()
 	// Entering the viewport marks a pane's completions seen (cats: switching

@@ -782,7 +782,22 @@ func (s *Session) tabIndexByNumber(ws *workspace.Workspace, num int) (int, bool)
 	return -1, false
 }
 
-// dropWorkspace removes the workspace at idx and keeps active valid.
+// dropWorkspace removes the workspace at idx and keeps active valid — in range,
+// and awake whenever any workspace still is (sleep.go's invariant).
+//
+// The index arithmetic alone lands on whichever workspace slid into the closed
+// one's slot (or the new last one), with no regard for sleep. Closing the last
+// workspace in the list (typically a just-removed worktree) would then make a
+// sleeping workspace active, and every window following the session default
+// would show a pane with no terminal behind it. So a sleeping landing spot is
+// corrected with the same nearest-awake rule SleepWorkspace uses: after it
+// first, then before.
+//
+// When every remaining workspace is asleep there is nowhere awake to go, and
+// active is left on the sleeping one. The model cannot fix that by itself:
+// waking means resuming the workspace's parked agents, which needs the
+// runtime. Dispatcher.WakeActiveIfAsleep is that step, and the runtime runs it
+// before realizing every model change.
 func (s *Session) dropWorkspace(idx int) {
 	s.workspaces = append(s.workspaces[:idx], s.workspaces[idx+1:]...)
 	switch {
@@ -790,5 +805,10 @@ func (s *Session) dropWorkspace(idx int) {
 		s.active = len(s.workspaces) - 1
 	case idx < s.active:
 		s.active--
+	}
+	if s.workspaces[s.active].Asleep {
+		if j := s.nearestAwake(s.active); j >= 0 {
+			s.active = j
+		}
 	}
 }

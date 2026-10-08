@@ -26,15 +26,150 @@ window were dated by grepping every session doc.
     not exist.
 - **Open** is what we intend to pick up next. **Roadmap** is wanted but later.
   **Non-goals** is likely never, kept so it stays visibly declined.
-- **Nothing leaves Open or Roadmap without a line in another section**
-  (Closed, Non-goals, or the other of the two). Moving between Open and Roadmap
-  keeps the header line unchanged.
-- Open and Roadmap stay in ID order. New items append to the end of Open (or
-  Roadmap, for future work) with the next ID.
+- **Validate** sits directly below Open: items whose remaining work is purely
+  testing (a hand check in a real terminal or app, a run on real data or
+  hardware, or a test to write or repair), with no product change planned. A
+  check that finds a defect raises it as a new Open item; an Open item whose
+  fix has landed but is unchecked moves to Validate.
+- **Nothing leaves Open, Validate or Roadmap without a line in another
+  section** (Closed, Non-goals, or another of the three). Moving among Open,
+  Validate and Roadmap keeps the header line unchanged.
+- Open, Validate and Roadmap stay in ID order. New items append to the end of
+  Open (or Validate, for a check, or Roadmap, for future work) with the next
+  ID.
 
 **Next ID:** N-054
 
 ## Open
+
+- **N-008** · raised `2026-0914-0158-catway-restart-cats-todo-release` · value low
+  `waitReady` (`cmd/catapp/supervise.go`) has no caller: it is only a wrapper
+  over `waitReadyOrExit(…, nil)`. Remove it or leave it. It is a candidate for
+  Non-goals if nobody minds.
+
+- **N-009** · raised `2026-0914-1051-ced-cats-bin-dir` · value low
+  `catctl integration install shell zsh` (the OSC 133 marks that feed the
+  command ledger and HISTORY) has not been run on this machine; the plain
+  `shellinit` eval only covers PATH. This is a user action.
+
+- **N-010** · raised `2026-0914-1051-ced-cats-bin-dir` · value low
+  ced repo: the README still documents Homebrew / `install.sh` installs, now
+  positioned as "without cats", and the Makefile's `alt` target (installs
+  `~/bin/ce`) has a comment about "a brew-installed ced". The Homebrew
+  formula step was removed from ced's release on 2026-09-14. Whether those
+  install paths stay is the user's call.
+
+- **N-013** · raised `2026-0918-1901-dictation-text-sink` · value low
+  IME users compose blind: marked text lives in the invisible text sink until
+  it commits. A visible preedit overlay at the cursor would fix it.
+
+- **N-014** · raised `2026-0918-1901-dictation-text-sink` · value low
+  Dead keys (⌥e) are still `preventDefault`ed by `onKey` unless the engine
+  reports them as `keyCode 229`.
+
+- **N-015** · raised `2026-0922-1301-cats-pane-input-queue` · value low
+  `errPaneInputFull` emits one error event per refused message, so a flood
+  into a dead pane could spam them. Rate-limit if it ever shows up.
+
+- **N-016** · raised `2026-0922-1301-cats-pane-input-queue` · value low
+  Legacy X10 / urxvt mouse encodings are never droppable (the conservative
+  choice). Fine while the browser encoder emits SGR.
+
+- **N-018** · raised `2026-0922-1713-plugin-types-and-releases` · value medium
+  ced repo: `TestThemeAfterSave_RepaintsLive` fails about 1 run in 10. TempDir
+  cleanup reports `themes/` "directory not empty", so something writes into
+  the directory after the test ends. The assertion itself passes.
+
+- **N-019** · raised `2026-0922-1713-plugin-types-and-releases` · value low
+  ced repo: `release.yml` still describes the `release` branch + auto-bump
+  route. That route hasn't been used since 0.2.0; releases are now a
+  hand-made "Release ced X" commit plus a tag. Retire it or go back to it.
+
+- **N-020** · raised `2026-0922-1713-plugin-types-and-releases` · value low
+  cats-mobile: nothing draws `Session.Plugins` yet. If the phone gets a
+  plugins list, split it by `PluginPane.Type` the way the desktop does.
+
+- **N-033** · raised `2026-0923-1443-settings-json-and-screen` · value low
+  Other open browsers don't pick up a `ui` pref (font size, sidebar width)
+  changed elsewhere until they reload; there is no broadcast for it.
+
+- **N-034** · raised `2026-0923-1545-perf-shifts-builder-deflate` · value low
+  cats-mobile does not list `pane_shift` in `Init.Features`, so a scrolling
+  pane still reaches the phone as a full frame per tick (now compressed). Its
+  grid (`internal/catsclient/grid.go`) would apply `PaneDiff.Shift` as the
+  browser does: scroll the cells up, blank the vacated rows, then the cells.
+
+- **N-037** · raised `2026-0924-1953-context-usage-warn-demotion-tool-types` · value low
+  The context used/window segment on agent rows (`43k/1M`) is claude-only.
+  Copilot's `events.jsonl` would need its own reader, if it records usage at
+  all (`lastCopilotModel`, `cmd/catway/agentmodel.go`).
+
+- **N-038** · raised `2026-0924-1953-context-usage-warn-demotion-tool-types` · value low
+  `tools.types` has no field on the settings screen, because the screen has no
+  key→value widget (`33-settings.js` OPTION_TABS). It is file-only plus
+  `catctl reload`. Adding it would mean adding `tools` to `optionSections` and
+  a map widget.
+
+- **N-039** · raised `2026-0924-2005-no-such-pane-exited-panes` · value low
+  `capture` / `read` of an exited pane now fail at once with "pane N has
+  exited" (they used to time out), but they still cannot return the text. The
+  daemon drops the emulator at PTY EOF. catway's grid mirror (`rt.grid`) still
+  holds the last screen, which is often what you want from a dead pane (the
+  crash message), so serve at least `scope: screen` from it.
+
+- **N-040** · raised `2026-0925-1102-n011-peer-pairing` · value low
+  `detach-peer` deletes the paired token file but cannot revoke the grant on
+  the other catway, which stays live until someone runs `revoke-peer-grant`
+  there (catway logs a reminder). A self-revoke route (`POST /peer/v1/unpair`,
+  authenticated by the grant itself) would make detach clean up both ends.
+
+- **N-043** · raised `2026-0926-2211-plugin-update-checks` · value low
+  Linked plugins are skipped by the update check, because `plugin update`
+  refuses them. A linked checkout that is behind its own upstream (ced, when
+  its origin has moved on) could still get a quiet "behind origin" hint. That
+  needs a fetch in the developer's own repo, which is why it was left out.
+
+- **N-044** · raised `2026-0926-2226-default-plugin-seed-cats-todo` · value medium
+  Push cats-todo `56c5c4d` and cut v0.42.1. Fresh installs clone cats-todo's
+  default branch, so until the headless-offer fix is on GitHub the automatic
+  install still spends the one-time "set up a backlog here?" offer on
+  catway's log.
+
+- **N-052** · raised `2026-0927-0024-n051-warn-fg-text-app-wide` · value low
+  The other agent-state words are still faint as text on the three themes
+  N-050/N-051 fixed for amber. "idle" (`--ok`), "blocked" (`--err`) and "done"
+  (`--done`) colour the pane header's state word (`.st-*` in
+  `10-panelist.css`) and a pane row's agent label. They read at 1.8 to 4.3:1:
+  - solarized-light: ok 2.1-2.6, err 3.1-3.8, done 2.9-3.6
+  - corporate: ok 3.0-3.6, err 3.5-4.3, done 2.9-3.6
+  - solarized-dark: ok 2.6-4.1, err 1.8-2.8, done 1.9-3.0
+
+  The ranges run from the focused header (`--chrome-focus`, worst) to the
+  sidebar (`--panel`). "working" is now the only state word at 4.5:1 or
+  better. `--err-fg` already exists but is the banner's ink on `--err-bg`, so
+  it may not be the right shade for panel text. The state dots stay on the
+  base hues either way, as `.st-working`'s markers do. Also seen:
+  solarized-light's folded usage group now shows its `.high` reading in
+  `#694f00`, close to the `#6f5f2a` group heading beside it. It still
+  stands apart from the grey resting state.
+
+- **N-053** · raised `2026-1007-1436-panes-dropdown-in-workspace-rows` · value low
+  At the 150px minimum sidebar width the section headings run out of room
+  and their right-edge controls clip. WORKSPACES shows ⊞ ⊟ with its ▼ fold
+  arrow cut off, and USAGE wraps its "1m ago" stamp onto a second line and
+  loses its ▼ too. Seen in a headless-Chrome screenshot while checking the
+  pane dropdowns; the headings were not touched by that change, so this
+  predates it. The workspace rows themselves now ellipse the name to keep
+  their caret on screen; the headings may want the same trade (title gives
+  way, controls hold their width).
+
+## Validate
+
+Items whose remaining work is purely testing: hand checks in a real terminal
+or app, runs on real data or hardware, and tests to write or repair. No
+product change is planned unless a check finds a defect, which is then raised
+as a new Open item. Split out of Open on 2026-10-07; each item kept its ID
+and `raised`.
 
 - **N-001** · raised `2026-0904-1753-a-dwell-before-the-hover-card` · value medium
   Hands-on pass in a rebuilt, reinstalled Cats.app. Sessions run inside
@@ -105,91 +240,17 @@ window were dated by grepping every session doc.
     pasteboard. If "clipboard has no text" recurs with no such line in the
     log, the 2026-10-05 clear came from outside cats (a password manager's
     timed clear, say).
-
-- **N-008** · raised `2026-0914-0158-catway-restart-cats-todo-release` · value low
-  `waitReady` (`cmd/catapp/supervise.go`) has no caller: it is only a wrapper
-  over `waitReadyOrExit(…, nil)`. Remove it or leave it. It is a candidate for
-  Non-goals if nobody minds.
-
-- **N-009** · raised `2026-0914-1051-ced-cats-bin-dir` · value low
-  `catctl integration install shell zsh` (the OSC 133 marks that feed the
-  command ledger and HISTORY) has not been run on this machine; the plain
-  `shellinit` eval only covers PATH. This is a user action.
-
-- **N-010** · raised `2026-0914-1051-ced-cats-bin-dir` · value low
-  ced repo: the README still documents Homebrew / `install.sh` installs, now
-  positioned as "without cats", and the Makefile's `alt` target (installs
-  `~/bin/ce`) has a comment about "a brew-installed ced". The Homebrew
-  formula step was removed from ced's release on 2026-09-14. Whether those
-  install paths stay is the user's call.
+  - closing onto an awake workspace (`2026-1008-1429-close-lands-on-awake-workspace`).
+    This needs a new catway only. With a sleeping workspace just above a
+    worktree workspace at the bottom of the list, remove the worktree. The
+    window should land on the nearest awake workspace, and the sleeper should
+    stay asleep. Then sleep every workspace but one and close that one. The
+    workspace now shown should wake with a shell, and its parked agents should
+    resume.
 
 - **N-012** · raised `2026-0916-1547-peer-sync` · value low
   Cross-OS home translation in peer sync is unit-tested only; the first
   Mac ↔ Linux sync is the real test of it.
-
-- **N-013** · raised `2026-0918-1901-dictation-text-sink` · value low
-  IME users compose blind: marked text lives in the invisible text sink until
-  it commits. A visible preedit overlay at the cursor would fix it.
-
-- **N-014** · raised `2026-0918-1901-dictation-text-sink` · value low
-  Dead keys (⌥e) are still `preventDefault`ed by `onKey` unless the engine
-  reports them as `keyCode 229`.
-
-- **N-015** · raised `2026-0922-1301-cats-pane-input-queue` · value low
-  `errPaneInputFull` emits one error event per refused message, so a flood
-  into a dead pane could spam them. Rate-limit if it ever shows up.
-
-- **N-016** · raised `2026-0922-1301-cats-pane-input-queue` · value low
-  Legacy X10 / urxvt mouse encodings are never droppable (the conservative
-  choice). Fine while the browser encoder emits SGR.
-
-- **N-018** · raised `2026-0922-1713-plugin-types-and-releases` · value medium
-  ced repo: `TestThemeAfterSave_RepaintsLive` fails about 1 run in 10. TempDir
-  cleanup reports `themes/` "directory not empty", so something writes into
-  the directory after the test ends. The assertion itself passes.
-
-- **N-019** · raised `2026-0922-1713-plugin-types-and-releases` · value low
-  ced repo: `release.yml` still describes the `release` branch + auto-bump
-  route. That route hasn't been used since 0.2.0; releases are now a
-  hand-made "Release ced X" commit plus a tag. Retire it or go back to it.
-
-- **N-020** · raised `2026-0922-1713-plugin-types-and-releases` · value low
-  cats-mobile: nothing draws `Session.Plugins` yet. If the phone gets a
-  plugins list, split it by `PluginPane.Type` the way the desktop does.
-
-- **N-033** · raised `2026-0923-1443-settings-json-and-screen` · value low
-  Other open browsers don't pick up a `ui` pref (font size, sidebar width)
-  changed elsewhere until they reload; there is no broadcast for it.
-
-- **N-034** · raised `2026-0923-1545-perf-shifts-builder-deflate` · value low
-  cats-mobile does not list `pane_shift` in `Init.Features`, so a scrolling
-  pane still reaches the phone as a full frame per tick (now compressed). Its
-  grid (`internal/catsclient/grid.go`) would apply `PaneDiff.Shift` as the
-  browser does: scroll the cells up, blank the vacated rows, then the cells.
-
-- **N-037** · raised `2026-0924-1953-context-usage-warn-demotion-tool-types` · value low
-  The context used/window segment on agent rows (`43k/1M`) is claude-only.
-  Copilot's `events.jsonl` would need its own reader, if it records usage at
-  all (`lastCopilotModel`, `cmd/catway/agentmodel.go`).
-
-- **N-038** · raised `2026-0924-1953-context-usage-warn-demotion-tool-types` · value low
-  `tools.types` has no field on the settings screen, because the screen has no
-  key→value widget (`33-settings.js` OPTION_TABS). It is file-only plus
-  `catctl reload`. Adding it would mean adding `tools` to `optionSections` and
-  a map widget.
-
-- **N-039** · raised `2026-0924-2005-no-such-pane-exited-panes` · value low
-  `capture` / `read` of an exited pane now fail at once with "pane N has
-  exited" (they used to time out), but they still cannot return the text. The
-  daemon drops the emulator at PTY EOF. catway's grid mirror (`rt.grid`) still
-  holds the last screen, which is often what you want from a dead pane (the
-  crash message), so serve at least `scope: screen` from it.
-
-- **N-040** · raised `2026-0925-1102-n011-peer-pairing` · value low
-  `detach-peer` deletes the paired token file but cannot revoke the grant on
-  the other catway, which stays live until someone runs `revoke-peer-grant`
-  there (catway logs a reminder). A self-revoke route (`POST /peer/v1/unpair`,
-  authenticated by the grant itself) would make detach clean up both ends.
 
 - **N-042** · raised `2026-0926-2211-plugin-update-checks` · value medium
   Plugin update checks: drive the parts that were only reasoned about. The
@@ -200,18 +261,6 @@ window were dated by grepping every session doc.
   more pending; the dark theme; and the reinstalled Cats.app. cats-todo is
   behind upstream right now (78c85ac → 9bfe73e), so updating it is the natural
   test.
-
-- **N-043** · raised `2026-0926-2211-plugin-update-checks` · value low
-  Linked plugins are skipped by the update check, because `plugin update`
-  refuses them. A linked checkout that is behind its own upstream (ced, when
-  its origin has moved on) could still get a quiet "behind origin" hint. That
-  needs a fetch in the developer's own repo, which is why it was left out.
-
-- **N-044** · raised `2026-0926-2226-default-plugin-seed-cats-todo` · value medium
-  Push cats-todo `56c5c4d` and cut v0.42.1. Fresh installs clone cats-todo's
-  default branch, so until the headless-offer fix is on GitHub the automatic
-  install still spends the one-time "set up a backlog here?" offer on
-  catway's log.
 
 - **N-045** · raised `2026-0926-2226-default-plugin-seed-cats-todo` · value medium
   Watch the default-plugin seed through a real catway start. It has only run
@@ -225,34 +274,6 @@ window were dated by grepping every session doc.
   The toolbar's "!" mark (N-048) should appear on its own once the failed
   pass ends, with the page already open. That push at the end of the seed
   pass has only been exercised by unit tests.
-
-- **N-052** · raised `2026-0927-0024-n051-warn-fg-text-app-wide` · value low
-  The other agent-state words are still faint as text on the three themes
-  N-050/N-051 fixed for amber. "idle" (`--ok`), "blocked" (`--err`) and "done"
-  (`--done`) colour the pane header's state word (`.st-*` in
-  `10-panelist.css`) and a pane row's agent label. They read at 1.8 to 4.3:1:
-  - solarized-light: ok 2.1-2.6, err 3.1-3.8, done 2.9-3.6
-  - corporate: ok 3.0-3.6, err 3.5-4.3, done 2.9-3.6
-  - solarized-dark: ok 2.6-4.1, err 1.8-2.8, done 1.9-3.0
-
-  The ranges run from the focused header (`--chrome-focus`, worst) to the
-  sidebar (`--panel`). "working" is now the only state word at 4.5:1 or
-  better. `--err-fg` already exists but is the banner's ink on `--err-bg`, so
-  it may not be the right shade for panel text. The state dots stay on the
-  base hues either way, as `.st-working`'s markers do. Also seen:
-  solarized-light's folded usage group now shows its `.high` reading in
-  `#694f00`, close to the `#6f5f2a` group heading beside it. It still
-  stands apart from the grey resting state.
-
-- **N-053** · raised `2026-1007-1436-panes-dropdown-in-workspace-rows` · value low
-  At the 150px minimum sidebar width the section headings run out of room
-  and their right-edge controls clip. WORKSPACES shows ⊞ ⊟ with its ▼ fold
-  arrow cut off, and USAGE wraps its "1m ago" stamp onto a second line and
-  loses its ▼ too. Seen in a headless-Chrome screenshot while checking the
-  pane dropdowns; the headings were not touched by that change, so this
-  predates it. The workspace rows themselves now ellipse the name to keep
-  their caret on screen; the headings may want the same trade (title gives
-  way, controls hold their width).
 
 ## Roadmap
 
