@@ -233,6 +233,13 @@
       const uiOpts = (cfg.options && cfg.options.ui) || {};
       const uiFont = numInput(row("font size"), uiOpts.font_px, 9, 32, "px — blank: each browser's own (⌘+ / ⌘-)");
       const uiSbw = numInput(row("sidebar width"), uiOpts.sidebar_width, 150, 2000, "px — blank: each browser's own (drag the gutter)");
+      // A checkbox rather than a third number box: off is the default, and
+      // off is also what an absent key reads as, so the box never needs a
+      // "blank" state of its own.
+      const uiUntitled = document.createElement("input"); uiUntitled.type = "checkbox";
+      uiUntitled.checked = !!uiOpts.show_untitled_panes;
+      uiUntitled.title = "off: a workspace's pane dropdown skips panes with no title (no rename, no program-set title) unless flagged or running an agent";
+      row("list untitled panes").appendChild(uiUntitled);
 
       // The action set comes from config.get, so every row is a known action.
       tab("keys");
@@ -327,7 +334,7 @@
           if (err) { errEl.textContent = err; return; }
           if (obj) options[section] = obj;
         }
-        const ui = uiChanges(uiOpts, uiFont, uiSbw);
+        const ui = uiChanges(uiOpts, uiFont, uiSbw, uiUntitled);
         if (ui.err) { errEl.textContent = ui.err; return; }
         if (ui.obj) options.ui = ui.obj;
         let appOut = null;
@@ -560,8 +567,10 @@
     return i;
   }
 
-  // uiChanges reads the two interface boxes against the file's values.
-  function uiChanges(orig, fontEl, sbwEl) {
+  // uiChanges reads the interface controls against the file's values. All
+  // three travel together once any one changed: config.set decodes the section
+  // onto the file's current value, so the unchanged two land as no-ops.
+  function uiChanges(orig, fontEl, sbwEl, untitledEl) {
     const read = (el, label) => {
       const t = el.value.trim();
       if (t === "") return 0;
@@ -572,8 +581,10 @@
     const font = read(fontEl, "font size"), sbw = read(sbwEl, "sidebar width");
     if (font instanceof Error) return { err: font.message };
     if (sbw instanceof Error) return { err: sbw.message };
-    if (font === (orig.font_px || 0) && sbw === (orig.sidebar_width || 0)) return {};
-    return { obj: { font_px: font, sidebar_width: sbw } };
+    const untitled = !!untitledEl.checked;
+    if (font === (orig.font_px || 0) && sbw === (orig.sidebar_width || 0) &&
+      untitled === !!orig.show_untitled_panes) return {};
+    return { obj: { font_px: font, sidebar_width: sbw, show_untitled_panes: untitled } };
   }
 
   // ---- front-end preferences ↔ config.json ------------------------------------
@@ -607,6 +618,19 @@
     Object.assign(uiPrefsFile, ui);
     if (ui.font_px) setFontSize(ui.font_px);
     if (ui.sidebar_width) { setSidebarWidth(ui.sidebar_width); sidebarResized(true); }
+    // Redrawn on the spot rather than left for the next push: in a quiet
+    // session that push could be minutes away, and the save should show.
+    if ("show_untitled_panes" in ui && layoutMsg) renderWorkspaces(layoutMsg);
+  }
+
+  // showUntitledPanes: does a workspace's pane dropdown list panes that have no
+  // title? Read from uiPrefsFile, the page's copy of config.json's "ui", so a
+  // save from this window's settings screen (applyUIPrefs) takes effect here
+  // at once. Other open windows pick it up on their next load, as they do the
+  // font size: config.set re-renders the served page but pushes no "ui" to
+  // pages already open.
+  function showUntitledPanes() {
+    return !!uiPrefsFile.show_untitled_panes;
   }
 
   // ---- the Mac app's section --------------------------------------------------

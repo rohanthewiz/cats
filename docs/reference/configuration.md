@@ -23,7 +23,11 @@ peers keep their own dialogs.
   rewrites it; each process rewrites only its own sections, under a lock.
 - **`ui`** holds front-end preferences that follow you between browsers:
   `font_px` (9–32) and `sidebar_width` (≥150). ⌘+/⌘- and dragging the sidebar
-  gutter write them; unset means each browser keeps its own.
+  gutter write them; unset means each browser keeps its own. It also holds
+  `show_untitled_panes` (default `false`): a workspace row's pane dropdown
+  leaves out panes that have no title, neither a rename nor one their program
+  set, unless they are flagged or running an agent. Set it to `true`
+  (Settings → appearance → interface) to list every pane.
 
 Location resolution: `catway --config <path>` > `$CATS_CONFIG` >
 `$XDG_CONFIG_HOME/cats/config.json` > `~/.config/cats/config.json`.

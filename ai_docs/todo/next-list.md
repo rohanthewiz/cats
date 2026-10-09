@@ -231,7 +231,11 @@ and `raised`.
     switching workspace, starting a drag or renaming; Alt+click opens or shuts
     every workspace (that ⌥ reaches the page as `altKey`); rows read `p1`
     while the hover card still says `cats:p1`; and a press on a row in another
-    workspace reveals it.
+    workspace reveals it. Since `2026-1008-1941-untitled-panes-hidden-from-dropdowns`:
+    a bare shell with no title is left out of its dropdown while
+    `todo: cats (N)`-titled and renamed panes stay; the ▶ tooltip says
+    "N untitled not listed"; and ticking Settings → appearance → interface →
+    *list untitled panes* brings the bare shell back at once, without a reload.
   - the dropped OSC 52 clear (`2026-1007-1407-osc52-clipboard-clear-ignored`).
     This needs a new catway only; cathost can keep running. Copy something,
     run `printf '\033]52;c;\007'` in a pane, and ⌘V should still paste it.

@@ -32,7 +32,7 @@ func TestSaveLoadJSONRoundTrip(t *testing.T) {
 	cfg := Default()
 	cfg.Panes.ReapExited = "2h"
 	cfg.Theme.Name = "darcula"
-	cfg.UI = UI{FontPx: 16, SidebarWidth: 240}
+	cfg.UI = UI{FontPx: 16, SidebarWidth: 240, ShowUntitledPanes: true}
 	if err := Save(path, cfg); err != nil {
 		t.Fatal(err)
 	}

@@ -301,3 +301,6 @@ runbooks:
 # ui:
 #   font_px: 14                        # 9–32
 #   sidebar_width: 260                 # at least 150
+#   show_untitled_panes: false         # true lists panes with no title (no
+#                                      # rename, no program-set title) in the
+#                                      # workspace rows' pane dropdowns too

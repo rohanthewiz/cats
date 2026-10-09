@@ -77,6 +77,16 @@ type UI struct {
 	FontPx int `yaml:"font_px,omitempty" json:"font_px,omitempty"`
 	// SidebarWidth is the sidebar's dragged width in CSS px.
 	SidebarWidth int `yaml:"sidebar_width,omitempty" json:"sidebar_width,omitempty"`
+	// ShowUntitledPanes lists every pane in a workspace row's dropdown. By
+	// default (false) a pane with no title at all, neither a pane.rename name
+	// nor one its program set over OSC, is left out: its row would read as a
+	// bare "p3", which says nothing the workspace row's own count doesn't, and
+	// a session of plain shells would otherwise fill the sidebar with them. A
+	// bool whose zero value is the default, so it fits this section's
+	// "zero means unset" rule without a Default() entry. Unlike the two sizes
+	// above, it has no localStorage fallback: it is a setting, not a gesture's
+	// resting place, so the file is the one place it lives.
+	ShowUntitledPanes bool `yaml:"show_untitled_panes,omitempty" json:"show_untitled_panes,omitempty"`
 }
 
 // UI bounds, mirroring the front end's own clamps (01-bootstrap.js FONT_MIN /

@@ -52,6 +52,14 @@
   // Every awake workspace's rows are built on every render, open or shut: the
   // caret's tooltip counts them, and the merge is a pass over a list already in
   // memory. Only the DOM is skipped for a shut dropdown (renderWorkspaces).
+  //
+  // Untitled panes are left out here, not at draw time (paneRowShown), so the
+  // caret and its count agree with what the dropdown would show: a workspace
+  // whose panes are all untitled shells gets no caret at all, rather than one
+  // that opens onto nothing. Each bucket carries the number it left out as
+  // .hidden, for the caret's tooltip. That count lives on the array because
+  // the bucket is the one thing renderWorkspaces hands the caret; a bucket
+  // whose every pane was hidden still exists, empty, so the count survives.
   function wsPaneRows() {
     const vis = new Map((layoutMsg ? layoutMsg.panes : []).map((pr) => [pr.pane, pr]));
     // Until the first snapshot lands (page load) the layout's own panes stand in,
@@ -91,10 +99,34 @@
       // workspace is reached (a click wakes it), so it gets no dropdown.
       if (wsAsleep(wsID)) continue;
       let rows = out.get(wsID);
-      if (!rows) out.set(wsID, rows = []);
+      if (!rows) { out.set(wsID, rows = []); rows.hidden = 0; }
+      if (!paneRowShown(row)) { rows.hidden++; continue; }
       rows.push(row);
     }
     return out;
+  }
+
+  // paneRowShown: does this row belong in its workspace's dropdown?
+  //
+  // A pane with no title, neither a rename nor an OSC title from its program,
+  // is left out unless the config asks for every pane (ui.show_untitled_panes,
+  // read through showUntitledPanes in 33-settings.js). Such a row is a bare
+  // "p3": the handle is all it has, and the handle alone tells you nothing
+  // the workspace row's ●N badge and the caret's count don't. A session of
+  // plain shells would otherwise give every workspace a column of them.
+  //
+  // "Title" is the merged one wsPaneRows puts on the row, which is the
+  // rename when there is one and the program's title otherwise, so a TUI that
+  // titles itself ("todo: cats (6)", vim) counts as titled without a rename.
+  //
+  // Two marks keep an untitled row anyway, because each is something the eye
+  // comes to this list for and is shown nowhere else in the dropdown:
+  //   - a flag, set on purpose to find the pane again (flagMark on the row);
+  //   - an agent, whose state label is the row's whole point. An agent pane
+  //     is almost always titled by the agent itself, so this rarely fires,
+  //     but the frame before that title lands should not drop the row.
+  function paneRowShown(row) {
+    return showUntitledPanes() || !!row.title || !!row.agent || !!row.flag;
   }
 
   // Count with its noun, singular or plural — "1 agent", "3 panes". Shared by the
@@ -176,8 +208,13 @@
     car.className = "car";
     car.textContent = open ? "▼" : "▶";
     const agents = rows.filter((r) => r.agent).length;
+    // The hidden count is said here because nowhere else would: the rows it
+    // counts are not drawn, so without it a workspace with four panes and one
+    // dropdown row would look like a workspace with one pane.
+    const hidden = rows.hidden || 0;
     car.title = (open ? "hide " : "show ") + nOf(rows.length, "pane")
       + (agents ? " (" + agents + " running an agent)" : "")
+      + (hidden ? " · " + hidden + " untitled not listed (Settings → interface)" : "")
       + " · Alt+click: every workspace";
     car.setAttribute("role", "button");
     car.setAttribute("aria-expanded", open ? "true" : "false");

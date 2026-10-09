@@ -18,7 +18,7 @@
 // reached the row it would also arm the row's switch-or-reorder gesture, and a
 // press meant to open a list would switch workspace as well.
 
-import { loadFns, ok, eq, has, report } from "./testutil.mjs";
+import { loadFns, ok, eq, has, lacks, report } from "./testutil.mjs";
 
 // ---- open state ----------------------------------------------------------------
 
@@ -93,15 +93,19 @@ const W1 = { id: "w1", active: true }, W2 = { id: "w2", active: false }, W3 = { 
 
 // ---- bucketing -----------------------------------------------------------------
 
-function rowsWorld({ inv, layoutPanes = [], workspaces, agents = [], live = new Map() }) {
+// showAll stands in for config.json's ui.show_untitled_panes. The bucketing
+// cases below set it, since they are about grouping and order, not about which
+// rows the filter keeps; the filter has its own cases after them.
+function rowsWorld({ inv, layoutPanes = [], workspaces, agents = [], live = new Map(), showAll = true }) {
   return loadFns({
     files: ["07-workspaces.js", "08-panelist.js"],
-    names: ["wsPaneRows", "markerState", "flagOf", "wsOf", "wsAsleep"],
+    names: ["wsPaneRows", "paneRowShown", "markerState", "flagOf", "wsOf", "wsAsleep"],
     env: {
       layoutMsg: { panes: layoutPanes, workspaces },
       paneInv: inv,
       agentItems: agents,
       panes: live,
+      showUntitledPanes: () => showAll,
     },
   });
 }
@@ -135,6 +139,47 @@ function rowsWorld({ inv, layoutPanes = [], workspaces, agents = [], live = new 
   const rows = f.wsPaneRows().get("w1");
   eq(rows && rows.map((r) => [r.pane, r.visible, r.focused]), [[7, true, true]],
     "the layout's panes stand in for the inventory until it arrives");
+}
+
+// ---- untitled panes ---------------------------------------------------------------
+//
+// By default a pane with no title at all (no rename, no program-set title) is
+// left out of its dropdown, unless a flag or an agent gives its row something
+// to say. ui.show_untitled_panes puts every pane back.
+
+{
+  const inv = [
+    { pane: 1, handle: "w1:p1", title: "" },                         // a bare shell: hidden
+    { pane: 2, handle: "w1:p2", title: "todo: cats (6)" },           // program-set title: kept
+    { pane: 3, handle: "w1:p3", name: "notes", title: "" },          // renamed: kept
+    { pane: 4, handle: "w1:p4", title: "", agent: "claude" },        // agent, no title yet: kept
+    { pane: 5, handle: "w1:p5", title: "", flag: { kind: "red" } },  // flagged: kept
+    { pane: 6, handle: "w2:p1", title: "" },                         // a workspace of bare shells
+  ];
+  const f = rowsWorld({ workspaces: [{ id: "w1" }, { id: "w2" }], inv, showAll: false });
+  const by = f.wsPaneRows();
+  eq(by.get("w1").map((r) => r.pane), [2, 3, 4, 5],
+    "by default an untitled pane is left out, and titled, renamed, agent and flagged ones stay");
+  eq(by.get("w1").hidden, 1, "...and its bucket counts what it left out");
+  eq([by.get("w2").length, by.get("w2").hidden], [0, 1],
+    "a workspace of bare shells keeps an empty bucket, so the count survives for the caret");
+
+  const all = rowsWorld({ workspaces: [{ id: "w1" }, { id: "w2" }], inv, showAll: true }).wsPaneRows();
+  eq(all.get("w1").map((r) => r.pane), [1, 2, 3, 4, 5], "show_untitled_panes lists every pane");
+  eq([all.get("w1").hidden, all.get("w2").length], [0, 1], "...hiding none");
+}
+
+// An on-screen pane is judged by its live title, which is fresher than the
+// snapshot: a shell that has just set its title stops being hidden at once.
+{
+  const f = rowsWorld({
+    workspaces: [{ id: "w1", active: true }],
+    inv: [{ pane: 7, handle: "w1:p1", title: "" }],
+    layoutPanes: [{ pane: 7, pub: "w1:p1", focused: true }],
+    live: new Map([[7, { title: "vim", cwd: "/" }]]),
+    showAll: false,
+  });
+  eq(f.wsPaneRows().get("w1").map((r) => r.title), ["vim"], "a live title keeps an on-screen pane listed");
 }
 
 // ---- the row label --------------------------------------------------------------
@@ -187,6 +232,7 @@ function caretWorld() {
   has(car.title, "show 3 panes", "the tooltip counts what the arrow would show");
   has(car.title, "1 running an agent", "...and how many of them run an agent");
   has(car.title, "Alt+click", "...and names the all-at-once gesture");
+  lacks(car.title, "untitled", "...and says nothing of untitled panes when none were left out");
 
   // A left press stops at the caret: the row never arms its switch/reorder.
   let stopped = 0, prevented = 0;
@@ -218,6 +264,16 @@ function caretWorld() {
   eq(car.textContent, "▼", "an open dropdown shows the open arrow");
   has(car.title, "hide 1 pane", "...and the tooltip offers to hide it, singular");
   ok(!car.title.includes("running an agent"), "no agent clause when none is running");
+}
+
+// A bucket that left untitled panes out says so: those rows are not drawn, so
+// the tooltip is the only place a workspace's real pane count can still show.
+{
+  const f = caretWorld();
+  const rows = Object.assign([{ agent: "" }], { hidden: 2 });
+  const car = f.paneCaretEl({ id: "w3" }, rows, false);
+  has(car.title, "show 1 pane", "the count is of the rows the dropdown would draw");
+  has(car.title, "2 untitled not listed", "...and the tooltip names the ones it left out");
 }
 
 report("pane dropdown");
