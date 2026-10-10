@@ -187,6 +187,11 @@ func (b *fakeBackend) LedgerJump(r Responder, p LedgerBlockParams) {
 	r.OK(nil)
 }
 
+func (b *fakeBackend) PanePrompts(r Responder, pane uint32, limit int) {
+	b.rec("panePrompts:" + strconv.FormatUint(uint64(pane), 10) + ":" + strconv.Itoa(limit))
+	r.OK(PanePromptsResult{Pane: pane, Agent: "claude", Prompts: []AgentPrompt{{Text: "fix the build"}}})
+}
+
 func (b *fakeBackend) LedgerList(r Responder, p LedgerListParams) {
 	b.rec("ledgerList:" + p.Host + ":" + p.Contains)
 	b.lastLedger = p
@@ -2847,4 +2852,51 @@ func TestDispatchWorkspaceFlag(t *testing.T) {
 			t.Fatalf("note with no kind stored: %+v", got)
 		}
 	})
+}
+
+// pane.prompts resolves its pane through the session (omitted = focused) and
+// hands the backend a limit already clamped to 1..PanePromptsMax, so neither the
+// browser's popover nor a script has to know the bounds.
+func TestDispatchPanePromptsResolvesAndClamps(t *testing.T) {
+	cases := []struct {
+		name   string
+		params PanePromptsParams
+		limit  int
+	}{
+		{"defaults", PanePromptsParams{}, PanePromptsDefault},
+		{"negative", PanePromptsParams{Limit: -3}, PanePromptsDefault},
+		{"kept", PanePromptsParams{Limit: 3}, 3},
+		{"clamped", PanePromptsParams{Limit: 10_000}, PanePromptsMax},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			h := newCmdHarness(t)
+			// Pane ids come from a process-wide counter, so the focused one is
+			// read from this harness's own session rather than assumed.
+			focused, _ := h.s.FocusedPane()
+			want := "panePrompts:" + strconv.Itoa(int(focused)) + ":" + strconv.Itoa(c.limit)
+			r := h.resp()
+			h.d.Dispatch(CmdPanePrompts, params(t, c.params), r)
+			if !r.okCall {
+				t.Fatalf("pane.prompts failed: %q", r.errMsg)
+			}
+			if got := (*h.log)[0]; got != want {
+				t.Fatalf("backend saw %q, want %q", got, want)
+			}
+		})
+	}
+
+	// An unknown pane fails in the dispatcher rather than reaching the backend
+	// as an empty history, which would read as "nothing was asked".
+	h := newCmdHarness(t)
+	r := h.resp()
+	h.d.Dispatch(CmdPanePrompts, params(t, PanePromptsParams{Pane: ptrU32(9999)}), r)
+	if !r.failCall {
+		t.Fatalf("an unknown pane should fail, log=%v", *h.log)
+	}
+	for _, e := range *h.log {
+		if strings.HasPrefix(e, "panePrompts:") {
+			t.Fatalf("an unknown pane reached the backend: %v", *h.log)
+		}
+	}
 }

@@ -38,7 +38,7 @@ window were dated by grepping every session doc.
   Open (or Validate, for a check, or Roadmap, for future work) with the next
   ID.
 
-**Next ID:** N-054
+**Next ID:** N-056
 
 ## Open
 
@@ -163,6 +163,14 @@ window were dated by grepping every session doc.
   their caret on screen; the headings may want the same trade (title gives
   way, controls hold their width).
 
+- **N-055** · raised `2026-1010-1836-pane-header-recent-agent-prompts` · value low
+  The header's **prompts ▾** list can only read claude and copilot histories
+  (the `prompts` field of `modelResolvers` in `cmd/catway/agentmodel.go`).
+  Every other agent pane shows the chip and opens a note saying cats cannot
+  read its history. A reader for codex (and the other agents in the AGENT_HUE
+  table) is one table entry each, once their on-disk history format is known.
+  The same entry would also give those panes a model in the header.
+
 ## Validate
 
 Items whose remaining work is purely testing: hand checks in a real terminal
@@ -278,6 +286,18 @@ and `raised`.
   The toolbar's "!" mark (N-048) should appear on its own once the failed
   pass ends, with the page already open. That push at the end of the seed
   pass has only been exercised by unit tests.
+
+- **N-054** · raised `2026-1010-1836-pane-header-recent-agent-prompts` · value medium
+  Hands-on check of the pane header's **prompts ▾** dropdown with a real
+  claude pane, in Cats.app as well as a browser. It was verified only in a
+  scratch catway with a stand-in `claude` binary and a fixture history. Check
+  that the rows match what was actually typed, including a prompt sent by
+  cats-todo through `pane.send_input`. Check that a click copies through the
+  WKWebView clipboard bridge (`catsClipWrite`) and that the tooltip shows the
+  full text. Also check a narrow pane: the chip is the last field and
+  `flex:none`, so once the title and path have shrunk it is the first thing
+  the header clips. If that hides it on ordinary widths, it may want to move
+  before the agent name or into the toolbar.
 
 ## Roadmap
 

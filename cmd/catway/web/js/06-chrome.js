@@ -91,6 +91,23 @@
       if (p.agent) {
         seg("agent", agentLabel(p.agent, p.agentModel));
         seg("astate " + stClass(p.agentState), p.agentState);
+        // The agent's recent prompts, one click away (see openPromptsMenu).
+        // Drawn on every agent pane rather than only on the agents the server
+        // can read, because which agents those are is the server's table
+        // (modelResolvers) — an agent it cannot read answers with a note
+        // saying so, which is more use than a control that silently isn't
+        // there.
+        const ps = seg("prompts", "prompts ▾");
+        if (ps) {
+          ps.title = "recent prompts sent to " + p.agent;
+          // Same press discipline as the flag: the header's mousedown starts
+          // a focus + swap drag, which must not begin under an opening menu.
+          ps.addEventListener("mousedown", (e) => e.stopPropagation());
+          ps.addEventListener("click", (e) => {
+            e.stopPropagation();
+            openPromptsMenu(p.id, ps);
+          });
+        }
       }
       if (p.exited !== null) {
         seg("exited", "exited (" + p.exited + ")");
@@ -109,6 +126,77 @@
     } else if (zoom) {
       zoom.remove();
     }
+  }
+
+  // ---- Recent prompts: the header's "prompts ▾" dropdown ----
+  //
+  //   pane 3 · ~/src/app · main · claude opus 5 · idle · prompts ▾
+  //                                                      ┌──────────────────────────┐
+  //                                                      │ LAST 3 PROMPTS           │
+  //                                                      │ commit and push      2m  │
+  //                                                      │ /model opus         14m  │
+  //                                                      │ fix the flaky test… 1h   │
+  //                                                      └──────────────────────────┘
+  //
+  // The rows come from pane.prompts, which reads the agent's own history on the
+  // server — so they are what the agent actually received, including prompts a
+  // plugin sent with pane.send_input, and they are fetched when the menu is
+  // opened rather than kept up to date in the background. Nothing is cached
+  // here: a prompt sent a second ago must be in the list the next time it is
+  // opened, and the read is a local file tail, fast enough to wait for.
+  //
+  // It is the context menu rather than a bespoke popover because the menu
+  // already does everything this needs — positioning clamped to the viewport,
+  // dismissal on an outside press, Esc and blur, and closing the hover card —
+  // and a row is a one-line preview: the full prompt is the row's tooltip, and
+  // a click copies it, which is the thing you do with an old prompt (send it
+  // again, or adapt it).
+  const PROMPTS_SHOWN = 5;
+  const PROMPT_ROW_CHARS = 72;
+
+  function openPromptsMenu(id, anchor) {
+    sendCmdAwait("pane.prompts", { pane: id, limit: PROMPTS_SHOWN }, (res) => {
+      // The answer is asynchronous: the pane may have closed, or the header
+      // been re-rendered, while the read was out. A detached anchor has no
+      // position worth opening at.
+      if (!anchor.isConnected) return;
+      const r = anchor.getBoundingClientRect();
+      openCtx(r.left, r.bottom + 2, promptsMenuItems(res));
+    });
+  }
+
+  // promptsMenuItems shapes a pane.prompts cmd_result into menu rows. Split
+  // out from openPromptsMenu so the shaping is testable without a DOM.
+  function promptsMenuItems(res) {
+    if (!res || !res.ok) {
+      return [{ note: "could not read prompts: " + ((res && res.error) || "no answer") }];
+    }
+    const data = res.data || {};
+    const prompts = data.prompts || [];
+    if (!prompts.length) return [{ note: data.note || "no prompts yet" }];
+    const now = Date.now();
+    const items = [{ head: prompts.length === 1 ? "last prompt" : "last " + prompts.length + " prompts" }];
+    for (const pr of prompts) {
+      const at = pr.at ? Date.parse(pr.at) : NaN;
+      items.push({
+        label: promptRowLabel(pr.text),
+        // The bare figure, not "2m ago": the column is all ages, and the word
+        // repeated down it is noise (the agents rows make the same call).
+        hint: isNaN(at) ? "" : fmtAgeNum(now - at),
+        title: pr.text + "\n\nclick to copy",
+        fn: () => clipWrite(pr.text).then(() => toast("prompt copied"), () => toast("copy failed")),
+      });
+    }
+    return items;
+  }
+
+  // promptRowLabel folds a prompt onto one row: whitespace runs (newlines
+  // included) collapse to a space, so a multi-paragraph prompt previews as its
+  // opening words rather than as its first line alone, which for a pasted spec
+  // is often a bare heading. Cut at PROMPT_ROW_CHARS, marked with "…".
+  function promptRowLabel(text) {
+    const one = String(text || "").replace(/\s+/g, " ").trim();
+    return one.length > PROMPT_ROW_CHARS ? one.slice(0, PROMPT_ROW_CHARS - 1) + "…" : one;
   }
 
   // ---- The auto-close countdown on an exited header ----

@@ -36,3 +36,13 @@
   #ctxmenu .head { padding:4px 10px 2px; font-size:10px; text-transform:uppercase;
     letter-spacing:.8px; color:var(--muted); cursor:default; margin-top:4px; }
   #ctxmenu .head:first-child { margin-top:0; }
+
+  /* Rows that are data rather than verbs (28-ctxmenu.js: hint, note). A hint is
+     a muted figure at the row's right edge — the age of a recent prompt — kept
+     clear of the label by the row's own gap and pushed over by margin-left:auto
+     so the figures line up as a column. A note is an inert sentence standing in
+     for an empty list: muted, no hover, and allowed to wrap within a bound,
+     since it explains rather than labels. */
+  #ctxmenu .item .hint { margin-left:auto; padding-left:12px; color:var(--muted); font-size:11px; }
+  #ctxmenu .item:hover .hint { color:inherit; }
+  #ctxmenu .note { padding:5px 10px; color:var(--muted); cursor:default; max-width:340px; white-space:normal; }

@@ -188,6 +188,21 @@ const (
 	CmdLedgerOutput = "ledger.output"
 	CmdLedgerJump   = "ledger.jump"
 
+	// pane.prompts is the other half of "what was this pane asked to do": the
+	// last few prompts a pane's coding agent was sent, newest first. The ledger
+	// cannot answer it — an agent's prompt is typed into the agent's own TUI,
+	// not run by a shell, so no shell integration ever sees one.
+	//
+	// The answer is read from the agent's own on-disk history, the same files
+	// the pane's model is read from, rather than captured from keystrokes on the
+	// way in. Keystrokes are what the user TYPED — edits, arrow-key recalls,
+	// half-written lines abandoned with Esc — while the history is what the
+	// agent actually RECEIVED, whoever sent it: a human at the keyboard, a
+	// pane.send_input from a plugin, or a paste. It also needs nothing recorded
+	// ahead of time, so a pane's earlier prompts are there the first time anyone
+	// asks.
+	CmdPanePrompts = "pane.prompts"
+
 	// File transfer: stat a path, read a slice of a file, write a slice of a
 	// file — on whichever machine the addressed pane runs on.
 	//
@@ -475,6 +490,9 @@ var commandSpecs = []CommandSpec{
 	{Name: CmdLedgerList, Params: LedgerListParams{}, Result: LedgerListResult{}, ReplyRequired: true},
 	{Name: CmdLedgerOutput, Params: LedgerBlockParams{}, Result: LedgerOutputResult{}, ReplyRequired: true, ParamsRequired: true},
 	{Name: CmdLedgerJump, Params: LedgerBlockParams{}, ParamsRequired: true},
+	// pane.prompts is a query like ledger.list, and reply-gated for the same
+	// reason — and because answering it reads a file that runs to megabytes.
+	{Name: CmdPanePrompts, Params: PanePromptsParams{}, Result: PanePromptsResult{}, ReplyRequired: true},
 
 	// Files. get and stat are queries and reply-gated: bytes with nowhere to go
 	// are not worth reading off a disk on another machine. put is an effect and
@@ -2178,6 +2196,53 @@ type LedgerOutputResult struct {
 	// block does not need a second round trip against a buffer that has moved.
 	StartRow uint32 `json:"start_row,omitempty"`
 	EndRow   uint32 `json:"end_row,omitempty"`
+}
+
+// --- Agent prompt history (§7, pane.prompts) ---------------------------------
+
+// PanePromptsParams addresses the pane whose agent's prompts are wanted. Pane
+// nil = the focused pane, as for pane.get. Limit 0 asks for the default
+// (PanePromptsDefault); anything above PanePromptsMax is clamped to it.
+type PanePromptsParams struct {
+	Pane  *uint32 `json:"pane,omitempty" cats:"handle=pane"`
+	Limit int     `json:"limit,omitempty"`
+}
+
+const (
+	// PanePromptsDefault is how many prompts an unbounded ask returns: "the last
+	// few", which is what fits in a header popover without scrolling.
+	PanePromptsDefault = 5
+	// PanePromptsMax bounds a single answer. The read is a bounded tail of the
+	// agent's history anyway (see the backend), so a larger number could not be
+	// honoured reliably — better a stated ceiling than a quiet shortfall.
+	PanePromptsMax = 50
+)
+
+// AgentPrompt is one prompt the pane's agent received.
+type AgentPrompt struct {
+	// Text is the prompt as the agent received it, trimmed of surrounding
+	// whitespace. A slash command is spelled the way it was typed ("/model
+	// opus") rather than as the markup the agent stores it under.
+	Text string `json:"text"`
+	// At is when the agent recorded it (RFC 3339), "" when its history does not
+	// say. It is the agent's clock, not catway's.
+	At string `json:"at,omitempty"`
+}
+
+// PanePromptsResult is CmdResult.Data for pane.prompts.
+//
+// An empty Prompts with a Note is the ordinary answer for a pane whose agent
+// keeps no history this side can read (an agent with no reader, a pane on
+// another host) or has not been sent anything yet. That is a state, not a
+// failure — the same stance LedgerOutputResult takes on a block that scrolled
+// away — so it is a field the caller can show rather than an error it has to
+// special-case.
+type PanePromptsResult struct {
+	Pane  uint32 `json:"pane" cats:"handle=pane"`
+	Agent string `json:"agent,omitempty"`
+	// Prompts is newest first.
+	Prompts []AgentPrompt `json:"prompts"`
+	Note    string        `json:"note,omitempty"`
 }
 
 // --- Runbook params & results (§7, runbook.list / runbook.run) ---------------

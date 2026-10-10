@@ -74,6 +74,9 @@ type (
 	LedgerListParams         = wire.LedgerListParams
 	LedgerListResult         = wire.LedgerListResult
 	LedgerOutputResult       = wire.LedgerOutputResult
+	PanePromptsParams        = wire.PanePromptsParams
+	PanePromptsResult        = wire.PanePromptsResult
+	AgentPrompt              = wire.AgentPrompt
 	LockWorkspaceParams      = wire.LockWorkspaceParams
 	CleanWorkspaceParams     = wire.CleanWorkspaceParams
 	CleanWorkspaceResult     = wire.CleanWorkspaceResult
@@ -216,6 +219,7 @@ const (
 	CmdHostDetach         = wire.CmdHostDetach
 	CmdHostList           = wire.CmdHostList
 	CmdLedgerJump         = wire.CmdLedgerJump
+	CmdPanePrompts        = wire.CmdPanePrompts
 	CmdLedgerList         = wire.CmdLedgerList
 	CmdLedgerOutput       = wire.CmdLedgerOutput
 	CmdNavBack            = wire.CmdNavBack

@@ -255,6 +255,13 @@ type Backend interface {
 	// now — so both resolve r later.
 	LedgerOutput(r Responder, p LedgerBlockParams)
 	LedgerJump(r Responder, p LedgerBlockParams)
+	// PanePrompts answers the last few prompts pane's coding agent was sent
+	// (pane.prompts), newest first. On the Backend because the answer lives in
+	// the agent's on-disk history, which only the backend knows how to locate —
+	// it is the same history the pane's model is read from — and asynchronous
+	// because that read is file I/O that must not run on the loop. pane is
+	// already resolved and limit already clamped to 1..PanePromptsMax.
+	PanePrompts(r Responder, pane uint32, limit int)
 
 	// RunbookList enumerates the runbooks on disk (runbook.list) and RunbookRun
 	// executes one (runbook.run).
@@ -1490,6 +1497,27 @@ func (d *Dispatcher) dispatch(name string, dec ParamDecoder, r Responder) {
 		}
 		d.backend.LedgerOutput(r, p)
 
+	case CmdPanePrompts:
+		// Reply gate first, as for ledger.output: the answer is a file read,
+		// and one with nowhere to go is not worth making.
+		if !r.WantsReply() {
+			return
+		}
+		var pp PanePromptsParams
+		if err := decodeOptional(dec, &pp); err != nil {
+			bad(err)
+			return
+		}
+		// Resolved through the session like pane.get, so an omitted pane means
+		// the focused one and an unknown id fails here rather than as an empty
+		// history the caller would read as "nothing was asked".
+		id, err := d.session.ResolvePaneTargetIn(d.ws(), optPaneID(pp.Pane))
+		if err != nil {
+			r.Fail(err.Error())
+			return
+		}
+		d.backend.PanePrompts(r, uint32(id), clampPromptLimit(pp.Limit))
+
 	case CmdLedgerJump:
 		p, ok := d.decodeBlockParams(dec, r)
 		if !ok {
@@ -1789,6 +1817,19 @@ func (d *Dispatcher) inheritedSplitCwd(target *layout.PaneID, host string) strin
 // share. Both refusals are about the PANE rather than the block, because a
 // block is live terminal state: a closed pane has no blocks at all, and a
 // disconnected host cannot be asked where one is.
+// clampPromptLimit maps pane.prompts' limit onto 1..PanePromptsMax: zero or a
+// negative number asks for the default, and an oversized one is clamped rather
+// than refused, since "as many as you have" is a reasonable thing to ask.
+func clampPromptLimit(n int) int {
+	switch {
+	case n <= 0:
+		return PanePromptsDefault
+	case n > PanePromptsMax:
+		return PanePromptsMax
+	}
+	return n
+}
+
 func (d *Dispatcher) decodeBlockParams(dec ParamDecoder, r Responder) (LedgerBlockParams, bool) {
 	var p LedgerBlockParams
 	if err := dec.Decode(&p); err != nil {

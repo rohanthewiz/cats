@@ -19,6 +19,13 @@
   // that actually differs, pushed to the right. Naming the subject once at the
   // top of its group buys the labels back: under a heading, "new…" is not
   // ambiguous.
+  //
+  // Three optional extras serve menus whose rows are data rather than verbs —
+  // the header's recent-prompts list is the first: {title} is the row's
+  // tooltip (the full text behind a truncated label), {hint} a muted figure
+  // pushed to the row's right edge (an age), and {note: "…"} an inert, muted
+  // sentence in place of rows, for a list that came back empty and should say
+  // why rather than open as a bare box.
   function openCtx(x, y, items) {
     closeCtx();
     // The hover card is the other floating surface over this page, and a menu
@@ -56,6 +63,12 @@
         m.appendChild(h);
         continue;
       }
+      if (it.note) {
+        const n = document.createElement("div");
+        n.className = "note"; n.textContent = it.note;
+        m.appendChild(n);
+        continue;
+      }
       const el = document.createElement("div");
       el.className = "item" + (it.danger ? " danger" : "") + (it.sub ? " sub" : "");
       if (it.icon) {
@@ -65,6 +78,12 @@
         el.appendChild(ic);
       }
       el.appendChild(document.createTextNode(it.label));
+      if (it.title) el.title = it.title;
+      if (it.hint) {
+        const hn = document.createElement("span");
+        hn.className = "hint"; hn.textContent = it.hint;
+        el.appendChild(hn);
+      }
       if (it.sub) {
         // Hover opens it (and closes any sibling's), which is what a pointer
         // expects; click does the same so a tap reaches it too. The child is

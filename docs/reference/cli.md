@@ -276,6 +276,17 @@ the scrollback, so `output` on a command whose lines have finally been discarded
 says so on stderr and exits 1 rather than printing whatever now occupies those
 rows.
 
+What a pane's coding agent was asked — its last few prompts, newest first, read
+from the agent's own history (claude and copilot):
+
+```bash
+catctl prompts            # the focused pane
+catctl prompts 3
+catctl pane.prompts --params '{"pane":3,"limit":20}'
+```
+
+See [the control API](../protocols/control-api.md#agent-prompt-history).
+
 Editors:
 
 ```bash

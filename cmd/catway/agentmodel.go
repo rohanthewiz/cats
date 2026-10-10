@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rohanthewiz/cats/internal/app"
 	"github.com/rohanthewiz/cats/internal/browserproto"
 	"github.com/rohanthewiz/cats/internal/config"
 	"github.com/rohanthewiz/cats/internal/dlog"
@@ -85,13 +86,20 @@ import (
 type modelResolver struct {
 	root func() string
 	read func(root, cwd, session string) string
+	// prompts reads the last n prompts the agent was sent out of the same
+	// history, newest first (pane.prompts; see agentprompts.go). It shares the
+	// entry because it shares everything else — the root, the session ref, the
+	// cwd fallback — and an agent whose model can be named has, by
+	// construction, a history whose prompts can be read too. nil means the
+	// agent's history has no readable prompts.
+	prompts func(root, cwd, session string, n int) []app.AgentPrompt
 }
 
 // modelResolvers is the set of agents whose model can be named, keyed by the
 // agent label detect.IdentifyAgent yields (and that the hook seam reports).
 var modelResolvers = map[string]modelResolver{
-	"claude":  {root: claudeProjectsDir, read: claudeModel},
-	"copilot": {root: copilotStateDir, read: copilotModel},
+	"claude":  {root: claudeProjectsDir, read: claudeModel, prompts: claudePrompts},
+	"copilot": {root: copilotStateDir, read: copilotModel, prompts: copilotPrompts},
 }
 
 // modelRootsFor resolves every entry's root once, dropping the agents whose home
@@ -165,24 +173,34 @@ func (o *orch) refreshAgentModel(rt *paneRuntime, agent string) {
 	}
 	rt.modelBusy = true
 	pid, cwd := rt.id, rt.cwd
-	// The session ref only names a history belonging to the agent that reported
-	// it. A pane that ran claude and then copilot still carries the older agent's
-	// ref until the new one's hook fires, and handing claude's id to copilot's
-	// reader would at best miss and at worst name someone else's directory. So
-	// both channels are filtered on the agent actually running, and the hook wins
-	// where they disagree: it is the agent speaking for itself, while the detected
-	// one is read from the outside off a pid that may have just been replaced.
-	session := ""
-	if s := rt.agentSession; s != nil && s.agent == agent && s.kind == "id" {
-		session = s.value
-	} else if s := rt.detectedSession; s != nil && s.agent == agent {
-		session = s.value
-	}
+	session := rt.historySession(agent)
 	read := resolver.read
 	go func() {
 		model := read(root, cwd, session)
 		o.post(func() { o.setAgentModel(pid, model) })
 	}()
+}
+
+// historySession is the session id naming agent's history for this pane, ""
+// when neither channel has one and the readers must fall back to the cwd.
+//
+// The session ref only names a history belonging to the agent that reported
+// it. A pane that ran claude and then copilot still carries the older agent's
+// ref until the new one's hook fires, and handing claude's id to copilot's
+// reader would at best miss and at worst name someone else's directory. So
+// both channels are filtered on the agent actually running, and the hook wins
+// where they disagree: it is the agent speaking for itself, while the detected
+// one is read from the outside off a pid that may have just been replaced.
+//
+// Loop goroutine only, like every other read of rt.
+func (rt *paneRuntime) historySession(agent string) string {
+	if s := rt.agentSession; s != nil && s.agent == agent && s.kind == "id" {
+		return s.value
+	}
+	if s := rt.detectedSession; s != nil && s.agent == agent {
+		return s.value
+	}
+	return ""
 }
 
 // setAgentModel records a resolved model and republishes the pane's agent chrome
@@ -625,7 +643,13 @@ func compactTokens(n int64) string {
 // Both agents' histories are append-only and run to megabytes while the records
 // worth reading sit within a few KB of the end, so neither is ever read whole.
 // nil for anything unreadable or empty — callers treat that as "no answer".
-func tailLines(path string) [][]byte {
+func tailLines(path string) [][]byte { return tailLinesN(path, modelTailBytes) }
+
+// tailLinesN is tailLines with the budget named: the last max bytes of path,
+// split into lines. pane.prompts reads a much longer tail than the model does
+// (see promptTailBytes), since a prompt is followed by a whole turn's worth of
+// tool traffic while a model is named by the very last record.
+func tailLinesN(path string, max int64) [][]byte {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil
@@ -636,8 +660,8 @@ func tailLines(path string) [][]byte {
 		return nil
 	}
 	off := int64(0)
-	if fi.Size() > modelTailBytes {
-		off = fi.Size() - modelTailBytes
+	if fi.Size() > max {
+		off = fi.Size() - max
 	}
 	buf := make([]byte, fi.Size()-off)
 	if _, err := io.ReadFull(io.NewSectionReader(f, off, int64(len(buf))), buf); err != nil {

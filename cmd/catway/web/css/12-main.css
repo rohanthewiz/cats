@@ -118,6 +118,13 @@
      (worst on the focused header's --chrome-focus). */
   .pane .chrome .info .agent { color:var(--warn-fg); }
   .pane .chrome .info .exited { color:var(--err); font-weight:600; }
+  /* "prompts ▾" opens the agent's recent prompts (06-chrome.js,
+     openPromptsMenu). Muted, like the host badge, because it is a control and
+     not a fact about the pane: it should be findable at the end of the agent's
+     run without competing with the state word before it. It takes the pointer
+     and brightens on hover, the way the flag and ZOOM chips in this row do. */
+  .pane .chrome .info .prompts { color:var(--muted); cursor:pointer; }
+  .pane .chrome .info .prompts:hover { color:var(--fg-strong); }
   /* The tidy-exit countdown, immediately after "exited (0)" and deliberately
      quieter than it: the exit is the news, the countdown is what the pane is
      about to do about it. Muted rather than red so a header that is merely

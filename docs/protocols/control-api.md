@@ -723,6 +723,7 @@ new panes rather than a location.
 | `ui.notify` / `ui.action` | `notify <title...>` / — |
 | `ledger.list` | `history [count]` |
 | `ledger.output` / `ledger.jump` | `output <pane> <block>` / `jump <pane> <block>` |
+| `pane.prompts` | `prompts [pane]` |
 | `pane.open_file` | `open <path> [line]` |
 | `file.stat` / `file.get` / `file.put` | `cp [-f] <src> <dst>` (a loop over all three) |
 | `runbook.list` / `runbook.run` | `runbooks` / `runbook <name> [key=value ...]` |
@@ -960,6 +961,48 @@ shell prints around each command, which each cathost scans out of its own panes'
 output. A shell with no integration produces no records — and one that prints
 the marks but never the command line produces none either, since the field the
 history exists for would be missing.
+
+### Agent prompt history
+
+`pane.prompts` is the agent's side of the same question: the last few prompts a
+pane's coding agent was sent, newest first.
+
+```bash
+catctl prompts            # the focused pane's last 5
+catctl prompts 3
+catctl pane.prompts --params '{"pane":3,"limit":20}'
+```
+
+| Field | Meaning |
+|-------|---------|
+| `pane` / `agent` | the pane asked about, and the agent holding it now |
+| `prompts[].text` | the prompt as the agent received it; a slash command reads as typed (`/model opus`), a `!` escape as `! git status` |
+| `prompts[].at` | when the agent recorded it (RFC 3339, the agent's clock); absent when its history does not say |
+| `note` | why `prompts` is empty, when it is |
+
+`limit` defaults to 5 and is clamped to 50.
+
+**It is read from the agent's own history, not recorded from keystrokes.** The
+ledger cannot see a prompt — it is typed into the agent's TUI, not run by a
+shell — and keystrokes are the wrong source anyway: they hold every edit, every
+↑-recall and every line abandoned with Esc, and nothing for a prompt that
+arrived by paste or by `pane.send_input`. The history holds what the agent
+actually received, whoever sent it, and is there the first time anyone asks.
+It is the same history the pane's model is named from, found the same way (the
+session id the agent reported or the host traced, then the newest history under
+the pane's cwd), so the agents that can be read are the ones whose model shows:
+claude and copilot today. Tool results, sub-agent turns, harness-injected text
+and slash-command output are user turns in that history too, and are left out.
+
+An agent with no reader, a pane on another host (its history is on that
+machine), and an agent that has not been sent anything yet all answer with an
+empty `prompts` and a `note` — states, not failures, the same stance
+`ledger.output` takes on a block that has scrolled away. Only an unknown pane
+fails.
+
+In the browser this is the **prompts ▾** control at the end of an agent pane's
+header: it opens the list, a row's tooltip is the full prompt, and a click
+copies it.
 
 ### Opening a file in the editor
 

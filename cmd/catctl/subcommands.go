@@ -153,6 +153,11 @@ var subcommands = []subcommand{
 	{"history", app.CmdLedgerList, "history [count]", nil, "recent commands across every pane and host", buildHistory},
 	{"output", app.CmdLedgerOutput, "output <pane> <block>", []argKind{argPane}, "print a recorded command's output, if it is still in the pane", buildBlock},
 	{"jump", app.CmdLedgerJump, "jump <pane> <block>", []argKind{argPane}, "put a recorded command's output on screen", buildBlock},
+	// The agent's side of the same question: what the pane's coding agent was
+	// asked, read from its own history. Pane-scoped like `pane`, so it takes
+	// the same optional handle; a longer list is `catctl pane.prompts --params
+	// '{"limit":20}'`, the shape a script writes anyway.
+	{"prompts", app.CmdPanePrompts, "prompts [pane]", []argKind{argPane}, "the last few prompts the pane's coding agent was sent (focused by default)", buildOptPane},
 
 	// Runbooks. `runbooks` lists, `runbook <name>` runs — the same plural/
 	// singular pair as themes, and for the same reason: the listing and the
