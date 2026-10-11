@@ -29,7 +29,7 @@ func TestBundledAssetsReportSessionRefs(t *testing.T) {
 		{
 			name:    "claude",
 			asset:   claudeHookAsset,
-			want:    []string{"agent_session_id", "pane.report_agent_session"},
+			want:    []string{"agent_session_id", "pane.report_agent_session", "session_source"},
 			wantNot: []string{`"state": action`, "pane.release_agent"},
 		},
 		{

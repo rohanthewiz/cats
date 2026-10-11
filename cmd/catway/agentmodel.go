@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -15,6 +16,7 @@ import (
 	"github.com/rohanthewiz/cats/internal/app"
 	"github.com/rohanthewiz/cats/internal/browserproto"
 	"github.com/rohanthewiz/cats/internal/config"
+	"github.com/rohanthewiz/cats/internal/detect"
 	"github.com/rohanthewiz/cats/internal/dlog"
 	"github.com/rohanthewiz/cats/internal/orchestration"
 )
@@ -194,13 +196,39 @@ func (o *orch) refreshAgentModel(rt *paneRuntime, agent string) {
 //
 // Loop goroutine only, like every other read of rt.
 func (rt *paneRuntime) historySession(agent string) string {
-	if s := rt.agentSession; s != nil && s.agent == agent && s.kind == "id" {
-		return s.value
-	}
-	if s := rt.detectedSession; s != nil && s.agent == agent {
+	if s := rt.historySessionRef(agent); s != nil {
 		return s.value
 	}
 	return ""
+}
+
+// historySessionRef is historySession's ref, nil when neither channel has one.
+func (rt *paneRuntime) historySessionRef(agent string) *agentSessionRef {
+	if s := rt.agentSession; s != nil && s.agent == agent && s.kind == "id" {
+		return s
+	}
+	if s := rt.detectedSession; s != nil && s.agent == agent {
+		return s
+	}
+	return nil
+}
+
+// sessionOrigin is the pane's conversation for agent (historySessionRef) and how
+// it began. The ref that names the conversation may not know its origin — a
+// hook ref from an older integration, or one restored across a restart — while
+// detection, which infers it on the host, does; when both name the same id the
+// detected origin fills the gap. Where both know, the hook's stands: it is the
+// agent's own account, the other an inference.
+func (rt *paneRuntime) sessionOrigin(agent string) (session, origin string) {
+	ref := rt.historySessionRef(agent)
+	if ref == nil {
+		return "", ""
+	}
+	origin = ref.origin
+	if d := rt.detectedSession; origin == "" && d != nil && d.agent == ref.agent && d.value == ref.value {
+		origin = d.origin
+	}
+	return ref.value, origin
 }
 
 // setAgentModel records a resolved model and republishes the pane's agent chrome
@@ -270,12 +298,21 @@ func (o *orch) applyPaneAgentSession(ev orchestration.PaneAgentSession) {
 	// gated: the value goes into a glob pattern, and this end does not get to
 	// assume the other end validated it.
 	if ev.Agent != "" && isTranscriptID(ev.SessionID) {
-		ref = &agentSessionRef{source: sessionSourceDetect, agent: ev.Agent, kind: "id", value: ev.SessionID}
+		ref = &agentSessionRef{source: sessionSourceDetect, agent: ev.Agent, kind: "id", value: ev.SessionID,
+			origin: detect.NormalizeSessionOrigin(ev.Origin)}
 	}
 	if sameSessionRef(rt.detectedSession, ref) {
 		return
 	}
 	rt.detectedSession = ref
+	if ref != nil {
+		log.Printf("catway: pane %d %s session %s detected (%s)", rt.id, ref.agent, ref.value, originLabel(ref.origin))
+	}
+	// A hook report that was parked for want of proof it came from the pane's
+	// own agent (setSessionRef) has its proof now if this names the same id.
+	if p := rt.pendingSession; p != nil && ref != nil && p.agent == ref.agent && p.value == ref.value {
+		o.setSessionRef(rt, p)
+	}
 	// A read already in flight is reading the previous identity's history; its
 	// answer must not settle as this one's (see setAgentModel).
 	rt.modelDirty = rt.modelBusy

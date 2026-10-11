@@ -791,11 +791,18 @@ func NewPaneAgent(id uint32, agent, state string, visibleBlocker, visibleWorking
 // retracts the session with it. A client that does not know this message ignores
 // it — the orchestrator's dispatch drops unknown event types — so an older peer
 // simply keeps the behaviour it had.
+//
+// Origin says how the conversation began — detect.SessionOriginStartup, …Clear
+// or …Resume — inferred on the host because the evidence (the pid that holds the
+// conversation, the transcript's first records) is on the agent's machine; see
+// detect.AgentSessionOrigin. "" when unknown, which is also what an older host
+// sends by leaving the field out.
 type PaneAgentSession struct {
 	Type      MessageType `json:"type"`
 	PaneID    uint32      `json:"pane_id"`
 	Agent     string      `json:"agent"`
 	SessionID string      `json:"session_id"`
+	Origin    string      `json:"origin,omitempty"`
 }
 
 // PaneJob reports whether a pane's shell currently has a foreground job — a
@@ -859,12 +866,13 @@ func NewPaneJob(id uint32, busy bool, exe string, argv []string) PaneJob {
 	return PaneJob{Type: MsgPaneJob, PaneID: id, Busy: busy, Exe: exe, Argv: argv}
 }
 
-func NewPaneAgentSession(id uint32, agent, sessionID string) PaneAgentSession {
+func NewPaneAgentSession(id uint32, agent, sessionID, origin string) PaneAgentSession {
 	return PaneAgentSession{
 		Type:      MsgPaneAgentSession,
 		PaneID:    id,
 		Agent:     agent,
 		SessionID: sessionID,
+		Origin:    origin,
 	}
 }
 

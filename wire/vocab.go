@@ -1223,6 +1223,14 @@ type PaneMeta struct {
 	AgentModel string `json:"agent_model,omitempty"` // LLM the agent is running under; only some agents resolve one
 	Title      string `json:"title,omitempty"`       // live terminal title
 	Cwd        string `json:"cwd,omitempty"`         // live working directory
+	// AgentSession is the conversation the agent is in (claude's session id),
+	// and AgentSessionOrigin how that conversation began: "startup" (a fresh
+	// launch), "clear" (the running agent dropped its conversation for a new
+	// one) or "resume" (an earlier conversation picked back up). Both only for
+	// agents whose conversations can be traced; the origin is "" when it could
+	// not be told, e.g. a session restored from before a restart.
+	AgentSession       string `json:"agent_session,omitempty"`
+	AgentSessionOrigin string `json:"agent_session_origin,omitempty"`
 	// Host is the cathost the pane's terminal lives on, resolved against the
 	// live roster — so it always names a host that exists, including for a pane
 	// restored onto one that has since gone away. It sits here rather than

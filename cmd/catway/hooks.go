@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rohanthewiz/cats/internal/detect"
 	"github.com/rohanthewiz/cats/internal/dlog"
 	"github.com/rohanthewiz/cats/internal/integration"
 )
@@ -73,6 +74,10 @@ type hookReportParams struct {
 	Seq              *uint64 `json:"seq,omitempty"`
 	AgentSessionID   string  `json:"agent_session_id,omitempty"`
 	AgentSessionPath string  `json:"agent_session_path,omitempty"`
+	// SessionSource is how the reported session began, straight from the
+	// agent's SessionStart `source` (claude: startup|resume|clear|compact).
+	// Optional — integrations older than claude v6 never send it.
+	SessionSource string `json:"session_source,omitempty"`
 }
 
 // hookError is a reply error; nil means ok. Codes are cats's snake_case set.
@@ -245,11 +250,23 @@ type hookAuthority struct {
 // agentSessionRef is a resumable agent-session identity reported by a hook
 // (cats's AgentSessionRef): claude's SessionStart session_id and friends. Kind
 // is "id" for every agent except pi, which may report an absolute "path".
+//
+// origin is how the conversation began (detect.SessionOrigin*), "" when unknown
+// — a restored ref, an integration too old to say, or an agent that does not.
+// It describes the conversation rather than identifying it, so sameConversation
+// is the comparison for "is this the same session".
 type agentSessionRef struct {
 	source string
 	agent  string
 	kind   string // "id" | "path"
 	value  string
+	origin string
+}
+
+// sameConversation reports whether a and b name the same conversation from the
+// same reporter, whatever each says about its origin.
+func sameConversation(a, b *agentSessionRef) bool {
+	return a.source == b.source && a.agent == b.agent && a.kind == b.kind && a.value == b.value
 }
 
 // hookSuppression marks a released/exited agent+session so a late duplicate
@@ -391,13 +408,18 @@ func (o *orch) applyHookReportFrom(method string, p hookReportParams, fromHost s
 
 // setSessionRef records a resumable session identity (cats's
 // set_agent_session_ref): dropped when the label conflicts with the currently
-// detected agent, or when a different session id arrives for the conversation
-// already held (cats's conflicting_current_session_ref — a sub-agent's or
-// nested session's id must not clobber the resumable parent session; the held
-// ref stays until detection or release clears it). A changed session clears
-// any release suppression for the source (it is a new conversation). An
-// actual change to the held ref marks the session state dirty — the ref is
-// what resume-on-restore persists.
+// detected agent. A different session id for the conversation already held is
+// the hard case (cats's conflicting_current_session_ref): it may be a sub-agent's
+// or nested session's id, which must not clobber the resumable parent session —
+// but it may just as well be the pane's own agent moving on, after a /clear or a
+// /resume, and refusing that leaves the pane pinned to a conversation it has
+// left (its model, prompts and resume target all read from the old history).
+// replacesSessionRef tells the two apart where it can; a report it cannot vouch
+// for is parked in pendingSession for detection to confirm.
+//
+// A changed session clears any release suppression for the source (it is a new
+// conversation). An actual change to the held ref marks the session state dirty
+// — the ref is what resume-on-restore persists.
 func (o *orch) setSessionRef(rt *paneRuntime, ref *agentSessionRef) {
 	if ref == nil {
 		return
@@ -406,16 +428,56 @@ func (o *orch) setSessionRef(rt *paneRuntime, ref *agentSessionRef) {
 		return
 	}
 	if cur := rt.agentSession; cur != nil && cur.kind == "id" && ref.kind == "id" &&
-		cur.source == ref.source && cur.agent == ref.agent && cur.value != ref.value {
+		cur.source == ref.source && cur.agent == ref.agent && cur.value != ref.value &&
+		!rt.replacesSessionRef(ref) {
+		rt.pendingSession = ref
 		return
+	}
+	rt.pendingSession = nil
+	cur := rt.agentSession
+	if cur != nil && ref.origin == "" && sameConversation(cur, ref) {
+		// A re-report of the held conversation that does not say how it began
+		// (a compact, an older integration) keeps what was known.
+		merged := *ref
+		merged.origin = cur.origin
+		ref = &merged
 	}
 	if sup, ok := rt.hookSuppressed[ref.source]; ok && sup.session != ref.value {
 		delete(rt.hookSuppressed, ref.source)
 	}
-	if cur := rt.agentSession; cur == nil || *cur != *ref {
+	if cur == nil || *cur != *ref {
+		if cur == nil || !sameConversation(cur, ref) {
+			log.Printf("catway: pane %d %s session %s (%s)", rt.id, ref.agent, ref.value, originLabel(ref.origin))
+		}
 		rt.agentSession = ref
 		o.noteSessionRefChanged(rt)
 	}
+}
+
+// replacesSessionRef reports whether ref, a session id conflicting with the one
+// held, is known to come from the pane's own agent rather than a nested one:
+//
+//   - its origin is "clear": only an interactive session can be cleared, and the
+//     interactive session in this pane is the pane's agent;
+//   - or the host's detection already traced the pane's foreground agent process
+//     to that very id.
+//
+// A "resume" or "startup" alone is not enough — a script in the pane running
+// `claude -p --resume …` reports exactly that — so those wait on detection.
+func (rt *paneRuntime) replacesSessionRef(ref *agentSessionRef) bool {
+	if ref.origin == detect.SessionOriginClear {
+		return true
+	}
+	d := rt.detectedSession
+	return d != nil && d.agent == ref.agent && d.value == ref.value
+}
+
+// originLabel spells an origin for logs, where "" would read as a missing word.
+func originLabel(origin string) string {
+	if origin == "" {
+		return "origin unknown"
+	}
+	return origin
 }
 
 // noteSessionRefChanged supersedes any restart-restored ref for the pane (the
@@ -440,7 +502,8 @@ func sessionRefFromReport(source, agent string, p hookReportParams) *agentSessio
 		}
 	}
 	if v := p.AgentSessionID; v != "" && len(v) <= 512 && !hasControl(v) {
-		return &agentSessionRef{source: source, agent: agent, kind: "id", value: v}
+		return &agentSessionRef{source: source, agent: agent, kind: "id", value: v,
+			origin: detect.NormalizeSessionOrigin(p.SessionSource)}
 	}
 	return nil
 }
@@ -581,6 +644,7 @@ func paneEnvMap(socket string, id uint32, publicID string) map[string]string {
 // a resumed pane the root process IS the agent) and republishes the arbitrated
 // state.
 func (o *orch) clearHookOnExit(rt *paneRuntime) {
+	rt.pendingSession = nil
 	if _, restored := o.restoredAgents[rt.id]; restored || rt.agentSession != nil {
 		rt.agentSession = nil
 		o.noteSessionRefChanged(rt)

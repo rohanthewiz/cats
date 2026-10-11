@@ -155,6 +155,77 @@ func TestHookReservedNativeSessionOnly(t *testing.T) {
 	}
 }
 
+// SessionStart's source tells a clear from a fresh start, and decides whether a
+// new id may replace the held one: a /clear is the pane's own agent and replaces
+// at once; a resume could be a nested `claude -p --resume`, so it waits until
+// detection traces the pane's process to the same id. A compact re-reports the
+// held id and must not erase how it began.
+func TestHookSessionOriginReplacesHeldSession(t *testing.T) {
+	o, rt, pub := hookOrch(t)
+	o.onPaneAgent(orchestration.PaneAgent{PaneID: rt.id, Agent: "claude", State: "idle"})
+	report := func(n uint64, id, source string) {
+		t.Helper()
+		if herr := o.applyHookReport(methodReportAgentSession, hookReportParams{
+			PaneID: pub, Source: "cats:claude", Agent: "claude", Seq: seq(n),
+			AgentSessionID: id, SessionSource: source,
+		}); herr != nil {
+			t.Fatalf("report %s/%s: %+v", id, source, herr)
+		}
+	}
+	held := func(id, origin string) {
+		t.Helper()
+		if s := rt.agentSession; s == nil || s.value != id || s.origin != origin {
+			t.Fatalf("held session = %+v, want %s (%s)", s, id, origin)
+		}
+	}
+
+	report(1, "sess-1", "startup")
+	held("sess-1", "startup")
+	report(2, "sess-1", "compact")
+	held("sess-1", "startup")
+
+	report(3, "sess-2", "clear")
+	held("sess-2", "clear")
+	if m := o.PaneMeta(rt.id); m.AgentSession != "sess-2" || m.AgentSessionOrigin != "clear" {
+		t.Fatalf("PaneMeta after clear = %s (%s)", m.AgentSession, m.AgentSessionOrigin)
+	}
+
+	report(4, "sess-3", "resume")
+	held("sess-2", "clear")
+	if rt.pendingSession == nil || rt.pendingSession.value != "sess-3" {
+		t.Fatalf("unconfirmed resume should be parked: %+v", rt.pendingSession)
+	}
+	o.applyPaneAgentSession(orchestration.PaneAgentSession{PaneID: rt.id, Agent: "claude", SessionID: "sess-3", Origin: "resume"})
+	held("sess-3", "resume")
+	if rt.pendingSession != nil {
+		t.Fatalf("adopted report should leave nothing parked: %+v", rt.pendingSession)
+	}
+
+	// Detection already on the new id: a startup report is accepted straight away.
+	o.applyPaneAgentSession(orchestration.PaneAgentSession{PaneID: rt.id, Agent: "claude", SessionID: "sess-4", Origin: "startup"})
+	report(5, "sess-4", "startup")
+	held("sess-4", "startup")
+}
+
+// A hook ref that does not know its origin (an integration older than v6) takes
+// it from detection when both name the same conversation.
+func TestSessionOriginFallsBackToDetection(t *testing.T) {
+	o, rt, pub := hookOrch(t)
+	o.onPaneAgent(orchestration.PaneAgent{PaneID: rt.id, Agent: "claude", State: "idle"})
+	if herr := o.applyHookReport(methodReportAgentSession, hookReportParams{
+		PaneID: pub, Source: "cats:claude", Agent: "claude", Seq: seq(1), AgentSessionID: "sess-1",
+	}); herr != nil {
+		t.Fatalf("report: %+v", herr)
+	}
+	if m := o.PaneMeta(rt.id); m.AgentSession != "sess-1" || m.AgentSessionOrigin != "" {
+		t.Fatalf("before detection: %s (%s)", m.AgentSession, m.AgentSessionOrigin)
+	}
+	o.applyPaneAgentSession(orchestration.PaneAgentSession{PaneID: rt.id, Agent: "claude", SessionID: "sess-1", Origin: "clear"})
+	if m := o.PaneMeta(rt.id); m.AgentSession != "sess-1" || m.AgentSessionOrigin != "clear" {
+		t.Fatalf("after detection: %s (%s)", m.AgentSession, m.AgentSessionOrigin)
+	}
+}
+
 // A detected visible blocker upgrades a non-full-lifecycle hook's non-blocked
 // state (the user is being asked something the hook didn't know about), but
 // never a full-lifecycle hook's.

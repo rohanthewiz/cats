@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"time"
 )
 
 // Which conversation a running agent process is in.
@@ -33,17 +34,34 @@ import (
 // The answer is a session *identity*, not a model: what it is worth is naming the
 // pane's own history file, wherever that history is then read from.
 
-// sessionProbe reads one agent's registry entry for a live pid, "" when there is
-// no usable answer (no registry, no entry, a half-written file). Never an error:
-// an agent that has not written its entry yet is an ordinary state, not a fault.
-type sessionProbe func(pid int) string
+// AgentSession is one agent process's registry entry, reduced to what callers use:
+// the conversation id, the pid that answered for it, and when that process
+// started. The zero value is "no answer".
+//
+// PID and StartedAt ride along with the id because the id alone cannot say how
+// the conversation began. Whether the process holding it is the same one that
+// held the previous conversation (a /clear or a /resume inside a running agent)
+// or a new one (a fresh launch) is a pid comparison, and whether a conversation's
+// history predates the process is a comparison against its start — see
+// AgentSessionOrigin.
+type AgentSession struct {
+	PID       int
+	ID        string
+	StartedAt time.Time // zero when the registry does not say
+}
+
+// sessionProbe reads one agent's registry entry for a live pid, the zero value
+// when there is no usable answer (no registry, no entry, a half-written file).
+// Never an error: an agent that has not written its entry yet is an ordinary
+// state, not a fault.
+type sessionProbe func(pid int) AgentSession
 
 // sessionProbes is the set of agents whose live processes can be traced back to a
 // conversation, keyed by the label IdentifyAgent yields. A table rather than a
 // switch for the same reason modelResolvers is one: a second agent that keeps a
 // pid-keyed registry is an entry, not another branch.
 var sessionProbes = map[string]sessionProbe{
-	"claude": claudeSessionID,
+	"claude": claudeSession,
 }
 
 // AgentSessionID names the conversation one of pids is in — the first that
@@ -56,19 +74,25 @@ var sessionProbes = map[string]sessionProbe{
 // script carries the name, the binary it started keeps the registry entry. They
 // are tried in the caller's order, which puts the likeliest first.
 func AgentSessionID(agent string, pids []int) string {
+	return AgentSessionOf(agent, pids).ID
+}
+
+// AgentSessionOf is AgentSessionID with the rest of the registry entry: which of
+// pids answered, and when that process started. The zero value when none did.
+func AgentSessionOf(agent string, pids []int) AgentSession {
 	probe := sessionProbes[agent]
 	if probe == nil {
-		return ""
+		return AgentSession{}
 	}
 	for _, pid := range pids {
 		if pid <= 0 {
 			continue
 		}
-		if id := probe(pid); id != "" {
-			return id
+		if s := probe(pid); s.ID != "" {
+			return s
 		}
 	}
-	return ""
+	return AgentSession{}
 }
 
 const (
@@ -80,7 +104,7 @@ const (
 	maxSessionIDLen = 128
 )
 
-// claudeSessionID reads claude's registry entry for pid. claude writes one at
+// claudeSession reads claude's registry entry for pid. claude writes one at
 // startup and rewrites it as the session changes (a new conversation under the
 // same process gets a new id there), so a re-read is what catches a /clear as
 // well as a fresh start.
@@ -88,26 +112,35 @@ const (
 // The entry names its own pid; a mismatch means the file is not this process's —
 // the only way that happens is a stale entry a dead claude never cleaned up and a
 // pid the OS has since reused — and is refused rather than believed.
-func claudeSessionID(pid int) string {
+//
+// startedAt is the process's own start, in epoch milliseconds. It is not
+// rewritten when the conversation changes, which is what makes it the reference
+// a fresh launch is told from a `claude --resume` launch by (claudeSessionOrigin).
+func claudeSession(pid int) AgentSession {
 	dir := claudeConfigDir()
 	if dir == "" {
-		return ""
+		return AgentSession{}
 	}
 	b, err := os.ReadFile(filepath.Join(dir, "sessions", strconv.Itoa(pid)+".json"))
 	if err != nil || len(b) > claudeSessionMaxBytes {
-		return ""
+		return AgentSession{}
 	}
 	var rec struct {
 		PID       int    `json:"pid"`
 		SessionID string `json:"sessionId"`
+		StartedAt int64  `json:"startedAt"`
 	}
 	if err := json.Unmarshal(b, &rec); err != nil {
-		return ""
+		return AgentSession{}
 	}
 	if rec.PID != pid || !isSessionID(rec.SessionID) {
-		return ""
+		return AgentSession{}
 	}
-	return rec.SessionID
+	s := AgentSession{PID: pid, ID: rec.SessionID}
+	if rec.StartedAt > 0 {
+		s.StartedAt = time.UnixMilli(rec.StartedAt)
+	}
+	return s
 }
 
 // claudeConfigDir is claude's state directory: CLAUDE_CONFIG_DIR when set (as

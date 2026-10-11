@@ -114,7 +114,7 @@ const (
 	piCodingAgentDirEnvVar = "PI_CODING_AGENT_DIR"
 
 	claudeHookInstallName    = "cats-agent-state.sh"
-	claudeIntegrationVersion = 5
+	claudeIntegrationVersion = 6
 	claudeConfigDirEnvVar    = "CLAUDE_CONFIG_DIR"
 
 	codexHookInstallName    = "cats-agent-state.sh"

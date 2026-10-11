@@ -124,6 +124,12 @@ type paneRuntime struct {
 	// integration, while this needs nothing of the agent at all. nil when the
 	// host reported none — an agent that keeps no such registry, or no agent.
 	detectedSession *agentSessionRef
+	// pendingSession is a hook-reported conversation that conflicted with the
+	// one already held and could not yet be told from a nested session's report
+	// (setSessionRef). It is adopted if the host's detection names the same id
+	// (applyPaneAgentSession) — the pane's own agent process is then in it — and
+	// is otherwise just superseded by the next report.
+	pendingSession *agentSessionRef
 	// unseen marks an agent completion that landed while the pane was off the
 	// viewport (cats's pane.seen, inverted so the zero value means seen).
 	// Set by publishAgent on a finished transition, cleared when the pane
@@ -2424,6 +2430,9 @@ func (o *orch) PaneMeta(pane uint32) app.PaneMeta {
 		// (agentmodel.go), so reporting it for a pane with no agent would be
 		// reporting a leftover.
 		meta.Agent, meta.AgentState, meta.AgentModel = agent, state, rt.agentModel
+		// The same session the history readers use (historySessionRef), so the
+		// id a client sees is the one the model and prompts were read from.
+		meta.AgentSession, meta.AgentSessionOrigin = rt.sessionOrigin(agent)
 	}
 	// The plugin pair is resolved the same way the sidebar resolves it
 	// (agentsMsg), so pane.list and the sidebar always agree on what a pane

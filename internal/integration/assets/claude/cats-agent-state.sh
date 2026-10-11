@@ -3,7 +3,7 @@
 # managed by cats; reinstalling or updating the integration overwrites this file.
 # add custom hooks beside this file instead of editing it.
 # CATS_INTEGRATION_ID=claude
-# CATS_INTEGRATION_VERSION=5
+# CATS_INTEGRATION_VERSION=6
 
 set -eu
 
@@ -59,17 +59,24 @@ request_id = f"{source}:{int(time.time() * 1000)}:{random.randrange(1_000_000):0
 report_seq = time.time_ns()
 session_id = hook_input.get("session_id")
 agent_session_id = session_id if isinstance(session_id, str) and session_id else None
+# SessionStart's "source" says how the session began: startup (a fresh launch),
+# clear (/clear), resume (--resume, --continue, /resume) or compact (same
+# session, compacted). Forwarded as-is; cats decides what each one means.
+session_source = hook_input.get("source")
 if agent_session_id:
+    params = {
+        "pane_id": pane_id,
+        "source": source,
+        "agent": "claude",
+        "seq": report_seq,
+        "agent_session_id": agent_session_id,
+    }
+    if isinstance(session_source, str) and session_source:
+        params["session_source"] = session_source
     request = {
         "id": request_id,
         "method": "pane.report_agent_session",
-        "params": {
-            "pane_id": pane_id,
-            "source": source,
-            "agent": "claude",
-            "seq": report_seq,
-            "agent_session_id": agent_session_id,
-        },
+        "params": params,
     }
 else:
     raise SystemExit(0)

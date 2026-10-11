@@ -44,6 +44,7 @@ func (o *orch) onPaneAgent(ev orchestration.PaneAgent) {
 		}
 		if (ev.Agent != "" && ev.Agent != sess.agent) || (ev.Agent != prev && prev == sess.agent) {
 			rt.agentSession = nil
+			rt.pendingSession = nil
 			o.noteSessionRefChanged(rt)
 		}
 	}

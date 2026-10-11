@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rohanthewiz/cats/internal/detect"
 	"github.com/rohanthewiz/cats/internal/terminal"
 )
 
@@ -267,6 +268,11 @@ func TestHostReportsAgentSession(t *testing.T) {
 				t.Fatalf("pane_agent_session for pane %d, want 9", ps.PaneID)
 			}
 			if ps.Agent == "claude" && ps.SessionID == "sess-live" {
+				// The first conversation seen in a new process, with no
+				// transcript behind it, is a fresh launch.
+				if ps.Origin != detect.SessionOriginStartup {
+					t.Fatalf("origin = %q, want %q", ps.Origin, detect.SessionOriginStartup)
+				}
 				return
 			}
 		case MsgError:

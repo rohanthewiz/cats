@@ -133,10 +133,12 @@ type pane struct {
 	hasAgent       bool // a pane_agent has been emitted at least once
 	// The conversation behind the detected agent, as last reported via
 	// pane_agent_session: the agent it belongs to (an id only names a history
-	// belonging to the agent that wrote it) and the id itself.
-	lastSessionAgent string
-	lastSessionID    string
-	hasSession       bool // a pane_agent_session has been emitted at least once
+	// belonging to the agent that wrote it), the id itself, and how that
+	// conversation began (detect.SessionOrigin*, "" when unknown).
+	lastSessionAgent  string
+	lastSessionID     string
+	lastSessionOrigin string
+	hasSession        bool // a pane_agent_session has been emitted at least once
 	// Foreground-job state, as last reported via pane_job (detectPump writes,
 	// resync reads). hasJob is set once a job has ever been reported, so a
 	// pane that has only ever sat at its prompt replays nothing. lastJobExe is
@@ -307,16 +309,20 @@ func jobArgvHead(argv []string) []string {
 // hears it is not missing anything. Once one has been reported, going back to
 // empty IS news — it is how a client learns the agent left, or that the identity
 // it was keyed on is no longer valid — so it is emitted.
-func (p *pane) setAgentSessionMeta(agent, sessionID string) (changed bool) {
+//
+// The origin takes part in the comparison although it is fixed for a given id:
+// the pump only ever pairs an id with the origin it worked out when the id first
+// appeared, so in practice it changes exactly when the id does.
+func (p *pane) setAgentSessionMeta(agent, sessionID, origin string) (changed bool) {
 	p.metaMu.Lock()
 	defer p.metaMu.Unlock()
 	if !p.hasSession && agent == "" && sessionID == "" {
 		return false
 	}
-	if p.hasSession && p.lastSessionAgent == agent && p.lastSessionID == sessionID {
+	if p.hasSession && p.lastSessionAgent == agent && p.lastSessionID == sessionID && p.lastSessionOrigin == origin {
 		return false
 	}
-	p.lastSessionAgent, p.lastSessionID = agent, sessionID
+	p.lastSessionAgent, p.lastSessionID, p.lastSessionOrigin = agent, sessionID, origin
 	p.hasSession = true
 	return true
 }
@@ -1011,7 +1017,7 @@ func (h *Host) resyncPane(p *pane) {
 	agent, state := p.lastAgent, p.lastAgentState
 	vb, vw, hasAgent := p.lastVisBlocker, p.lastVisWorking, p.hasAgent
 	branch, hasBranch := p.lastBranch, p.hasBranch
-	sessAgent, sessID, hasSession := p.lastSessionAgent, p.lastSessionID, p.hasSession
+	sessAgent, sessID, sessOrigin, hasSession := p.lastSessionAgent, p.lastSessionID, p.lastSessionOrigin, p.hasSession
 	job, jobExe, jobArgv, hasJob := p.lastJob, p.lastJobExe, p.lastJobArgv, p.hasJob
 	p.metaMu.Unlock()
 	if cwd != "" {
@@ -1034,7 +1040,7 @@ func (h *Host) resyncPane(p *pane) {
 	// the next time it changes — which for a pane sitting in one session is
 	// never.
 	if hasSession {
-		h.emit(NewPaneAgentSession(p.id, sessAgent, sessID))
+		h.emit(NewPaneAgentSession(p.id, sessAgent, sessID, sessOrigin))
 	}
 	// And whether a job holds the terminal, for the same reason: a client
 	// deciding what is idle must not be left with the answer from before it
@@ -1274,6 +1280,14 @@ func (h *Host) detectPump(p *pane) {
 	// throttled, so most ticks never re-read the pids.
 	var agentPids []int
 	var lastSessionCheck time.Time
+	// lastSession is the last conversation the registry answered with (kept
+	// through empty reads, so a half-written registry file between two ids does
+	// not erase what the next id is compared against), lastSessionSeen the last
+	// time it was still the answer, and lastSessionOrigin how it began. All three
+	// feed detect.AgentSessionOrigin, which runs once per change of id.
+	var lastSession detect.AgentSession
+	var lastSessionSeen time.Time
+	var lastSessionOrigin string
 	var acquisitionStartedAt time.Time
 	var hasAcquisition bool
 	// jobExe is the foreground job leader's executable as of the last process
@@ -1413,9 +1427,27 @@ func (h *Host) detectPump(p *pane) {
 		// longer has.
 		if agentChanged || now.Sub(lastSessionCheck) >= agentSessionInterval {
 			lastSessionCheck = now
-			sessionID := detect.AgentSessionID(agent, agentPids)
-			if p.setAgentSessionMeta(agent, sessionID) {
-				h.emit(NewPaneAgentSession(p.id, agent, sessionID))
+			sess := detect.AgentSessionOf(agent, agentPids)
+			// How the conversation began is worked out on the read that first
+			// sees its id, against the previous one: same pid → it began inside
+			// the running agent (/clear or /resume), new pid → a launch. Later
+			// reads of the same id reuse the answer rather than re-reading the
+			// transcript every few seconds.
+			switch {
+			case sess.ID == "":
+				// No answer this read — keep lastSession for the comparison.
+			case sess.ID == lastSession.ID && sess.PID == lastSession.PID:
+				lastSessionSeen = now
+			default:
+				lastSessionOrigin = detect.AgentSessionOrigin(agent, sess, lastSession, lastSessionSeen)
+				lastSession, lastSessionSeen = sess, now
+			}
+			origin := ""
+			if sess.ID != "" {
+				origin = lastSessionOrigin
+			}
+			if p.setAgentSessionMeta(agent, sess.ID, origin) {
+				h.emit(NewPaneAgentSession(p.id, agent, sess.ID, origin))
 			}
 		}
 
