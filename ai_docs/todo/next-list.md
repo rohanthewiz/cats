@@ -38,7 +38,7 @@ window were dated by grepping every session doc.
   Open (or Validate, for a check, or Roadmap, for future work) with the next
   ID.
 
-**Next ID:** N-056
+**Next ID:** N-058
 
 ## Open
 
@@ -171,6 +171,13 @@ window were dated by grepping every session doc.
   table) is one table entry each, once their on-disk history format is known.
   The same entry would also give those panes a model in the header.
 
+- **N-057** · raised `2026-1011-1617-agent-session-origin` · value low
+  A pane's session origin (`startup` / `clear` / `resume`) is only exposed
+  through `PaneMeta` (`agent_session_origin` in `pane.list` / `pane.get`).
+  The browser does not show it. A small marker in the pane header or the
+  sidebar hover card (e.g. "cleared 2m ago") would make a `/clear` visible
+  at a glance. It would need the origin on `browserproto` alongside the model.
+
 ## Validate
 
 Items whose remaining work is purely testing: hand checks in a real terminal
@@ -298,6 +305,18 @@ and `raised`.
   `flex:none`, so once the title and path have shrunk it is the first thing
   the header clips. If that hides it on ordinary widths, it may want to move
   before the agent name or into the toolbar.
+
+- **N-056** · raised `2026-1011-1617-agent-session-origin` · value medium
+  Hands-on check of session origins in a real Cats pane, read with
+  `catctl pane list`. Check each of: a fresh `claude` (→ `startup`), `/clear`
+  (→ `clear`), `/resume` inside the running claude (→ `resume`), and
+  `claude --resume` from the shell (→ `resume`). Check both without the hook
+  integration (detection only) and after re-running
+  `catctl integration install` to get the v6 claude hook. With the hook,
+  confirm the model readout and **prompts ▾** follow the pane into the new
+  conversation after a `/clear` (they used to stay on the old one). Only
+  unit-tested so far, plus a classifier run against real transcripts on this
+  machine.
 
 ## Roadmap
 
