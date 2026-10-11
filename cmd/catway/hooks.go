@@ -449,8 +449,12 @@ func (o *orch) setSessionRef(rt *paneRuntime, ref *agentSessionRef) {
 		if cur == nil || !sameConversation(cur, ref) {
 			log.Printf("catway: pane %d %s session %s (%s)", rt.id, ref.agent, ref.value, originLabel(ref.origin))
 		}
+		moved := cur == nil || !sameConversation(cur, ref)
 		rt.agentSession = ref
 		o.noteSessionRefChanged(rt)
+		if moved {
+			o.historyMoved(rt) // the model, and the blank dot, follow the pane at once
+		}
 	}
 }
 

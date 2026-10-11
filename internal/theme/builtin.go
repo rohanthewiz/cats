@@ -48,6 +48,11 @@ func builtins() []Theme {
 				// green while staying saturated and darker than agent-2's pastel
 				// #7fb3ff, so the state dot and the identity name still differ.
 				"done": "#2b9bff",
+				// An idle agent with a blank conversation (fresh launch or
+				// /clear): a light brown, warmer and brighter than the olive
+				// ws-heading it would otherwise derive from, so the dot reads
+				// as a state beside the green idle one rather than as a heading.
+				"blank": "#c8a27c",
 				// Amber text needs no separate shade here: #e0b64e is ~7:1 on
 				// panel2 already. Authored only because this theme carries
 				// the full key set.
@@ -91,6 +96,9 @@ func builtins() []Theme {
 				"branch":     "#f0a35e", // lighter than the #cc7832 accent so the handle and branch don't merge
 				"todo":       "#bbb529", "ok": "#629755", "warn": "#ffc66b", "err": "#ff6b68",
 				"done": "#6897bb", "accent-fg": "#2b1d0e",
+				// ws-heading here is olive/amber, too near the working dot to
+				// stand in for the blank-conversation dot: a light brown instead.
+				"blank": "#b9967a",
 			},
 		},
 		{
@@ -115,6 +123,9 @@ func builtins() []Theme {
 				"branch":     "#e07a3c", // solarized orange lifted: #cb4b16 itself is too dim on base02
 				"todo":       "#cb4b16", "ok": "#859900", "warn": "#b58900", "err": "#dc322f",
 				"done": "#6c71c4", "accent-fg": "#fdf6e3", "fg-strong": "#eee8d5",
+				// ws-heading here is olive/amber, too near the working dot to
+				// stand in for the blank-conversation dot: a light brown instead.
+				"blank": "#c09a78",
 				// Solarized yellow is a mid-tone, and on base02 it is only
 				// ~3:1 as text. Same hue lifted to ~5.8:1.
 				"warn-fg": "#f2b700",
@@ -134,6 +145,10 @@ func builtins() []Theme {
 				"branch": "#a8420f",
 				"todo":   "#b58900", "ok": "#859900", "warn": "#b58900", "err": "#dc322f",
 				"done": "#6c71c4", "accent-fg": "#fdf6e3",
+				// Blank-conversation dot: a light brown would vanish on paper,
+				// so it goes to a mid brown (~5:1 on #e4ddc8), redder than the
+				// olive ws-heading so the two don't read as one colour.
+				"blank": "#8a5a32",
 				// The same yellow as text lands near 2.4:1 on the base2
 				// panels. Same hue taken dark (~5.7:1 on #e4ddc8).
 				"warn-fg":   "#694f00",
@@ -180,6 +195,9 @@ func builtins() []Theme {
 				"branch":     "#ff7a1a", // neon orange, halfway between the warn amber and the err red
 				"todo":       "#ffe14d", "ok": "#5fe86a", "warn": "#ffb020", "err": "#ff3860",
 				"done": "#00e5ff", "accent-fg": "#041008",
+				// ws-heading here is olive/amber, too near the working dot to
+				// stand in for the blank-conversation dot: a light brown instead.
+				"blank": "#c49f7c",
 			},
 		},
 		{
@@ -212,6 +230,9 @@ func builtins() []Theme {
 				"branch": "#a8480c",
 				"todo":   "#9a6700", "ok": "#1e8e5a", "warn": "#b07800", "err": "#cc3d3d",
 				"done": "#0e8a9e", "accent-fg": "#ffffff",
+				// Blank-conversation dot, taken to a mid brown for the light
+				// panels for the same reason as solarized-light's.
+				"blank": "#8a5a32",
 				// The ledger amber as text is ~3:1 on #e4e7ed; taken dark
 				// to ~6:1, and darker than the #9a6700 todo mark.
 				"warn-fg":   "#734e00",

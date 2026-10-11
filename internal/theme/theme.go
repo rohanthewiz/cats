@@ -69,6 +69,7 @@ var requiredKeys = []string{"bg", "fg", "muted", "line", "accent", "ok", "warn",
 //	 line ── chrome-focus                       ├─ term-fg
 //	                                            └─ hover/scroll-thumb-idle (α)
 //	muted ── ws-heading ─┬─ branch   (sparse themes only; built-ins author an orange)
+//	                     ├─ blank    (idle agent, nothing asked yet)
 //	                     └─ agent-3
 //	 accent ─ heading · accent-dim(α) · done · sel-fill(α) · cm-cursor(α) · scroll-thumb(α)
 //	 warn ─ todo · warn-fg        err ─ err-fg
@@ -98,6 +99,11 @@ var derivations = []struct {
 	// the header's agent colour and err its dead-pane colour, and either would
 	// make the branch look like one of those states.
 	{"branch", "ws-heading", 0},
+	// The idle-but-blank agent dot (an agent whose conversation has had nothing
+	// asked of it). Meant to be a light brown; ws-heading is the one key every
+	// built-in authors as a tan or olive brown, so a theme that leaves blank out
+	// still gets a brown that belongs to its palette.
+	{"blank", "ws-heading", 0},
 	{"accent-dim", "accent", 0.45},
 	{"accent-fg", "bg", 0},
 	{"todo", "warn", 0},

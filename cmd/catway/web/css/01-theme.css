@@ -65,6 +65,13 @@
        clearly not the error red, and clear of every agent-state dot. */
     --git-synced:var(--ok); --git-ahead:var(--done); --git-behind:#e0559b;
     --ok:#6ac47a; --warn:#e0b64e; --err:#e57373; --done:#2b9bff;
+    /* An idle agent whose conversation has had nothing asked of it yet (a
+       fresh launch or a /clear). Light brown: a resting state like idle's
+       green, so it must not borrow an alarm hue, but visibly not the green —
+       "nothing here yet" and "finished, waiting on you" are different
+       sentences. Themes that don't author it get their ws-heading, the tan
+       every built-in already carries. */
+    --blank:#c8a27c;
     /* Agent identity hues. AGENTS hands each tool name one of these six slots
        (AGENT_HUE below), so claude and ced in the same list are told apart
        without reading. Six fixed slots rather than a colour per agent: the

@@ -73,6 +73,13 @@ func (o *orch) publishAgent(rt *paneRuntime) {
 		rt.stateAt = time.Now()
 	}
 	rt.pubAgent, rt.pubState = agent, state
+	// A working agent was asked something, so its conversation is no longer
+	// blank — cleared here rather than left to the throttled history re-read,
+	// which could keep the blank dot up through the whole first turn.
+	if state == "working" {
+		rt.workingAt = time.Now()
+		rt.blank = ""
+	}
 	// Re-resolve the pane's model (agentmodel.go) before the broadcast below:
 	// an agent that just left clears it synchronously, and a refresh that has to
 	// go to disk lands as its own later broadcast.
@@ -93,7 +100,7 @@ func (o *orch) publishAgent(rt *paneRuntime) {
 	// Per view: the windows showing this pane get the chrome, the ones showing
 	// another workspace do not. The unseen flag above stays union-scoped — one
 	// window looking is enough to have seen a completion (decision 6).
-	o.sendVisible(rt.id, browserproto.NewPaneAgent(rt.id, agent, state, rt.agentModel, !rt.unseen))
+	o.sendVisible(rt.id, o.paneAgentMsg(rt, agent, state, !rt.unseen))
 	o.broadcast(o.agentsMsg())
 	o.refreshTabNames() // an agent appearing/leaving moves its tab's auto-name rung
 	o.emitEvent(app.EventPaneAgent, rt.id, app.PaneAgentEvent{Pane: rt.id, Agent: agent, State: state})

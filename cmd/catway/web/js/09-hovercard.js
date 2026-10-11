@@ -385,8 +385,8 @@
     const c = agentStateCounts().get(w.id);
     if (c) {
       const parts = [];
-      for (const st of ["blocked", "done", "working", "idle"]) {
-        if (c[st]) parts.push(c[st] + " " + (st === "done" ? "done (unseen)" : st));
+      for (const st of ["blocked", "done", "working", "idle", "blank"]) {
+        if (c[st]) parts.push(c[st] + " " + stateCountLabel(st));
       }
       if (parts.length) items.push(["Agents", parts.join(", ")]);
     }

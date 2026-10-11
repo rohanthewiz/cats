@@ -99,6 +99,7 @@
         // Absent (an agent with no resolvable model) clears it — a stale model
         // must not outlive the agent the server reported it for.
         p.agentModel = msg.model || "";
+        p.agentBlank = msg.blank || ""; // "new" | "cleared" while nothing has been asked
         renderChrome(p); refreshPaneList(); break;
       }
       case "pane_modes": {

@@ -130,6 +130,14 @@ type paneRuntime struct {
 	// (applyPaneAgentSession) — the pane's own agent process is then in it — and
 	// is otherwise just superseded by the next report.
 	pendingSession *agentSessionRef
+	// blank is "new" or "cleared" while the pane's current conversation has
+	// had nothing asked of it, "" otherwise (agentblank.go). nonBlankSession is
+	// the last session id seen to have had a turn — never read for blankness
+	// again — and workingAt when the published state last turned working,
+	// which a blank answer read before it cannot override.
+	blank           string
+	nonBlankSession string
+	workingAt       time.Time
 	// unseen marks an agent completion that landed while the pane was off the
 	// viewport (cats's pane.seen, inverted so the zero value means seen).
 	// Set by publishAgent on a finished transition, cleared when the pane
@@ -1676,7 +1684,7 @@ func (o *orch) agentsMsg() browserproto.Agents {
 				items = append(items, browserproto.AgentItem{
 					Pane: rt.id, Pub: pub, Workspace: ws.ID, Tab: tab.Number,
 					Agent: agent, State: state, Model: rt.agentModel,
-					Seen: !rt.unseen, SinceMs: since,
+					Seen: !rt.unseen, SinceMs: since, Blank: rt.blank,
 					// The flag is the user's, not the runtime's, so it comes off
 					// the session's pane state rather than off rt. The tab is
 					// already in hand here, which makes it a map hit rather than
@@ -2613,7 +2621,7 @@ func (o *orch) sendPaneChrome(c *client, pid uint32) {
 		out(browserproto.NewPaneBranch(pid, rt.branch))
 	}
 	if agent, state := rt.effectiveAgent(); agent != "" {
-		out(browserproto.NewPaneAgent(pid, agent, state, rt.agentModel, true))
+		out(o.paneAgentMsg(rt, agent, state, true))
 	}
 	if rt.exited != nil {
 		// With whatever is LEFT of the auto-close countdown, not a fresh one: a

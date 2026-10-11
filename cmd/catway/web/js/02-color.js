@@ -69,7 +69,7 @@
       pub: "", info: null, W: 0, H: 0, cells: [], links: [], cur: null,
       gs: 1, ox: 0, oy: 0,   // grid inset: scale + centring offsets (setInset)
       defFg: THEME_FG, defBg: THEME_BG, modes: { mouse: false, alt: false, kitty: 0 },
-      title: "", cwd: "", branch: "", agent: "", agentState: "", agentModel: "", exited: null,
+      title: "", cwd: "", branch: "", agent: "", agentState: "", agentModel: "", agentBlank: "", exited: null,
       // autocloseAt is when the server intends to close this exited pane by
       // itself (a local Date.now() deadline derived from the remaining time it
       // sent), 0 when no countdown is running. See armAutoclose in reap.go.

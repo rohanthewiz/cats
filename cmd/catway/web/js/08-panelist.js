@@ -77,7 +77,8 @@
       };
       if (live) {
         row.title = p.title; row.cwd = p.cwd;
-        row.agent = p.agent; row.state = p.agentState; row.model = p.agentModel;
+        row.agent = p.agent; row.model = p.agentModel;
+        row.state = p.agentState === "idle" && p.agentBlank ? "blank" : p.agentState;
       } else {
         // A custom name overrides the terminal title, as effectiveTitle does
         // server-side for the panes whose titles are pushed.

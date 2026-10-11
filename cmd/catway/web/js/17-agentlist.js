@@ -135,7 +135,7 @@
     const af = flagMark(flagOf(it));
     if (af) name.appendChild(af);
     const meta = document.createElement("span"); meta.className = "ameta";
-    const st = it.seen ? it.state : "done";
+    const st = markerState(it);
     meta.textContent = paneRef(it.pub, it.pane) + " · ";
     // Every state carries its age, working included. For a settled state it
     // answers "is this still true?"; for a working one it reads as "how long
@@ -149,7 +149,9 @@
       paintAge(age, it.since_ms, st);
       meta.appendChild(age);
     }
-    meta.appendChild(document.createTextNode(st));
+    // A blank row says which kind of blank ("new" / "cleared") rather than the
+    // state's own name — that is the half a glance at the dot cannot tell.
+    meta.appendChild(document.createTextNode(st === "blank" ? it.blank : st));
     li.appendChild(dot); li.appendChild(name); li.appendChild(meta);
     // agent.focus, not pane.focus: the agents list is global, so the target
     // may sit in another workspace/tab and has to be revealed into the

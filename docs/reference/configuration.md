@@ -698,6 +698,7 @@ required in a custom theme — every other key is derived from them when absent
 | `agent-1` … `agent-6` | the identity hues the sidebar's Agents list gives tool names, so two agents on screen are told apart by colour (default to `accent`, `done`, `branch`, `heading`, `ok`, `todo`) |
 | `todo` | the workspace to-do reminder mark |
 | `done` | the unseen-completion marker on a pane whose agent finished while you were elsewhere |
+| `blank` | the dot for an idle agent whose conversation has had nothing asked of it yet — a fresh launch or a `/clear` (defaults to `ws-heading`) |
 | `err-bg` / `err-fg` | the link-error banner's surface and text |
 | `warn-fg` | amber text on a panel, such as the plugins dialog's install errors (defaults to `warn`; set it when `warn` is too faint as small text on `panel2`) |
 | `hover` | the translucent wash on hovered icon buttons |

@@ -244,6 +244,11 @@ type AgentItem struct {
 	// Omitted when unresolved, so a row falls back to Agent.
 	Model string `json:"model,omitempty"`
 	Seen  bool   `json:"seen"` // false renders as "Done"
+	// Blank is "new" or "cleared" while the agent's current conversation has
+	// had nothing asked of it — a fresh launch, or a /clear — and is omitted
+	// once it has had a turn, or when that cannot be told. An idle blank agent
+	// renders with a dot of its own rather than the idle one.
+	Blank string `json:"blank,omitempty"`
 	// SinceMs is how long the pane has held this state, as of the moment the
 	// rollup was built. The rollup only goes out on a change, so the browser
 	// converts it to an absolute instant on arrival and ticks the label itself.
@@ -456,6 +461,7 @@ type PaneAgent struct {
 	State string `json:"state"`
 	Model string `json:"model,omitempty"`
 	Seen  bool   `json:"seen"`
+	Blank string `json:"blank,omitempty"` // as AgentItem.Blank: "new" | "cleared" | omitted
 }
 
 func NewPaneAgent(pane uint32, agent, state, model string, seen bool) PaneAgent {

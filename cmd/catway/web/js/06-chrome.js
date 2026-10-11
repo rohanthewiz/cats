@@ -90,7 +90,10 @@
       // fact about the pane.
       if (p.agent) {
         seg("agent", agentLabel(p.agent, p.agentModel));
-        seg("astate " + stClass(p.agentState), p.agentState);
+        // An idle agent with a blank conversation shows the blank colour and
+        // says which blank it is ("new" / "cleared") in place of "idle".
+        const blank = p.agentState === "idle" && p.agentBlank;
+        seg("astate " + stClass(blank ? "blank" : p.agentState), blank ? p.agentBlank : p.agentState);
         // The agent's recent prompts, one click away (see openPromptsMenu).
         // Drawn on every agent pane rather than only on the agents the server
         // can read, because which agents those are is the server's table

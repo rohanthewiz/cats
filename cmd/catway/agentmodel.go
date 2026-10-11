@@ -95,13 +95,18 @@ type modelResolver struct {
 	// construction, a history whose prompts can be read too. nil means the
 	// agent's history has no readable prompts.
 	prompts func(root, cwd, session string, n int) []app.AgentPrompt
+	// blank reports whether the conversation session names has had nothing
+	// asked of it yet (agentblank.go), and found whether its history exists at
+	// all. It takes no cwd: blankness is only ever read for a pinned session.
+	// nil means the agent's conversations cannot be told blank.
+	blank func(root, session string) (blank, found bool)
 }
 
 // modelResolvers is the set of agents whose model can be named, keyed by the
 // agent label detect.IdentifyAgent yields (and that the hook seam reports).
 var modelResolvers = map[string]modelResolver{
-	"claude":  {root: claudeProjectsDir, read: claudeModel, prompts: claudePrompts},
-	"copilot": {root: copilotStateDir, read: copilotModel, prompts: copilotPrompts},
+	"claude":  {root: claudeProjectsDir, read: claudeModel, prompts: claudePrompts, blank: claudeBlank},
+	"copilot": {root: copilotStateDir, read: copilotModel, prompts: copilotPrompts, blank: copilotBlank},
 }
 
 // modelRootsFor resolves every entry's root once, dropping the agents whose home
@@ -167,6 +172,7 @@ func (o *orch) refreshAgentModel(rt *paneRuntime, agent string) {
 	// the hook relay that would carry the real one is Phase 6.
 	if !known || root == "" || !o.paneIsLocal(rt.id) {
 		rt.agentModel = ""
+		rt.blank = ""
 		rt.modelAt = time.Time{}
 		return
 	}
@@ -175,12 +181,48 @@ func (o *orch) refreshAgentModel(rt *paneRuntime, agent string) {
 	}
 	rt.modelBusy = true
 	pid, cwd := rt.id, rt.cwd
-	session := rt.historySession(agent)
+	session, origin := rt.sessionOrigin(agent)
 	read := resolver.read
+	// The blank read rides the model read but only for a pinned session, and
+	// not for one already seen non-blank (agentblank.go).
+	readBlank := resolver.blank
+	if session == "" || session == rt.nonBlankSession {
+		readBlank = nil
+	}
+	started := time.Now()
 	go func() {
-		model := read(root, cwd, session)
-		o.post(func() { o.setAgentModel(pid, model) })
+		// blankRead is always set here: a skipped blank read is itself the
+		// answer "not blank" (no pinned session, or one that has had a turn).
+		res := agentReadResult{model: read(root, cwd, session), session: session, started: started, blankRead: true}
+		if readBlank != nil {
+			blank, found := readBlank(root, session)
+			res.blank = resolveBlank(blank, found, origin)
+			res.nonBlank = found && !blank
+		}
+		o.post(func() { o.setAgentRead(pid, res) })
 	}()
+}
+
+// agentReadResult is what one background history read found.
+//
+// blankRead is false only for a model-only update (setAgentModel), which
+// leaves the pane's blank word alone. nonBlank records a history that has had a turn, so it is never read for
+// blankness again. started is when the read was kicked off, which setAgentRead
+// holds a "blank" answer against: if the pane has gone working since, the
+// answer is out of date before it lands.
+type agentReadResult struct {
+	model     string
+	session   string
+	blank     string
+	blankRead bool
+	nonBlank  bool
+	started   time.Time
+}
+
+// setAgentModel records a resolved model alone. Kept for callers that have no
+// blank answer to give (tests); the pane's blank word is left as it was.
+func (o *orch) setAgentModel(pid uint32, model string) {
+	o.setAgentRead(pid, agentReadResult{model: model})
 }
 
 // historySession is the session id naming agent's history for this pane, ""
@@ -231,11 +273,13 @@ func (rt *paneRuntime) sessionOrigin(agent string) (session, origin string) {
 	return ref.value, origin
 }
 
-// setAgentModel records a resolved model and republishes the pane's agent chrome
-// when it actually changed. The pane may have gone — or the agent may have left
-// it — while the read was in flight, and a read that raced the agent out must not
-// put a model back on a pane that no longer has one.
-func (o *orch) setAgentModel(pid uint32, model string) {
+// setAgentRead records a resolved model (and, when read, the blank word) and
+// republishes the pane's agent chrome when either actually changed. The pane may
+// have gone — or the agent may have left it — while the read was in flight, and
+// a read that raced the agent out must not put a model back on a pane that no
+// longer has one.
+func (o *orch) setAgentRead(pid uint32, res agentReadResult) {
+	model := res.model
 	rt := o.panes[pid]
 	if rt == nil {
 		return
@@ -257,14 +301,29 @@ func (o *orch) setAgentModel(pid uint32, model string) {
 	if _, known := modelResolvers[agent]; !known {
 		model = ""
 	}
-	if model == rt.agentModel {
+	blank := rt.blank
+	if res.blankRead {
+		blank = res.blank
+		if res.nonBlank {
+			rt.nonBlankSession = res.session
+		}
+		// Asked something while the read was in flight: the history the read
+		// saw was blank, the conversation is not.
+		if blank != "" && rt.workingAt.After(res.started) {
+			blank = ""
+		}
+	}
+	if agent == "" {
+		blank = ""
+	}
+	if model == rt.agentModel && blank == rt.blank {
 		return
 	}
-	rt.agentModel = model
+	rt.agentModel, rt.blank = model, blank
 	if agent == "" {
 		return
 	}
-	o.sendVisible(pid, browserproto.NewPaneAgent(pid, agent, state, model, !rt.unseen))
+	o.sendVisible(pid, o.paneAgentMsg(rt, agent, state, !rt.unseen))
 	// The sidebar's agents rollup names each row by its model, and it otherwise
 	// only ships on a state change — which is precisely the moment this read was
 	// kicked off from, so the rollup that went out then carried the *previous*
@@ -305,6 +364,7 @@ func (o *orch) applyPaneAgentSession(ev orchestration.PaneAgentSession) {
 		return
 	}
 	rt.detectedSession = ref
+	o.historyMoved(rt)
 	if ref != nil {
 		log.Printf("catway: pane %d %s session %s detected (%s)", rt.id, ref.agent, ref.value, originLabel(ref.origin))
 	}
@@ -313,12 +373,28 @@ func (o *orch) applyPaneAgentSession(ev orchestration.PaneAgentSession) {
 	if p := rt.pendingSession; p != nil && ref != nil && p.agent == ref.agent && p.value == ref.value {
 		o.setSessionRef(rt, p)
 	}
-	// A read already in flight is reading the previous identity's history; its
-	// answer must not settle as this one's (see setAgentModel).
+}
+
+// historyMoved re-reads the pane's history straight away after the conversation
+// it names changed, by either channel (applyPaneAgentSession, setSessionRef).
+// A read already in flight is reading the previous identity's history; its
+// answer must not settle as this one's (see setAgentRead). The throttle is
+// cleared rather than respected because what it is throttling is a read of the
+// wrong file — and, for the blank dot, the read that says a /clear left the
+// pane blank.
+func (o *orch) historyMoved(rt *paneRuntime) {
 	rt.modelDirty = rt.modelBusy
 	rt.modelAt = time.Time{}
 	agent, _ := rt.effectiveAgent()
 	o.refreshAgentModel(rt, agent)
+}
+
+// paneAgentMsg builds the browser's pane_agent for rt, blank word included. One
+// constructor for every send site, so none of them can forget the field.
+func (o *orch) paneAgentMsg(rt *paneRuntime, agent, state string, seen bool) browserproto.PaneAgent {
+	m := browserproto.NewPaneAgent(rt.id, agent, state, rt.agentModel, seen)
+	m.Blank = rt.blank
+	return m
 }
 
 // sameSessionRef compares two optional session refs, nil (no identity) included.

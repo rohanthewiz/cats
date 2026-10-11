@@ -1,12 +1,20 @@
   // ---- Sidebar (WS8) ----
   function stClass(state) {
     return state === "working" ? "st-working" : state === "blocked" ? "st-blocked"
-      : state === "done" ? "st-done" : state === "idle" ? "st-idle" : "st-unknown";
+      : state === "done" ? "st-done" : state === "idle" ? "st-idle"
+      : state === "blank" ? "st-blank" : "st-unknown";
   }
 
-  // markerState folds a rollup item's seen flag into the display state:
-  // idle+unseen renders as the "done" attention tier (cats's teal dot).
-  function markerState(it) { return it.state === "idle" && !it.seen ? "done" : it.state; }
+  // markerState folds a rollup item's flags into the display state:
+  // idle+unseen renders as the "done" attention tier (cats's teal dot), and an
+  // idle agent whose conversation has had nothing asked of it — a fresh launch
+  // or a /clear (it.blank: "new" | "cleared") — as "blank", a light-brown dot.
+  // Blank is checked first: a blank conversation has done no work, so an
+  // unseen flag still standing from the conversation before a /clear is stale.
+  function markerState(it) {
+    if (it.state === "idle" && it.blank) return "blank";
+    return it.state === "idle" && !it.seen ? "done" : it.state;
+  }
 
   // paneRef renders a server handle ("w1:p3") for display, swapping the opaque
   // workspace id for the workspace's name ("cats:p3"). Every pane reference the
@@ -50,8 +58,11 @@
 
   // attentionRank orders marker states for aggregation (cats's
   // workspace_attention_priority): blocked > done(unseen) > working > idle.
+  // Blank shares idle's tier: both are an agent at rest waiting on the user,
+  // and neither is asking for anything.
   function attentionRank(st) {
-    return st === "blocked" ? 4 : st === "done" ? 3 : st === "working" ? 2 : st === "idle" ? 1 : 0;
+    return st === "blocked" ? 4 : st === "done" ? 3 : st === "working" ? 2
+      : st === "idle" || st === "blank" ? 1 : 0;
   }
 
   // agentStateCounts buckets the agents rollup by workspace, one pass over the
@@ -63,7 +74,7 @@
     const states = new Map();
     for (const it of agentItems) {
       let c = states.get(it.workspace);
-      if (!c) states.set(it.workspace, c = { blocked: 0, done: 0, working: 0, idle: 0 });
+      if (!c) states.set(it.workspace, c = { blocked: 0, done: 0, working: 0, idle: 0, blank: 0 });
       const st = markerState(it);
       if (c[st] !== undefined) c[st]++;
     }
@@ -206,12 +217,12 @@
   function workspaceSummary(counts) {
     if (!counts) return null;
     const frag = document.createDocumentFragment();
-    for (const st of ["blocked", "done", "working", "idle"]) {
+    for (const st of ["blocked", "done", "working", "idle", "blank"]) {
       if (!counts[st]) continue;
       const s = document.createElement("span");
       s.className = stClass(st);
       s.textContent = "●" + counts[st];
-      s.title = counts[st] + " " + (st === "done" ? "done (unseen)" : st);
+      s.title = counts[st] + " " + stateCountLabel(st);
       frag.appendChild(s);
     }
     return frag.childNodes.length ? frag : null;
@@ -737,8 +748,15 @@
     }
     return best;
   }
+  // stateCountLabel spells a marker state for a count ("2 done (unseen)").
+  function stateCountLabel(st) {
+    return st === "done" ? "done (unseen)" : st === "blank" ? "blank (new or cleared)" : st;
+  }
+
   function tabMarker(best) {
-    if (!best || best === "idle" || best === "unknown") return null;
+    // Resting states earn no tab mark: blank, like idle, is an agent waiting
+    // with nothing to report.
+    if (!best || best === "idle" || best === "blank" || best === "unknown") return null;
     const s = document.createElement("span");
     s.className = "tmark " + stClass(best);
     s.textContent = "●";
