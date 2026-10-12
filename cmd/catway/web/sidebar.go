@@ -59,7 +59,7 @@ func (Sidebar) Render(b *element.Builder) (x any) {
 		// them.
 		b.Section("id", "sec-workspaces").R(
 			b.H2().R(
-				b.T("Workspaces"),
+				headingTitle(b, "Workspaces"),
 				b.Span("id", "ws-global-todo").R(),
 				b.SpanClass("hctl", "id", "ws-hctl").R(
 					b.SpanClass("hcount", "id", "ws-count").R(),
@@ -108,7 +108,7 @@ func section(b *element.Builder, secID, title, hctlID, listID string, hidden boo
 	}
 	b.Section(attrs...).R(
 		b.H2().R(
-			b.T(title),
+			headingTitle(b, title),
 			b.SpanClass("hctl", "id", hctlID).R(),
 		),
 		b.Ul("id", listID).R(
@@ -119,5 +119,21 @@ func section(b *element.Builder, secID, title, hctlID, listID string, hidden boo
 			}),
 		),
 	)
+	return nil
+}
+
+// headingTitle is a section heading's label, in a span of its own so it can
+// give way when the sidebar is narrow. A bare text node is an anonymous flex
+// item that CSS cannot reach, so it could neither shrink nor ellipsize, and at
+// the 150px minimum width the heading's right-edge controls (the age stamp,
+// the fold arrow) were the ones pushed off the edge. With the span, the title
+// is the one flex item allowed to shrink (.htitle in css/05-sections.css):
+//
+//	wide:    USAGE ·············· 3s ago ↻ ⊞ ⊟ ▼
+//	narrow:  USA… 3s ago ↻ ⊞ ⊟ ▼        (title shrinks, controls keep width)
+//
+// The title attribute carries the full word for the case where it is cut.
+func headingTitle(b *element.Builder, title string) any {
+	b.SpanClass("htitle", "title", title).T(title)
 	return nil
 }

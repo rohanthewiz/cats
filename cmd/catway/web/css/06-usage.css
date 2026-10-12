@@ -93,7 +93,8 @@
      it is meant to annotate. */
   #sidebar h2 .hage { color:var(--muted); font-weight:400; text-transform:none;
     letter-spacing:0; font-size:calc(10px * var(--sb-scale));
-    font-variant-numeric:tabular-nums; margin-right:3px; }
+    font-variant-numeric:tabular-nums; margin-right:3px;
+    min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   /* The stand-in a folded *section* shows, when the section had no group headers
      to carry one (see renderWorkspaces). Same register as .hage for the same
      reason — it is a reading, not a label — and the same right-edge berth just

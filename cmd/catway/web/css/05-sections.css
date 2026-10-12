@@ -13,7 +13,27 @@
     font-weight:700; margin:0 0 6px; padding:0 8px; display:flex; align-items:baseline; }
   /* Section-level controls, pinned to the heading's right edge. Muted until
      hovered so the heading still reads as a label, not a toolbar. */
-  #sidebar h2 .hctl { margin-left:auto; display:flex; gap:1px; }
+  /* The title is the heading's only part that gives way (see headingTitle in
+     sidebar.go). At the 150px minimum the heading's natural width is wider than
+     the column, and before this the controls lost: USAGE wrapped its age stamp
+     onto a second line and both USAGE and WORKSPACES pushed their fold arrow
+     off the edge. Now the title shrinks to an ellipsis and every control keeps
+     its width, the same trade the workspace rows make with their caret. The
+     full word is in the span's tooltip.
+
+     USAGE needs one more step. Its controls alone (age stamp, refresh, the
+     fold pair and the arrow) fill a 150px column, so a title that shrank to
+     zero would leave a heading with no name. The title therefore keeps a stub
+     (min-width, about "US…"), and its large flex-shrink makes it give way
+     first. Past that stub the age stamp ellipsizes (.hage in 06-usage.css):
+     it is a reading, its tooltip keeps the time, and the buttons are what a
+     narrow column still needs to work.
+
+       150px:  US… 4s… ↻ ⊞ ⊟ ▼     WORKS… ⊞ ⊟ ▼     AGENTS ▼ */
+  #sidebar h2 .htitle { flex:0 1000 auto; min-width:2.6em; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  #sidebar h2 > :not(.htitle):not(.hctl) { flex:none; }
+  #sidebar h2 .hctl { margin-left:auto; display:flex; gap:1px; white-space:nowrap; flex:0 1 auto; min-width:0; }
+  #sidebar h2 .hctl > :not(.hage) { flex:none; }
   #sidebar h2 .hctl button { background:none; border:0; padding:0 3px; cursor:pointer;
     font:inherit; font-size:calc(11px * var(--sb-scale)); line-height:1; color:var(--muted); }
   #sidebar h2 .hctl button:hover { color:var(--accent); }
@@ -26,11 +46,12 @@
      age stamp, no per-group fold pair, no backlog mark — a bar whose only job is
      to say "this section is here, closed" has nothing to summarize, and a
      summary there is a second thing to read on the way past it.
-     Two rules cover the lot because the title is the heading's only text node:
-     everything else in an h2 is an element, so :not() reaches all of it. */
+     Two rules cover the lot because the title is the heading's one .htitle
+     span: everything else in an h2 is some other element, so :not() reaches
+     all of it. */
   #sidebar section.folded > ul { display:none; }
   #sidebar section.folded h2 { margin-bottom:0; }
-  #sidebar section.folded h2 > :not(.hctl) { display:none; }
+  #sidebar section.folded h2 > :not(.hctl):not(.htitle) { display:none; }
   #sidebar section.folded h2 .hctl > :not(.secfold) { display:none; }
   #sidebar ul { list-style:none; margin:0; padding:0; }
   /* Rows sit one step under their section title and level with the group

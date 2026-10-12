@@ -142,16 +142,6 @@ window were dated by grepping every session doc.
   `#694f00`, close to the `#6f5f2a` group heading beside it. It still
   stands apart from the grey resting state.
 
-- **N-053** · raised `2026-1007-1436-panes-dropdown-in-workspace-rows` · value low
-  At the 150px minimum sidebar width the section headings run out of room
-  and their right-edge controls clip. WORKSPACES shows ⊞ ⊟ with its ▼ fold
-  arrow cut off, and USAGE wraps its "1m ago" stamp onto a second line and
-  loses its ▼ too. Seen in a headless-Chrome screenshot while checking the
-  pane dropdowns; the headings were not touched by that change, so this
-  predates it. The workspace rows themselves now ellipse the name to keep
-  their caret on screen; the headings may want the same trade (title gives
-  way, controls hold their width).
-
 - **N-055** · raised `2026-1010-1836-pane-header-recent-agent-prompts` · value low
   The header's **prompts ▾** list can only read claude and copilot histories
   (the `prompts` field of `modelResolvers` in `cmd/catway/agentmodel.go`).
@@ -335,6 +325,20 @@ unchanged.
 Closures before this file existed live in the session docs' own write-ups.
 Newest first. The unnumbered entries at the end were found done while seeding,
 so they are not carried.
+
+- **N-053** · raised `2026-1007-1436-panes-dropdown-in-workspace-rows` ·
+  closed 2026-10-11, `SESSDOC2`. Each heading's title is now a
+  `span.htitle` (`headingTitle` in `cmd/catway/web/sidebar.go`) and is the
+  part that gives way: it ellipsizes, keeps a stub of about "US…", and
+  carries the full word as its tooltip. Every other heading item holds its
+  width. USAGE's controls alone fill a 150px column, so past the title's
+  stub its age stamp ellipsizes too (`.hage`); its tooltip keeps the time.
+  The fold rule now spares `.htitle` instead of relying on the title being
+  a bare text node. Checked in headless-Chrome renders of a scratch catway
+  with `ui.sidebar_width` set. At 150px the headings read "USA… ↻ ⊞ ⊟ ▼"
+  and "WORKS… ⊞ ⊟ ▼" (before: "3s ago" wrapped, both ▼ were cut off, and
+  the sidebar scrolled sideways). At 180px: "USA… 3s a… ↻ ⊞ ⊟ ▼". At 278px
+  nothing changed.
 
 - **N-045** · raised `2026-0926-2226-default-plugin-seed-cats-todo` ·
   closed 2026-10-11, `2026-1011-2316-n044-n018-n045-seed-checked-live`. Watched live through real catway starts
