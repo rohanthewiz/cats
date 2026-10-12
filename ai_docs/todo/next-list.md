@@ -38,7 +38,7 @@ window were dated by grepping every session doc.
   Open (or Validate, for a check, or Roadmap, for future work) with the next
   ID.
 
-**Next ID:** N-060
+**Next ID:** N-061
 
 ## Open
 
@@ -105,13 +105,6 @@ window were dated by grepping every session doc.
   `catctl reload`. Adding it would mean adding `tools` to `optionSections` and
   a map widget.
 
-- **N-039** · raised `2026-0924-2005-no-such-pane-exited-panes` · value low
-  `capture` / `read` of an exited pane now fail at once with "pane N has
-  exited" (they used to time out), but they still cannot return the text. The
-  daemon drops the emulator at PTY EOF. catway's grid mirror (`rt.grid`) still
-  holds the last screen, which is often what you want from a dead pane (the
-  crash message), so serve at least `scope: screen` from it.
-
 - **N-040** · raised `2026-0925-1102-n011-peer-pairing` · value low
   `detach-peer` deletes the paired token file but cannot revoke the grant on
   the other catway, which stays live until someone runs `revoke-peer-grant`
@@ -149,6 +142,15 @@ window were dated by grepping every session doc.
     err 4.29, all on `chrome-focus`.
   The base hues stay right for the dots; this is shades for the words only,
   authored per theme as N-052 did.
+
+- **N-060** · raised `SESSDOC2` · value low
+  `catctl help capture` and `catctl help read` show a raw form,
+  `catctl capture --params '{…"ansi":true}'`, that catctl refuses ("capture
+  takes positional arguments, not --params"). When an ergonomic verb has the
+  same name as its method, `cmd/catctl/main.go` sends any `--params` to the
+  refusal, so `ansi`, `unwrap`, `scope` and `rect` cannot be reached from
+  catctl at all. Either let `--params` bypass the subcommand when it is
+  given, or change the help text.
 
 ## Validate
 
@@ -326,6 +328,23 @@ Closures before this file existed live in the session docs' own write-ups.
 Newest first. The unnumbered entries at the end were found done while seeding,
 so they are not carried.
 
+- **N-039** · raised `2026-0924-2005-no-such-pane-exited-panes` ·
+  closed 2026-10-11, `SESSDOC2`. `capture` of an exited pane now answers
+  from catway's grid mirror (`captureExited` in `cmd/catway/catway.go`,
+  `Grid.ScreenText` in `internal/browserproto`). The visible scope gets the
+  last screen. The recent scope gets that screen's tail, because it is what
+  `catctl capture <pane>` sends and the screen is the buffer's tail while the
+  view sat at the bottom. `ansi`, `unwrap` and a recent capture of a view
+  scrolled into history fail with "has exited; only its last screen is
+  kept". An invalid grid (frame-gated) keeps the plain "has exited". `read`
+  is unchanged. Documented in `docs/protocols/control-api.md` and
+  `catctl help capture`. Unit tests in both packages. Live on a scratch
+  catway: a pane ran `printf "panic: boom…"; exit 3`, and `catctl capture 2`
+  returned the screen ending "panic: boom / at main.go:42", while `capture 2
+  1` returned just the last line. Known limits: soft-wrapped lines stay
+  split, and a wide grapheme reads with a space after it (its spacer cell).
+  The help's raw-form example turned out not to work: N-060.
+
 - **N-052** · raised `2026-0927-0024-n051-warn-fg-text-app-wide` ·
   closed 2026-10-11, `SESSDOC2`. Three new theme keys, `ok-fg`,
   `done-fg` and `err-text`, colour the idle, done and blocked state words as
@@ -342,9 +361,9 @@ so they are not carried.
   themes there. cats-green authors the keys at its base values, so nothing
   on it moves. A headless-Chrome render of the real stylesheets showed the
   dots unchanged and the words darkened (or, on solarized-dark, lifted). The
-  test found other themes short as well, raised as N-059. The solarized-light
-  `#694f00` / `#6f5f2a` note in the old text was left alone: that heading
-  still reads apart.
+  test found other themes short as well, raised as N-059. The item's side
+  note (solarized-light's `.high` usage reading near the `#6f5f2a` group
+  heading) was not touched or re-checked.
 
 - **N-053** · raised `2026-1007-1436-panes-dropdown-in-workspace-rows` ·
   closed 2026-10-11, `SESSDOC2`. Each heading's title is now a

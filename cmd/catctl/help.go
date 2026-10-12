@@ -37,7 +37,10 @@ fraction of the split given to the first child (0.5 is even).`,
 the last N rows. ANSI colour and unwrapping options are reachable only
 through the raw form:
 
-    catctl capture --params '{"pane":1,"scope":1,"lines":100,"ansi":true}'`,
+    catctl capture --params '{"pane":1,"scope":1,"lines":100,"ansi":true}'
+
+An exited pane answers from the last screen it showed, since its scrollback
+went with it. The text is that screen (or its last N rows), plain only.`,
 
 	"read": `Points are [row,col], both zero-based, in the pane's current viewport.
 Rectangular (rather than line-flowed) selection needs the raw form:

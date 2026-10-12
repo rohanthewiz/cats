@@ -1,6 +1,10 @@
 package browserproto
 
-import "github.com/rohanthewiz/cats/internal/orchestration"
+import (
+	"strings"
+
+	"github.com/rohanthewiz/cats/internal/orchestration"
+)
 
 // A β diff touching more than 3/5 (~60%) of cells is sent as a full frame —
 // cheaper than the per-cell index overhead, and free to decide since β diffs
@@ -177,6 +181,44 @@ func (g *Grid) FullView() (FrameView, bool) {
 	f := &orchestration.Frame{Cols: g.cols, Rows: g.rows, Full: true,
 		Cursor: g.cursor, Scroll: g.scroll, Hyperlinks: g.links}
 	return FrameView{Frame: f, Cells: g.cells}, true
+}
+
+// ScreenText is the grid's current screen as plain text, one line per row,
+// for the one reader that cannot ask the daemon: a capture of an exited pane,
+// whose emulator the daemon dropped at PTY EOF (catway's captureExited). ok is
+// false while the grid is invalid.
+//
+// It follows the daemon's plain capture (ExtractText with trim) where it can:
+// each row loses its trailing blanks, trailing empty rows are dropped, and
+// there is no final newline. Two things it cannot match. Soft wraps are not in
+// the cells, so a wrapped line stays split (no unwrap), and a wide grapheme's
+// spacer cell arrives as a blank like any other, so "🍏x" reads "🍏 x". For a
+// crash message on a dead pane, both are an acceptable price for having the
+// text at all.
+func (g *Grid) ScreenText() (string, bool) {
+	if !g.valid {
+		return "", false
+	}
+	cols, rows := int(g.cols), int(g.rows)
+	lines := make([]string, 0, rows)
+	var b strings.Builder
+	for y := 0; y < rows; y++ {
+		b.Reset()
+		for _, c := range g.cells[y*cols : (y+1)*cols] {
+			b.WriteString(c.Symbol)
+		}
+		lines = append(lines, strings.TrimRight(b.String(), " "))
+	}
+	for len(lines) > 0 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+	return strings.Join(lines, "\n"), true
+}
+
+// ScrolledBack reports whether the last frame showed the pane scrolled up
+// into its history, i.e. the screen is not the tail of the buffer.
+func (g *Grid) ScrolledBack() bool {
+	return g.scroll != nil && g.scroll.OffsetFromBottom > 0
 }
 
 // Translate converts one dense β frame into the message to send — see

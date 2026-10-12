@@ -372,6 +372,15 @@ channel, since a result with nowhere to go is not worth producing.
 `send` stages text without submitting; `run` types it and presses Enter. Both map
 to `pane.send_input` — the difference is one flag.
 
+`capture` of an **exited** pane answers from catway's copy of the last screen
+the pane showed, because cathost drops the pane's emulator, and its scrollback,
+when the process exits. Either scope gets that screen (the recent scope's
+`lines` keeps its last N rows), as plain text with trailing blanks trimmed.
+`ansi` and `unwrap` cannot be honoured, nor can the recent scope when the pane
+was scrolled into its history, so those fail with "pane N has exited; only its
+last screen is kept". `read` of an exited pane still fails with "pane N has
+exited".
+
 `nav.back` / `nav.forward` walk the **focus-location history**: every place
 focus lands — by click, tab or workspace switch, split, or a command — is an
 entry, and back/forward step through them, revealing the pane wherever it now

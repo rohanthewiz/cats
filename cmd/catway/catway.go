@@ -1784,11 +1784,63 @@ func (o *orch) StartRead(r app.Responder, p app.ReadParams) {
 // StartCapture registers an in-flight capture (app.Backend) and asks the daemon
 // to extract the pane's buffer text. The pane_text reply completes r.
 func (o *orch) StartCapture(r app.Responder, p app.CaptureParams) {
-	if o.failExited(r, p.Pane) {
+	if rt := o.panes[p.Pane]; rt != nil && rt.exited != nil {
+		o.captureExited(r, rt, p)
 		return
 	}
 	o.registerPending(r, paneKey(p.Pane, reqText))
 	o.hostForPane(p.Pane).send(orchestration.NewRequestText(p.Pane, p.Scope, p.Lines, p.Ansi, p.Unwrap))
+}
+
+// captureExited answers a capture of an exited pane from catway's own mirror of
+// its screen. The daemon dropped the pane's emulator at PTY EOF, so it can no
+// longer extract anything, but rt.grid still holds the last frame applied, and
+// the last screen of a dead pane is usually what the caller wants: the crash
+// message, the final test summary, the prompt the agent died at.
+//
+//	capture(exited pane)
+//	   ├─ ansi or unwrap ─────────────────────▶ Fail("…has exited; only its last screen…")
+//	   ├─ grid invalid (no frame since reset) ─▶ Fail("pane N has exited")
+//	   ├─ scope visible ──────────────────────▶ OK(the screen)
+//	   ├─ scope recent, view at the bottom ───▶ OK(the screen's last `lines` rows)
+//	   └─ scope recent, scrolled back ────────▶ Fail("…has exited; only its last screen…")
+//
+// Scope recent is served too, though only the screen is left of the buffer it
+// asks for, because it is what `catctl capture <pane>` sends: refusing it would
+// leave the everyday verb with nothing to say about a dead pane. The screen is
+// the buffer's tail as long as the view sat at the bottom, so the answer is the
+// last part of what was asked for, never different text; the docs say the
+// scrollback above it is gone. A view scrolled into history is not the tail,
+// and neither ansi nor unwrap can be honoured, since VT styling and soft-wrap
+// flags never reach catway. Those fail with a reason that names what is still
+// available. The grid can be invalid when the frame gate held the pane back
+// while it was off screen (framegate.go); then there is nothing to serve, and
+// the plain "has exited" answer stands.
+func (o *orch) captureExited(r app.Responder, rt *paneRuntime, p app.CaptureParams) {
+	refuse := func() {
+		r.Fail(fmt.Sprintf("pane %d has exited; only its last screen is kept, as plain text (no ansi or unwrap)", p.Pane))
+	}
+	if p.Ansi || p.Unwrap {
+		refuse()
+		return
+	}
+	text, ok := rt.grid.ScreenText()
+	if !ok {
+		r.Fail(fmt.Sprintf("pane %d has exited", p.Pane))
+		return
+	}
+	if p.Scope != uint8(terminal.TextVisible) {
+		if rt.grid.ScrolledBack() {
+			refuse()
+			return
+		}
+		// lines counts rows from the end, as the daemon's recent scope does;
+		// 0 is "the whole buffer", which is now the whole screen.
+		if lines := strings.Split(text, "\n"); p.Lines > 0 && int(p.Lines) < len(lines) {
+			text = strings.Join(lines[len(lines)-int(p.Lines):], "\n")
+		}
+	}
+	r.OK(app.CaptureResult{Text: text})
 }
 
 // failExited fails r at once when pane has exited, and reports whether it did.

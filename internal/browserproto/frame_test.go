@@ -659,3 +659,38 @@ func TestGridFullViewIsTheCurrentScreen(t *testing.T) {
 		t.Fatal("an invalid grid produced a view")
 	}
 }
+
+// ScreenText reads the grid back as the daemon's plain capture would: rows
+// joined by newlines, trailing blanks and trailing empty rows gone. It follows
+// diffs like FullView does, and an invalid grid has no text to give.
+func TestGridScreenText(t *testing.T) {
+	row := func(s string) []orchestration.Cell {
+		out := make([]orchestration.Cell, 0, len(s))
+		for _, r := range s {
+			out = append(out, orchestration.Cell{Symbol: string(r)})
+		}
+		return out
+	}
+	var g Grid
+	if _, ok := g.ScreenText(); ok {
+		t.Fatal("an empty grid produced text")
+	}
+	var cells []orchestration.Cell
+	for _, r := range []string{"panic: boom", "  at main()", "           ", "           "} {
+		cells = append(cells, row(r)...)
+	}
+	g.Apply(&orchestration.Frame{Cols: 11, Rows: 4, Full: true, Cells: cells})
+	if got, ok := g.ScreenText(); !ok || got != "panic: boom\n  at main()" {
+		t.Fatalf("ScreenText = %q, %v", got, ok)
+	}
+	// A diff lands in the text, including on a row that was blank.
+	g.Apply(&orchestration.Frame{Cols: 11, Rows: 4, Sparse: true,
+		Runs: []orchestration.CellRun{{At: 33, Cells: row("$ ")}}})
+	if got, _ := g.ScreenText(); got != "panic: boom\n  at main()\n\n$" {
+		t.Fatalf("after a diff: %q", got)
+	}
+	g.Invalidate()
+	if _, ok := g.ScreenText(); ok {
+		t.Fatal("an invalid grid produced text")
+	}
+}
