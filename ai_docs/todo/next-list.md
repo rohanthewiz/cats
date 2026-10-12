@@ -337,7 +337,7 @@ Newest first. The unnumbered entries at the end were found done while seeding,
 so they are not carried.
 
 - **N-045** · raised `2026-0926-2226-default-plugin-seed-cats-todo` ·
-  closed 2026-10-11, `SESSDOC1`. Watched live through real catway starts
+  closed 2026-10-11, `2026-1011-2316-n044-n018-n045-seed-checked-live`. Watched live through real catway starts
   from the current tree, each with `CATS_PLUGINS_DIR` pointing at a directory
   that did not exist yet. With Go on PATH, the first start logged
   `installed default plugin rohanthewiz/cats-todo v0.45.0` about 4s after
@@ -353,7 +353,7 @@ so they are not carried.
   Cats.app half moved into N-001.
 
 - **N-018** · raised `2026-0922-1713-plugin-types-and-releases` ·
-  closed 2026-10-11, `SESSDOC1`. No longer reproduces. ced at `d8732ef`:
+  closed 2026-10-11, `2026-1011-2316-n044-n018-n045-seed-checked-live`. No longer reproduces. ced at `d8732ef`:
   `TestThemeAfterSave_RepaintsLive` passed 800 times (`-run Theme
   -count=400 -cpu 1,4`, with three busy loops loading the CPU), plus 6 runs
   of `./internal/app` and 5 of `go test ./...`, with no TempDir cleanup
@@ -365,7 +365,7 @@ so they are not carried.
   file's name.
 
 - **N-044** · raised `2026-0926-2226-default-plugin-seed-cats-todo` ·
-  closed 2026-10-11, `SESSDOC1`. Already done: cats-todo `56c5c4d`
+  closed 2026-10-11, `2026-1011-2316-n044-n018-n045-seed-checked-live`. Already done: cats-todo `56c5c4d`
   ("a headless host install leaves the backlog offer unspent") is on
   origin/main and tagged v0.42.1 (2026-09-27 00:32), and v0.42.2 through
   v0.45.0 have shipped on top of it. Checked with `git tag --contains` in
