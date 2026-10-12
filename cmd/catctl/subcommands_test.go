@@ -369,3 +369,29 @@ func TestBuildAttachPeer(t *testing.T) {
 		t.Fatal("missing id accepted")
 	}
 }
+
+// --params reaches the raw form of a verb named like its method (N-060), so
+// `catctl capture --params '{"pane":1,"ansi":true}'` works as the help says.
+// Everything else keeps resolving to the verb.
+func TestResolveVerbRawFormForSameNamedVerbs(t *testing.T) {
+	cases := []struct {
+		word      string
+		params    bool
+		operands  int
+		wantVerb  bool
+		explained string
+	}{
+		{"capture", true, 0, false, "same-named verb, --params, no operands: raw form"},
+		{"read", true, 0, false, "same-named verb, --params, no operands: raw form"},
+		{"capture", false, 1, true, "positional use is the verb"},
+		{"capture", true, 1, true, "operands plus --params stays the verb (and is refused)"},
+		{"split", true, 0, true, "split is pane.split: --params is refused, the raw spelling is pane.split"},
+		{"pane.split", true, 0, false, "a raw method name is never a verb"},
+	}
+	for _, c := range cases {
+		if _, got := resolveVerb(c.word, c.params, c.operands); got != c.wantVerb {
+			t.Errorf("resolveVerb(%q, params=%v, operands=%d) verb=%v, want %v: %s",
+				c.word, c.params, c.operands, got, c.wantVerb, c.explained)
+		}
+	}
+}

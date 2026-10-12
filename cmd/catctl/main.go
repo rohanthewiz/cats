@@ -195,7 +195,7 @@ func run() int {
 	// positional args) takes precedence; otherwise the raw `<method> --params`
 	// path — the full-coverage escape hatch — carries the request through.
 	var params json.RawMessage
-	if sc, ok := lookupSubcommand(method); ok {
+	if sc, isVerb := resolveVerb(method, *paramsJSON != "", len(pos)); isVerb {
 		if *paramsJSON != "" {
 			fmt.Fprintf(os.Stderr, "catctl: %s takes positional arguments, not --params\n", method)
 			return 2

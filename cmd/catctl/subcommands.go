@@ -202,6 +202,25 @@ func lookupSubcommand(verb string) (subcommand, bool) {
 	return subcommand{}, false
 }
 
+// resolveVerb decides whether the word after catctl's flags is run as an
+// ergonomic verb (true) or falls through to the raw `<method> --params` path.
+//
+// A verb spelled exactly like its own method (capture, read, scroll, …) would
+// otherwise shadow the raw form, leaving the fields its positional shape has no
+// slot for (capture's ansi/unwrap/scope, read's rect) unreachable from catctl,
+// though `catctl help capture` shows them used that way. So --params with no
+// operands takes the raw path for such a verb. Operands plus --params is the
+// ambiguous mix and stays a verb, which the caller refuses. So does --params on
+// a verb whose method has another name: `split` is pane.split, and `catctl
+// pane.split --params …` is already the raw spelling.
+func resolveVerb(word string, paramsGiven bool, operands int) (subcommand, bool) {
+	sc, ok := lookupSubcommand(word)
+	if ok && paramsGiven && operands == 0 && sc.method == word {
+		return subcommand{}, false
+	}
+	return sc, ok
+}
+
 // --- param builders ----------------------------------------------------------
 
 // noParams accepts a no-argument verb.

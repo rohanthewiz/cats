@@ -143,15 +143,6 @@ window were dated by grepping every session doc.
   The base hues stay right for the dots; this is shades for the words only,
   authored per theme as N-052 did.
 
-- **N-060** · raised `2026-1011-2327-n053-n052-n039-headings-state-words-exited-capture` · value low
-  `catctl help capture` and `catctl help read` show a raw form,
-  `catctl capture --params '{…"ansi":true}'`, that catctl refuses ("capture
-  takes positional arguments, not --params"). When an ergonomic verb has the
-  same name as its method, `cmd/catctl/main.go` sends any `--params` to the
-  refusal, so `ansi`, `unwrap`, `scope` and `rect` cannot be reached from
-  catctl at all. Either let `--params` bypass the subcommand when it is
-  given, or change the help text.
-
 ## Validate
 
 Items whose remaining work is purely testing: hand checks in a real terminal
@@ -327,6 +318,17 @@ unchanged.
 Closures before this file existed live in the session docs' own write-ups.
 Newest first. The unnumbered entries at the end were found done while seeding,
 so they are not carried.
+
+- **N-060** · raised `2026-1011-2327-n053-n052-n039-headings-state-words-exited-capture` ·
+  closed 2026-10-11, `SESSDOC3`. `--params` with no operands now takes
+  the raw path for a verb spelled like its own method (capture, read,
+  scroll), via `resolveVerb` in `cmd/catctl/subcommands.go`. Operands plus
+  `--params` is still refused, and so is `--params` on a verb whose method
+  has another name (`split` → `pane.split`). The help text was already right
+  once this works, so it is unchanged. `TestResolveVerbRawFormForSameNamedVerbs`
+  covers it. Live on a scratch catway, `catctl capture --params
+  '{"pane":1,"ansi":true}'` returned VT-styled text, and the same for an
+  exited pane returned N-039's "only its last screen" refusal.
 
 - **N-039** · raised `2026-0924-2005-no-such-pane-exited-panes` ·
   closed 2026-10-11, `2026-1011-2327-n053-n052-n039-headings-state-words-exited-capture`. `capture` of an exited pane now answers
