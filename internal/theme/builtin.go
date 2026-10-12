@@ -57,11 +57,19 @@ func builtins() []Theme {
 				// panel2 already. Authored only because this theme carries
 				// the full key set.
 				"warn-fg": "#e0b64e",
-				// The other state words as text, at the base hues so nothing
-				// on this theme moves. Authored only for the full key set. The
-				// red and blue are under 4.5:1 on the focused header (#3a4a3f);
-				// see N-059 in ai_docs/todo/next-list.md.
-				"ok-fg": "#6ac47a", "done-fg": "#2b9bff", "err-text": "#e57373",
+				// The other state words as text. The focused pane header
+				// (#3a4a3f) is the lightest surface they sit on, and there the
+				// base red and blue were ~3.2:1 and the green 4.4:1. Each hue
+				// is held and lifted until it is 4.5:1 on that header (and so
+				// higher on the panels):
+				//   - green and blue keep their saturation; the green barely
+				//     moves, the blue goes to a lighter sky blue;
+				//   - the red also takes a 30% step toward full saturation,
+				//     because lifted alone it fades to a dusty pink that no
+				//     longer reads as "blocked".
+				// The dots keep the base hues. The :root fallback in
+				// css/01-theme.css mirrors these three values.
+				"ok-fg": "#71c780", "done-fg": "#6ebbff", "err-text": "#f39e9e",
 				// The six agent identity hues, hand-picked rather than derived:
 				// this is the one theme required to author the full key set, and
 				// identity colours only do their job if they're separated on the
@@ -104,6 +112,12 @@ func builtins() []Theme {
 				// ws-heading here is olive/amber, too near the working dot to
 				// stand in for the blank-conversation dot: a light brown instead.
 				"blank": "#b9967a",
+				// The state words as text. The greyed green and blue and the
+				// red were 2.3-2.8:1 on the focused header (#4e5254). Each hue
+				// is held and lifted to 4.5:1 there, taking a 30% step toward
+				// full saturation on the way: lifted alone, the green and blue
+				// fade to near-grey and stop reading as their states.
+				"ok-fg": "#94d584", "done-fg": "#a5cae6", "err-text": "#ffb1af",
 			},
 		},
 		{
@@ -116,6 +130,10 @@ func builtins() []Theme {
 				"branch":     "#f5a05a", // the palette's orange, a shade off the #ff9e64 todo mark
 				"todo":       "#ff9e64", "ok": "#9ece6a", "warn": "#e0af68", "err": "#f7768e",
 				"done": "#7dcfff", "accent-fg": "#15161e", "fg-soft": "#a9b1d6",
+				// "blocked" as text: the rose red is 3.4:1 on the focused
+				// header (#33467c), so it is lifted to 4.5:1 there with a
+				// little more saturation. The green and cyan already pass.
+				"err-text": "#fb9dae",
 			},
 		},
 		{
@@ -185,6 +203,9 @@ func builtins() []Theme {
 				"branch":     "#f28b3a", // redder and hotter than the amber accent/warn it sits among
 				"todo":       "#f0d090", "ok": "#a8c080", "warn": "#e8b04e", "err": "#e57360",
 				"done": "#7ec8c0", "accent-fg": "#201505",
+				// "blocked" as text: the ember red is 3.5:1 on the focused
+				// header (#4a3d30); lifted to 4.5:1 there, a coral.
+				"err-text": "#f19181",
 			},
 		},
 		{
@@ -198,6 +219,17 @@ func builtins() []Theme {
 				"branch":     "#e8a060", // the aurora orange brightened past the #d08770 todo mark
 				"todo":       "#d08770", "ok": "#a3be8c", "warn": "#ebcb8b", "err": "#bf616a",
 				"done": "#b48ead", "accent-fg": "#16242a",
+				// The state words as text. The focused header (#4c566a) is a
+				// mid slate, and on it the aurora green, purple and red were
+				// 3.6, 2.6 and 1.8:1. Lifting each to 4.5:1 there leaves the
+				// green a pale lime, but drives the purple (hue 311) and the
+				// red (hue 354) to two near-identical pale pinks, so "done"
+				// and "blocked" would read as one colour. These two also move
+				// hue, apart from each other: done to a lavender (hue 275)
+				// and blocked to a salmon (hue 8). Both are still recognisably
+				// their aurora colours. At their own hues, anything light
+				// enough for 4.5:1 there is pink.
+				"ok-fg": "#aed88b", "done-fg": "#dac3eb", "err-text": "#f2c0b8",
 			},
 		},
 		{
@@ -215,6 +247,9 @@ func builtins() []Theme {
 				// ws-heading here is olive/amber, too near the working dot to
 				// stand in for the blank-conversation dot: a light brown instead.
 				"blank": "#c49f7c",
+				// "blocked" as text: the neon red is 4.0:1 on the focused
+				// header (#2a2a44); the same red lifted just to 4.5:1.
+				"err-text": "#ff5778",
 			},
 		},
 		{
@@ -229,6 +264,9 @@ func builtins() []Theme {
 				"branch":     "#ff8c42", // orange neon sign, clear of the #ffb454 warn and #ff6767 err
 				"todo":       "#ffe073", "ok": "#5df0a6", "warn": "#ffb454", "err": "#ff6767",
 				"done": "#82e2ff", "accent-fg": "#140a24",
+				// "blocked" as text: the sign red is 4.3:1 on the focused
+				// header (#35305a); the same red lifted just to 4.5:1.
+				"err-text": "#ff7171",
 			},
 		},
 		{

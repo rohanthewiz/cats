@@ -245,26 +245,19 @@ func TestBuiltinWarnFgContrast(t *testing.T) {
 	}
 }
 
-// The agent-state words read as small text wherever they are drawn, on the
-// themes that author state-word shades for that purpose. The words sit on the
-// sidebar (panel), the palette and dialogs (panel2) and the pane header strip,
-// whose focused form (chrome-focus) is the darkest surface on the light themes
-// and the lightest on solarized-dark, so it is the floor that matters.
-// warn-fg is in the set because "working" is one of the words; its own test
-// above holds it on panel2 only, for every built-in.
+// Every built-in's agent-state words read as small text wherever they are
+// drawn. The words sit on the sidebar (panel), the palette and dialogs
+// (panel2) and the pane header strip, whose focused form (chrome-focus) is
+// the darkest surface on the light themes and the lightest on the dark ones,
+// so it is the floor that matters. warn-fg is in the set because "working" is
+// one of the words; its own test above holds it on panel2 only.
 //
-// Only these three themes are held to it for now. The other dark built-ins'
-// base reds, blues and greens are 1.8-4.4:1 on their own focused headers
-// (N-059 in ai_docs/todo/next-list.md); add a theme here once it authors
-// shades of its own.
+// A theme whose base hue passes needs no shade: the derivation copies it.
+// One that fails authors ok-fg / done-fg / err-text in builtin.go.
 func TestBuiltinStateWordContrast(t *testing.T) {
 	keys := []string{"warn-fg", "ok-fg", "done-fg", "err-text"}
 	surfaces := []string{"panel", "panel2", "chrome", "chrome-focus"}
-	held := map[string]bool{"solarized-light": true, "corporate": true, "solarized-dark": true}
 	for _, b := range BuiltIns() {
-		if !held[b.Name] {
-			continue
-		}
 		n := Normalize(b)
 		for _, k := range keys {
 			for _, sk := range surfaces {

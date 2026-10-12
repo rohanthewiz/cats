@@ -157,9 +157,10 @@ var derivations = []struct {
 	// agent rows. Same reasoning as warn-fg: the base hue stays the marker
 	// colour (the dots, tab marks and the workspace badge, where hue is the
 	// signal), and these are that hue taken far enough from the panel to read
-	// as 11px text. They copy verbatim, so only the three built-ins whose
-	// greens, reds and violets fell to 1.8-4.3:1 (solarized-light, corporate,
-	// solarized-dark) author their own.
+	// as 11px text. They copy verbatim; a built-in whose base hue is under
+	// 4.5:1 on any panel or header surface authors its own (most do for the
+	// red, which the focused header is hardest on), and
+	// TestBuiltinStateWordContrast holds every built-in to it.
 	//
 	// Red is err-text rather than an err-fg: err-fg was already the banner's
 	// ink on err-bg, and the default theme authors it as a pale pink that

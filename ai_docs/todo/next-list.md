@@ -84,24 +84,6 @@ window were dated by grepping every session doc.
   table) is one table entry each, once their on-disk history format is known.
   The same entry would also give those panes a model in the header.
 
-- **N-059** · raised `2026-1011-2327-n053-n052-n039-headings-state-words-exited-capture` · value low
-  The other built-ins' state words are also under 4.5:1 as text, mostly on
-  the focused pane header (`chrome-focus`). N-052 fixed the three themes it
-  measured and added `ok-fg` / `done-fg` / `err-text`, which copy the base
-  hue elsewhere. `TestBuiltinStateWordContrast` (internal/theme) holds only
-  those three; adding a theme name to its `held` set prints its failures.
-  Measured on 2026-10-11 (worst surface first):
-  - cats-green (the default): done 3.24 and err 3.15 on `chrome-focus`, ok
-    4.39 there; err 4.41 on panel2. A change here moves the default look.
-  - darcula: ok 2.29, done 2.53, err 2.84 on `chrome-focus`; ok 3.07, done
-    3.40, err 3.82 on panel2.
-  - cool-blue: err 1.80, done 2.60, ok 3.62 on `chrome-focus`; err 2.46,
-    done 3.55 on panel2; err 3.05 on panel.
-  - tokyo-night err 3.44, super-warm err 3.47, dark-game err 3.96, dark-city
-    err 4.29, all on `chrome-focus`.
-  The base hues stay right for the dots; this is shades for the words only,
-  authored per theme as N-052 did.
-
 ## Validate
 
 Items whose remaining work is purely testing: hand checks in a real terminal
@@ -313,6 +295,26 @@ unchanged.
 Closures before this file existed live in the session docs' own write-ups.
 Newest first. The unnumbered entries at the end were found done while seeding,
 so they are not carried.
+
+- **N-059** · raised `2026-1011-2327-n053-n052-n039-headings-state-words-exited-capture` ·
+  closed 2026-10-12, `2026-1012-0107-n059-state-word-shades`. Every built-in
+  now holds its state words at 4.5:1 or better on panel, panel2, chrome and
+  chrome-focus. `TestBuiltinStateWordContrast` checks all of them; the
+  `held` set is gone. Each shade keeps the base hue and is lifted until it
+  passes on the focused header. Where lifting alone faded a muted hue to
+  grey or dusty pink, it also took a 30% step toward full saturation. Authored:
+  - cats-green (the default, so its look moves): ok `#71c780`, done
+    `#6ebbff`, err `#f39e9e`; the `:root` fallback in `01-theme.css`
+    matches.
+  - darcula: `#94d584` / `#a5cae6` / `#ffb1af`.
+  - cool-blue: ok `#aed88b`, done `#dac3eb`, err `#f2c0b8`. Lifted at
+    their own hues, the purple and the red became the same pale pink, so
+    done moved to a lavender (hue 311 to 275) and err to a salmon (354 to 8).
+  - err only: tokyo-night `#fb9dae`, super-warm `#f19181`, dark-game
+    `#ff5778`, dark-city `#ff7171`.
+  The dots keep the base hues. Picked from a headless-Chrome swatch sheet of
+  the candidates on each theme's chrome-focus and panel2. Not checked in the
+  running app.
 
 - **N-043** · raised `2026-0926-2211-plugin-update-checks` ·
   closed 2026-10-11, `2026-1011-2349-n043-n008-linked-hint-and-run-end`. Done without a fetch, which was the
