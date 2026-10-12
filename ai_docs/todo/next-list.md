@@ -81,12 +81,6 @@ window were dated by grepping every session doc.
   Copilot's `events.jsonl` would need its own reader, if it records usage at
   all (`lastCopilotModel`, `cmd/catway/agentmodel.go`).
 
-- **N-043** · raised `2026-0926-2211-plugin-update-checks` · value low
-  Linked plugins are skipped by the update check, because `plugin update`
-  refuses them. A linked checkout that is behind its own upstream (ced, when
-  its origin has moved on) could still get a quiet "behind origin" hint. That
-  needs a fetch in the developer's own repo, which is why it was left out.
-
 - **N-055** · raised `2026-1010-1836-pane-header-recent-agent-prompts` · value low
   The header's **prompts ▾** list can only read claude and copilot histories
   (the `prompts` field of `modelResolvers` in `cmd/catway/agentmodel.go`).
@@ -318,6 +312,25 @@ unchanged.
 Closures before this file existed live in the session docs' own write-ups.
 Newest first. The unnumbered entries at the end were found done while seeding,
 so they are not carried.
+
+- **N-043** · raised `2026-0926-2211-plugin-update-checks` ·
+  closed 2026-10-11, `SESSDOC5`. Done without a fetch, which was the
+  reason it had been left out. `linkedBehind` (`internal/plugin/check.go`)
+  reads the checkout's branch upstream from `branch.<b>.remote` / `.merge`
+  and asks `git ls-remote` for that ref. It adds "origin/main has moved on
+  (1a2b3c4)" to the skip reason when that commit is not an ancestor of HEAD
+  (or is not in the object store at all). The status stays skipped, so there
+  is no badge and no update button. catway now caches and times out linked
+  checks like the others. The dialog shows the note in amber ahead of the
+  path, since the path line ellipsizes at its end. `runCheck` no longer
+  skips a dialog whose plugins are all linked. That filter would have hidden
+  the hint whenever a linked plugin was the only one installed, which is how
+  the live check found it. `TestCheckUpdateLinkedBehindHint` uses real
+  repos: level, upstream ahead (and `origin/main` unmoved), local ahead, and
+  no upstream. Live on a scratch catway with a linked checkout one commit
+  behind its upstream: `catctl plugin check` printed "skipped (linked
+  checkout · origin/main has moved on (e5cd86b))", and the dialog showed the
+  note with the toolbar badge empty. Docs in plugins.md.
 
 - **N-038** · raised `2026-0924-1953-context-usage-warn-demotion-tool-types` ·
   closed 2026-10-11, `2026-1011-2344-n034-n038-n014-n013-mobile-shift-tools-tab-ime`. The settings screen has a **tools** tab

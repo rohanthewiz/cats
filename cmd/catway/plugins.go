@@ -319,8 +319,11 @@ func (o *orch) StartPluginCheckUpdates(r app.Responder, p app.PluginCheckUpdates
 // still fresh and still about the same commit + ref (see the cache note).
 func checkPluginCached(inst plugin.Installed, force bool) app.PluginUpdateInfo {
 	// Nothing to compare against → no git, no cache entry; CheckUpdate
-	// classifies these without I/O beyond a stat.
-	if inst.Err != nil || inst.Linked {
+	// classifies these without I/O beyond a stat. A linked checkout is NOT
+	// here any more: its "has moved on" hint (N-043) asks its upstream with
+	// ls-remote, a round trip that wants the same timeout and cache as a real
+	// check. Its cache key is its HEAD, so a pull or a commit re-asks.
+	if inst.Err != nil {
 		return pluginUpdateInfo(plugin.CheckUpdate(context.Background(), inst), time.Now())
 	}
 	commit, _ := plugin.HeadCommit(inst) // "" on failure simply never matches a cached entry

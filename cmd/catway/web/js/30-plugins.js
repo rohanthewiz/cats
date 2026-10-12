@@ -450,7 +450,10 @@
       // background check usually has one) and the spinner says a newer one is
       // on its way.
       const runCheck = (force) => {
-        if (!plugins.some((p) => !p.broken && !p.linked)) return; // nothing checkable
+        // A linked checkout is checkable too since N-043: its check is the
+        // "has moved on" hint, so a dialog listing only linked plugins still
+        // asks. Only a broken entry has nothing to ask about.
+        if (!plugins.some((p) => !p.broken)) return; // nothing checkable
         checking = true;
         checkFailed = false;
         paint();
@@ -459,6 +462,16 @@
           checkFailed = !(r && r.ok);
           paint();
         });
+      };
+
+      // linkedMovedOn is the "origin/main has moved on (1a2b3c4)" hint from a
+      // linked plugin's check, "" when there is none. The host keeps a linked
+      // check's status at skipped (it is not an update anyone here can apply)
+      // and appends the hint to the reason after " · " (plugin.linkedBehind).
+      const linkedMovedOn = (u) => {
+        if (!u || u.status !== "skipped" || !u.reason) return "";
+        const i = u.reason.indexOf(" · ");
+        return i < 0 ? "" : u.reason.slice(i + 3);
       };
 
       const pluginRow = (p) => {
@@ -477,6 +490,8 @@
         } else if (u && u.status === "error") {
           tip.push("update check failed: " + u.reason);
         }
+        const moved = p.linked ? linkedMovedOn(u) : "";
+        if (moved) tip.push("upstream: " + moved);
         if (u && u.checked_at) tip.push("checked " + fmtAge(Date.now() - u.checked_at));
         row.title = tip.filter(Boolean).join("\n");
 
@@ -534,6 +549,17 @@
             (u.latest_subject ? " · " + u.latest_subject : "");
         } else if (p.linked && p.dir) {
           l2.classList.add("path"); l2.textContent = p.dir;
+          // The quiet hint a linked checkout gets instead of an update (N-043):
+          // its upstream has a commit it lacks. A note on the path line, not a
+          // pill or a badge, because nothing here can act on it; the pull is
+          // the developer's, in their own tree. It goes BEFORE the path: the
+          // line ellipsizes at its end, and a checkout path is usually long
+          // enough that a trailing note would never be seen.
+          if (moved) {
+            const h = document.createElement("span"); h.className = "moved";
+            h.textContent = moved + " · ";
+            l2.prepend(h);
+          }
         } else if (u && u.status === "error") {
           l2.classList.add("warn"); l2.textContent = "couldn't check for updates: " + u.reason;
         } else {

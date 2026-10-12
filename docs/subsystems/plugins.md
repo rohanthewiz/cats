@@ -597,8 +597,15 @@ without changing anything itself:
 
 git runs with prompts disabled (`GIT_TERMINAL_PROMPT=0`, ssh `BatchMode`) and a
 20-second timeout per plugin, so a private repo without cached credentials or a
-hung remote shows up as *couldn't check*, never as a stalled dialog. Linked and
-broken plugins are skipped.
+hung remote shows up as *couldn't check*, never as a stalled dialog. Broken
+plugins are skipped. A linked plugin is skipped too, as far as updates go: its
+directory is the developer's own checkout, which `plugin update` will not touch.
+It still gets a quiet hint. If the branch it is on tracks an upstream, `git
+ls-remote` asks for that branch's tip. When the tip is not in the checkout's
+history (never fetched, or the branches diverged), the check's reason gains
+"origin/main has moved on (1a2b3c4)". The hint never fetches, so the
+developer's remote-tracking refs stay where they are. A detached HEAD or a
+branch with no upstream gets no hint.
 
 The browser checks shortly after connecting, then hourly, and again whenever the
 dialog opens; **↻** in the dialog header forces a fresh check. The server caches
@@ -613,8 +620,9 @@ more pending the footer offers **update all**, which runs
 `catctl plugin check [id...]` is the same check from the CLI, straight against
 the remotes (no server, no cache).
 
-Linked rows show their checkout path and swap **update** (there is no remote to
-pull from) for **rebuild** — a re-link that re-runs the build steps to pick up
+Linked rows show their checkout path, led by the "has moved on" note in amber
+when there is one, and swap **update** (there is no remote to pull from) for
+**rebuild** — a re-link that re-runs the build steps to pick up
 local edits. **unlink** removes only the link, never the checkout.
 
 ### Where an action starts

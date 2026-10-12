@@ -84,6 +84,9 @@ func CheckUpdate(ctx context.Context, inst Installed) UpdateCheck {
 		return res
 	case inst.Linked:
 		res.Status, res.Reason = UpdateSkipped, "linked checkout"
+		if hint := linkedBehind(ctx, inst.Dir, &res); hint != "" {
+			res.Reason += " · " + hint
+		}
 		return res
 	}
 	if _, err := os.Stat(filepath.Join(inst.Dir, ".git")); err != nil {
@@ -114,6 +117,79 @@ func CheckUpdate(ctx context.Context, inst Installed) UpdateCheck {
 	res.Status = UpdateAvailable
 	res.RemoteVersion, res.RemoteSubject = remoteCommitInfo(ctx, inst.Dir, inst.Ref, remote)
 	return res
+}
+
+// linkedBehind is the quiet hint a linked checkout gets in place of an update
+// check (N-043): "origin/main has moved on (1a2b3c4)" when the branch the
+// developer's checkout tracks has a commit the checkout does not contain, ""
+// otherwise. A linked plugin is the developer's own tree, which `plugin update`
+// refuses to touch, so the verdict stays UpdateSkipped (no badge, no update
+// button). The hint only rides on the reason.
+//
+// It must not fetch. A fetch in someone's working repo moves their
+// remote-tracking refs behind their back, which is why this was left out of
+// the update check at first. ls-remote gets the same answer without writing
+// anything: it asks the remote for one ref and prints it. Everything after it
+// reads only what is already in the object store:
+//
+//	branch main, upstream origin/main (branch.main.remote / .merge)
+//	   │
+//	   ├─ ls-remote origin refs/heads/main ─▶ R
+//	   ├─ R == HEAD ─────────────────────────────────▶ "" (level)
+//	   ├─ R is in the object store and an ancestor
+//	   │  of HEAD (merge-base --is-ancestor) ────────▶ "" (ahead, or level)
+//	   └─ otherwise (not fetched yet, or diverged) ───▶ "origin/main has moved on (R)"
+//
+// "Moved on" rather than "behind": a commit that has never been fetched could
+// sit on a branch that has diverged from HEAD, and nothing short of a fetch can
+// tell which. Either way the developer has something to pull or reconcile.
+// A detached HEAD, a branch with no upstream, a local upstream (remote ".") or
+// an unreachable remote gives no hint at all: this is decoration, and its
+// failures are not worth a line of their own. res gets the two SHAs, so the
+// caller can show them, whether or not there is a hint.
+func linkedBehind(ctx context.Context, dir string, res *UpdateCheck) string {
+	local, err := gitHead(dir)
+	if err != nil {
+		return ""
+	}
+	res.LocalSHA = local
+	out := func(args ...string) string {
+		b, err := gitQuiet(ctx, dir, args...)
+		if err != nil {
+			return ""
+		}
+		return strings.TrimSpace(string(b))
+	}
+	branch := out("symbolic-ref", "--quiet", "--short", "HEAD")
+	if branch == "" {
+		return ""
+	}
+	remote := out("config", "branch."+branch+".remote")
+	merge := out("config", "branch."+branch+".merge")
+	if remote == "" || remote == "." || !strings.HasPrefix(merge, "refs/heads/") {
+		return ""
+	}
+	var remoteSHA string
+	for line := range strings.SplitSeq(out("ls-remote", remote, merge), "\n") {
+		if sha, name, ok := strings.Cut(line, "\t"); ok && strings.TrimSpace(name) == merge {
+			remoteSHA = strings.TrimSpace(sha)
+		}
+	}
+	if remoteSHA == "" {
+		return ""
+	}
+	res.RemoteSHA = remoteSHA
+	if remoteSHA == local {
+		return ""
+	}
+	if _, err := gitQuiet(ctx, dir, "merge-base", "--is-ancestor", remoteSHA, "HEAD"); err == nil {
+		return ""
+	}
+	short := remoteSHA
+	if len(short) > 7 {
+		short = short[:7]
+	}
+	return fmt.Sprintf("%s/%s has moved on (%s)", remote, strings.TrimPrefix(merge, "refs/heads/"), short)
 }
 
 // remoteRefSHA resolves ref on origin to the COMMIT sha it points at, which is

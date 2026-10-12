@@ -92,6 +92,10 @@
      Tints, edges and fills stay --warn, where the hue is the signal. */
   .row.plg .l2.warn { color:var(--warn-fg); }
   .row.plg .l2.path { font-family:var(--mono, monospace); font-size:10.5px; }
+  /* A linked checkout's "origin/main has moved on" note after its path
+     (N-043): amber text, like the other notes on this dialog that say "look
+     here" without offering a button. */
+  .row.plg .l2.path .moved { color:var(--warn-fg); }
 
   /* Pills: version, type, status, and the update target. Small caps-free
      chips with a tinted fill; the fill comes from the pill's own colour via
