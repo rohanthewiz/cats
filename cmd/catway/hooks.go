@@ -255,12 +255,19 @@ type hookAuthority struct {
 // — a restored ref, an integration too old to say, or an agent that does not.
 // It describes the conversation rather than identifying it, so sameConversation
 // is the comparison for "is this the same session".
+//
+// began is when the pane entered the conversation, zero when unknown. A
+// detected ref carries the host's answer (orchestration.PaneAgentSession's
+// BeganMs); a hook ref is stamped when setSessionRef first sees it name a new
+// conversation, since the hook fires as the conversation starts. A ref restored
+// across a restart has none, and borrows the detected one (sessionOrigin).
 type agentSessionRef struct {
 	source string
 	agent  string
 	kind   string // "id" | "path"
 	value  string
 	origin string
+	began  time.Time
 }
 
 // sameConversation reports whether a and b name the same conversation from the
@@ -435,12 +442,26 @@ func (o *orch) setSessionRef(rt *paneRuntime, ref *agentSessionRef) {
 	}
 	rt.pendingSession = nil
 	cur := rt.agentSession
-	if cur != nil && ref.origin == "" && sameConversation(cur, ref) {
+	if cur != nil && sameConversation(cur, ref) {
 		// A re-report of the held conversation that does not say how it began
-		// (a compact, an older integration) keeps what was known.
+		// (a compact, an older integration) keeps what was known. Its began time
+		// is always the held one: a re-report is not the conversation starting
+		// again, and a fresh stamp would make "cleared 2h ago" read "just now"
+		// after every compact.
 		merged := *ref
-		merged.origin = cur.origin
+		if merged.origin == "" {
+			merged.origin = cur.origin
+		}
+		merged.began = cur.began
 		ref = &merged
+	} else if ref.began.IsZero() {
+		// A conversation this pane was not in before: the hook fires as it
+		// starts, so its arrival is the moment the pane entered it. Copied
+		// rather than written through, since ref may be the parked
+		// pendingSession being adopted.
+		stamped := *ref
+		stamped.began = time.Now()
+		ref = &stamped
 	}
 	if sup, ok := rt.hookSuppressed[ref.source]; ok && sup.session != ref.value {
 		delete(rt.hookSuppressed, ref.source)

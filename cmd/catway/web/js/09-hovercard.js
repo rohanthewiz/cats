@@ -254,6 +254,11 @@
       items.push(["Note", row.flag.note]);
     }
     if (row.agent) items.push(["Agent", row.agent + " · " + (row.state || "unknown")]);
+    // How the agent's conversation began, and when. Shown blank or not: the
+    // card has the room, and while the conversation is blank this is where its
+    // age is spelled out (the row only says "new" / "cleared").
+    const ow = row.agent ? originWord(row.origin) : "";
+    if (ow) items.push(["Session", ow + (row.originAt ? " " + fmtAge(Date.now() - row.originAt) : "")]);
     // The LLM the agent is running under — with the reasoning effort it last ran
     // at appended, when the transcript named one — read from that transcript
     // server-side (agentmodel.go), already one display string. Only claude

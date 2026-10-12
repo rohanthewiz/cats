@@ -118,6 +118,12 @@
      (worst on the focused header's --chrome-focus). */
   .pane .chrome .info .agent { color:var(--warn-fg); }
   .pane .chrome .info .exited { color:var(--err); font-weight:600; }
+  /* How the agent's conversation began ("cleared 5m ago"), after the state word.
+     Muted: it is background to the state, not news. It keeps its width
+     (flex:none, like every field but the title and path): it is a short
+     phrase, and when it could shrink a long path squeezed it to "s…", which
+     says nothing. The title and path are the fields built to give way. */
+  .pane .chrome .info .aorigin { color:var(--muted); }
   /* "prompts ▾" opens the agent's recent prompts (06-chrome.js,
      openPromptsMenu). Muted, like the host badge, because it is a control and
      not a fact about the pane: it should be findable at the end of the agent's

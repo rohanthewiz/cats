@@ -134,10 +134,12 @@ type pane struct {
 	// The conversation behind the detected agent, as last reported via
 	// pane_agent_session: the agent it belongs to (an id only names a history
 	// belonging to the agent that wrote it), the id itself, and how that
-	// conversation began (detect.SessionOrigin*, "" when unknown).
+	// conversation began (detect.SessionOrigin*, "" when unknown), and when the
+	// pane entered it (detect.AgentSessionBegan, zero when unknown).
 	lastSessionAgent  string
 	lastSessionID     string
 	lastSessionOrigin string
+	lastSessionBegan  time.Time
 	hasSession        bool // a pane_agent_session has been emitted at least once
 	// Foreground-job state, as last reported via pane_job (detectPump writes,
 	// resync reads). hasJob is set once a job has ever been reported, so a
@@ -310,19 +312,20 @@ func jobArgvHead(argv []string) []string {
 // empty IS news — it is how a client learns the agent left, or that the identity
 // it was keyed on is no longer valid — so it is emitted.
 //
-// The origin takes part in the comparison although it is fixed for a given id:
-// the pump only ever pairs an id with the origin it worked out when the id first
-// appeared, so in practice it changes exactly when the id does.
-func (p *pane) setAgentSessionMeta(agent, sessionID, origin string) (changed bool) {
+// The origin and began time take part in the comparison although both are fixed
+// for a given id: the pump only ever pairs an id with the answers it worked out
+// when the id first appeared, so in practice they change exactly when the id does.
+func (p *pane) setAgentSessionMeta(agent, sessionID, origin string, began time.Time) (changed bool) {
 	p.metaMu.Lock()
 	defer p.metaMu.Unlock()
 	if !p.hasSession && agent == "" && sessionID == "" {
 		return false
 	}
-	if p.hasSession && p.lastSessionAgent == agent && p.lastSessionID == sessionID && p.lastSessionOrigin == origin {
+	if p.hasSession && p.lastSessionAgent == agent && p.lastSessionID == sessionID && p.lastSessionOrigin == origin &&
+		p.lastSessionBegan.Equal(began) {
 		return false
 	}
-	p.lastSessionAgent, p.lastSessionID, p.lastSessionOrigin = agent, sessionID, origin
+	p.lastSessionAgent, p.lastSessionID, p.lastSessionOrigin, p.lastSessionBegan = agent, sessionID, origin, began
 	p.hasSession = true
 	return true
 }
@@ -1018,6 +1021,7 @@ func (h *Host) resyncPane(p *pane) {
 	vb, vw, hasAgent := p.lastVisBlocker, p.lastVisWorking, p.hasAgent
 	branch, hasBranch := p.lastBranch, p.hasBranch
 	sessAgent, sessID, sessOrigin, hasSession := p.lastSessionAgent, p.lastSessionID, p.lastSessionOrigin, p.hasSession
+	sessBegan := p.lastSessionBegan
 	job, jobExe, jobArgv, hasJob := p.lastJob, p.lastJobExe, p.lastJobArgv, p.hasJob
 	p.metaMu.Unlock()
 	if cwd != "" {
@@ -1040,7 +1044,7 @@ func (h *Host) resyncPane(p *pane) {
 	// the next time it changes — which for a pane sitting in one session is
 	// never.
 	if hasSession {
-		h.emit(NewPaneAgentSession(p.id, sessAgent, sessID, sessOrigin))
+		h.emit(NewPaneAgentSession(p.id, sessAgent, sessID, sessOrigin, sessBegan))
 	}
 	// And whether a job holds the terminal, for the same reason: a client
 	// deciding what is idle must not be left with the answer from before it
@@ -1285,9 +1289,12 @@ func (h *Host) detectPump(p *pane) {
 	// not erase what the next id is compared against), lastSessionSeen the last
 	// time it was still the answer, and lastSessionOrigin how it began. All three
 	// feed detect.AgentSessionOrigin, which runs once per change of id.
+	// lastSessionBegan is when the pane entered it (detect.AgentSessionBegan),
+	// worked out on the same read.
 	var lastSession detect.AgentSession
 	var lastSessionSeen time.Time
 	var lastSessionOrigin string
+	var lastSessionBegan time.Time
 	var acquisitionStartedAt time.Time
 	var hasAcquisition bool
 	// jobExe is the foreground job leader's executable as of the last process
@@ -1440,14 +1447,15 @@ func (h *Host) detectPump(p *pane) {
 				lastSessionSeen = now
 			default:
 				lastSessionOrigin = detect.AgentSessionOrigin(agent, sess, lastSession, lastSessionSeen)
+				lastSessionBegan = detect.AgentSessionBegan(sess, lastSession, now)
 				lastSession, lastSessionSeen = sess, now
 			}
-			origin := ""
+			origin, began := "", time.Time{}
 			if sess.ID != "" {
-				origin = lastSessionOrigin
+				origin, began = lastSessionOrigin, lastSessionBegan
 			}
-			if p.setAgentSessionMeta(agent, sess.ID, origin) {
-				h.emit(NewPaneAgentSession(p.id, agent, sess.ID, origin))
+			if p.setAgentSessionMeta(agent, sess.ID, origin, began) {
+				h.emit(NewPaneAgentSession(p.id, agent, sess.ID, origin, began))
 			}
 		}
 

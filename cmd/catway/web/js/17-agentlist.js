@@ -101,6 +101,18 @@
     li.dataset.ws = it.workspace; // ditto markLockedAgents, when a lock flips
     li.dataset.model = it.model || ""; // the untrimmed string the row's tooltip shows
     li.dataset.agent = it.agent || ""; // identity, for CSS/debug reach without re-deriving it
+    // How the conversation began, for the row's tooltip (setAgentLocked). Not
+    // drawn in the row itself: the meta line is the sidebar's tightest, and at
+    // the default width it already runs to the edge. While the conversation is
+    // blank the state slot says "new" / "cleared", so the tooltip skips it too.
+    const ow = markerState(it) === "blank" ? "" : originWord(it.origin);
+    if (ow) {
+      li.dataset.origin = ow;
+      if (it.origin_ms > 0) li.dataset.originAt = String(Date.now() - it.origin_ms);
+      // The age in a tooltip is fixed when it is set, so it is set again as
+      // the pointer arrives rather than left to read "2m ago" an hour later.
+      li.addEventListener("mouseenter", () => setAgentLocked(li, li.classList.contains("wslocked")));
+    }
     if (it.pane === foc) li.classList.add("focused");
     setAgentLocked(li, wsLocked(it.workspace));
     const dot = document.createElement("span"); dot.className = "adot " + stClass(markerState(it)); dot.textContent = "●";
@@ -293,9 +305,13 @@
   // either way: the row shows the half that tells it apart, the tooltip holds
   // the whole string. The lock displaces it: while a click is refused, saying
   // so matters more.
+  //
+  // An agent row's tooltip also carries how its conversation began, on a line
+  // of its own ("cleared 5m ago") — the row has no room to show it.
   function setAgentLocked(li, locked) {
     li.classList.toggle("wslocked", locked);
-    const full = li.dataset.model || li.dataset.plugin || "";
+    const origin = li.dataset.origin ? originPhrase(li.dataset.origin, Number(li.dataset.originAt) || 0) : "";
+    const full = [li.dataset.model || li.dataset.plugin || "", origin].filter(Boolean).join("\n");
     if (locked) li.title = "workspace locked — clicking will not reveal this " + (li.dataset.plugin ? "pane" : "agent");
     else if (full) li.title = full;
     else li.removeAttribute("title");

@@ -84,6 +84,8 @@ function world() {
       wsLocked: () => false,
       wsName: (id) => id,
       paintAge: () => {},
+      originWord: (o) => ({ startup: "started", clear: "cleared", resume: "resumed" })[o] || "",
+      originPhrase: (w, at) => w + (at ? " 5m ago" : ""),
       pressActivate: () => {},
       openCtx: () => {},
       paneMenuItems: () => [],
@@ -162,6 +164,22 @@ const plug = (pane, id, title, type) => ({
   const w = world();
   w.fns.renderAgents([], [plug(4, "x.untyped", "t")]);
   eq(w.plugRows()[0].text(), "●untyped tcats:p4", "an untyped plugin row shows the handle alone");
+}
+
+// How the conversation began rides in the row's tooltip, under the model —
+// never in the row, whose meta line has no room for it. The age is re-read as
+// the pointer arrives.
+{
+  const { fns, rows } = world();
+  fns.renderAgents([{ ...agent(1, "idle"), origin: "clear", origin_ms: 300000 }], []);
+  const r = rows()[0];
+  eq(r.title, "claude-opus-5\ncleared 5m ago", "model, then origin and age");
+  ok(!r.text().includes("cleared"), "the row text does not carry it");
+  ok(typeof r.on.mouseenter === "function", "the tooltip is refreshed on hover");
+  const w = world();
+  w.fns.renderAgents([agent(2, "idle")], []);
+  eq(w.rows()[0].title, "claude-opus-5", "no origin: the model alone");
+  eq(w.rows()[0].on.mouseenter, undefined, "and nothing to refresh");
 }
 
 // Nothing at all: AGENTS says none and PLUGINS hides. Plugin panes alone

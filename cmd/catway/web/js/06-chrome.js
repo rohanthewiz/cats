@@ -94,6 +94,12 @@
         // says which blank it is ("new" / "cleared") in place of "idle".
         const blank = p.agentState === "idle" && p.agentBlank;
         seg("astate " + stClass(blank ? "blank" : p.agentState), blank ? p.agentBlank : p.agentState);
+        // How the conversation began and when ("cleared 5m ago"), once it is
+        // past its first prompt. Placed through seg so it gets its separator;
+        // the age itself is kept current by the agents tick (13-agents.js).
+        const ow = blank ? "" : originWord(p.agentOrigin);
+        const os = seg("aorigin", ow);
+        if (os) fillOrigin(os, ow, p.agentOriginAt);
         // The agent's recent prompts, one click away (see openPromptsMenu).
         // Drawn on every agent pane rather than only on the agents the server
         // can read, because which agents those are is the server's table

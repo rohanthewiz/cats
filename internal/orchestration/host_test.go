@@ -249,7 +249,7 @@ func TestHostReportsAgentSession(t *testing.T) {
 	// terminal has on it — and then stays alive long enough to be probed.
 	cp.Args = []string{"-c", `exec -a claude sh -c '` +
 		`mkdir -p "$CLAUDE_CONFIG_DIR/sessions"; ` +
-		`printf "{\"pid\":%d,\"sessionId\":\"sess-live\"}" $$ > "$CLAUDE_CONFIG_DIR/sessions/$$.json"; ` +
+		`printf "{\"pid\":%d,\"sessionId\":\"sess-live\",\"startedAt\":1760000000000}" $$ > "$CLAUDE_CONFIG_DIR/sessions/$$.json"; ` +
 		`sleep 20'`}
 	if err := WriteMessage(c, cp); err != nil {
 		t.Fatalf("create_pane: %v", err)
@@ -272,6 +272,11 @@ func TestHostReportsAgentSession(t *testing.T) {
 				// transcript behind it, is a fresh launch.
 				if ps.Origin != detect.SessionOriginStartup {
 					t.Fatalf("origin = %q, want %q", ps.Origin, detect.SessionOriginStartup)
+				}
+				// A launch entered its conversation as the process started,
+				// which is the registry's startedAt (detect.AgentSessionBegan).
+				if ps.BeganMs != 1760000000000 {
+					t.Fatalf("began_ms = %d, want the registry's startedAt", ps.BeganMs)
 				}
 				return
 			}

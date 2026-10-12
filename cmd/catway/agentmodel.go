@@ -181,7 +181,7 @@ func (o *orch) refreshAgentModel(rt *paneRuntime, agent string) {
 	}
 	rt.modelBusy = true
 	pid, cwd := rt.id, rt.cwd
-	session, origin := rt.sessionOrigin(agent)
+	session, origin, _ := rt.sessionOrigin(agent)
 	read := resolver.read
 	// The blank read rides the model read but only for a pinned session, and
 	// not for one already seen non-blank (agentblank.go).
@@ -255,22 +255,33 @@ func (rt *paneRuntime) historySessionRef(agent string) *agentSessionRef {
 	return nil
 }
 
-// sessionOrigin is the pane's conversation for agent (historySessionRef) and how
-// it began. The ref that names the conversation may not know its origin — a
-// hook ref from an older integration, or one restored across a restart — while
-// detection, which infers it on the host, does; when both name the same id the
-// detected origin fills the gap. Where both know, the hook's stands: it is the
-// agent's own account, the other an inference.
-func (rt *paneRuntime) sessionOrigin(agent string) (session, origin string) {
+// sessionOrigin is the pane's conversation for agent (historySessionRef), how
+// it began, and when the pane entered it (zero when unknown). The ref that names
+// the conversation may not know its origin — a hook ref from an older
+// integration, or one restored across a restart — while detection, which infers
+// it on the host, does; when both name the same id the detected origin fills
+// the gap. Where both know, the hook's stands: it is the agent's own account,
+// the other an inference.
+//
+// The began time is merged differently: where both know, the earlier wins.
+// Either can only be late — the host's is a poll after an in-process switch,
+// the hook's is late when its report was parked waiting on detection
+// (setSessionRef) — so the earlier is the closer to the truth.
+func (rt *paneRuntime) sessionOrigin(agent string) (session, origin string, began time.Time) {
 	ref := rt.historySessionRef(agent)
 	if ref == nil {
-		return "", ""
+		return "", "", time.Time{}
 	}
-	origin = ref.origin
-	if d := rt.detectedSession; origin == "" && d != nil && d.agent == ref.agent && d.value == ref.value {
-		origin = d.origin
+	origin, began = ref.origin, ref.began
+	if d := rt.detectedSession; d != nil && d != ref && d.agent == ref.agent && d.value == ref.value {
+		if origin == "" {
+			origin = d.origin
+		}
+		if !d.began.IsZero() && (began.IsZero() || d.began.Before(began)) {
+			began = d.began
+		}
 	}
-	return ref.value, origin
+	return ref.value, origin, began
 }
 
 // setAgentRead records a resolved model (and, when read, the blank word) and
@@ -359,6 +370,9 @@ func (o *orch) applyPaneAgentSession(ev orchestration.PaneAgentSession) {
 	if ev.Agent != "" && isTranscriptID(ev.SessionID) {
 		ref = &agentSessionRef{source: sessionSourceDetect, agent: ev.Agent, kind: "id", value: ev.SessionID,
 			origin: detect.NormalizeSessionOrigin(ev.Origin)}
+		if ev.BeganMs > 0 {
+			ref.began = time.UnixMilli(ev.BeganMs)
+		}
 	}
 	if sameSessionRef(rt.detectedSession, ref) {
 		return
@@ -385,15 +399,58 @@ func (o *orch) applyPaneAgentSession(ev orchestration.PaneAgentSession) {
 func (o *orch) historyMoved(rt *paneRuntime) {
 	rt.modelDirty = rt.modelBusy
 	rt.modelAt = time.Time{}
-	agent, _ := rt.effectiveAgent()
+	agent, state := rt.effectiveAgent()
 	o.refreshAgentModel(rt, agent)
+	// The session origin is published straight from the ref, not from the
+	// history read above. That read republishes only when the model or blank
+	// word moves, and neither has to: a /resume into a conversation on the same
+	// model, already past its first prompt, changes neither — and a remote pane
+	// gets no read at all. Without this the origin would sit on the previous
+	// conversation's answer until the pane's next state change.
+	if agent == "" {
+		return
+	}
+	if o2 := rt.originStamp(agent); o2 != rt.pubOrigin {
+		rt.pubOrigin = o2
+		o.sendVisible(rt.id, o.paneAgentMsg(rt, agent, state, !rt.unseen))
+		o.broadcast(o.agentsMsg())
+	}
 }
 
-// paneAgentMsg builds the browser's pane_agent for rt, blank word included. One
-// constructor for every send site, so none of them can forget the field.
+// originStamp is the session origin a browser is shown for rt's agent: how the
+// conversation began, and when. Compared against rt.pubOrigin so historyMoved
+// only republishes on a real change.
+type originStamp struct {
+	origin string
+	began  time.Time
+}
+
+func (rt *paneRuntime) originStamp(agent string) originStamp {
+	_, origin, began := rt.sessionOrigin(agent)
+	return originStamp{origin: origin, began: began}
+}
+
+// originAgeMs is how long ago began was, for the browser's origin_ms: relative
+// rather than absolute so a browser whose clock disagrees with this machine's
+// still shows the right age (the same bargain AgentItem.SinceMs makes). Never
+// below 1 while known, because 0 is the field's "unknown" (omitempty).
+func originAgeMs(began time.Time) int64 {
+	if began.IsZero() {
+		return 0
+	}
+	return max(time.Since(began).Milliseconds(), 1)
+}
+
+// paneAgentMsg builds the browser's pane_agent for rt, blank word and session
+// origin included. One constructor for every send site, so none of them can
+// forget a field.
 func (o *orch) paneAgentMsg(rt *paneRuntime, agent, state string, seen bool) browserproto.PaneAgent {
 	m := browserproto.NewPaneAgent(rt.id, agent, state, rt.agentModel, seen)
 	m.Blank = rt.blank
+	if agent != "" {
+		st := rt.originStamp(agent)
+		m.Origin, m.OriginMs = st.origin, originAgeMs(st.began)
+	}
 	return m
 }
 

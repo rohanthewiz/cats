@@ -16,6 +16,48 @@
     return it.state === "idle" && !it.seen ? "done" : it.state;
   }
 
+  // originWord names how an agent's current conversation began — the server's
+  // origin, "startup" | "clear" | "resume" — as a past-tense verb, so it reads
+  // with an age after it: "started 2h ago", "cleared 5m ago", "resumed 1d ago".
+  // "" when the origin is unknown, which drops the field wherever it is drawn.
+  //
+  // Not drawn while the conversation is blank (state "blank"): the blank word
+  // ("new" / "cleared") already says the same thing in the state's own slot.
+  // The origin is what is left of that once the first prompt has gone in.
+  function originWord(origin) {
+    return origin === "startup" ? "started" : origin === "clear" ? "cleared"
+      : origin === "resume" ? "resumed" : "";
+  }
+
+  // originPhrase spells an origin out with its age: "cleared 5m ago", or the
+  // bare verb when the instant is unknown (at = 0). Read off the clock each
+  // call, so a caller that re-asks gets a current age.
+  function originPhrase(word, at) {
+    return word + (at ? " " + fmtAge(Date.now() - at) : "");
+  }
+
+  // paintOrigin (re)writes the pane header's origin label from its element's
+  // data: data-word (originWord's verb) and data-at (the absolute instant the
+  // pane entered the conversation, absent when the server could not say).
+  // Re-run by the agents tick (13-agents.js), since nothing else redraws a
+  // header whose only change is the passing of time. The title adds the clock
+  // time, for an age that has rounded to hours or days.
+  function paintOrigin(el) {
+    const word = el.dataset.word || "", at = Number(el.dataset.at) || 0;
+    el.textContent = originPhrase(word, at);
+    el.title = "conversation " + el.textContent
+      + (at ? " (" + new Date(at).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }) + ")" : "");
+  }
+
+  // fillOrigin stamps an origin label's data and paints it. at is the absolute
+  // instant (0 = unknown).
+  function fillOrigin(el, word, at) {
+    el.dataset.word = word;
+    if (at) el.dataset.at = String(at);
+    paintOrigin(el);
+    return el;
+  }
+
   // paneRef renders a server handle ("w1:p3") for display, swapping the opaque
   // workspace id for the workspace's name ("cats:p3"). Every pane reference the
   // user sees goes through here — the pane header, tooltip, dialog title, agents

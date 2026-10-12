@@ -57,6 +57,10 @@
     for (const el of agentListEl.querySelectorAll(".aage")) {
       paintAge(el, Date.now() - Number(el.dataset.at), el.dataset.st);
     }
+    // Session-origin ages in the pane headers ("cleared 5m ago"). Only the
+    // ones with an instant: an origin with no known time is a bare word that
+    // never needs repainting.
+    for (const el of document.querySelectorAll(".aorigin[data-at]")) paintOrigin(el);
   }, 5000);
 
   // ---- Auto-reveal (pairs with setSidebarHidden) ----

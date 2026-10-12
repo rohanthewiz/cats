@@ -249,6 +249,18 @@ type AgentItem struct {
 	// once it has had a turn, or when that cannot be told. An idle blank agent
 	// renders with a dot of its own rather than the idle one.
 	Blank string `json:"blank,omitempty"`
+	// Origin is how the agent's current conversation began, in the vocabulary
+	// PaneMeta.AgentSessionOrigin uses: "startup" (a fresh launch), "clear" (a
+	// /clear in the running agent) or "resume" (an earlier conversation picked
+	// back up). Unlike Blank it outlasts the first prompt. Omitted when it
+	// cannot be told.
+	//
+	// OriginMs is how long ago the pane entered that conversation, as of the
+	// moment the message was built — relative, like SinceMs, so the browser
+	// converts it to an instant on arrival. 0 (omitted) when unknown; a known
+	// age is never below 1.
+	Origin   string `json:"origin,omitempty"`
+	OriginMs int64  `json:"origin_ms,omitempty"`
 	// SinceMs is how long the pane has held this state, as of the moment the
 	// rollup was built. The rollup only goes out on a change, so the browser
 	// converts it to an absolute instant on arrival and ticks the label itself.
@@ -462,6 +474,10 @@ type PaneAgent struct {
 	Model string `json:"model,omitempty"`
 	Seen  bool   `json:"seen"`
 	Blank string `json:"blank,omitempty"` // as AgentItem.Blank: "new" | "cleared" | omitted
+	// As AgentItem.Origin / OriginMs: "startup" | "clear" | "resume" | omitted,
+	// and how long ago the pane entered that conversation (0 = unknown).
+	Origin   string `json:"origin,omitempty"`
+	OriginMs int64  `json:"origin_ms,omitempty"`
 }
 
 func NewPaneAgent(pane uint32, agent, state, model string, seen bool) PaneAgent {

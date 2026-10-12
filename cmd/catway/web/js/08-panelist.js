@@ -79,6 +79,7 @@
         row.title = p.title; row.cwd = p.cwd;
         row.agent = p.agent; row.model = p.agentModel;
         row.state = p.agentState === "idle" && p.agentBlank ? "blank" : p.agentState;
+        row.origin = p.agentOrigin; row.originAt = p.agentOriginAt;
       } else {
         // A custom name overrides the terminal title, as effectiveTitle does
         // server-side for the panes whose titles are pushed.
@@ -86,7 +87,12 @@
         row.agent = pi.agent || ""; row.state = pi.agent_state || ""; row.model = pi.agent_model || "";
       }
       const a = byPane.get(pi.pane);
-      if (a) { row.agent = a.agent; row.state = markerState(a); }
+      if (a) {
+        row.agent = a.agent; row.state = markerState(a);
+        // The rollup spans every workspace, so it is the one source of the
+        // session origin for a pane that is off screen (the hover card's row).
+        if (!live) { row.origin = a.origin || ""; row.originAt = a.origin_ms > 0 ? Date.now() - a.origin_ms : 0; }
+      }
       // The flag is session state, so both sources carry it and either will do.
       // The layout wins where it has an answer: it is pushed the moment the flag
       // changes, while the snapshot arrives on the pane.list that push triggers —

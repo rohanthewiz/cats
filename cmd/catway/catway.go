@@ -138,6 +138,10 @@ type paneRuntime struct {
 	blank           string
 	nonBlankSession string
 	workingAt       time.Time
+	// pubOrigin is the session origin last published by historyMoved, which
+	// republishes the pane's agent chrome only when it changes. Every other
+	// pane_agent / agents send reads the origin fresh (paneAgentMsg, agentsMsg).
+	pubOrigin originStamp
 	// unseen marks an agent completion that landed while the pane was off the
 	// viewport (cats's pane.seen, inverted so the zero value means seen).
 	// Set by publishAgent on a finished transition, cleared when the pane
@@ -1681,10 +1685,12 @@ func (o *orch) agentsMsg() browserproto.Agents {
 				if !rt.stateAt.IsZero() {
 					since = time.Since(rt.stateAt).Milliseconds()
 				}
+				origin := rt.originStamp(agent)
 				items = append(items, browserproto.AgentItem{
 					Pane: rt.id, Pub: pub, Workspace: ws.ID, Tab: tab.Number,
 					Agent: agent, State: state, Model: rt.agentModel,
 					Seen: !rt.unseen, SinceMs: since, Blank: rt.blank,
+					Origin: origin.origin, OriginMs: originAgeMs(origin.began),
 					// The flag is the user's, not the runtime's, so it comes off
 					// the session's pane state rather than off rt. The tab is
 					// already in hand here, which makes it a map hit rather than
@@ -2440,7 +2446,7 @@ func (o *orch) PaneMeta(pane uint32) app.PaneMeta {
 		meta.Agent, meta.AgentState, meta.AgentModel = agent, state, rt.agentModel
 		// The same session the history readers use (historySessionRef), so the
 		// id a client sees is the one the model and prompts were read from.
-		meta.AgentSession, meta.AgentSessionOrigin = rt.sessionOrigin(agent)
+		meta.AgentSession, meta.AgentSessionOrigin, _ = rt.sessionOrigin(agent)
 	}
 	// The plugin pair is resolved the same way the sidebar resolves it
 	// (agentsMsg), so pane.list and the sidebar always agree on what a pane

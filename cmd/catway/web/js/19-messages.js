@@ -100,6 +100,11 @@
         // must not outlive the agent the server reported it for.
         p.agentModel = msg.model || "";
         p.agentBlank = msg.blank || ""; // "new" | "cleared" while nothing has been asked
+        // How the conversation began ("startup" | "clear" | "resume"), and the
+        // instant the pane entered it — converted from the relative origin_ms
+        // on arrival, as the agents rollup's since_ms is. 0 = unknown.
+        p.agentOrigin = msg.origin || "";
+        p.agentOriginAt = msg.origin_ms > 0 ? Date.now() - msg.origin_ms : 0;
         renderChrome(p); refreshPaneList(); break;
       }
       case "pane_modes": {

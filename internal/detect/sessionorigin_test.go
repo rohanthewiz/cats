@@ -168,3 +168,26 @@ func TestNormalizeSessionOrigin(t *testing.T) {
 		}
 	}
 }
+
+// When the pane entered a conversation: the process start for a launch, the
+// moment of the read for a switch inside a running agent.
+func TestAgentSessionBegan(t *testing.T) {
+	start := time.Date(2026, 10, 11, 12, 0, 0, 0, time.UTC)
+	now := start.Add(time.Hour)
+	prev := AgentSession{PID: 100, ID: "sess-old", StartedAt: start}
+	for _, c := range []struct {
+		name      string
+		cur, prev AgentSession
+		want      time.Time
+	}{
+		{"launch takes the process start", AgentSession{PID: 200, ID: "b", StartedAt: start.Add(50 * time.Minute)}, prev, start.Add(50 * time.Minute)},
+		{"first sighting takes the process start", AgentSession{PID: 200, ID: "b", StartedAt: start.Add(50 * time.Minute)}, AgentSession{}, start.Add(50 * time.Minute)},
+		{"switch in the same process takes the read", AgentSession{PID: 100, ID: "b", StartedAt: start}, prev, now},
+		{"no process start known", AgentSession{PID: 200, ID: "b"}, prev, now},
+		{"a start in the future is not believed", AgentSession{PID: 200, ID: "b", StartedAt: now.Add(time.Minute)}, prev, now},
+	} {
+		if got := AgentSessionBegan(c.cur, c.prev, now); !got.Equal(c.want) {
+			t.Errorf("%s: got %v, want %v", c.name, got, c.want)
+		}
+	}
+}

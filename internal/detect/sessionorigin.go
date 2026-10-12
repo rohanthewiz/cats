@@ -95,6 +95,31 @@ func AgentSessionOrigin(agent string, cur, prev AgentSession, prevSeen time.Time
 	return probe(cur, prev, prevSeen)
 }
 
+// AgentSessionBegan says when the pane entered cur, a conversation first seen at
+// now that replaced prev (the zero value when there was none to compare with).
+// It is the moment the conversation became the pane's, not the age of its
+// history: a resumed conversation began in this pane when it was resumed, even
+// though its first records are older.
+//
+//	same pid as prev  → now        the switch happened inside the running agent
+//	                                (/clear, /resume), somewhere since the last
+//	                                read — now is late by at most one poll
+//	new pid, start known → StartedAt  a launch (fresh or `--resume`) enters its
+//	                                conversation as the process starts
+//	otherwise         → now        nothing better is known
+//
+// The process start is preferred over now for a launch because a host does not
+// always see a launch promptly: the registry entry is written a moment after the
+// process starts, and the session read is paced. Agnostic of the agent, unlike
+// the origin: it reads only what AgentSessionOf already returned.
+func AgentSessionBegan(cur, prev AgentSession, now time.Time) time.Time {
+	samePID := prev.ID != "" && prev.ID != cur.ID && prev.PID == cur.PID && cur.PID > 0
+	if !samePID && !cur.StartedAt.IsZero() && !cur.StartedAt.After(now) {
+		return cur.StartedAt
+	}
+	return now
+}
+
 func claudeSessionOrigin(cur, prev AgentSession, prevSeen time.Time) string {
 	samePID := prev.ID != "" && prev.ID != cur.ID && prev.PID == cur.PID && cur.PID > 0
 	switchAt := cur.StartedAt

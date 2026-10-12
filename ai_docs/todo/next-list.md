@@ -38,7 +38,7 @@ window were dated by grepping every session doc.
   Open (or Validate, for a check, or Roadmap, for future work) with the next
   ID.
 
-**Next ID:** N-058
+**Next ID:** N-059
 
 ## Open
 
@@ -171,16 +171,16 @@ window were dated by grepping every session doc.
   table) is one table entry each, once their on-disk history format is known.
   The same entry would also give those panes a model in the header.
 
-- **N-057** · raised `2026-1011-1617-agent-session-origin` · value low
-  A pane's session origin (`startup` / `clear` / `resume`) is only exposed
-  through `PaneMeta` (`agent_session_origin` in `pane.list` / `pane.get`).
-  The browser shows it only while the conversation is blank: the light-brown
-  dot (`2026-1011-1920-blank-session-dot`) is labelled "new" or "cleared" in
-  the agents list and the pane header. Once the pane has worked, the origin is
-  no longer visible. What is left is a marker that outlasts the first prompt,
-  e.g. "cleared 2m ago" in the hover card, and showing "resumed" at all (a
-  blank resumed conversation reads "new"). The origin would need to ride on
-  `wire.PaneAgent` / `AgentItem` next to `blank`.
+- **N-058** · raised `2026-1011-1949-session-origin-after-first-prompt` · value medium
+  The AGENTS row is wider than the sidebar at its default width (278px): a
+  claude row measured 309px, so the state word ("idle") is clipped at the
+  right edge (`li` is `overflow:hidden`). It comes from the model label
+  ("claude opus 5.5") plus the meta line ("proj:p1 · 1m ago · idle"); neither
+  shrinks. Measured in a scratch catway while placing the session origin,
+  which went into the row's tooltip for this reason. The state is what the row
+  is for, so the name or the handle should give way first (an ellipsizing
+  `.aname`, as plugin rows already have, or dropping the workspace half of the
+  handle in the row).
 
 ## Validate
 
@@ -321,9 +321,14 @@ and `raised`.
   conversation after a `/clear` (they used to stay on the old one). Also
   check the blank dot: a fresh claude and a `/clear` show the light-brown dot
   ("new" / "cleared") in the agents list, header and workspace badge, and it
-  turns to working the moment a prompt is sent. Only unit-tested so far, plus
-  a classifier run against real transcripts on this machine and a scratch
-  catway with stand-in claude processes for the dot.
+  turns to working the moment a prompt is sent. Then check the origin after
+  the first prompt (`2026-1011-1949-session-origin-after-first-prompt`): the pane header reads
+  "started / cleared / resumed N ago", the AGENTS row's tooltip carries the
+  same phrase under the model, and the workspace dropdown's hover card has a
+  "Session" row. The age should match the launch (claude's own `startedAt`)
+  or the /clear, and survive a catway restart. Only unit-tested so far, plus
+  a classifier run against real transcripts on this machine and scratch
+  catways with stand-in claude processes for the dot and the origin.
 
 ## Roadmap
 
@@ -359,6 +364,17 @@ unchanged.
 Closures before this file existed live in the session docs' own write-ups.
 Newest first. The unnumbered entries at the end were found done while seeding,
 so they are not carried.
+
+- **N-057** · raised `2026-1011-1617-agent-session-origin` ·
+  closed 2026-10-11, `2026-1011-1949-session-origin-after-first-prompt`. The origin now rides on
+  `wire.AgentItem` / `PaneAgent` (`origin`, plus `origin_ms` for its age) and
+  outlasts the first prompt. The pane header shows "cleared 5m ago" after the
+  state word, the AGENTS row's tooltip and the pane hover card carry the same
+  phrase, and "resumed" shows at all. The time comes from cathost
+  (`PaneAgentSession.BeganMs`, `detect.AgentSessionBegan`), so it survives a
+  catway restart; a hook ref is stamped on arrival and the earlier of the two
+  wins. A blank resumed conversation still reads "new" in the blank slot, but
+  the hover card says "resumed".
 
 - **N-051** · raised `2026-0927-0014-n050-warn-fg-theme-key` ·
   closed 2026-09-27, `2026-0927-0024-n051-warn-fg-text-app-wide`. The twelve
