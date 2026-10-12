@@ -84,12 +84,6 @@ window were dated by grepping every session doc.
   cats-mobile: nothing draws `Session.Plugins` yet. If the phone gets a
   plugins list, split it by `PluginPane.Type` the way the desktop does.
 
-- **N-034** · raised `2026-0923-1545-perf-shifts-builder-deflate` · value low
-  cats-mobile does not list `pane_shift` in `Init.Features`, so a scrolling
-  pane still reaches the phone as a full frame per tick (now compressed). Its
-  grid (`internal/catsclient/grid.go`) would apply `PaneDiff.Shift` as the
-  browser does: scroll the cells up, blank the vacated rows, then the cells.
-
 - **N-037** · raised `2026-0924-1953-context-usage-warn-demotion-tool-types` · value low
   The context used/window segment on agent rows (`43k/1M`) is claude-only.
   Copilot's `events.jsonl` would need its own reader, if it records usage at
@@ -308,6 +302,21 @@ unchanged.
 Closures before this file existed live in the session docs' own write-ups.
 Newest first. The unnumbered entries at the end were found done while seeding,
 so they are not carried.
+
+- **N-034** · raised `2026-0923-1545-perf-shifts-builder-deflate` ·
+  closed 2026-10-11, `SESSDOC4`. cats-mobile `a228479` pins cats at
+  v0.4.0, the first tag with `wire.FeaturePaneShift`, and puts
+  `plugin_notice` on its ignore list. `8c050f3` adds `PaneGrid.shiftUp`:
+  it scrolls all five column slices, blanks the vacated rows in the frame
+  defaults, marks every row dirty, and runs before the diff's cells. The
+  handshake now lists `pane_shift`. Unit tests cover shift-then-patch and an
+  oversized shift. Live: a throwaway test (not committed) connected
+  catsclient to a scratch catway while a pane printed 150 lines of random
+  base64. 171 of 194 diffs carried a shift, no full frame was sent during
+  the run, and the grid matched catway's own capture row for row. With
+  "line N" output catway sent plain diffs, since a shift has to save two
+  rows of cells. Not watched on a phone, but painting uses the same
+  dirty-row path that full frames always took.
 
 - **N-033** · raised `2026-0923-1443-settings-json-and-screen` ·
   closed 2026-10-11, `2026-1011-2335-n060-n040-n033-raw-params-unpair-ui-push`. A new down message, `ui_prefs`
