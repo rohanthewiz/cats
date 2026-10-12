@@ -129,12 +129,6 @@ window were dated by grepping every session doc.
   its origin has moved on) could still get a quiet "behind origin" hint. That
   needs a fetch in the developer's own repo, which is why it was left out.
 
-- **N-044** · raised `2026-0926-2226-default-plugin-seed-cats-todo` · value medium
-  Push cats-todo `56c5c4d` and cut v0.42.1. Fresh installs clone cats-todo's
-  default branch, so until the headless-offer fix is on GitHub the automatic
-  install still spends the one-time "set up a backlog here?" offer on
-  catway's log.
-
 - **N-052** · raised `2026-0927-0024-n051-warn-fg-text-app-wide` · value low
   The other agent-state words are still faint as text on the three themes
   N-050/N-051 fixed for amber. "idle" (`--ok`), "blocked" (`--err`) and "done"
@@ -353,6 +347,13 @@ unchanged.
 Closures before this file existed live in the session docs' own write-ups.
 Newest first. The unnumbered entries at the end were found done while seeding,
 so they are not carried.
+
+- **N-044** · raised `2026-0926-2226-default-plugin-seed-cats-todo` ·
+  closed 2026-10-11, `SESSDOC1`. Already done: cats-todo `56c5c4d`
+  ("a headless host install leaves the backlog offer unspent") is on
+  origin/main and tagged v0.42.1 (2026-09-27 00:32), and v0.42.2 through
+  v0.45.0 have shipped on top of it. Checked with `git tag --contains` in
+  ../cats-todo.
 
 - **N-058** · raised `2026-1011-1949-session-origin-after-first-prompt` ·
   closed 2026-10-11, `2026-1011-1959-n058-agent-row-name-gives-way`. The
