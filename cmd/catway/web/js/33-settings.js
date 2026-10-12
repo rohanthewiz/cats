@@ -405,6 +405,7 @@
   //   list      comma-separated        (an array of strings)
   //   kinds     one checkbox per push kind (an array)
   //   priority  one select per push kind   (a {kind: level} object)
+  //   map       label → value rows, add/remove (a {string: string} object)
   // The labels and hints are the documentation that used to live in the YAML
   // file's comments — JSON has none, so the screen is where they went.
   const PUSH_KINDS = ["attention", "finished", "info"];
@@ -443,6 +444,13 @@
       ["enabled", "enabled", "bool", "record every shell command (needs `catctl integration install shell`)"],
       ["retention", "retention", "int", "records kept; the oldest go first"],
     ] },
+    // tools.types (N-038): a tool started from a shell has no plugin manifest
+    // behind it, so this map is what types it by the agent label it reports.
+    // config.set replaces the whole map, and a default tool whose row is
+    // removed is saved as "" so it stays out (applyToolTypes in settings.go).
+    { tab: "tools", section: "tools", fields: [
+      ["types", "tool types", "map", "agent label → plugin type (db_client, notes_mgr, todos_mgr, http_client, git, agent). A blank type, or a removed row, leaves that tool untyped. Editors belong in editor › editor agents"],
+    ] },
   ];
 
   // zeroFor is what an absent (omitempty) key means for a kind, so "absent" and
@@ -452,7 +460,7 @@
       case "bool": return false;
       case "int": return 0;
       case "list": case "kinds": return [];
-      case "priority": return {};
+      case "priority": case "map": return {};
       default: return "";
     }
   }
@@ -543,11 +551,59 @@
           return out;
         };
       }
+      case "map": return mapControl(r, cur || {});
       default: { // text, duration
         const i = text(cur || "");
         return () => i.value.trim();
       }
     }
+  }
+
+  // mapControl is the key→value widget: one line per entry (key, value, ×) and
+  // an add button under them, all inside the row's value column.
+  //
+  //   tool types  [dbc      ] [db_client ] ×
+  //               [gonotes  ] [notes_mgr ] ×
+  //               [+ add]
+  //
+  // Its reader returns the whole object, which config.set takes as a
+  // replacement for the map. A line with both boxes empty is ignored, so an
+  // unused "+ add" costs nothing. A value with no key, or a key given twice
+  // (case-insensitively, the way tools.types matches labels), is an error the
+  // save line shows, rather than an entry silently dropped. Keys are sorted
+  // at build so the order is stable from one opening to the next.
+  function mapControl(r, cur) {
+    const box = document.createElement("div"); box.className = "kvmap";
+    r.appendChild(box);
+    const lines = [];
+    const addLine = (k, v) => {
+      const line = document.createElement("div"); line.className = "kv";
+      const ki = document.createElement("input"); ki.type = "text"; ki.spellcheck = false; ki.value = k; ki.placeholder = "label";
+      const vi = document.createElement("input"); vi.type = "text"; vi.spellcheck = false; vi.value = v; vi.placeholder = "(none)";
+      const del = document.createElement("button"); del.type = "button"; del.textContent = "×"; del.title = "remove";
+      const entry = { ki, vi };
+      del.addEventListener("click", () => { lines.splice(lines.indexOf(entry), 1); line.remove(); });
+      line.appendChild(ki); line.appendChild(vi); line.appendChild(del);
+      box.insertBefore(line, addBtn);
+      lines.push(entry);
+      return ki;
+    };
+    const addBtn = document.createElement("button"); addBtn.type = "button"; addBtn.className = "kvadd"; addBtn.textContent = "+ add";
+    addBtn.addEventListener("click", () => addLine("", "").focus());
+    box.appendChild(addBtn);
+    for (const k of Object.keys(cur).sort()) addLine(k, cur[k]);
+    return () => {
+      const out = {}, seen = new Set();
+      for (const { ki, vi } of lines) {
+        const k = ki.value.trim(), v = vi.value.trim();
+        if (!k && !v) continue;
+        if (!k) return new Error(`"${v}" has no label`);
+        if (seen.has(k.toLowerCase())) return new Error(`"${k}" is listed twice`);
+        seen.add(k.toLowerCase());
+        out[k] = v;
+      }
+      return out;
+    };
   }
 
   // chkGroup is the wrapping container for a row of several small controls

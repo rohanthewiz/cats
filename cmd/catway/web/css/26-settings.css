@@ -24,6 +24,13 @@
   .settings .row input[type=checkbox] { accent-color:var(--accent); }
   .settings .presets .row input[type=text] { flex:none; width:140px; }
   .settings .presets .row .ro { flex:1; }
+  /* The key→value widget (mapControl, e.g. tools › tool types): its lines
+     stack inside the value column, each a label box, a value box and a
+     remove button, with "+ add" under them. */
+  .settings .row .kvmap { flex:1; min-width:0; display:flex; flex-direction:column; align-items:flex-start; gap:3px; }
+  .settings .row .kvmap .kv { display:flex; align-items:center; gap:6px; width:100%; }
+  .settings .row .kvmap .kv input[type=text] { flex:1; min-width:0; }
+  .settings .row .kvmap .kv button { padding:2px 8px; }
   @media (max-width: 600px) {
     .settings .sbody { flex-direction:column; height:auto; max-height:75vh; }
     .settings .stabs { width:auto; flex-direction:row; flex-wrap:wrap; border-right:none; border-bottom:1px solid var(--line); }

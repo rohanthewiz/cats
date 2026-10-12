@@ -89,12 +89,6 @@ window were dated by grepping every session doc.
   Copilot's `events.jsonl` would need its own reader, if it records usage at
   all (`lastCopilotModel`, `cmd/catway/agentmodel.go`).
 
-- **N-038** · raised `2026-0924-1953-context-usage-warn-demotion-tool-types` · value low
-  `tools.types` has no field on the settings screen, because the screen has no
-  key→value widget (`33-settings.js` OPTION_TABS). It is file-only plus
-  `catctl reload`. Adding it would mean adding `tools` to `optionSections` and
-  a map widget.
-
 - **N-043** · raised `2026-0926-2211-plugin-update-checks` · value low
   Linked plugins are skipped by the update check, because `plugin update`
   refuses them. A linked checkout that is behind its own upstream (ced, when
@@ -302,6 +296,22 @@ unchanged.
 Closures before this file existed live in the session docs' own write-ups.
 Newest first. The unnumbered entries at the end were found done while seeding,
 so they are not carried.
+
+- **N-038** · raised `2026-0924-1953-context-usage-warn-demotion-tool-types` ·
+  closed 2026-10-11, `SESSDOC4`. The settings screen has a **tools** tab
+  with a key→value widget (`mapControl` in `33-settings.js`: a label box, a
+  type box and × per row, plus **+ add**). Its reader refuses a value with
+  no label and a label given twice (case-insensitively). `tools` joined
+  `optionSections`. `applyToolTypes` (`settings.go`) makes a `types` object
+  replace the map, since decoding onto it could only add, and saves a
+  default left out as `""`, since the load-time merge would otherwise
+  restore it. `TestConfigSetToolTypesReplacesAndOptsOutDefaults` covers
+  replace, opt-out, live `TypeFor`, a reload, and refusals that leave the
+  map alone. Live in Chrome on a scratch catway: the tab listed dbc and
+  gonotes, and removing dbc, adding `roman → http_client` and saving wrote
+  `{"dbc": "", "gonotes": "notes_mgr", "roman": "http_client"}`. A
+  duplicate `GONOTES` showed "tool types: "GONOTES" is listed twice". Docs
+  in configuration.md.
 
 - **N-034** · raised `2026-0923-1545-perf-shifts-builder-deflate` ·
   closed 2026-10-11, `SESSDOC4`. cats-mobile `a228479` pins cats at

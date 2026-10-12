@@ -4,6 +4,7 @@ package main
 
 import (
 	"encoding/json"
+	"maps"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -391,6 +392,61 @@ func TestConfigSetBroadcastsUIPrefs(t *testing.T) {
 	case b := <-c.out:
 		t.Fatalf("a save that left ui alone pushed %s", b)
 	default:
+	}
+}
+
+// tools.types is edited as rows (N-038): config.set replaces the map, so a
+// removed row is gone, and a default tool left out is saved as "" so the
+// load-time merge does not bring it back. It reaches TypeFor at once and
+// survives a reload of the file.
+func TestConfigSetToolTypesReplacesAndOptsOutDefaults(t *testing.T) {
+	o, c := newPendingHarness()
+	path := filepath.Join(t.TempDir(), "config.json")
+	o.cfg = config.Default()
+	o.cfgPath = path
+	if o.cfg.Tools.TypeFor("dbc") == "" || o.cfg.Tools.TypeFor("gonotes") == "" {
+		t.Fatal("precondition: dbc and gonotes are typed by default")
+	}
+
+	// Add one tool and drop dbc; gonotes is kept with a new type.
+	o.handleCmd(c, cmd(t, "c1", browserproto.CmdConfigSet, browserproto.ConfigSetParams{
+		Options: map[string]json.RawMessage{"tools": json.RawMessage(`{"types":{"GoNotes":"todos_mgr","roman":"http_client"}}`)},
+	}))
+	expectOK(t, c, "config.set tools")
+	expectThemePush(t, c)
+	if got := o.cfg.Tools.TypeFor("roman"); got != "http_client" {
+		t.Fatalf("roman = %q, want http_client live", got)
+	}
+	if got := o.cfg.Tools.TypeFor("gonotes"); got != "todos_mgr" {
+		t.Fatalf("gonotes = %q, want the edited todos_mgr", got)
+	}
+	if got := o.cfg.Tools.TypeFor("dbc"); got != "" {
+		t.Fatalf("dbc = %q, want its removed row to leave it untyped", got)
+	}
+	loaded, _, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Tools.TypeFor("dbc") != "" || loaded.Tools.TypeFor("roman") != "http_client" {
+		t.Fatalf("after a reload: %v", loaded.Tools.Types)
+	}
+
+	// A tools object without "types" leaves the map alone; an editor type and
+	// an unknown field are refused without touching it.
+	before := maps.Clone(o.cfg.Tools.Types)
+	for name, raw := range map[string]string{
+		"editor type":   `{"types":{"vi":"editor"}}`,
+		"unknown field": `{"kinds":{}}`,
+	} {
+		o.handleCmd(c, cmd(t, "c2", browserproto.CmdConfigSet, browserproto.ConfigSetParams{
+			Options: map[string]json.RawMessage{"tools": json.RawMessage(raw)},
+		}))
+		if r, ok := recvDown(t, c).(*browserproto.CmdResult); !ok || r.Ok {
+			t.Fatalf("%s: want a refusal, got %#v", name, r)
+		}
+		if !maps.Equal(o.cfg.Tools.Types, before) {
+			t.Fatalf("%s: the live map changed: %v", name, o.cfg.Tools.Types)
+		}
 	}
 }
 

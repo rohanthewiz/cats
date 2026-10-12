@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strings"
 
 	"github.com/rohanthewiz/cats/internal/app"
 	"github.com/rohanthewiz/cats/internal/browserproto"
@@ -193,7 +194,7 @@ func (o *orch) ThemeDelete(r app.Responder, p app.ThemeDeleteParams) {
 //     switch-vs-merge semantics a raw section write would bypass.
 //   - runbooks: a runbook can issue config.set, so making triggers settable
 //     here would let a runbook re-enable its own triggers (see config.Runbooks).
-var optionSections = []string{"panes", "persistence", "worktrees", "push", "editor", "ledger", "ui"}
+var optionSections = []string{"panes", "persistence", "worktrees", "push", "editor", "ledger", "ui", "tools"}
 
 // restartSections are the optionSections catway only reads at startup (main.go
 // builds the persister, the push bridge and the ledger once). Saving them is
@@ -217,6 +218,8 @@ func optionTarget(c *config.Config, section string) any {
 		return &c.Ledger
 	case "ui":
 		return &c.UI
+	case "tools":
+		return &c.Tools
 	}
 	return nil
 }
@@ -240,12 +243,72 @@ func applyOptions(cfg *config.Config, opts map[string]json.RawMessage) error {
 		if target == nil {
 			return fmt.Errorf("config.set: %q is not an editable section (want one of %v)", section, optionSections)
 		}
+		if section == "tools" {
+			if err := applyToolTypes(cfg, opts[section]); err != nil {
+				return err
+			}
+			continue
+		}
 		dec := json.NewDecoder(bytes.NewReader(opts[section]))
 		dec.DisallowUnknownFields()
 		if err := dec.Decode(target); err != nil {
 			return fmt.Errorf("config.set: %s: %w", section, err)
 		}
 	}
+	return nil
+}
+
+// applyToolTypes is applyOptions for the tools section (N-038). tools.types is
+// a key→value map the settings screen edits as rows, and a row the user
+// deleted has to stay deleted, which neither of the generic rules gives:
+//
+//   - Decoding onto the live map would only ever add and overwrite (encoding/
+//     json writes INTO an existing map), so a removed row would survive the
+//     save. A "types" object in the request therefore REPLACES the map; a
+//     request without one leaves it alone, the usual partial-object rule.
+//   - The file's map is merged key-wise over the defaults at load
+//     (config.parse), so a default tool (dbc, gonotes) simply left out of the
+//     saved map would come back on the next load. A default the new map does
+//     not name is written as "", the documented opt-out, so removing its row
+//     means what it looks like.
+//
+//	live: {dbc: db_client, gonotes: notes_mgr, mytool: x}
+//	sent: {gonotes: notes_mgr, other: y}
+//	kept: {dbc: "", gonotes: notes_mgr, other: y}      (mytool gone, dbc opted out)
+func applyToolTypes(cfg *config.Config, raw json.RawMessage) error {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return fmt.Errorf("config.set: tools: %w", err)
+	}
+	for k := range fields {
+		if k != "types" {
+			return fmt.Errorf("config.set: tools: unknown field %q", k)
+		}
+	}
+	typesRaw, ok := fields["types"]
+	if !ok {
+		return nil
+	}
+	var types map[string]string
+	if err := json.Unmarshal(typesRaw, &types); err != nil {
+		return fmt.Errorf("config.set: tools.types: %w", err)
+	}
+	if types == nil {
+		types = map[string]string{}
+	}
+	for label := range config.Default().Tools.Types {
+		named := false
+		for k := range types {
+			if strings.EqualFold(k, label) {
+				named = true
+				break
+			}
+		}
+		if !named {
+			types[label] = ""
+		}
+	}
+	cfg.Tools.Types = types
 	return nil
 }
 

@@ -626,6 +626,12 @@ manifest, as `editor.agents` does, because it is your statement about the tool.
 files, which is `editor.agents`' job. Any other well-formed word is accepted,
 including one this build does not know. Live-reloadable with `catctl reload`.
 
+The settings screen edits it on its **tools** tab, one row per label with a
+remove button and **+ add**. Its save replaces the whole map: a removed row is
+gone, and a default tool whose row is removed is saved as `""`, so the merge
+over the defaults does not bring it back. A `config.set` with a
+`tools.types` object behaves the same way.
+
 > **Warning — the topic URL is a capability**
 >
 > Anyone who learns your ntfy topic path can read your notifications, so treat
