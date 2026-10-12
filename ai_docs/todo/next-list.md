@@ -213,7 +213,7 @@ and `raised`.
   Mac ↔ Linux sync is the real test of it.
 
 - **N-013** · raised `2026-0918-1901-dictation-text-sink` · value low
-  Fix landed (`SESSDOC4`), hand check left. While a composition runs, the
+  Fix landed (`2026-1011-2344-n034-n038-n014-n013-mobile-shift-tools-tab-ime`), hand check left. While a composition runs, the
   text sink is shown as the preedit (`showPreedit` in `42-textsink.js`). It
   sits on the cursor cell in the terminal font, scaled with the pane's
   zoom, on the terminal background with an accent underline, and is resized
@@ -231,7 +231,7 @@ and `raised`.
   cursor.
 
 - **N-014** · raised `2026-0918-1901-dictation-text-sink` · value low
-  Fix landed (`SESSDOC4`), hand check left. `onKey` (`20-keys.js`) now
+  Fix landed (`2026-1011-2344-n034-n038-n014-n013-mobile-shift-tools-tab-ime`), hand check left. `onKey` (`20-keys.js`) now
   returns on a keydown whose key is "Dead" without preventDefault, so the
   host composes the accent into the text sink and the committed "é" arrives
   as a paste. The keyup of a key whose keydown went to a composition is
@@ -320,7 +320,7 @@ Newest first. The unnumbered entries at the end were found done while seeding,
 so they are not carried.
 
 - **N-038** · raised `2026-0924-1953-context-usage-warn-demotion-tool-types` ·
-  closed 2026-10-11, `SESSDOC4`. The settings screen has a **tools** tab
+  closed 2026-10-11, `2026-1011-2344-n034-n038-n014-n013-mobile-shift-tools-tab-ime`. The settings screen has a **tools** tab
   with a key→value widget (`mapControl` in `33-settings.js`: a label box, a
   type box and × per row, plus **+ add**). Its reader refuses a value with
   no label and a label given twice (case-insensitively). `tools` joined
@@ -336,7 +336,7 @@ so they are not carried.
   in configuration.md.
 
 - **N-034** · raised `2026-0923-1545-perf-shifts-builder-deflate` ·
-  closed 2026-10-11, `SESSDOC4`. cats-mobile `a228479` pins cats at
+  closed 2026-10-11, `2026-1011-2344-n034-n038-n014-n013-mobile-shift-tools-tab-ime`. cats-mobile `a228479` pins cats at
   v0.4.0, the first tag with `wire.FeaturePaneShift`, and puts
   `plugin_notice` on its ignore list. `8c050f3` adds `PaneGrid.shiftUp`:
   it scrolls all five column slices, blanks the vacated rows in the frame
