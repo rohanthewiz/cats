@@ -21,6 +21,7 @@ import (
 	"github.com/rohanthewiz/cats/internal/config"
 	"github.com/rohanthewiz/cats/internal/ctlproto"
 	"github.com/rohanthewiz/cats/internal/dlog"
+	"github.com/rohanthewiz/cats/internal/gwauth"
 	"github.com/rohanthewiz/cats/internal/peergrant"
 	"github.com/rohanthewiz/cats/internal/peersync"
 )
@@ -42,6 +43,7 @@ import (
 //	                                                   │ post ▶ loop: peers: entry, token_file, save
 //	auth guard: catspeer_… accepted on /peer/v1/* only
 //	catctl peer-grants / revoke-peer-grant <id> ─socket─▶ handlePeerGrants / handlePeerRevoke
+//	handlePeerUnpair ◀── POST /peer/v1/unpair (Bearer grant) ── catctl detach-peer <id> (PeerDetach)
 
 // peerGrantsFile and peerTokensDir are where the two halves keep their state,
 // both under the state directory rather than beside the config file. The
@@ -207,6 +209,38 @@ func (o *orch) handlePeerPair(ctx rweb.Context) error {
 	}
 	log.Printf("catway: issued peer grant %s (%s)", g.ID, grantWho(g))
 	return ctx.WriteJSON(peersync.PairResponse{Credential: cred, GrantID: g.ID, Instance: peerLocal{o}.Instance()})
+}
+
+// handlePeerUnpair revokes the grant the request was authenticated with (POST
+// /peer/v1/unpair), so a peer that detaches can clean up this end (N-040).
+// The auth guard has already checked the credential against the grant table;
+// it is checked again here to learn WHICH grant it was, since the guard only
+// answers yes or no. Anything that is not a live grant (the password, a
+// session token, a grant revoked a moment ago) has nothing to revoke and gets
+// a 400, not a 401: the caller is authenticated, it just asked for the wrong
+// thing. Under --auth none there is no guard and no grant table worth
+// consulting, and the answer is the same 503 pairing gives.
+func (o *orch) handlePeerUnpair(ctx rweb.Context) error {
+	p := o.pairing.Load()
+	if p == nil {
+		return ctx.Status(http.StatusServiceUnavailable).
+			WriteText("peer grants unavailable: this catway runs without auth, so there is no grant to revoke")
+	}
+	if p.grants == nil {
+		return ctx.Status(http.StatusServiceUnavailable).WriteText(peerGrantsUnavailable)
+	}
+	token, _ := gwauth.BearerToken(ctx.Request().Header("Authorization"))
+	g, ok := p.grants.Check(token, time.Now())
+	if !ok {
+		return ctx.Status(http.StatusBadRequest).
+			WriteText("unpair revokes the peer grant the request is authenticated with, and this request carries none")
+	}
+	if _, err := p.grants.Revoke(g.ID); err != nil {
+		dlog.Errorf("catway: peer unpair: %v", err)
+		return ctx.Status(http.StatusInternalServerError).WriteText("could not revoke the grant; see the catway log")
+	}
+	log.Printf("catway: revoked peer grant %s (%s) at its holder's request (detach-peer)", g.ID, grantWho(g))
+	return ctx.WriteJSON(peersync.UnpairResponse{GrantID: g.ID})
 }
 
 // --- redeemer ----------------------------------------------------------------------

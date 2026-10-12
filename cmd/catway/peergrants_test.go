@@ -163,6 +163,49 @@ func TestPeerGrantLifecycle(t *testing.T) {
 	}
 }
 
+// unpair revokes the grant it is presented with, and nothing else (N-040):
+// the password is refused (it is not a grant), a grant's own unpair works
+// once, and after it the grant no longer opens the peer routes. A second
+// grant is untouched.
+func TestPeerUnpairRevokesOnlyThePresentedGrant(t *testing.T) {
+	f := newGrantor(t)
+	redeem := func() peersync.PairResponse {
+		t.Helper()
+		resp := f.redeem(f.mint(t, `{"peer":true}`).Token)
+		var got peersync.PairResponse
+		if err := json.Unmarshal(resp.Body(), &got); err != nil || got.Credential == "" {
+			t.Fatalf("redeem: %d %s", resp.Status(), resp.Body())
+		}
+		return got
+	}
+	mine, other := redeem(), redeem()
+	unpair := func(bearer string) rweb.Response {
+		return f.server.Request(http.MethodPost, peersync.PathUnpair,
+			[]rweb.Header{{Key: "Authorization", Value: "Bearer " + bearer}}, nil)
+	}
+
+	if r := unpair("the-real-password"); r.Status() != http.StatusBadRequest {
+		t.Fatalf("unpair with the password: %d %s, want 400", r.Status(), r.Body())
+	}
+	r := unpair(mine.Credential)
+	var res peersync.UnpairResponse
+	if r.Status() != http.StatusOK || json.Unmarshal(r.Body(), &res) != nil || res.GrantID != mine.GrantID {
+		t.Fatalf("unpair with the grant: %d %s, want grant %s", r.Status(), r.Body(), mine.GrantID)
+	}
+	if r := f.get(peersync.PathHello, mine.Credential); r.Status() == http.StatusOK {
+		t.Fatal("an unpaired grant still reaches the peer routes")
+	}
+	if r := unpair(mine.Credential); r.Status() == http.StatusOK {
+		t.Fatal("a second unpair with the same grant succeeded")
+	}
+	if r := f.get(peersync.PathHello, other.Credential); r.Status() != http.StatusOK {
+		t.Fatalf("the other grant was touched: hello %d", r.Status())
+	}
+	if n := len(f.store.List()); n != 1 {
+		t.Fatalf("%d grants left, want the other one only", n)
+	}
+}
+
 // A device token presented at the peer door is refused and left live.
 func TestPeerPairRefusesDeviceToken(t *testing.T) {
 	f := newGrantor(t)

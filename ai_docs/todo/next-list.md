@@ -105,12 +105,6 @@ window were dated by grepping every session doc.
   `catctl reload`. Adding it would mean adding `tools` to `optionSections` and
   a map widget.
 
-- **N-040** · raised `2026-0925-1102-n011-peer-pairing` · value low
-  `detach-peer` deletes the paired token file but cannot revoke the grant on
-  the other catway, which stays live until someone runs `revoke-peer-grant`
-  there (catway logs a reminder). A self-revoke route (`POST /peer/v1/unpair`,
-  authenticated by the grant itself) would make detach clean up both ends.
-
 - **N-043** · raised `2026-0926-2211-plugin-update-checks` · value low
   Linked plugins are skipped by the update check, because `plugin update`
   refuses them. A linked checkout that is behind its own upstream (ced, when
@@ -318,6 +312,24 @@ unchanged.
 Closures before this file existed live in the session docs' own write-ups.
 Newest first. The unnumbered entries at the end were found done while seeding,
 so they are not carried.
+
+- **N-040** · raised `2026-0925-1102-n011-peer-pairing` ·
+  closed 2026-10-11, `SESSDOC3`. New route `POST /peer/v1/unpair`
+  (`handlePeerUnpair`) revokes exactly the grant the request is
+  authenticated with. The password and other non-grant credentials get a 400,
+  and the guard already keeps the route behind auth. `peersync.Client.Unpair`
+  calls it. `PeerDetach` reads the credential first, saves the config,
+  deletes the token file, then unpairs on a goroutine and replies after the
+  attempt. On failure (offline, an older peer's 404, already revoked) it
+  logs the old "stays live until revoked there" reminder with the reason.
+  Tests: `TestPeerUnpairRevokesOnlyThePresentedGrant` (password refused, own
+  grant revoked once, another grant untouched) and `TestUnpair`. Live with
+  two scratch catways: B (password auth) minted a link, A attached by it, and
+  B listed grant `f349c29a`. `catctl detach-peer bpeer` on A logged "revoked
+  its grant f349c29a on the peer", B logged the revocation, and B's
+  `peer-grants` came back empty. With B's catway stopped, a detach completed
+  and logged "connection refused; its grant on the peer stays live…".
+  `docs/subsystems/peer-sync.md` and `docs/reference/cli.md` updated.
 
 - **N-060** · raised `2026-1011-2327-n053-n052-n039-headings-state-words-exited-capture` ·
   closed 2026-10-11, `SESSDOC3`. `--params` with no operands now takes

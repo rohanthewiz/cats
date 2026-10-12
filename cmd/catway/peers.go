@@ -308,27 +308,69 @@ func (o *orch) PeerAttach(r app.Responder, p app.PeerAttachParams) {
 }
 
 // PeerDetach removes a peers: entry (peer.detach). Nothing synced is undone.
-// A token file this catway wrote when pairing is deleted with the entry; the
-// grant it held stays live on the peer until revoked there — this side has no
-// way to reach over and do it — so the log line says so.
+// A token file this catway wrote when pairing is deleted with the entry, and
+// the grant it held is revoked on the peer by presenting it once more at
+// PathUnpair (N-040), so a detach cleans up both ends:
+//
+//	read credential ─▶ save config without the entry ─▶ delete token file
+//	                                                       │
+//	        goroutine: POST /peer/v1/unpair (Bearer grant) ◀┘
+//	                     ├─ ok ──────▶ log "revoked its grant <id> on the peer"
+//	                     └─ failed ──▶ log the error + "revoke it there (catctl revoke-peer-grant)"
+//	        loop: reply with the roster
+//
+// The credential is read before anything is removed, since the file is its
+// only copy. The unpair is best effort: the detach itself is already done and
+// is not undone when the peer is offline, runs a cats from before the route
+// (404), or has already revoked the grant (401). Each of those only means the
+// grant may still be live there, which is the state every detach used to end
+// in, so the log line falls back to the old reminder. The reply waits for the
+// attempt (bounded by the client's timeout) so that whatever runs `catctl
+// detach-peer` next sees the grant already gone. A peer whose credential the
+// operator manages (a literal token or their own token_file, typically the
+// password) has no grant to revoke and is not contacted.
 func (o *orch) PeerDetach(r app.Responder, p app.PeerDetachParams) {
 	peer, ok := o.findPeer(p.ID)
 	if !ok {
 		r.Fail(fmt.Sprintf("no peer %q (peers: %s)", p.ID, o.peerIDs()))
 		return
 	}
+	tok, tokErr := peerToken(peer)
 	cfg := o.cfg
 	cfg.Peers = slices.DeleteFunc(slices.Clone(o.cfg.Peers), func(q config.Peer) bool { return q.ID == p.ID })
 	if msg := o.saveConfig(cfg); msg != "" {
 		r.Fail(msg)
 		return
 	}
-	if o.removeManagedTokenFile(peer) {
-		log.Printf("catway: peer.detach %s — its grant on the peer stays live until revoked there (catctl revoke-peer-grant)", p.ID)
-	} else {
+	if !o.removeManagedTokenFile(peer) {
 		log.Printf("catway: peer.detach %s", p.ID)
+		r.OK(app.PeerListResult{Peers: o.peerInfos()})
+		return
 	}
-	r.OK(app.PeerListResult{Peers: o.peerInfos()})
+	stillLive := func(why string) {
+		log.Printf("catway: peer.detach %s — %s; its grant on the peer stays live until revoked there (catctl revoke-peer-grant)", p.ID, why)
+		r.OK(app.PeerListResult{Peers: o.peerInfos()})
+	}
+	if tokErr != nil {
+		stillLive("could not read its credential to revoke the grant: " + tokErr.Error())
+		return
+	}
+	client, err := peersync.NewClient(peer.URL, tok, peer.Fingerprint)
+	if err != nil {
+		stillLive("could not reach the peer to revoke the grant: " + err.Error())
+		return
+	}
+	go func() {
+		res, err := client.Unpair(context.Background())
+		o.post(func() {
+			if err != nil {
+				stillLive("revoking the grant there failed: " + err.Error())
+				return
+			}
+			log.Printf("catway: peer.detach %s — revoked its grant %s on the peer", p.ID, res.GrantID)
+			r.OK(app.PeerListResult{Peers: o.peerInfos()})
+		})
+	}()
 }
 
 // --- inbound HTTP -----------------------------------------------------------------
@@ -339,6 +381,7 @@ func (o *orch) PeerDetach(r app.Responder, p app.PeerDetachParams) {
 // public — and PathPair is authenticated by the pairing token in its body.
 func (o *orch) registerPeerRoutes(s *rweb.Server) {
 	s.Post(peersync.PathPair, o.handlePeerPair) // public: the pairing token is the credential
+	s.Post(peersync.PathUnpair, o.handlePeerUnpair)
 	s.Get(peersync.PathHello, o.handlePeerHello)
 	s.Get(peersync.PathBundle, o.handlePeerBundle)
 	s.Post(peersync.PathApply, o.handlePeerApply)

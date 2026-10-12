@@ -103,8 +103,13 @@ accepted at the other's door (`/login` vs `/peer/v1/pair`), and trying the wrong
 one does not burn it. Grants live in B's `<state_dir>/peer-grants.db`
 (btypedb, hashes only), survive restarts of either side, and are managed on B
 over the control socket: `catctl peer-grants`, `catctl revoke-peer-grant <id>`.
-A's `detach-peer` deletes the token file it wrote but cannot revoke the grant on
-B; re-running `attach-peer` for an attached id with a fresh link re-pairs it.
+A's `detach-peer` revokes the grant on B as well: it presents the grant once
+more at `POST /peer/v1/unpair`, which revokes exactly the grant the request is
+authenticated with (the password has nothing to revoke there and is refused),
+then deletes the token file it wrote. If B cannot be reached, or runs a cats
+from before the route, the detach still completes and A's log says the grant
+stays live until `revoke-peer-grant` is run on B. Re-running `attach-peer` for
+an attached id with a fresh link re-pairs it.
 Minting, listing and revoking are control-socket methods, not §7 commands, so
 no browser session can administer peer access.
 

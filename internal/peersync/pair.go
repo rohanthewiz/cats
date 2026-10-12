@@ -62,6 +62,31 @@ func (c *Client) Redeem(ctx context.Context, token, name string) (PairResponse, 
 	return out, nil
 }
 
+// PathUnpair revokes the peer grant the request is authenticated with. It is
+// how `catctl detach-peer` cleans up both ends: the detaching catway still
+// holds the credential, and presenting it is proof enough that the caller is
+// the grant's holder, so no other authority is needed and nobody has to run
+// `catctl revoke-peer-grant` on the other machine. It is not public: the auth
+// guard's grant check (on every /peer/v1/ path) is what lets the call in, and
+// the handler then revokes exactly the grant that was checked. A request
+// carrying the password instead of a grant has nothing to revoke and is
+// refused.
+const PathUnpair = "/peer/v1/unpair" // POST (no body) → UnpairResponse
+
+// UnpairResponse names the grant that was revoked, for the detaching side's
+// log line, so it can be matched against the grantor's own.
+type UnpairResponse struct {
+	GrantID string `json:"grant_id"`
+}
+
+// Unpair revokes this client's own grant on the peer. The client must have
+// been built with the grant as its token.
+func (c *Client) Unpair(ctx context.Context) (UnpairResponse, error) {
+	var out UnpairResponse
+	err := c.do(ctx, http.MethodPost, PathUnpair, nil, &out, fetchTimeout)
+	return out, err
+}
+
 // PeerLinkScheme is the link `catctl pair peer` prints and `catctl attach-peer`
 // accepts in place of a URL. It is a sibling of the device link (cats://pair)
 // rather than a query flag on it: the mobile app registers cats://pair, and a

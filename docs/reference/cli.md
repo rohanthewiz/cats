@@ -637,8 +637,10 @@ catctl revoke-peer-grant 258e3a60    # the laptop's syncs are refused from the n
 ```
 
 A revoked peer comes back by running `attach-peer` again with a fresh link, for
-the same id — it re-pairs in place. `detach-peer` deletes the token file it
-wrote, but the grant stays live on the other side until revoked there. See
+the same id — it re-pairs in place. `detach-peer` revokes its grant on the
+other side (`POST /peer/v1/unpair`) and deletes the token file it wrote. If the
+other catway is unreachable, the detach still completes, and the catway log says
+to run `revoke-peer-grant` there. See
 [peer sync](../subsystems/peer-sync.md#pairing).
 
 ### `catctl integration`

@@ -72,3 +72,40 @@ func TestRedeem(t *testing.T) {
 		t.Fatalf("refused Redeem err = %v, want the pairing-token sentence", err)
 	}
 }
+
+// Unpair posts to PathUnpair with the grant as the bearer and decodes which
+// grant went; a peer from before the route answers 404, which surfaces as an
+// error the detaching side logs.
+func TestUnpair(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != PathUnpair || r.Method != http.MethodPost {
+			http.NotFound(w, r)
+			return
+		}
+		if r.Header.Get("Authorization") != "Bearer catspeer_x" {
+			http.Error(w, "no", http.StatusUnauthorized)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(UnpairResponse{GrantID: "0a0b0c0d"})
+	}))
+	defer srv.Close()
+
+	c, err := NewClient(srv.URL, "catspeer_x", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := c.Unpair(context.Background())
+	if err != nil || got.GrantID != "0a0b0c0d" {
+		t.Fatalf("Unpair = %+v, %v", got, err)
+	}
+	stale, _ := NewClient(srv.URL, "catspeer_gone", "")
+	if _, err := stale.Unpair(context.Background()); err == nil {
+		t.Fatal("Unpair with a refused credential succeeded")
+	}
+	old := httptest.NewServer(http.NotFoundHandler())
+	defer old.Close()
+	oc, _ := NewClient(old.URL, "catspeer_x", "")
+	if _, err := oc.Unpair(context.Background()); err == nil || !strings.Contains(err.Error(), "404") {
+		t.Fatalf("Unpair against a peer without the route: %v, want a 404 error", err)
+	}
+}
