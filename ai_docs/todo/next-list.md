@@ -171,17 +171,6 @@ window were dated by grepping every session doc.
   table) is one table entry each, once their on-disk history format is known.
   The same entry would also give those panes a model in the header.
 
-- **N-058** · raised `2026-1011-1949-session-origin-after-first-prompt` · value medium
-  The AGENTS row is wider than the sidebar at its default width (278px): a
-  claude row measured 309px, so the state word ("idle") is clipped at the
-  right edge (`li` is `overflow:hidden`). It comes from the model label
-  ("claude opus 5.5") plus the meta line ("proj:p1 · 1m ago · idle"); neither
-  shrinks. Measured in a scratch catway while placing the session origin,
-  which went into the row's tooltip for this reason. The state is what the row
-  is for, so the name or the handle should give way first (an ellipsizing
-  `.aname`, as plugin rows already have, or dropping the workspace half of the
-  handle in the row).
-
 ## Validate
 
 Items whose remaining work is purely testing: hand checks in a real terminal
@@ -364,6 +353,14 @@ unchanged.
 Closures before this file existed live in the session docs' own write-ups.
 Newest first. The unnumbered entries at the end were found done while seeding,
 so they are not carried.
+
+- **N-058** · raised `2026-1011-1949-session-origin-after-first-prompt` ·
+  closed 2026-10-11, `2026-1011-1959-n058-agent-row-name-gives-way`. The
+  name now gives way: `.aname` ellipsizes and `.ameta` holds its width on
+  agent rows as well as plugin rows, so the state word ends at the row's edge
+  ("claude o…  proj:p1 · 1m ago · idle" at 278px). The flag mark moved out of
+  `.aname` to a row item of its own, so the ellipsis cannot clip it. The
+  workspace half of the handle stays.
 
 - **N-057** · raised `2026-1011-1617-agent-session-origin` ·
   closed 2026-10-11, `2026-1011-1949-session-origin-after-first-prompt`. The origin now rides on

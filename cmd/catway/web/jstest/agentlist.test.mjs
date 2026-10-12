@@ -50,7 +50,9 @@ function listStub(listEl) {
   };
 }
 
-function world() {
+// over replaces individual stubs, for the one test that needs a real answer
+// from one of them (a flag, say).
+function world(over = {}) {
   const listEl = el("ul");
   const plugEl = el("ul");
   const plugSec = { hidden: true }; // the markup ships it hidden
@@ -91,6 +93,7 @@ function world() {
       paneMenuItems: () => [],
       sendCmd: () => {},
       toast: () => {},
+      ...over,
     },
   });
   return { fns, rows: () => listEl.children, plugRows: () => plugEl.children, plugSec };
@@ -180,6 +183,21 @@ const plug = (pane, id, title, type) => ({
   w.fns.renderAgents([agent(2, "idle")], []);
   eq(w.rows()[0].title, "claude-opus-5", "no origin: the model alone");
   eq(w.rows()[0].on.mouseenter, undefined, "and nothing to refresh");
+}
+
+// The flag mark is a row item between the name and the meta line, never a
+// child of .aname: the name is what ellipsizes when the row is wider than the
+// column, and a hand-pinned mark must not be clipped along with it. The same
+// holds on a plugin row.
+{
+  const flagMark = (f) => { if (!f) return null; const s = el("span"); s.className = "flag-mark"; s.textContent = "⚑"; return s; };
+  const { fns, rows, plugRows } = world({ flagOf: () => ({ kind: "followup" }), flagMark });
+  fns.renderAgents([agent(1, "idle")], [plug(4, "rohanthewiz.cats-todo", "todo: cats (3)", "todos_mgr")]);
+  for (const [what, r] of [["agent", rows()[0]], ["plugin", plugRows()[0]]]) {
+    eq(r.children.map((c) => c.className.split(" ")[0]), ["adot", "aname", "flag-mark", "ameta"],
+      what + " row: dot, name, flag, meta");
+    ok(!r.children[1].children.some((c) => c.className === "flag-mark"), what + " row: the flag is not inside .aname");
+  }
 }
 
 // Nothing at all: AGENTS says none and PLUGINS hides. Plugin panes alone

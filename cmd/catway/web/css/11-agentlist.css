@@ -63,13 +63,24 @@
   :is(#agent-list, #plugin-list) li.sep { height:0; padding:0; margin:5px 8px; border-top:1px solid var(--line);
     border-radius:0; cursor:default; }
   :is(#agent-list, #plugin-list) li.sep:hover { background:none; }
-  /* A plugin row's title half is the pane's live terminal title, which is
-     arbitrary text a program chose — it can be long, and it must not push the
-     pane handle off the right edge. The name shrinks and ellipsizes; the handle
-     never does. (Agent rows need neither: a trimmed model label is three words
-     at most.) */
-  :is(#agent-list, #plugin-list) li.plug .aname { min-width:0; overflow:hidden; text-overflow:ellipsis; }
-  :is(#agent-list, #plugin-list) li.plug .ameta { flex:none; }
+  /* When a row is wider than the column, the name gives way and the meta line
+     never does. The meta line ends in what the row is for — an agent's state,
+     a plugin's pane handle — and #sidebar li clips its overflow at the right
+     edge, so without this the state word was the part cut off.
+
+       ● claude opus 5.5  proj:p1 · 1m ago · id|     before (309px row, 278px column)
+       ● claude o…  proj:p1 · 1m ago · idle |       after (measured, same row and column)
+
+     Agent rows need it as much as plugin rows: a trimmed model label is only
+     three words, but beside a handle, an age and a state it already overran
+     the default width, and a longer workspace name or a wider --sb-scale
+     pushes further. A plugin row's title half is arbitrary text a program
+     chose, so it can run on without limit. The name is the half to give: its
+     agent word is the hued, leading part and survives longest, and the full
+     model (or plugin id) stays in the row's tooltip. The flag mark is a row
+     item of its own (agentRow), so it is not inside what gets cut. */
+  :is(#agent-list, #plugin-list) .aname { min-width:0; overflow:hidden; text-overflow:ellipsis; }
+  :is(#agent-list, #plugin-list) .ameta { flex:none; }
 
   /* The idle dot, pulled a step off full green. In AGENTS every settled agent
      shows one, so a column of saturated dots was the brightest thing in the

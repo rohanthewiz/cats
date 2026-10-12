@@ -144,8 +144,12 @@
     // name, because it qualifies *this* agent rather than announcing a new
     // row, and before the state, because the state is the half that changes on
     // its own while the flag is the half somebody chose.
+    //
+    // A row item of its own rather than a child of .aname: the name is the
+    // part that ellipsizes when the row is wider than the column, and a mark
+    // somebody pinned by hand must not be the first thing the ellipsis eats.
+    // The pane rows place their flag the same way, for the same reason.
     const af = flagMark(flagOf(it));
-    if (af) name.appendChild(af);
     const meta = document.createElement("span"); meta.className = "ameta";
     const st = markerState(it);
     meta.textContent = paneRef(it.pub, it.pane) + " · ";
@@ -164,7 +168,9 @@
     // A blank row says which kind of blank ("new" / "cleared") rather than the
     // state's own name — that is the half a glance at the dot cannot tell.
     meta.appendChild(document.createTextNode(st === "blank" ? it.blank : st));
-    li.appendChild(dot); li.appendChild(name); li.appendChild(meta);
+    li.appendChild(dot); li.appendChild(name);
+    if (af) li.appendChild(af);
+    li.appendChild(meta);
     // agent.focus, not pane.focus: the agents list is global, so the target
     // may sit in another workspace/tab and has to be revealed into the
     // viewport (pane.focus only moves the focus flag within the current one).
@@ -253,15 +259,16 @@
       ti.textContent = " " + p.title;
       name.appendChild(ti);
     }
-    const af = flagMark(flagOf(p));
-    if (af) name.appendChild(af);
+    const af = flagMark(flagOf(p)); // a row item, outside the ellipsis, as on an agent row
     const meta = document.createElement("span"); meta.className = "ameta";
     // The type goes before the handle, where an agent row puts its age and
     // state: it is the one thing a plugin row can say about what kind of
     // thing is in the pane. An untyped plugin shows the handle alone.
     const tl = pluginTypeLabel(p.type);
     meta.textContent = (tl ? tl + " · " : "") + paneRef(p.pub, p.pane);
-    li.appendChild(dot); li.appendChild(name); li.appendChild(meta);
+    li.appendChild(dot); li.appendChild(name);
+    if (af) li.appendChild(af);
+    li.appendChild(meta);
     // Reveal and right-click behave exactly as they do on an agent row — the
     // row's job is the same, "take me to that pane" — including the lock's
     // refusal, since revealing one is a workspace switch either way.
