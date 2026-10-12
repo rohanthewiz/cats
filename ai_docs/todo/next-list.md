@@ -125,7 +125,7 @@ window were dated by grepping every session doc.
   table) is one table entry each, once their on-disk history format is known.
   The same entry would also give those panes a model in the header.
 
-- **N-059** · raised `SESSDOC2` · value low
+- **N-059** · raised `2026-1011-2327-n053-n052-n039-headings-state-words-exited-capture` · value low
   The other built-ins' state words are also under 4.5:1 as text, mostly on
   the focused pane header (`chrome-focus`). N-052 fixed the three themes it
   measured and added `ok-fg` / `done-fg` / `err-text`, which copy the base
@@ -143,7 +143,7 @@ window were dated by grepping every session doc.
   The base hues stay right for the dots; this is shades for the words only,
   authored per theme as N-052 did.
 
-- **N-060** · raised `SESSDOC2` · value low
+- **N-060** · raised `2026-1011-2327-n053-n052-n039-headings-state-words-exited-capture` · value low
   `catctl help capture` and `catctl help read` show a raw form,
   `catctl capture --params '{…"ansi":true}'`, that catctl refuses ("capture
   takes positional arguments, not --params"). When an ergonomic verb has the
@@ -329,7 +329,7 @@ Newest first. The unnumbered entries at the end were found done while seeding,
 so they are not carried.
 
 - **N-039** · raised `2026-0924-2005-no-such-pane-exited-panes` ·
-  closed 2026-10-11, `SESSDOC2`. `capture` of an exited pane now answers
+  closed 2026-10-11, `2026-1011-2327-n053-n052-n039-headings-state-words-exited-capture`. `capture` of an exited pane now answers
   from catway's grid mirror (`captureExited` in `cmd/catway/catway.go`,
   `Grid.ScreenText` in `internal/browserproto`). The visible scope gets the
   last screen. The recent scope gets that screen's tail, because it is what
@@ -346,7 +346,7 @@ so they are not carried.
   The help's raw-form example turned out not to work: N-060.
 
 - **N-052** · raised `2026-0927-0024-n051-warn-fg-text-app-wide` ·
-  closed 2026-10-11, `SESSDOC2`. Three new theme keys, `ok-fg`,
+  closed 2026-10-11, `2026-1011-2327-n053-n052-n039-headings-state-words-exited-capture`. Three new theme keys, `ok-fg`,
   `done-fg` and `err-text`, colour the idle, done and blocked state words as
   text (`.st-*` in `10-panelist.css`: pane header, pane rows, palette).
   Red is `err-text` because `err-fg` was already the banner's ink, and the
@@ -366,7 +366,7 @@ so they are not carried.
   heading) was not touched or re-checked.
 
 - **N-053** · raised `2026-1007-1436-panes-dropdown-in-workspace-rows` ·
-  closed 2026-10-11, `SESSDOC2`. Each heading's title is now a
+  closed 2026-10-11, `2026-1011-2327-n053-n052-n039-headings-state-words-exited-capture`. Each heading's title is now a
   `span.htitle` (`headingTitle` in `cmd/catway/web/sidebar.go`) and is the
   part that gives way: it ellipsizes, keeps a stub of about "US…", and
   carries the full word as its tooltip. Every other heading item holds its
