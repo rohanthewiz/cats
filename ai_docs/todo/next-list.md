@@ -301,7 +301,7 @@ unchanged.
   Restarting cathost automatically. Its exit takes the panes with it, and
   relaunching it would hide that loss. The overlay tells the user to quit and
   reopen instead.
-- **N-008** · declined `SESSDOC5` — Removing `waitReady`
+- **N-008** · declined `2026-1011-2349-n043-n008-linked-hint-and-run-end` — Removing `waitReady`
   (`cmd/catapp/supervise.go`). It still has no caller, since it is only
   `waitReadyOrExit(…, nil)`. But it is three lines that document the plain
   "wait for the port" case beside the variant that also watches the process,
@@ -315,7 +315,7 @@ Newest first. The unnumbered entries at the end were found done while seeding,
 so they are not carried.
 
 - **N-043** · raised `2026-0926-2211-plugin-update-checks` ·
-  closed 2026-10-11, `SESSDOC5`. Done without a fetch, which was the
+  closed 2026-10-11, `2026-1011-2349-n043-n008-linked-hint-and-run-end`. Done without a fetch, which was the
   reason it had been left out. `linkedBehind` (`internal/plugin/check.go`)
   reads the checkout's branch upstream from `branch.<b>.remote` / `.merge`
   and asks `git ls-remote` for that ref. It adds "origin/main has moved on
