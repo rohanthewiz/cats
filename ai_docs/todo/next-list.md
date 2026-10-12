@@ -75,11 +75,6 @@ window were dated by grepping every session doc.
   Legacy X10 / urxvt mouse encodings are never droppable (the conservative
   choice). Fine while the browser encoder emits SGR.
 
-- **N-018** · raised `2026-0922-1713-plugin-types-and-releases` · value medium
-  ced repo: `TestThemeAfterSave_RepaintsLive` fails about 1 run in 10. TempDir
-  cleanup reports `themes/` "directory not empty", so something writes into
-  the directory after the test ends. The assertion itself passes.
-
 - **N-019** · raised `2026-0922-1713-plugin-types-and-releases` · value low
   ced repo: `release.yml` still describes the `release` branch + auto-bump
   route. That route hasn't been used since 0.2.0; releases are now a
@@ -253,6 +248,12 @@ and `raised`.
     stay asleep. Then sleep every workspace but one and close that one. The
     workspace now shown should wake with a shell, and its parked agents should
     resume.
+  - the default-plugin seed in the rebuilt Cats.app (`2026-0926-2226-default-plugin-seed-cats-todo`,
+    folded in from N-045, whose catway half passed live). On a machine or
+    profile with no plugins directory, the first launch should log
+    `catway: installed default plugin rohanthewiz/cats-todo` to
+    `daemons.log`, and cats-todo should show in the plugins dialog and
+    picker once they are reopened.
 
 - **N-012** · raised `2026-0916-1547-peer-sync` · value low
   Cross-OS home translation in peer sync is unit-tested only; the first
@@ -267,19 +268,6 @@ and `raised`.
   more pending; the dark theme; and the reinstalled Cats.app. cats-todo is
   behind upstream right now (78c85ac → 9bfe73e), so updating it is the natural
   test.
-
-- **N-045** · raised `2026-0926-2226-default-plugin-seed-cats-todo` · value medium
-  Watch the default-plugin seed through a real catway start. It has only run
-  as a direct `SeedDefaults` call against a scratch root. Start a catway (and
-  the rebuilt Cats.app) with `CATS_PLUGINS_DIR` pointing at a directory that
-  does not exist yet, then confirm the install log line in `daemons.log` and
-  that cats-todo shows in the plugins dialog and picker once they are
-  reopened. Also start once without Go on PATH to see the retry and give-up
-  warnings, and the plugins dialog's "could not be installed" row after each
-  failed start (N-046 checked that row only against a hand-written state file).
-  The toolbar's "!" mark (N-048) should appear on its own once the failed
-  pass ends, with the page already open. That push at the end of the seed
-  pass has only been exercised by unit tests.
 
 - **N-054** · raised `2026-1010-1836-pane-header-recent-agent-prompts` · value medium
   Hands-on check of the pane header's **prompts ▾** dropdown with a real
@@ -347,6 +335,34 @@ unchanged.
 Closures before this file existed live in the session docs' own write-ups.
 Newest first. The unnumbered entries at the end were found done while seeding,
 so they are not carried.
+
+- **N-045** · raised `2026-0926-2226-default-plugin-seed-cats-todo` ·
+  closed 2026-10-11, `SESSDOC1`. Watched live through real catway starts
+  from the current tree, each with `CATS_PLUGINS_DIR` pointing at a directory
+  that did not exist yet. With Go on PATH, the first start logged
+  `installed default plugin rohanthewiz/cats-todo v0.45.0` about 4s after
+  serving, and `catctl plugin list` showed it with both actions. With
+  PATH=/usr/bin:/bin, three starts logged "attempt 1, will retry", "attempt 2,
+  will retry" and "not installed after 3 attempts, giving up", each with the
+  `sh: go: command not found` tail, and the state file moved the entry from
+  `pending` to `failed`. `catctl plugin list` showed the "could not be
+  installed" line after the first failed start. A WebSocket client connected
+  before the seed pass finished got `plugin_notice` with `[]` in the connect
+  burst, then `["rohanthewiz.cats-todo"]` pushed 0.75s later when the pass
+  failed. A headless-Chrome render showed the toolbar's "!" mark. The
+  Cats.app half moved into N-001.
+
+- **N-018** · raised `2026-0922-1713-plugin-types-and-releases` ·
+  closed 2026-10-11, `SESSDOC1`. No longer reproduces. ced at `d8732ef`:
+  `TestThemeAfterSave_RepaintsLive` passed 800 times (`-run Theme
+  -count=400 -cpu 1,4`, with three busy loops loading the CPU), plus 6 runs
+  of `./internal/app` and 5 of `go test ./...`, with no TempDir cleanup
+  error. No writer into the themes directory was found after a save: the
+  atomic save's temp file is renamed before `saveTabAt` returns, and the
+  background work it starts that was read (git diff, git status) only reads.
+  Reopen it if the
+  "directory not empty" cleanup error is seen again, noting the leftover
+  file's name.
 
 - **N-044** · raised `2026-0926-2226-default-plugin-seed-cats-todo` ·
   closed 2026-10-11, `SESSDOC1`. Already done: cats-todo `56c5c4d`
