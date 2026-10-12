@@ -148,6 +148,7 @@
       // the server pushes the list (and once in the connect burst) rather
       // than the page polling for it.
       case "plugin_notice": applyPluginNotice(msg); break;
+      case "ui_prefs": applyUIPrefsPush(msg); break;
       case "usage": renderUsage(msg); break;
       case "clipboard": // OSC 52 write from a pane app — no user activation
         // Empty data would be a pane clearing the clipboard. catway already

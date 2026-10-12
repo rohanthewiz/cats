@@ -623,12 +623,40 @@
     if ("show_untitled_panes" in ui && layoutMsg) renderWorkspaces(layoutMsg);
   }
 
+  // applyUIPrefsPush takes a ui_prefs message: the connect burst's copy of the
+  // "ui" section, or a broadcast after another window (or a reload) changed it
+  // (N-033). Only the fields that differ from this page's copy are applied.
+  //
+  //   push { font_px: 15, sidebar_width: 240, show_untitled_panes: false }
+  //     │
+  //     ├─ same as uiPrefsFile ─▶ nothing (this window's own save echoing back,
+  //     │                          or a connect with nothing new)
+  //     ├─ a size is 0 ─────────▶ forget the file's value; keep the size on
+  //     │                          screen ("unset" means this browser decides)
+  //     └─ differs ─────────────▶ applyUIPrefs, as if saved here
+  //
+  // The echo case is why this compares instead of applying blindly: the window
+  // that saved has already updated uiPrefsFile, and re-applying a sidebar width
+  // that arrives a round trip late would snap back a gutter being dragged again.
+  // applyUIPrefs updates uiPrefsFile before setFontSize / setSidebarWidth run,
+  // so their persistUIPref sees the file already agreeing and writes nothing.
+  function applyUIPrefsPush(msg) {
+    const ui = {};
+    for (const k of ["font_px", "sidebar_width"]) {
+      const v = msg[k] || 0;
+      if (!v) { delete uiPrefsFile[k]; continue; }
+      if (v !== (uiPrefsFile[k] || 0)) ui[k] = v;
+    }
+    const untitled = !!msg.show_untitled_panes;
+    if (untitled !== !!uiPrefsFile.show_untitled_panes) ui.show_untitled_panes = untitled;
+    if (Object.keys(ui).length) applyUIPrefs(ui);
+  }
+
   // showUntitledPanes: does a workspace's pane dropdown list panes that have no
   // title? Read from uiPrefsFile, the page's copy of config.json's "ui", so a
   // save from this window's settings screen (applyUIPrefs) takes effect here
-  // at once. Other open windows pick it up on their next load, as they do the
-  // font size: config.set re-renders the served page but pushes no "ui" to
-  // pages already open.
+  // at once, and one from another window arrives as a ui_prefs push
+  // (applyUIPrefsPush).
   function showUntitledPanes() {
     return !!uiPrefsFile.show_untitled_panes;
   }

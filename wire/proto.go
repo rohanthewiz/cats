@@ -80,6 +80,12 @@ const (
 	// old client ignores the type and shows the notice only in the plugins
 	// dialog, which is the UI it had before this existed.
 	MsgPluginNotice Type = "plugin_notice"
+	// MsgUIPrefs carries config.json's "ui" section (font size, sidebar width,
+	// untitled panes) so a change saved from one window reaches the others
+	// without a reload. Added within protocol v1: an old client ignores the
+	// type and picks the change up on its next page load, which is what it did
+	// before this existed.
+	MsgUIPrefs Type = "ui_prefs"
 	// Chat surface (the ACP side panel). Added within protocol v1: an old
 	// client ignores unknown types, and a new client learns the server serves
 	// chat from CapChat rather than by probing.
@@ -150,6 +156,7 @@ var msgTypes = map[reflect.Type]Type{
 	reflect.TypeOf(Record{}):        MsgRecord,
 	reflect.TypeOf(RunbookRuns{}):   MsgRunbookRuns,
 	reflect.TypeOf(PluginNotice{}):  MsgPluginNotice,
+	reflect.TypeOf(UIPrefs{}):       MsgUIPrefs,
 	reflect.TypeOf(ChatState{}):     MsgChatState,
 	reflect.TypeOf(ChatSnapshot{}):  MsgChatSnapshot,
 	reflect.TypeOf(ChatRowMsg{}):    MsgChatRow,
@@ -318,6 +325,8 @@ func DecodeDown(data []byte) (any, error) {
 		return decodeAs[RunbookRuns](data)
 	case MsgPluginNotice:
 		return decodeAs[PluginNotice](data)
+	case MsgUIPrefs:
+		return decodeAs[UIPrefs](data)
 	case MsgChatState:
 		return decodeAs[ChatState](data)
 	case MsgChatSnapshot:

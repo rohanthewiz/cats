@@ -84,10 +84,6 @@ window were dated by grepping every session doc.
   cats-mobile: nothing draws `Session.Plugins` yet. If the phone gets a
   plugins list, split it by `PluginPane.Type` the way the desktop does.
 
-- **N-033** · raised `2026-0923-1443-settings-json-and-screen` · value low
-  Other open browsers don't pick up a `ui` pref (font size, sidebar width)
-  changed elsewhere until they reload; there is no broadcast for it.
-
 - **N-034** · raised `2026-0923-1545-perf-shifts-builder-deflate` · value low
   cats-mobile does not list `pane_shift` in `Init.Features`, so a scrolling
   pane still reaches the phone as a full frame per tick (now compressed). Its
@@ -312,6 +308,22 @@ unchanged.
 Closures before this file existed live in the session docs' own write-ups.
 Newest first. The unnumbered entries at the end were found done while seeding,
 so they are not carried.
+
+- **N-033** · raised `2026-0923-1443-settings-json-and-screen` ·
+  closed 2026-10-11, `SESSDOC3`. A new down message, `ui_prefs`
+  (`wire.UIPrefs`), carries the `ui` section. catway sends it in the connect
+  burst and broadcasts it when `config.set` or `server.reload_config` changes
+  the section (`broadcastUIPrefs`, compared against the section before the
+  save). The page's `applyUIPrefsPush` (`33-settings.js`) applies only the
+  fields that differ from its copy, so the saving window ignores its echo
+  and a late echo can't snap back a gutter being dragged. A size that
+  became unset is forgotten but left on screen. Tests:
+  `TestConfigSetBroadcastsUIPrefs`, `uiprefs.test.mjs`, and the wire
+  round-trip table. Live on a scratch catway: a WebSocket client saw the
+  burst copy, then a push after `config.set` of `ui.font_px`, and nothing
+  after a panes-only save. A Chrome tab already open on the page went from a
+  278px to a 340px sidebar after `config.set` of `ui.sidebar_width`, with no
+  reload. Documented in browser-protocol.md and configuration.md.
 
 - **N-040** · raised `2026-0925-1102-n011-peer-pairing` ·
   closed 2026-10-11, `SESSDOC3`. New route `POST /peer/v1/unpair`

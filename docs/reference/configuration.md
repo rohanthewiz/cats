@@ -27,7 +27,9 @@ peers keep their own dialogs.
   `show_untitled_panes` (default `false`): a workspace row's pane dropdown
   leaves out panes that have no title, neither a rename nor one their program
   set, unless they are flagged or running an agent. Set it to `true`
-  (Settings → appearance → interface) to list every pane.
+  (Settings → appearance → interface) to list every pane. A change saved from
+  one window, or picked up by `catctl reload`, reaches the other open windows
+  at once (the `ui_prefs` message); none of them needs a reload.
 
 Location resolution: `catway --config <path>` > `$CATS_CONFIG` >
 `$XDG_CONFIG_HOME/cats/config.json` > `~/.config/cats/config.json`.

@@ -2534,6 +2534,7 @@ func (o *orch) ReloadConfig() error {
 		dlog.Warnf("catway: server.reload_config failed: %v", err)
 		return err
 	}
+	prevUI := o.cfg.UI
 	o.cfg = cfg // keep config.get / config.set working from the reloaded state
 	o.reapAfter = reapAfterFromConfig(cfg.Panes)
 	o.autocloseAfter = autocloseAfterFromConfig(cfg.Panes)
@@ -2541,6 +2542,7 @@ func (o *orch) ReloadConfig() error {
 	page := renderPage(o.baseHTML, cfg)
 	o.page.Store(&page)
 	o.broadcastTheme() // the theme lands live everywhere; keybindings still need a reload
+	o.broadcastUIPrefs(prevUI)
 	// The roster is adopted after o.cfg, so a host that fails to build leaves the
 	// reload otherwise applied and the previous roster running — the same
 	// all-or-nothing guarantee applyHostRoster gives host.attach, scoped to the
@@ -2549,7 +2551,7 @@ func (o *orch) ReloadConfig() error {
 		dlog.Warnf("catway: server.reload_config: hosts: %v (keeping the running roster)", err)
 		return err
 	}
-	log.Printf("catway: reloaded config from %s — theme and hosts applied live, keybindings apply to new page loads; other server settings need a restart", path)
+	log.Printf("catway: reloaded config from %s — theme, ui and hosts applied live, keybindings apply to new page loads; other server settings need a restart", path)
 	return nil
 }
 
@@ -3181,6 +3183,12 @@ func (o *orch) registerConn(c *client, init *browserproto.Init) {
 	// window reconnecting across a dismiss (or an install) has a mark to turn
 	// off.
 	o.send(c, o.pluginNoticeMsg())
+	// The "ui" section, always: the page baked window.__catsUI in when it
+	// loaded, and a window reconnecting after a catway restart (or a dropped
+	// socket) may have missed a change made elsewhere meanwhile. The page
+	// applies only what differs from its copy, so for every other connect this
+	// changes nothing.
+	o.send(c, o.uiPrefsMsg())
 	if o.chat != nil {
 		// The whole chat model in one message — a client joining
 		// mid-conversation (or mid-permission-prompt) starts converged.

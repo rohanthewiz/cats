@@ -1015,6 +1015,33 @@ func NewPluginNotice(failedDefaults []string) PluginNotice {
 	return PluginNotice{T: MsgPluginNotice, FailedDefaults: failedDefaults}
 }
 
+// UIPrefs is config.json's "ui" section as the page reads it (window.__catsUI
+// at load). It is pushed once in the connect burst and again whenever a save
+// or a reload changes the section, so a font size or sidebar width set in one
+// browser follows the user into the others already open, as it already did
+// into the next one loaded.
+//
+// The two sizes keep the config's "0 = unset" meaning, so they are omitempty:
+// an absent size tells the page to keep whatever it has. ShowUntitledPanes is
+// always sent, because its false is a value (the default) that must be able to
+// turn a true back off.
+//
+// A page applies only the fields that differ from its own copy of the section.
+// The window whose save caused the push updated its copy before sending, so
+// it ignores its own echo, which also keeps a late echo from snapping back a
+// sidebar that is being dragged again.
+type UIPrefs struct {
+	T                 Type `json:"t"`
+	FontPx            int  `json:"font_px,omitempty"`
+	SidebarWidth      int  `json:"sidebar_width,omitempty"`
+	ShowUntitledPanes bool `json:"show_untitled_panes"`
+}
+
+// NewUIPrefs builds the message.
+func NewUIPrefs(fontPx, sidebarWidth int, showUntitledPanes bool) UIPrefs {
+	return UIPrefs{T: MsgUIPrefs, FontPx: fontPx, SidebarWidth: sidebarWidth, ShowUntitledPanes: showUntitledPanes}
+}
+
 // CmdResult is the reply to a Cmd, always sent when the command carried an id.
 // Data is command-specific (e.g. ReadResult for "read").
 type CmdResult struct {

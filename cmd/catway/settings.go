@@ -13,6 +13,7 @@ import (
 	"github.com/rohanthewiz/cats/internal/browserproto"
 	"github.com/rohanthewiz/cats/internal/config"
 	"github.com/rohanthewiz/cats/internal/theme"
+	"github.com/rohanthewiz/cats/wire"
 )
 
 // The config + theme commands (app.Backend seam, settings modal). All run
@@ -30,13 +31,16 @@ func (o *orch) ConfigGet(r app.Responder) {
 // ConfigSet merges the live-appliable sections onto the current config,
 // validates, writes the YAML (creating the default file when none was in use
 // yet), re-renders the served page, and broadcasts the new theme so every
-// connected client restyles immediately.
+// connected client restyles immediately. A change to the "ui" section is
+// broadcast too (broadcastUIPrefs), so the other open windows take a new font
+// size or sidebar width without a reload.
 //
 // Theme semantics (see app.ConfigSetParams): a request carrying a theme NAME
 // is a switch — colors/font REPLACE the stored overrides (empty means "the
 // theme, clean"); a request without a name is the legacy poke — colors merge
 // key-wise, a non-empty font sticks.
 func (o *orch) ConfigSet(r app.Responder, p app.ConfigSetParams) {
+	prevUI := o.cfg.UI
 	cfg := o.cfg
 	cfg.Theme.Colors = maps.Clone(cfg.Theme.Colors)
 	cfg.Keybindings.CopyMode = maps.Clone(cfg.Keybindings.CopyMode)
@@ -78,6 +82,31 @@ func (o *orch) ConfigSet(r app.Responder, p app.ConfigSetParams) {
 	// push it also receives is idempotent (same values it just applied).
 	r.OK(o.configSnapshot())
 	o.broadcastTheme()
+	o.broadcastUIPrefs(prevUI)
+}
+
+// uiPrefsMsg is the ui_prefs message for the current config: the connect
+// burst's copy, and what broadcastUIPrefs pushes.
+func (o *orch) uiPrefsMsg() wire.UIPrefs {
+	u := o.cfg.UI
+	return wire.NewUIPrefs(u.FontPx, u.SidebarWidth, u.ShowUntitledPanes)
+}
+
+// broadcastUIPrefs pushes the "ui" section to every window when it differs
+// from prev, the section before the save or reload (N-033). Before this the
+// served page was re-rendered and nothing else, so a browser already open kept
+// its old font size and sidebar width until it reloaded.
+//
+// Every window gets it, the one whose settings screen or gesture caused the
+// save included. That window ignores it: the page applies only the fields that
+// differ from its own copy of the section, which it updated before sending
+// config.set (see applyUIPrefsPush in 33-settings.js). A save that left the
+// section alone (a theme switch, an editor option) broadcasts nothing.
+func (o *orch) broadcastUIPrefs(prev config.UI) {
+	if o.cfg.UI == prev {
+		return
+	}
+	o.broadcast(o.uiPrefsMsg())
 }
 
 // ThemeList enumerates the available themes (theme.list).

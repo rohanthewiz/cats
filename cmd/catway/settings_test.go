@@ -13,6 +13,7 @@ import (
 	"github.com/rohanthewiz/cats/internal/browserproto"
 	"github.com/rohanthewiz/cats/internal/config"
 	"github.com/rohanthewiz/cats/internal/theme"
+	"github.com/rohanthewiz/cats/wire"
 )
 
 // expectOK reads the next down message as a successful CmdResult.
@@ -360,6 +361,36 @@ func TestConfigSetOptions(t *testing.T) {
 	// must survive a push edit that did not mention them.
 	if got.Push.Priority["attention"] != "high" {
 		t.Fatalf("push.priority lost: %v", got.Push.Priority)
+	}
+}
+
+// A config.set that changes the "ui" section is pushed to every window as
+// ui_prefs, after the theme push (N-033); one that leaves it alone pushes
+// nothing more than the theme.
+func TestConfigSetBroadcastsUIPrefs(t *testing.T) {
+	o, c := newPendingHarness()
+	o.cfg = config.Default()
+	o.cfgPath = filepath.Join(t.TempDir(), "config.json")
+
+	o.handleCmd(c, cmd(t, "c1", browserproto.CmdConfigSet, browserproto.ConfigSetParams{
+		Options: map[string]json.RawMessage{"ui": json.RawMessage(`{"font_px":17,"show_untitled_panes":true}`)},
+	}))
+	expectOK(t, c, "config.set ui")
+	expectThemePush(t, c)
+	m, ok := recvDown(t, c).(*wire.UIPrefs)
+	if !ok || m.FontPx != 17 || m.SidebarWidth != 0 || !m.ShowUntitledPanes {
+		t.Fatalf("expected a ui_prefs push with font_px 17 and untitled on, got %#v", m)
+	}
+
+	o.handleCmd(c, cmd(t, "c2", browserproto.CmdConfigSet, browserproto.ConfigSetParams{
+		Options: map[string]json.RawMessage{"panes": json.RawMessage(`{"reap_exited":"30m"}`)},
+	}))
+	expectOK(t, c, "config.set panes")
+	expectThemePush(t, c)
+	select {
+	case b := <-c.out:
+		t.Fatalf("a save that left ui alone pushed %s", b)
+	default:
 	}
 }
 
