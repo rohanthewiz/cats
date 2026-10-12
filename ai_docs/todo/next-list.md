@@ -174,9 +174,13 @@ window were dated by grepping every session doc.
 - **N-057** · raised `2026-1011-1617-agent-session-origin` · value low
   A pane's session origin (`startup` / `clear` / `resume`) is only exposed
   through `PaneMeta` (`agent_session_origin` in `pane.list` / `pane.get`).
-  The browser does not show it. A small marker in the pane header or the
-  sidebar hover card (e.g. "cleared 2m ago") would make a `/clear` visible
-  at a glance. It would need the origin on `browserproto` alongside the model.
+  The browser shows it only while the conversation is blank: the light-brown
+  dot (`2026-1011-1920-blank-session-dot`) is labelled "new" or "cleared" in
+  the agents list and the pane header. Once the pane has worked, the origin is
+  no longer visible. What is left is a marker that outlasts the first prompt,
+  e.g. "cleared 2m ago" in the hover card, and showing "resumed" at all (a
+  blank resumed conversation reads "new"). The origin would need to ride on
+  `wire.PaneAgent` / `AgentItem` next to `blank`.
 
 ## Validate
 
@@ -314,9 +318,12 @@ and `raised`.
   integration (detection only) and after re-running
   `catctl integration install` to get the v6 claude hook. With the hook,
   confirm the model readout and **prompts ▾** follow the pane into the new
-  conversation after a `/clear` (they used to stay on the old one). Only
-  unit-tested so far, plus a classifier run against real transcripts on this
-  machine.
+  conversation after a `/clear` (they used to stay on the old one). Also
+  check the blank dot: a fresh claude and a `/clear` show the light-brown dot
+  ("new" / "cleared") in the agents list, header and workspace badge, and it
+  turns to working the moment a prompt is sent. Only unit-tested so far, plus
+  a classifier run against real transcripts on this machine and a scratch
+  catway with stand-in claude processes for the dot.
 
 ## Roadmap
 
