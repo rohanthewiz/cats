@@ -310,7 +310,7 @@ Newest first. The unnumbered entries at the end were found done while seeding,
 so they are not carried.
 
 - **N-033** · raised `2026-0923-1443-settings-json-and-screen` ·
-  closed 2026-10-11, `SESSDOC3`. A new down message, `ui_prefs`
+  closed 2026-10-11, `2026-1011-2335-n060-n040-n033-raw-params-unpair-ui-push`. A new down message, `ui_prefs`
   (`wire.UIPrefs`), carries the `ui` section. catway sends it in the connect
   burst and broadcasts it when `config.set` or `server.reload_config` changes
   the section (`broadcastUIPrefs`, compared against the section before the
@@ -326,7 +326,7 @@ so they are not carried.
   reload. Documented in browser-protocol.md and configuration.md.
 
 - **N-040** · raised `2026-0925-1102-n011-peer-pairing` ·
-  closed 2026-10-11, `SESSDOC3`. New route `POST /peer/v1/unpair`
+  closed 2026-10-11, `2026-1011-2335-n060-n040-n033-raw-params-unpair-ui-push`. New route `POST /peer/v1/unpair`
   (`handlePeerUnpair`) revokes exactly the grant the request is
   authenticated with. The password and other non-grant credentials get a 400,
   and the guard already keeps the route behind auth. `peersync.Client.Unpair`
@@ -344,7 +344,7 @@ so they are not carried.
   `docs/subsystems/peer-sync.md` and `docs/reference/cli.md` updated.
 
 - **N-060** · raised `2026-1011-2327-n053-n052-n039-headings-state-words-exited-capture` ·
-  closed 2026-10-11, `SESSDOC3`. `--params` with no operands now takes
+  closed 2026-10-11, `2026-1011-2335-n060-n040-n033-raw-params-unpair-ui-push`. `--params` with no operands now takes
   the raw path for a verb spelled like its own method (capture, read,
   scroll), via `resolveVerb` in `cmd/catctl/subcommands.go`. Operands plus
   `--params` is still refused, and so is `--params` on a verb whose method
