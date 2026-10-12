@@ -59,10 +59,6 @@ window were dated by grepping every session doc.
   formula step was removed from ced's release on 2026-09-14. Whether those
   install paths stay is the user's call.
 
-- **N-013** · raised `2026-0918-1901-dictation-text-sink` · value low
-  IME users compose blind: marked text lives in the invisible text sink until
-  it commits. A visible preedit overlay at the cursor would fix it.
-
 - **N-015** · raised `2026-0922-1301-cats-pane-input-queue` · value low
   `errPaneInputFull` emits one error event per refused message, so a flood
   into a dead pane could spam them. Rate-limit if it ever shows up.
@@ -215,6 +211,24 @@ and `raised`.
 - **N-012** · raised `2026-0916-1547-peer-sync` · value low
   Cross-OS home translation in peer sync is unit-tested only; the first
   Mac ↔ Linux sync is the real test of it.
+
+- **N-013** · raised `2026-0918-1901-dictation-text-sink` · value low
+  Fix landed (`SESSDOC4`), hand check left. While a composition runs, the
+  text sink is shown as the preedit (`showPreedit` in `42-textsink.js`). It
+  sits on the cursor cell in the terminal font, scaled with the pane's
+  zoom, on the terminal background with an accent underline, and is resized
+  on every revision. It goes back to 1px and transparent on
+  `compositionend`. The sink now sits on the cursor row's top edge rather
+  than under it, so it can cover the cell. Checked in Chrome only with
+  synthetic composition events: "かんじ" drew right after the prompt at the
+  pane's font size, and on end the overlay hid and "漢字" reached the pane.
+  Check by hand, in Cats.app and in Chrome, with a real IME (Japanese
+  Romaji, or Pinyin): the marked text and its clause underlines show at the
+  cursor while composing; the candidate window sits just under the cursor
+  row; arrow keys move within the composition; committing types it into the
+  pane once. Also check dictation (Edit ▸ Start Dictation): the hypothesis is
+  readable while it is being revised, and the mic popup still sits near the
+  cursor.
 
 - **N-014** · raised `2026-0918-1901-dictation-text-sink` · value low
   Fix landed (`SESSDOC4`), hand check left. `onKey` (`20-keys.js`) now

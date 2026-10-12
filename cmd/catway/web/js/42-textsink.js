@@ -77,15 +77,58 @@
   // best-effort: p.ox/p.oy/p.gs are the grid's inset and scale inside the
   // canvas (setInset), and any pane without a cursor leaves the sink where it
   // was. A slightly-off anchor costs nothing; a throw here would cost the text.
+  //
+  // The sink's top edge sits on the TOP of the cursor's row, because while a
+  // composition runs the sink is the visible preedit (showPreedit) and has to
+  // cover the cursor cell. Host UI anchored to the caret (the IME candidate
+  // list, the dictation microphone) still lands just under that row, where it
+  // always did. It returns the pane's grid scale so showPreedit can size the
+  // text to match the canvas; 1 when there is no pane.
   function placeTextSink() {
     const id = focusedPaneId();
     const p = id === null ? null : panes.get(id);
-    if (!p || !p.cur) return;
+    if (!p || !p.cur) return 1;
     const r = p.canvas.getBoundingClientRect();
     const x = r.left + p.ox + p.cur.x * cellW * p.gs;
-    const y = r.top + p.oy + (p.cur.y + 1) * cellH * p.gs;
+    const y = r.top + p.oy + p.cur.y * cellH * p.gs;
     textSinkEl.style.left = Math.max(0, Math.min(window.innerWidth - 2, x)) + "px";
     textSinkEl.style.top = Math.max(0, Math.min(window.innerHeight - 2, y)) + "px";
+    return p.gs || 1;
+  }
+
+  // showPreedit makes the sink the visible preedit while a composition runs
+  // (N-013). Before, an IME user composed blind: the marked text lived in a
+  // 1px transparent textarea until it committed, so a long CJK phrase or a
+  // dictation hypothesis could not be read until it was already in the pane.
+  //
+  //   composing:  ...$ ls 漢字|          the marked text drawn at the cursor
+  //                       └──┘ accent underline, the terminal's font and colours
+  //   committed:  the sink goes back to 1px and transparent; the pane echoes the text
+  //
+  // The textarea itself is shown rather than a separate overlay because it is
+  // the element the host is editing: its own rendering of the marked text
+  // (the IME's clause underlines, the caret inside the composition) is the
+  // one that matches what the arrow keys are doing to it. Everything about it
+  // stays inline so the part keeps no stylesheet of its own, and the box is
+  // re-sized on every revision (the input handler) because composed text
+  // grows and shrinks as candidates change.
+  const SINK_HIDDEN_STYLE = textSinkEl.style.cssText;
+  let preeditScale = 1;
+  function showPreedit(on) {
+    if (!on) { textSinkEl.style.cssText = SINK_HIDDEN_STYLE; placeTextSink(); return; }
+    const { left, top } = textSinkEl.style;
+    const px = FONT_PX * preeditScale;
+    textSinkEl.style.cssText = SINK_HIDDEN_STYLE +
+      `left:${left};top:${top};opacity:1;z-index:50;height:${Math.ceil(cellH * preeditScale)}px;` +
+      `font:${px}px ui-monospace, Menlo, monospace;line-height:${Math.ceil(cellH * preeditScale)}px;` +
+      "color:var(--term-fg);background:var(--term-bg);caret-color:var(--term-fg);" +
+      "border-bottom:1px solid var(--accent);white-space:pre;";
+    sizePreedit();
+  }
+  function sizePreedit() {
+    measureCtx.font = `${FONT_PX * preeditScale}px ui-monospace, Menlo, monospace`;
+    const w = measureCtx.measureText(textSinkEl.value || "").width;
+    textSinkEl.style.width = Math.ceil(Math.max(cellW * preeditScale, w + cellW * preeditScale)) + "px";
   }
 
   // flushTextSink forwards whatever has been committed and empties the sink.
@@ -113,14 +156,16 @@
   let textSinkComposing = false;
   textSinkEl.addEventListener("compositionstart", () => {
     textSinkComposing = true;
-    placeTextSink();
+    preeditScale = placeTextSink();
+    showPreedit(true);
   });
   textSinkEl.addEventListener("compositionend", () => {
     textSinkComposing = false;
+    showPreedit(false);
     flushTextSink();
   });
   textSinkEl.addEventListener("input", (e) => {
-    if (textSinkComposing || e.isComposing) return;
+    if (textSinkComposing || e.isComposing) { sizePreedit(); return; }
     flushTextSink();
   });
 
