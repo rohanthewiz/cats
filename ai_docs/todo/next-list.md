@@ -42,11 +42,6 @@ window were dated by grepping every session doc.
 
 ## Open
 
-- **N-008** · raised `2026-0914-0158-catway-restart-cats-todo-release` · value low
-  `waitReady` (`cmd/catapp/supervise.go`) has no caller: it is only a wrapper
-  over `waitReadyOrExit(…, nil)`. Remove it or leave it. It is a candidate for
-  Non-goals if nobody minds.
-
 - **N-009** · raised `2026-0914-1051-ced-cats-bin-dir` · value low
   `catctl integration install shell zsh` (the OSC 133 marks that feed the
   command ledger and HISTORY) has not been run on this machine; the plain
@@ -306,6 +301,12 @@ unchanged.
   Restarting cathost automatically. Its exit takes the panes with it, and
   relaunching it would hide that loss. The overlay tells the user to quit and
   reopen instead.
+- **N-008** · declined `SESSDOC5` — Removing `waitReady`
+  (`cmd/catapp/supervise.go`). It still has no caller, since it is only
+  `waitReadyOrExit(…, nil)`. But it is three lines that document the plain
+  "wait for the port" case beside the variant that also watches the process,
+  and the standing rule is not to remove code unless it is clearly in the
+  way. The item named Non-goals as the default if nobody minded.
 
 ## Closed
 
