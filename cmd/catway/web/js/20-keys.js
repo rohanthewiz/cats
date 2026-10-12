@@ -94,6 +94,10 @@
     return CMD_TO_PANE.has(e.code) && focusedPaneKitty();
   }
 
+  // composedCodes are the physical keys (e.code) whose current keydown went to
+  // a host composition instead of the pane; onKey swallows their keyup.
+  const composedCodes = new Set();
+
   function onKey(e) {
     // The chat panel owns the keyboard while focus is inside it: composed
     // text must never reach a PTY, and terminal shortcuts (⌘V paste-to-pane,
@@ -106,7 +110,30 @@
     // committed result arrives through the text sink instead (42-textsink.js).
     // keyCode 229 is the legacy spelling of the same fact, still the only
     // signal WebKit gives on the keydown that STARTS a composition.
-    if (e.isComposing || e.keyCode === 229) return;
+    //
+    // A dead key (⌥e, ⌥u, ⌥` on a US Mac layout; ´ ` ^ ¨ on many European
+    // ones) is the same case one step earlier (N-014). Its keydown reports
+    // key "Dead", and on hosts that do not route dead keys through the IME it
+    // does NOT carry keyCode 229, so it used to reach the preventDefault at
+    // the bottom of this function. That cancelled the host's accent
+    // composition, and ⌥e then e typed a bare "e". Let through, the host
+    // composes into the text sink and the committed "é" arrives as text
+    // (flushTextSink), like any other composed character:
+    //
+    //   ⌥e  keydown key "Dead" ─▶ return, no preventDefault ─▶ composition starts in the sink
+    //   e   keydown isComposing ─▶ return                     ─▶ compositionend "é" ─▶ {t:"paste"}
+    //   e   keyup (after the composition ended) ─▶ swallowed: its keydown never reached the pane
+    //
+    // That last line is composedCodes: the keyup of a key whose keydown went
+    // to a composition can arrive with isComposing already false (Chrome ends
+    // the composition on the keydown), and forwarding it would hand a
+    // kitty-protocol app a release for a press it never saw.
+    if (e.isComposing || e.keyCode === 229 || e.key === "Dead") {
+      if (e.type === "keydown") composedCodes.add(e.code);
+      else composedCodes.delete(e.code);
+      return;
+    }
+    if (e.type === "keyup" && composedCodes.delete(e.code)) return;
     // An open dialog/menu/palette owns the keyboard: its own listeners handle
     // Enter/arrows, Escape falls through to here, and nothing reaches the PTY.
     if (uiOpen()) {

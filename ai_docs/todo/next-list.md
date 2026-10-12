@@ -63,10 +63,6 @@ window were dated by grepping every session doc.
   IME users compose blind: marked text lives in the invisible text sink until
   it commits. A visible preedit overlay at the cursor would fix it.
 
-- **N-014** · raised `2026-0918-1901-dictation-text-sink` · value low
-  Dead keys (⌥e) are still `preventDefault`ed by `onKey` unless the engine
-  reports them as `keyCode 229`.
-
 - **N-015** · raised `2026-0922-1301-cats-pane-input-queue` · value low
   `errPaneInputFull` emits one error event per refused message, so a flood
   into a dead pane could spam them. Rate-limit if it ever shows up.
@@ -219,6 +215,18 @@ and `raised`.
 - **N-012** · raised `2026-0916-1547-peer-sync` · value low
   Cross-OS home translation in peer sync is unit-tested only; the first
   Mac ↔ Linux sync is the real test of it.
+
+- **N-014** · raised `2026-0918-1901-dictation-text-sink` · value low
+  Fix landed (`SESSDOC4`), hand check left. `onKey` (`20-keys.js`) now
+  returns on a keydown whose key is "Dead" without preventDefault, so the
+  host composes the accent into the text sink and the committed "é" arrives
+  as a paste. The keyup of a key whose keydown went to a composition is
+  swallowed (`composedCodes`), so a kitty-protocol pane never gets a release
+  without a press. Covered by `deadkeys.test.mjs` only. Check by hand, in
+  Cats.app and in Chrome, on a US layout: ⌥e then e types "é" at a shell
+  prompt and in a kitty-protocol editor (ced); ⌥u then u types "ü"; ⌥e then
+  space types "´"; and plain typing and ⌥-chords an app binds (⌥b/⌥f in
+  zsh) still work.
 
 - **N-042** · raised `2026-0926-2211-plugin-update-checks` · value medium
   Plugin update checks: drive the parts that were only reasoned about. The
