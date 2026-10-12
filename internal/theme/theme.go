@@ -72,7 +72,8 @@ var requiredKeys = []string{"bg", "fg", "muted", "line", "accent", "ok", "warn",
 //	                     ├─ blank    (idle agent, nothing asked yet)
 //	                     └─ agent-3
 //	 accent ─ heading · accent-dim(α) · done · sel-fill(α) · cm-cursor(α) · scroll-thumb(α)
-//	 warn ─ todo · warn-fg        err ─ err-fg
+//	 warn ─ todo · warn-fg        err ─ err-fg · err-text
+//	 ok ─ ok-fg                    done ─ done-fg
 //	 agent-1..6 ← accent · done · ws-heading · heading · ok · todo (the palette's own hues)
 var derivations = []struct {
 	key   string
@@ -151,6 +152,21 @@ var derivations = []struct {
 	// one: it only copies a key, and which way to move (darker or lighter)
 	// depends on the surface, not on warn.
 	{"warn-fg", "warn", 0},
+	// The other agent-state words as text: "idle" (ok), "done" and "blocked"
+	// (err), in a pane header, a pane row's agent label and the palette's
+	// agent rows. Same reasoning as warn-fg: the base hue stays the marker
+	// colour (the dots, tab marks and the workspace badge, where hue is the
+	// signal), and these are that hue taken far enough from the panel to read
+	// as 11px text. They copy verbatim, so only the three built-ins whose
+	// greens, reds and violets fell to 1.8-4.3:1 (solarized-light, corporate,
+	// solarized-dark) author their own.
+	//
+	// Red is err-text rather than an err-fg: err-fg was already the banner's
+	// ink on err-bg, and the default theme authors it as a pale pink that
+	// suits a dark red banner and would not read as "blocked" on a panel.
+	{"ok-fg", "ok", 0},
+	{"done-fg", "done", 0},
+	{"err-text", "err", 0},
 	{"hover", "fg", 0.16},
 	{"sel-fill", "accent", 0.30},
 	{"cm-cursor", "accent", 0.95},

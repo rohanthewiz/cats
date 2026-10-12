@@ -38,7 +38,7 @@ window were dated by grepping every session doc.
   Open (or Validate, for a check, or Roadmap, for future work) with the next
   ID.
 
-**Next ID:** N-059
+**Next ID:** N-060
 
 ## Open
 
@@ -124,24 +124,6 @@ window were dated by grepping every session doc.
   its origin has moved on) could still get a quiet "behind origin" hint. That
   needs a fetch in the developer's own repo, which is why it was left out.
 
-- **N-052** · raised `2026-0927-0024-n051-warn-fg-text-app-wide` · value low
-  The other agent-state words are still faint as text on the three themes
-  N-050/N-051 fixed for amber. "idle" (`--ok`), "blocked" (`--err`) and "done"
-  (`--done`) colour the pane header's state word (`.st-*` in
-  `10-panelist.css`) and a pane row's agent label. They read at 1.8 to 4.3:1:
-  - solarized-light: ok 2.1-2.6, err 3.1-3.8, done 2.9-3.6
-  - corporate: ok 3.0-3.6, err 3.5-4.3, done 2.9-3.6
-  - solarized-dark: ok 2.6-4.1, err 1.8-2.8, done 1.9-3.0
-
-  The ranges run from the focused header (`--chrome-focus`, worst) to the
-  sidebar (`--panel`). "working" is now the only state word at 4.5:1 or
-  better. `--err-fg` already exists but is the banner's ink on `--err-bg`, so
-  it may not be the right shade for panel text. The state dots stay on the
-  base hues either way, as `.st-working`'s markers do. Also seen:
-  solarized-light's folded usage group now shows its `.high` reading in
-  `#694f00`, close to the `#6f5f2a` group heading beside it. It still
-  stands apart from the grey resting state.
-
 - **N-055** · raised `2026-1010-1836-pane-header-recent-agent-prompts` · value low
   The header's **prompts ▾** list can only read claude and copilot histories
   (the `prompts` field of `modelResolvers` in `cmd/catway/agentmodel.go`).
@@ -149,6 +131,24 @@ window were dated by grepping every session doc.
   read its history. A reader for codex (and the other agents in the AGENT_HUE
   table) is one table entry each, once their on-disk history format is known.
   The same entry would also give those panes a model in the header.
+
+- **N-059** · raised `SESSDOC2` · value low
+  The other built-ins' state words are also under 4.5:1 as text, mostly on
+  the focused pane header (`chrome-focus`). N-052 fixed the three themes it
+  measured and added `ok-fg` / `done-fg` / `err-text`, which copy the base
+  hue elsewhere. `TestBuiltinStateWordContrast` (internal/theme) holds only
+  those three; adding a theme name to its `held` set prints its failures.
+  Measured on 2026-10-11 (worst surface first):
+  - cats-green (the default): done 3.24 and err 3.15 on `chrome-focus`, ok
+    4.39 there; err 4.41 on panel2. A change here moves the default look.
+  - darcula: ok 2.29, done 2.53, err 2.84 on `chrome-focus`; ok 3.07, done
+    3.40, err 3.82 on panel2.
+  - cool-blue: err 1.80, done 2.60, ok 3.62 on `chrome-focus`; err 2.46,
+    done 3.55 on panel2; err 3.05 on panel.
+  - tokyo-night err 3.44, super-warm err 3.47, dark-game err 3.96, dark-city
+    err 4.29, all on `chrome-focus`.
+  The base hues stay right for the dots; this is shades for the words only,
+  authored per theme as N-052 did.
 
 ## Validate
 
@@ -325,6 +325,26 @@ unchanged.
 Closures before this file existed live in the session docs' own write-ups.
 Newest first. The unnumbered entries at the end were found done while seeding,
 so they are not carried.
+
+- **N-052** · raised `2026-0927-0024-n051-warn-fg-text-app-wide` ·
+  closed 2026-10-11, `SESSDOC2`. Three new theme keys, `ok-fg`,
+  `done-fg` and `err-text`, colour the idle, done and blocked state words as
+  text (`.st-*` in `10-panelist.css`: pane header, pane rows, palette).
+  Red is `err-text` because `err-fg` was already the banner's ink, and the
+  default theme's is a pale pink. They copy the base hue unless authored.
+  The dots, tab marks and workspace badge keep the base hues through a
+  marker rule, as `.st-working` already did. Authored values:
+  solarized-light `#486200` / `#484eb3` / `#ac1f1d`, corporate `#166a43` /
+  `#0a6776` / `#ad2e2e`, and solarized-dark `#b1cc00` / `#b6baff` /
+  `#ffa9a8` (no full red reaches 4.5:1 on its mid-teal focused header, so
+  that one is a salmon). Each word is now 4.5:1 or better on panel, panel2,
+  chrome and chrome-focus; `TestBuiltinStateWordContrast` holds those three
+  themes there. cats-green authors the keys at its base values, so nothing
+  on it moves. A headless-Chrome render of the real stylesheets showed the
+  dots unchanged and the words darkened (or, on solarized-dark, lifted). The
+  test found other themes short as well, raised as N-059. The solarized-light
+  `#694f00` / `#6f5f2a` note in the old text was left alone: that heading
+  still reads apart.
 
 - **N-053** · raised `2026-1007-1436-panes-dropdown-in-workspace-rows` ·
   closed 2026-10-11, `SESSDOC2`. Each heading's title is now a

@@ -98,6 +98,10 @@
        ambers it is too faint as small text, so those themes author a shade of
        their own. Here it is the same amber. */
     --warn-fg:#e0b64e;
+    /* The other agent-state words as text, on the same terms: the base hue
+       here, a shade of their own on themes where it is too faint. err-text,
+       not err-fg, because err-fg is the banner's ink above. */
+    --ok-fg:#6ac47a; --done-fg:#2b9bff; --err-text:#e57373;
     /* Translucent washes. hover flashes icon buttons; the rest paint the
        canvas overlays (drag selection, copy-mode cursor, scrollbar thumb),
        read from JS via getComputedStyle so themes reach the canvas too. */

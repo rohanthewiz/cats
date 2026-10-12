@@ -57,6 +57,11 @@ func builtins() []Theme {
 				// panel2 already. Authored only because this theme carries
 				// the full key set.
 				"warn-fg": "#e0b64e",
+				// The other state words as text, at the base hues so nothing
+				// on this theme moves. Authored only for the full key set. The
+				// red and blue are under 4.5:1 on the focused header (#3a4a3f);
+				// see N-059 in ai_docs/todo/next-list.md.
+				"ok-fg": "#6ac47a", "done-fg": "#2b9bff", "err-text": "#e57373",
 				// The six agent identity hues, hand-picked rather than derived:
 				// this is the one theme required to author the full key set, and
 				// identity colours only do their job if they're separated on the
@@ -129,6 +134,13 @@ func builtins() []Theme {
 				// Solarized yellow is a mid-tone, and on base02 it is only
 				// ~3:1 as text. Same hue lifted to ~5.8:1.
 				"warn-fg": "#f2b700",
+				// The other state words as text, for the same reason: on the
+				// focused header's #0f5666 the base green, red and violet are
+				// 1.8-2.6:1. Each is its hue at full saturation, lifted to
+				// 4.5:1 there (5.7:1 on base02), so red and violet go to a
+				// salmon and a periwinkle: no full red reaches 4.5:1 on a
+				// mid-dark teal.
+				"ok-fg": "#b1cc00", "err-text": "#ffa9a8", "done-fg": "#b6baff",
 			},
 		},
 		{
@@ -151,7 +163,12 @@ func builtins() []Theme {
 				"blank": "#8a5a32",
 				// The same yellow as text lands near 2.4:1 on the base2
 				// panels. Same hue taken dark (~5.7:1 on #e4ddc8).
-				"warn-fg":   "#694f00",
+				"warn-fg": "#694f00",
+				// The other state words as text (2.1-3.8:1 as authored), taken
+				// dark to 4.6:1 on the focused header (#d9d2bc). The green also
+				// moves a little toward green (hue 76 from 68), so "idle"
+				// stays apart from the #694f00 "working" beside it.
+				"ok-fg": "#486200", "err-text": "#ac1f1d", "done-fg": "#484eb3",
 				"fg-strong": "#073642", "fg-bright": "#002b36",
 				"err-bg": "#f6d7cd", "err-fg": "#a4321f",
 			},
@@ -235,7 +252,10 @@ func builtins() []Theme {
 				"blank": "#8a5a32",
 				// The ledger amber as text is ~3:1 on #e4e7ed; taken dark
 				// to ~6:1, and darker than the #9a6700 todo mark.
-				"warn-fg":   "#734e00",
+				"warn-fg": "#734e00",
+				// The ledger green, red and teal as text are 2.9-4.3:1; each
+				// taken dark to 4.6:1 on the focused header (#d3dae6).
+				"ok-fg": "#166a43", "err-text": "#ad2e2e", "done-fg": "#0a6776",
 				"fg-strong": "#14181f", "fg-bright": "#000000",
 				"err-bg": "#f5dada", "err-fg": "#a02c2c",
 			},
