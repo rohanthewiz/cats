@@ -183,6 +183,21 @@
         if (step) setFontSize(FONT_PX + step);
         return;
       }
+      // Horizontal wheel (a trackpad's sideways swipe, a tilt wheel, or
+      // macOS's Shift+wheel, which WebKit delivers as deltaX with deltaY 0).
+      // The DOMINANT axis decides rather than sending both: a vertical
+      // trackpad swipe leaks a few pixels of deltaX on nearly every event,
+      // and forwarding that would jog the child's view sideways while the
+      // user only meant to scroll down. Only a mouse-reporting child hears
+      // it — the server encodes dx as wheel buttons 6/7 (SGR 66/67); the
+      // alternate-scroll arrows and catway's own scrollback have no
+      // horizontal axis, so there it is simply consumed.
+      if (Math.abs(ev.deltaX) > Math.abs(ev.deltaY)) {
+        const cols = ev.deltaMode === 1 ? Math.round(ev.deltaX)
+          : Math.sign(ev.deltaX) * Math.max(1, Math.round(Math.abs(ev.deltaX) / (cellW * (p.gs || 1))));
+        if (cols && p.modes.mouse) sendMouse(p, "w", 3, ev, cols, 0);
+        return;
+      }
       const lines = ev.deltaMode === 1 ? Math.round(ev.deltaY)
         : Math.sign(ev.deltaY) * Math.max(1, Math.round(Math.abs(ev.deltaY) / (cellH * (p.gs || 1))));
       if (!lines) return;
