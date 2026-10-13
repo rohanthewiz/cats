@@ -30,6 +30,7 @@
 .DS_Store
 .idea/
 .vscode/
+.ced/
 
 # Claude Code personal settings (shared settings.json is committed)
 .claude/settings.local.json
