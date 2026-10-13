@@ -48,23 +48,15 @@ window were dated by grepping every session doc.
   `shellinit` eval only covers PATH. This is a user action.
 
 - **N-010** · raised `2026-0914-1051-ced-cats-bin-dir` · value low
-  ced repo: the README still documents the `install.sh` install, positioned
-  as "without cats", and the Makefile still has the `alt` target (installs
-  `~/bin/ce`). Whether those two stay is the user's call. Corrected
-  2026-10-13: the Homebrew half was already done. ced `84e60d3`
-  (2026-09-14 11:06, the session that raised this) dropped the Homebrew
-  instructions, so the README now says "There is no Homebrew formula". It
-  also changed the `alt` comment from "a brew-installed ced" to "the cats
-  plugin's ced (~/.cats/bin/ced)".
+  ced repo: whether the Makefile's `alt` target (installs `~/bin/ce`) stays
+  is the user's call. Corrected 2026-10-13: the Homebrew half was already
+  done in ced `84e60d3` (2026-09-14), and the `install.sh` half went with
+  N-019's retirement of the release pipeline (ced `2176e90`), which
+  deleted the script and its README section.
 
 - **N-016** · raised `2026-0922-1301-cats-pane-input-queue` · value low
   Legacy X10 / urxvt mouse encodings are never droppable (the conservative
   choice). Fine while the browser encoder emits SGR.
-
-- **N-019** · raised `2026-0922-1713-plugin-types-and-releases` · value low
-  ced repo: `release.yml` still describes the `release` branch + auto-bump
-  route. That route hasn't been used since 0.2.0; releases are now a
-  hand-made "Release ced X" commit plus a tag. Retire it or go back to it.
 
 - **N-020** · raised `2026-0922-1713-plugin-types-and-releases` · value low
   cats-mobile: nothing draws `Session.Plugins` yet. If the phone gets a
@@ -294,6 +286,19 @@ unchanged.
 Closures before this file existed live in the session docs' own write-ups.
 Newest first. The unnumbered entries at the end were found done while seeding,
 so they are not carried.
+
+- **N-019** · raised `2026-0922-1713-plugin-types-and-releases` ·
+  closed 2026-10-13, `2026-1013-1530-n019-ced-release-pipeline-retired`
+  (ced `2176e90`). Retired, not revived, which was the
+  user's call. Checking found that the 15 tags since v0.2.0 had no GitHub
+  Release, so `install.sh` was serving a v0.2.0 binary. ced deleted
+  `release.yml`, `.goreleaser.yml` and `install.sh`. Its README, CLAUDE.md
+  and AGENTS.md now describe only the hand flow (a `Release ced x.y.z`
+  commit plus an annotated tag on main) and say there are no binaries. The
+  cats plugin or a source build is the install. ced's own next-list:
+  N-001 (the parked pipeline) declined, N-009 moot. The `release` branch
+  (fully contained in main) is deleted, remote and local. The v0.2.0 GitHub
+  Release is kept, by the user's choice.
 
 - **N-015** · raised `2026-0922-1301-cats-pane-input-queue` ·
   closed 2026-10-13, `2026-1013-1516-n015-refused-input-rate-limit` (cats
