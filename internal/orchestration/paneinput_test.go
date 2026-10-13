@@ -2,6 +2,7 @@ package orchestration
 
 import (
 	"bytes"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -164,4 +165,47 @@ func TestPaneInputCloseReleasesWriter(t *testing.T) {
 	}
 	q.close()
 	q.sent(5) // a writer finishing a batch after close must not drive queued negative
+}
+
+// TestFullReporterRateLimits: an episode's first refusal is reported at once,
+// later ones fold into at most one report per fullReportEvery carrying their
+// count, and an accepted message ends the episode so the next refusal is
+// reported at once again.
+func TestFullReporterRateLimits(t *testing.T) {
+	var r fullReporter
+	t0 := time.Unix(1_700_000_000, 0)
+	at := func(d time.Duration) time.Time { return t0.Add(d) }
+
+	if err := r.refused(at(0)); err != errPaneInputFull {
+		t.Fatalf("first refusal = %v, want the bare errPaneInputFull", err)
+	}
+	for _, d := range []time.Duration{time.Second, 5 * time.Second, fullReportEvery - time.Millisecond} {
+		if err := r.refused(at(d)); err != nil {
+			t.Fatalf("refusal at +%s = %v, want it folded", d, err)
+		}
+	}
+	err := r.refused(at(fullReportEvery))
+	if !errors.Is(err, errPaneInputFull) || !strings.Contains(err.Error(), "3 more refused in the last 10s") {
+		t.Fatalf("re-report = %v, want errPaneInputFull with \"3 more refused in the last 10s\"", err)
+	}
+	if err := r.refused(at(fullReportEvery + time.Second)); err != nil {
+		t.Fatalf("refusal just after the re-report = %v, want it folded", err)
+	}
+
+	// One folded refusal is still counted; an interval with none folded
+	// re-reports the bare error.
+	if err := r.refused(at(3 * fullReportEvery)); !errors.Is(err, errPaneInputFull) ||
+		!strings.Contains(err.Error(), "1 more refused") {
+		t.Fatalf("re-report after one folded = %v, want \"1 more refused\"", err)
+	}
+	if err := r.refused(at(5 * fullReportEvery)); err != errPaneInputFull {
+		t.Fatalf("re-report with nothing folded = %v, want the bare errPaneInputFull", err)
+	}
+
+	// Accepted input ends the episode: the next refusal, however soon, is news.
+	r.refused(at(5*fullReportEvery + time.Second)) // folded, then dropped by accepted
+	r.accepted()
+	if err := r.refused(at(5*fullReportEvery + 2*time.Second)); err != errPaneInputFull {
+		t.Fatalf("first refusal of a new episode = %v, want the bare errPaneInputFull", err)
+	}
 }

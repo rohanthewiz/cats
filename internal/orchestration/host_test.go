@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"net"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -1110,6 +1111,80 @@ func TestHostStuckPaneDoesNotStallOthers(t *testing.T) {
 	case <-echoed:
 	case <-time.After(5 * time.Second):
 		t.Fatal("live pane never echoed while the stuck pane was flooded")
+	}
+}
+
+// TestHostRefusedInputReportsOncePerEpisode: a pane whose input backlog is
+// full refuses every message, and the client hears about it once per episode
+// rather than once per message (fullReporter). The pane is built by hand with
+// an 8-byte budget and no writer goroutine, which is exactly a child that has
+// stopped reading. An input to a pane that does not exist marks the end of
+// each burst: dispatch handles messages in order, so every error the burst
+// raised arrives before the marker's "no such pane".
+func TestHostRefusedInputReportsOncePerEpisode(t *testing.T) {
+	serverEnd, c := net.Pipe()
+	h := NewHost()
+	ctx, cancel := context.WithCancel(context.Background())
+	go h.Attach(ctx, serverEnd)
+	t.Cleanup(func() {
+		cancel()
+		c.Close()
+	})
+	_ = c.SetDeadline(time.Now().Add(15 * time.Second))
+	if err := WriteMessage(c, NewHello()); err != nil {
+		t.Fatalf("send hello: %v", err)
+	}
+	if typ, _ := readEvent(t, c); typ != MsgWelcome {
+		t.Fatalf("first event = %q, want welcome", typ)
+	}
+
+	// Added after the welcome, so nothing in the handshake reads its (absent)
+	// emulator, and removed before teardown for the same reason.
+	p := &pane{id: 1, input: newPaneInput(8)}
+	h.mu.Lock()
+	h.panes[1] = p
+	h.mu.Unlock()
+	t.Cleanup(func() { h.removePane(1) })
+
+	// burst sends each input to pane 1, then the marker, and returns the
+	// error messages raised for pane 1.
+	burst := func(inputs ...string) []string {
+		t.Helper()
+		go func() {
+			for _, in := range inputs {
+				_ = WriteMessage(c, NewInput(1, []byte(in)))
+			}
+			_ = WriteMessage(c, NewInput(99, []byte("x")))
+		}()
+		var got []string
+		for {
+			typ, payload := readEvent(t, c)
+			if typ != MsgError {
+				continue
+			}
+			var ev Error
+			if err := json.Unmarshal(payload, &ev); err != nil {
+				t.Fatalf("decode error event: %v", err)
+			}
+			if ev.PaneID == 99 {
+				return got
+			}
+			got = append(got, ev.Message)
+		}
+	}
+
+	// Fill the budget, then refuse twenty more: one report, not twenty.
+	refusals := append([]string{"12345678"}, slices.Repeat([]string{"k"}, 20)...)
+	got := burst(refusals...)
+	if len(got) != 1 || got[0] != errPaneInputFull.Error() {
+		t.Fatalf("errors for a refused burst = %q, want one %q", got, errPaneInputFull)
+	}
+
+	// The child reads its backlog; one accepted message ends the episode, so
+	// the next refusal is reported at once rather than folded.
+	p.input.sent(len(p.input.take()))
+	if got := burst("1234567", "89"); len(got) != 1 || got[0] != errPaneInputFull.Error() {
+		t.Fatalf("errors after the pane read again = %q, want one %q", got, errPaneInputFull)
 	}
 }
 

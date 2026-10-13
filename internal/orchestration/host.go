@@ -182,6 +182,10 @@ type pane struct {
 	// append, so neither the dispatch goroutine nor readPump (holding emuMu)
 	// can block on a child that has stopped reading stdin.
 	input *paneInput
+
+	// fullReports rate-limits the error events for input this pane refuses
+	// because its backlog is full (paneinput.go). The zero value is ready.
+	fullReports fullReporter
 }
 
 // writePTY queues b for the PTY without blocking. Wheel and buttonless-motion
@@ -723,7 +727,17 @@ func (h *Host) dispatch(typ MessageType, payload []byte) error {
 			return nil
 		}
 		if p := h.getPane(c.PaneID); p != nil {
-			if err := p.writePTY(c.Data); err != nil {
+			err := p.writePTY(c.Data)
+			switch {
+			case err == nil:
+				p.fullReports.accepted()
+			case errors.Is(err, errPaneInputFull):
+				// A full backlog refuses every message until the child reads
+				// again, so report the episode, not each refusal.
+				if rep := p.fullReports.refused(time.Now()); rep != nil {
+					h.emit(NewError(c.PaneID, rep.Error()))
+				}
+			default:
 				h.emit(NewError(c.PaneID, err.Error()))
 			}
 		} else {

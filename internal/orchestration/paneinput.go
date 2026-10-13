@@ -2,7 +2,9 @@ package orchestration
 
 import (
 	"errors"
+	"fmt"
 	"sync"
+	"time"
 )
 
 // paneInput is one pane's queue of bytes bound for its PTY master, drained by
@@ -91,6 +93,84 @@ var (
 	// backlog is past its budget.
 	errPaneInputFull = errors.New("pane is not reading its input (backlog full)")
 )
+
+// fullReportEvery is the least time between two error events for one pane's
+// refused input (see fullReporter). Long enough that typing into a wedged pane
+// raises one toast rather than one per key, short enough that a pane still
+// wedged a while later is reported again with a count of what it refused.
+const fullReportEvery = 10 * time.Second
+
+// fullReporter rate-limits the error events for a pane whose input is being
+// refused (errPaneInputFull).
+//
+// Without it every refused input message became its own error event, and
+// catway turns each one into a WARN line in daemons.log and a toast in every
+// window, so typing into a wedged pane, or a script sending to it in a loop,
+// spammed both. The first refusal of an episode is still reported at once,
+// because it is the news. Later ones fold into at most one event per
+// fullReportEvery, and that event carries how many were folded:
+//
+//	refused  refused  refused … refused   accepted   refused
+//	   │        ·        ·         │          │          │
+//	 event   (folded) (folded)   event    episode     event
+//	 t=0                        t≥10s,     ends      at once
+//	                      "N more refused…"
+//
+// An accepted message ends the episode, so the next refusal is reported at
+// once again. Refusals folded in an episode's final interval are not reported
+// on their own: by then the pane has already been reported as not reading,
+// and that it takes input again shows in the pane itself.
+//
+// Only the dispatch path's refusals go through it. The emulator's query
+// replies share the pane's queue but never report (their callback drops the
+// error). Counting them here could spend an episode's first report on an
+// event nobody sees, and so silence the user's own refused keys for an
+// interval.
+//
+// The mutex is for safety, not contention: input is dispatched from the one
+// attached session's read loop, so the lock is uncontended in practice.
+type fullReporter struct {
+	mu sync.Mutex
+	// refusing is true from an episode's first refusal until the next
+	// accepted message.
+	refusing bool
+	// lastReport is when the episode's last error event was reported.
+	lastReport time.Time
+	// folded counts refusals since lastReport that were not reported.
+	folded int
+}
+
+// refused records one refusal at now. It returns the error to report, or nil
+// when the refusal is folded into a later report. A reported error always
+// wraps errPaneInputFull, and is that error itself when nothing was folded.
+func (r *fullReporter) refused(now time.Time) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.refusing && now.Sub(r.lastReport) < fullReportEvery {
+		r.folded++
+		return nil
+	}
+	folded, since := r.folded, now.Sub(r.lastReport)
+	r.refusing, r.lastReport, r.folded = true, now, 0
+	// folded is 0 on an episode's first refusal (accepted resets it), so only
+	// a re-report within an episode can carry a count.
+	if folded == 0 {
+		return errPaneInputFull
+	}
+	return fmt.Errorf("%w; %d more refused in the last %s",
+		errPaneInputFull, folded, since.Round(time.Second))
+}
+
+// accepted ends a refusal episode, if one is running. It is called for every
+// accepted input message, so its common case is one uncontended lock and a
+// false test.
+func (r *fullReporter) accepted() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.refusing {
+		r.refusing, r.folded = false, 0
+	}
+}
 
 // newPaneInput returns an open queue. A budget ≤ 0 selects the default.
 func newPaneInput(budget int) *paneInput {
