@@ -48,15 +48,14 @@ window were dated by grepping every session doc.
   `shellinit` eval only covers PATH. This is a user action.
 
 - **N-010** · raised `2026-0914-1051-ced-cats-bin-dir` · value low
-  ced repo: the README still documents Homebrew / `install.sh` installs, now
-  positioned as "without cats", and the Makefile's `alt` target (installs
-  `~/bin/ce`) has a comment about "a brew-installed ced". The Homebrew
-  formula step was removed from ced's release on 2026-09-14. Whether those
-  install paths stay is the user's call.
-
-- **N-015** · raised `2026-0922-1301-cats-pane-input-queue` · value low
-  `errPaneInputFull` emits one error event per refused message, so a flood
-  into a dead pane could spam them. Rate-limit if it ever shows up.
+  ced repo: the README still documents the `install.sh` install, positioned
+  as "without cats", and the Makefile still has the `alt` target (installs
+  `~/bin/ce`). Whether those two stay is the user's call. Corrected
+  2026-10-13: the Homebrew half was already done. ced `84e60d3`
+  (2026-09-14 11:06, the session that raised this) dropped the Homebrew
+  instructions, so the README now says "There is no Homebrew formula". It
+  also changed the `alt` comment from "a brew-installed ced" to "the cats
+  plugin's ced (~/.cats/bin/ced)".
 
 - **N-016** · raised `2026-0922-1301-cats-pane-input-queue` · value low
   Legacy X10 / urxvt mouse encodings are never droppable (the conservative
@@ -75,14 +74,6 @@ window were dated by grepping every session doc.
   The context used/window segment on agent rows (`43k/1M`) is claude-only.
   Copilot's `events.jsonl` would need its own reader, if it records usage at
   all (`lastCopilotModel`, `cmd/catway/agentmodel.go`).
-
-- **N-055** · raised `2026-1010-1836-pane-header-recent-agent-prompts` · value low
-  The header's **prompts ▾** list can only read claude and copilot histories
-  (the `prompts` field of `modelResolvers` in `cmd/catway/agentmodel.go`).
-  Every other agent pane shows the chip and opens a note saying cats cannot
-  read its history. A reader for codex (and the other agents in the AGENT_HUE
-  table) is one table entry each, once their on-disk history format is known.
-  The same entry would also give those panes a model in the header.
 
 ## Validate
 
@@ -219,9 +210,11 @@ and `raised`.
   theme). Not run: a real **update** from the dialog, and whether the badge
   then clears by itself via the +30s/+90s/+4m rechecks (skipped so the
   installed cats-todo wasn't changed mid-session); **update all** with two or
-  more pending; the dark theme; and the reinstalled Cats.app. cats-todo is
-  behind upstream right now (78c85ac → 9bfe73e), so updating it is the natural
-  test.
+  more pending; the dark theme; and the reinstalled Cats.app. As of
+  2026-10-13, cats-todo is up to date (v0.45.0), and `catctl plugin check`
+  shows ced as the one pending update (63c7a41 → 6cba63d). That makes ced the
+  natural test for a single **update**. **Update all** needs a second pending
+  plugin, so it waits until there is one.
 
 - **N-054** · raised `2026-1010-1836-pane-header-recent-agent-prompts` · value medium
   Hands-on check of the pane header's **prompts ▾** dropdown with a real
@@ -261,7 +254,13 @@ Wanted, but not next. Items move here from Open (or straight here when raised
 as future work) and back to Open when they become next, with their header line
 unchanged.
 
-- None yet.
+- **N-055** · raised `2026-1010-1836-pane-header-recent-agent-prompts` · value low
+  The header's **prompts ▾** list can only read claude and copilot histories
+  (the `prompts` field of `modelResolvers` in `cmd/catway/agentmodel.go`).
+  Every other agent pane shows the chip and opens a note saying cats cannot
+  read its history. A reader for codex (and the other agents in the AGENT_HUE
+  table) is one table entry each, once their on-disk history format is known.
+  The same entry would also give those panes a model in the header.
 
 ## Non-goals
 
@@ -295,6 +294,24 @@ unchanged.
 Closures before this file existed live in the session docs' own write-ups.
 Newest first. The unnumbered entries at the end were found done while seeding,
 so they are not carried.
+
+- **N-015** · raised `2026-0922-1301-cats-pane-input-queue` ·
+  closed 2026-10-13, `2026-1013-1516-n015-refused-input-rate-limit` (cats
+  `e3551fb`). Refused input is now reported once per episode, not
+  once per message. That mattered because catway turns each error event
+  into a WARN line in `daemons.log` and a toast in every window. A new
+  `fullReporter` per pane (`internal/orchestration/paneinput.go`) reports an
+  episode's first refusal at once. It then folds later refusals into at most
+  one event per 10s, worded "…; N more refused in the last 10s". An accepted
+  message ends the episode. Only dispatch's refusals count: the emulator's
+  query replies share the queue but drop their errors, so counting them
+  could have spent a first report on an event nobody sees. Tests:
+  `TestFullReporterRateLimits` (fake clock) and
+  `TestHostRefusedInputReportsOncePerEpisode`. The second uses a hand-built
+  pane with an 8-byte budget and no writer, sends twenty-one refused
+  messages, and gets one error. It got twenty-one with the old emit put
+  back. Not seen live: a real pane needs 16MB of unread input to refuse
+  anything.
 
 - **N-059** · raised `2026-1011-2327-n053-n052-n039-headings-state-words-exited-capture` ·
   closed 2026-10-12, `2026-1012-0107-n059-state-word-shades`. Every built-in
