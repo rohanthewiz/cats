@@ -58,10 +58,6 @@ window were dated by grepping every session doc.
   Legacy X10 / urxvt mouse encodings are never droppable (the conservative
   choice). Fine while the browser encoder emits SGR.
 
-- **N-020** · raised `2026-0922-1713-plugin-types-and-releases` · value low
-  cats-mobile: nothing draws `Session.Plugins` yet. If the phone gets a
-  plugins list, split it by `PluginPane.Type` the way the desktop does.
-
 - **N-037** · raised `2026-0924-1953-context-usage-warn-demotion-tool-types` · value low
   The context used/window segment on agent rows (`43k/1M`) is claude-only.
   Copilot's `events.jsonl` would need its own reader, if it records usage at
@@ -280,6 +276,18 @@ unchanged.
 Closures before this file existed live in the session docs' own write-ups.
 Newest first. The unnumbered entries at the end were found done while seeding,
 so they are not carried.
+
+- **N-020** · raised `2026-0922-1713-plugin-types-and-releases` ·
+  closed 2026-10-14, cats-mobile 85ebdec. `Session.SplitPlugins` divides
+  the rollup's plugin panes on `wire.IsAgentPluginType`, so the phone and the
+  desktop route unknown types the same way. The Agents screen draws
+  agent-typed plugins under an AGENT PLUGINS heading below the state groups.
+  A heading of their own, not a headless block as on the desktop, because a
+  block after IDLE would read as idle agents. Everything else goes under
+  PLUGINS, with a hairline between plugin-id blocks. Rows show the short id,
+  the terminal title, the handle and a type badge, with no state or age.
+  Covered by a catsclient split test, two app journeys and the
+  `agents_plugins` golden. Not run on a device.
 
 - **N-042** · raised `2026-0926-2211-plugin-update-checks` ·
   closed 2026-10-14, `2026-1014-0728-n042-plugin-updates-checked-live`.
