@@ -282,7 +282,7 @@ Newest first. The unnumbered entries at the end were found done while seeding,
 so they are not carried.
 
 - **N-042** · raised `2026-0926-2211-plugin-update-checks` ·
-  closed 2026-10-14, `2026-1014-0730-n042-plugin-updates-checked-live`.
+  closed 2026-10-14, `2026-1014-0728-n042-plugin-updates-checked-live`.
   Driven live against a scratch catway and cathost on 127.0.0.1:8531 with
   their own `CATS_PLUGINS_DIR`, `CATS_BIN_DIR` and `XDG_*`, so the real
   plugins were not touched. ced and cats-todo were installed there, then
