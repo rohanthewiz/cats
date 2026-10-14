@@ -161,6 +161,12 @@ and `raised`.
     `catway: installed default plugin rohanthewiz/cats-todo` to
     `daemons.log`, and cats-todo should show in the plugins dialog and
     picker once they are reopened.
+  - plugin update checks in the rebuilt Cats.app (`2026-0926-2211-plugin-update-checks`,
+    folded in from N-042, whose browser half passed live). With a plugin
+    behind upstream, the toolbar's **⧉ plugins** shows the count, and the
+    dialog's **update** opens an "update <id>" tab whose clean exit closes
+    it. The badge should drop by one about 30s later without reopening
+    anything.
 
 - **N-012** · raised `2026-0916-1547-peer-sync` · value low
   Cross-OS home translation in peer sync is unit-tested only; the first
@@ -195,18 +201,6 @@ and `raised`.
   prompt and in a kitty-protocol editor (ced); ⌥u then u types "ü"; ⌥e then
   space types "´"; and plain typing and ⌥-chords an app binds (⌥b/⌥f in
   zsh) still work.
-
-- **N-042** · raised `2026-0926-2211-plugin-update-checks` · value medium
-  Plugin update checks: drive the parts that were only reasoned about. The
-  badge, dialog rows and ↻ were checked in a browser on a dev catway (light
-  theme). Not run: a real **update** from the dialog, and whether the badge
-  then clears by itself via the +30s/+90s/+4m rechecks (skipped so the
-  installed cats-todo wasn't changed mid-session); **update all** with two or
-  more pending; the dark theme; and the reinstalled Cats.app. As of
-  2026-10-13, cats-todo is up to date (v0.45.0), and `catctl plugin check`
-  shows ced as the one pending update (63c7a41 → 6cba63d). That makes ced the
-  natural test for a single **update**. **Update all** needs a second pending
-  plugin, so it waits until there is one.
 
 - **N-054** · raised `2026-1010-1836-pane-header-recent-agent-prompts` · value medium
   Hands-on check of the pane header's **prompts ▾** dropdown with a real
@@ -286,6 +280,24 @@ unchanged.
 Closures before this file existed live in the session docs' own write-ups.
 Newest first. The unnumbered entries at the end were found done while seeding,
 so they are not carried.
+
+- **N-042** · raised `2026-0926-2211-plugin-update-checks` ·
+  closed 2026-10-14, `2026-1014-0730-n042-plugin-updates-checked-live`.
+  Driven live against a scratch catway and cathost on 127.0.0.1:8531 with
+  their own `CATS_PLUGINS_DIR`, `CATS_BIN_DIR` and `XDG_*`, so the real
+  plugins were not touched. ced and cats-todo were installed there, then
+  each tree was reset two commits back. The badge read `2`. The ced row's
+  **update** opened an "update rohanthewiz.ced" tab, which reset the tree to
+  05a180c and rebuilt the binary. The tab closed itself on the clean exit,
+  and the badge went to `1` on its own 31s after the click (the +30s
+  recheck). With ced reset again, ↻ brought the badge back to `2`, and
+  **update all (2)** ran both updates in one "update plugins" tab
+  (rebuilt 07:24:37 and :38). The badge emptied at +30s, and `catctl plugin
+  check` reported both up to date. Headless-Chrome captures of the open
+  dialog in cats-green (dark) and solarized-light both read cleanly. The
+  2026-09-26 "light theme" check was probably the dark default seen through
+  claude-in-chrome's forced inversion. The reinstalled Cats.app half moved
+  into N-001.
 
 - **N-019** · raised `2026-0922-1713-plugin-types-and-releases` ·
   closed 2026-10-13, `2026-1013-1530-n019-ced-release-pipeline-retired`
