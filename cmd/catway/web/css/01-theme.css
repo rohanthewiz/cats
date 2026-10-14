@@ -113,13 +113,24 @@
        colors. Split out from --bg/--fg so a theme can tint the chrome without
        recoloring terminal content. */
     --term-fg:#d6ddd6; --term-bg:#1f2420;
+    /* --ui-zoom is the terminal font zoom as a ratio: FONT_PX / FONT_DEFAULT,
+       written onto <html> by applyUIZoom (01-bootstrap.js) whenever ⌘+ / ⌘- /
+       Ctrl+wheel / a ui_prefs push changes the font. 1 here is the default font
+       and the value a page without JS (or before boot) renders at. */
+    --ui-zoom:1;
     /* --sb-scale sizes the whole left column as one unit: the column width and
        every type size inside it are expressed against it, so the sidebar grows
-       or shrinks without any of its parts drifting out of proportion. */
-    --sb-scale:1.15;
+       or shrinks without any of its parts drifting out of proportion. It rides
+       --ui-zoom, so zooming the panes zooms the sidebar with them — 1.15 is
+       still the column's own size at the default font, the zoom multiplies it. */
+    --sb-scale:calc(1.15 * var(--ui-zoom));
     /* Sidebar column width. Anything else that has to clear the sidebar (the
-       banner) reads it from here so the two can't drift apart. */
-    --sidebar-w:calc(253px * var(--sb-scale));
+       banner) reads it from here so the two can't drift apart. Clamped the way
+       a dragged width is (sidebarWidthCSS, 38-sidebar.js): never under the
+       150px floor, never over 60% of the window — without the cap the default
+       column at the top font size (32/14 zoom, ~665px) would swallow a laptop
+       window's terminals. */
+    --sidebar-w:max(150px, min(calc(253px * var(--sb-scale)), 60vw));
     /* Chat column width. 0 keeps the grid math identical to the pre-chat
        layout when the panel is closed; body.chat-open widens it. */
     --chat-w:0px;

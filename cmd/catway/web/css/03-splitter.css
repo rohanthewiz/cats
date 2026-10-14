@@ -15,7 +15,7 @@
 
   /* ---- Folded sidebar ----
      The column goes to nothing rather than merely narrow: --sidebar-w is
-     re-declared on <body>, which beats the inline value setSidebarWidth writes
+     re-declared on <body>, which beats the inline value setSidebarBase writes
      on :root for everything inside it (the #app grid track, and #banner's left
      edge, both of which read the same variable) while leaving that stored width
      untouched for the reveal. #sidebar itself leaves the flow so its content

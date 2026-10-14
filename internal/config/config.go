@@ -75,7 +75,10 @@ type Config struct {
 type UI struct {
 	// FontPx is the terminal font size in CSS px (the ⌘+/⌘- zoom level).
 	FontPx int `yaml:"font_px,omitempty" json:"font_px,omitempty"`
-	// SidebarWidth is the sidebar's dragged width in CSS px.
+	// SidebarWidth is the sidebar's dragged width in CSS px at the default
+	// font size. The client multiplies it by the font zoom (font_px / 14), so
+	// the column grows with the type inside it and one stored value means the
+	// same column at every zoom — see setSidebarBase in 38-sidebar.js.
 	SidebarWidth int `yaml:"sidebar_width,omitempty" json:"sidebar_width,omitempty"`
 	// ShowUntitledPanes lists every pane in a workspace row's dropdown. By
 	// default (false) a pane with no title at all, neither a pane.rename name

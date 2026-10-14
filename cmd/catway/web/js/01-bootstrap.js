@@ -19,6 +19,31 @@
     const filePx = (window.__catsUI || {}).font_px;
     if (filePx >= FONT_MIN && filePx <= FONT_MAX) FONT_PX = filePx;
   }
+  applyUIZoom();
+
+  // uiZoom is the font zoom as a ratio of the default size — 1 at 14px, 2 at
+  // 28px. The terminal font is the one zoom control cats has (⌘+ / ⌘- /
+  // Ctrl+wheel; the browser's own page zoom is suppressed, see 20-keys.js), so
+  // whatever else should grow with the panes reads this ratio rather than
+  // keeping a zoom of its own: today that is the left sidebar.
+  function uiZoom() {
+    return FONT_PX / FONT_DEFAULT;
+  }
+
+  // applyUIZoom publishes uiZoom as the --ui-zoom custom property on <html>.
+  // The stylesheet derives --sb-scale (and from it the sidebar's width and
+  // every type size inside it) from that one variable, so this single write
+  // rescales the whole column; nothing in the sidebar has to be re-rendered.
+  //
+  //   FONT_PX ─▶ --ui-zoom ─▶ --sb-scale ─▶ sidebar type, icons, indents
+  //                     └───▶ --sidebar-w ─▶ #app grid column ─▶ #panes width
+  //
+  // The last arrow is why callers that change the font must call this BEFORE
+  // gridSize(): the pane grid is the space left over once the sidebar has
+  // taken its column, so it has to be measured at the new sidebar width.
+  function applyUIZoom() {
+    document.documentElement.style.setProperty("--ui-zoom", String(uiZoom()));
+  }
 
   const panesEl = document.getElementById("panes");
   const wsListEl = document.getElementById("ws-list");
@@ -243,12 +268,16 @@
   // server's relayout lands (a bigger font means fewer cells, so its rects
   // change too). Cell pixel metrics reported at init aren't resent — β only
   // consumes them when a pane is created.
+  //
+  // The sidebar zooms along with the type (applyUIZoom), and it goes first:
+  // a wider sidebar column narrows #panes, and gridSize has to see that.
   function setFontSize(px) {
     px = Math.min(FONT_MAX, Math.max(FONT_MIN, Math.round(px)));
     if (px === FONT_PX) return;
     FONT_PX = px;
     try { localStorage.setItem(FONT_KEY, String(px)); } catch (e) { /* not persisted */ }
     persistUIPref("font_px", px);
+    applyUIZoom();
     measure();
     gridSize();
     sendMsg({ t: "resize", cols, rows });

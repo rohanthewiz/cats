@@ -4,22 +4,60 @@
   // Setting --sidebar-w on the root overrides the stylesheet's scale-derived
   // default, and everything that has to clear the sidebar (the banner) follows
   // for free because it reads the same variable.
+  //
+  // A stored width is the BASE width: what the column measures at the default
+  // font size. The column on screen is that times the font zoom (uiZoom), so
+  // ⌘+ widens a dragged sidebar exactly as it widens the default one, and the
+  // text that just grew inside it does not start truncating:
+  //
+  //   drag ── screen px ÷ uiZoom ──▶ sbwBase ──▶ localStorage / ui.sidebar_width
+  //                                     │
+  //   --sidebar-w = clamp(150px, sbwBase × --ui-zoom, 60vw)   ◀── CSS, live
+  //
+  // Storing the base rather than the screen width is what keeps a zoom from
+  // being a write: the multiplication happens in CSS against --ui-zoom, so a
+  // font change never touches the stored width (and two windows echoing
+  // rescaled widths at each other over ui_prefs cannot happen). The clamp
+  // lives in CSS for the same reason — it is re-evaluated on every zoom and
+  // every window resize, while the base the user chose is kept intact for
+  // when the window widens again.
+  //
+  // The base is floored at SBW_MIN too, because config.go rejects a smaller
+  // ui.sidebar_width. The upshot is that the narrowest column scales with the
+  // zoom (150px at 14px type, 225px at 21px) — which is the point of a floor
+  // that exists to keep the column's contents legible.
   const SBW_KEY = "cats.sidebar_w", SBW_MIN = 150;
   const sbwMax = () => Math.max(SBW_MIN, Math.round(window.innerWidth * 0.6));
+  let sbwBase = 0;   // 0 = no override: the stylesheet's own default width
+  // sidebarWidthCSS is the --sidebar-w value for a base width. Kept in step
+  // with the default's clamp in 01-theme.css.
+  function sidebarWidthCSS(base) {
+    return "max(" + SBW_MIN + "px, min(calc(" + base + "px * var(--ui-zoom)), 60vw))";
+  }
+  // setSidebarBase applies (and remembers in this browser) a base width — the
+  // unit stored in localStorage and in config.json's ui.sidebar_width.
+  function setSidebarBase(base) {
+    sbwBase = Math.max(SBW_MIN, Math.round(base));
+    document.documentElement.style.setProperty("--sidebar-w", sidebarWidthCSS(sbwBase));
+    try { localStorage.setItem(SBW_KEY, String(sbwBase)); } catch (e) { /* not persisted */ }
+  }
+  // setSidebarWidth takes the width the column should have ON SCREEN — a
+  // gutter drag's pointer position — and stores it as a base. The 60% cap is
+  // applied here in screen px, before the division, so a drag cannot bank a
+  // base the window could never show; the floor is applied on the base.
   function setSidebarWidth(px) {
     px = Math.min(sbwMax(), Math.max(SBW_MIN, Math.round(px)));
-    document.documentElement.style.setProperty("--sidebar-w", px + "px");
-    try { localStorage.setItem(SBW_KEY, String(px)); } catch (e) { /* not persisted */ }
+    setSidebarBase(px / uiZoom());
   }
   try {
     const storedW = parseInt(localStorage.getItem(SBW_KEY), 10);
-    if (storedW >= SBW_MIN) document.documentElement.style.setProperty("--sidebar-w", storedW + "px");
+    if (storedW >= SBW_MIN) setSidebarBase(storedW);
   } catch (e) { /* storage disabled — keep the stylesheet default */ }
   // As with the font size, config.json's ui.sidebar_width wins when the file
   // has one — written back when a drag comes to rest (the pointerup below).
   {
     const fileW = (window.__catsUI || {}).sidebar_width;
-    if (fileW >= SBW_MIN) document.documentElement.style.setProperty("--sidebar-w", fileW + "px");
+    if (fileW >= SBW_MIN) setSidebarBase(fileW);
   }
 
   // Panes are laid out from cols/rows, so a drag has to re-derive the grid and
@@ -130,9 +168,10 @@
       sidebarResized(true);
       // Only a real drag that ended with the column showing is a new width;
       // folding it away is its own (per-browser) toggle, not a width of 0.
+      // What is saved is the base width (see setSidebarBase), not the pixels
+      // on screen, so the file means the same thing at every font size.
       if (moved && !sidebarHidden()) {
-        const w = parseInt(document.documentElement.style.getPropertyValue("--sidebar-w"), 10);
-        if (w >= SBW_MIN) persistUIPref("sidebar_width", w);
+        if (sbwBase >= SBW_MIN) persistUIPref("sidebar_width", sbwBase);
       }
     };
     splitterEl.addEventListener("pointermove", move);
@@ -143,6 +182,7 @@
   splitterEl.addEventListener("dblclick", () => {
     if (Date.now() - revealedAt < 600) return;   // this was the reveal click, twice
     document.documentElement.style.removeProperty("--sidebar-w");
+    sbwBase = 0;
     try { localStorage.removeItem(SBW_KEY); } catch (e) { /* nothing to clear */ }
     persistUIPref("sidebar_width", 0); // back to "each browser's own default"
     sidebarResized(true);

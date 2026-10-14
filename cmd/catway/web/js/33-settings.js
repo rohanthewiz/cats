@@ -232,7 +232,7 @@
       sub("interface");
       const uiOpts = (cfg.options && cfg.options.ui) || {};
       const uiFont = numInput(row("font size"), uiOpts.font_px, 9, 32, "px — blank: each browser's own (⌘+ / ⌘-)");
-      const uiSbw = numInput(row("sidebar width"), uiOpts.sidebar_width, 150, 2000, "px — blank: each browser's own (drag the gutter)");
+      const uiSbw = numInput(row("sidebar width"), uiOpts.sidebar_width, 150, 2000, "px at the default font size, ⌘+ scales it — blank: each browser's own (drag the gutter)");
       // A checkbox rather than a third number box: off is the default, and
       // off is also what an absent key reads as, so the box never needs a
       // "blank" state of its own.
@@ -673,7 +673,8 @@
   function applyUIPrefs(ui) {
     Object.assign(uiPrefsFile, ui);
     if (ui.font_px) setFontSize(ui.font_px);
-    if (ui.sidebar_width) { setSidebarWidth(ui.sidebar_width); sidebarResized(true); }
+    // A base width (see setSidebarBase): the zoom is applied in CSS on top.
+    if (ui.sidebar_width) { setSidebarBase(ui.sidebar_width); sidebarResized(true); }
     // Redrawn on the spot rather than left for the next push: in a quiet
     // session that push could be minutes away, and the save should show.
     if ("show_untitled_panes" in ui && layoutMsg) renderWorkspaces(layoutMsg);
@@ -694,7 +695,7 @@
   // The echo case is why this compares instead of applying blindly: the window
   // that saved has already updated uiPrefsFile, and re-applying a sidebar width
   // that arrives a round trip late would snap back a gutter being dragged again.
-  // applyUIPrefs updates uiPrefsFile before setFontSize / setSidebarWidth run,
+  // applyUIPrefs updates uiPrefsFile before setFontSize / setSidebarBase run,
   // so their persistUIPref sees the file already agreeing and writes nothing.
   function applyUIPrefsPush(msg) {
     const ui = {};

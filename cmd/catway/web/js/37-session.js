@@ -48,9 +48,11 @@
     clearTimeout(resizeTimer);
     resizeTimer = setTimeout(() => {
       // A window narrowed since the last drag can leave the stored sidebar
-      // width past its 60% ceiling; re-clamp before deriving the grid.
-      const sbw = parseInt(document.documentElement.style.getPropertyValue("--sidebar-w"), 10);
-      if (sbw > 0) setSidebarWidth(sbw);
+      // width past its 60% ceiling. That clamp used to be re-applied here by
+      // rewriting the stored width; it now lives in --sidebar-w itself
+      // (min(…, 60vw), see sidebarWidthCSS), which the browser re-evaluates
+      // on its own — and which hands the column its full width back when the
+      // window widens again, where a rewrite would have lost it for good.
       gridSize();
       // Same reason as the fold: the window has already been repainted at its
       // new size, and the panes are still wearing the old one until the server
