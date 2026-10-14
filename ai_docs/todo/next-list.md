@@ -278,7 +278,7 @@ Newest first. The unnumbered entries at the end were found done while seeding,
 so they are not carried.
 
 - **N-020** · raised `2026-0922-1713-plugin-types-and-releases` ·
-  closed 2026-10-14, cats-mobile 85ebdec. `Session.SplitPlugins` divides
+  closed 2026-10-14, cats-mobile `2026-1014-1554-n020-plugin-panes-split-by-type` (85ebdec). `Session.SplitPlugins` divides
   the rollup's plugin panes on `wire.IsAgentPluginType`, so the phone and the
   desktop route unknown types the same way. The Agents screen draws
   agent-typed plugins under an AGENT PLUGINS heading below the state groups.
