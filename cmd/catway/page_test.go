@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/rohanthewiz/cats/cmd/catway/web"
 	"github.com/rohanthewiz/cats/buildbadge"
+	"github.com/rohanthewiz/cats/cmd/catway/web"
 	"github.com/rohanthewiz/cats/internal/config"
 )
 
