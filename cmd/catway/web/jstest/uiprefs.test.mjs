@@ -61,4 +61,13 @@ function world(file) {
   eq(JSON.stringify(applied[1]), JSON.stringify({ show_untitled_panes: false }), "and back off");
 }
 
+// ---- the side columns' zooms travel like the sizes ---------------------------------
+
+{
+  const { f, applied } = world({ font_px: 15, sidebar_zoom: 120 });
+  f.applyUIPrefsPush({ t: "ui_prefs", font_px: 15, sidebar_zoom: 120, chat_zoom: 140, show_untitled_panes: false });
+  eq(JSON.stringify(applied[0]), JSON.stringify({ chat_zoom: 140 }),
+    "a chat zoom set in another window lands, and the unchanged sidebar zoom does not re-apply");
+}
+
 report("ui prefs push");

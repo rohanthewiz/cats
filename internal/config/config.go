@@ -80,6 +80,15 @@ type UI struct {
 	// the column grows with the type inside it and one stored value means the
 	// same column at every zoom — see setSidebarBase in 38-sidebar.js.
 	SidebarWidth int `yaml:"sidebar_width,omitempty" json:"sidebar_width,omitempty"`
+	// SidebarZoom and ChatZoom are the two side columns' own zoom levels, in
+	// percent (100 = the column at the font zoom alone). Each multiplies the
+	// font zoom rather than replacing it, so ⌘+ over the panes still grows
+	// everything together, while ⌘+ (or Ctrl+wheel) with the pointer over the
+	// left sidebar or the right chat panel rescales just that column — see
+	// setAsideZoom in 01-bootstrap.js. Percent rather than a float so the
+	// section stays all-int and "0 = unset" keeps meaning what it does above.
+	SidebarZoom int `yaml:"sidebar_zoom,omitempty" json:"sidebar_zoom,omitempty"`
+	ChatZoom    int `yaml:"chat_zoom,omitempty" json:"chat_zoom,omitempty"`
 	// ShowUntitledPanes lists every pane in a workspace row's dropdown. By
 	// default (false) a pane with no title at all, neither a pane.rename name
 	// nor one its program set over OSC, is left out: its row would read as a
@@ -93,12 +102,14 @@ type UI struct {
 }
 
 // UI bounds, mirroring the front end's own clamps (01-bootstrap.js FONT_MIN /
-// FONT_MAX, 38-sidebar.js SBW_MIN). Checked here so a hand-edit that would be
+// FONT_MAX, 38-sidebar.js SBW_MIN, ASIDE_ZOOM_MIN / ASIDE_ZOOM_MAX). Checked here so a hand-edit that would be
 // silently clamped away in the browser fails loudly at load instead.
 const (
 	UIFontMin         = 9
 	UIFontMax         = 32
 	UISidebarWidthMin = 150
+	UIAsideZoomMin    = 50
+	UIAsideZoomMax    = 250
 )
 
 // validate checks the UI section; zero fields are "unset" and always valid.
@@ -108,6 +119,14 @@ func (u UI) validate() error {
 	}
 	if u.SidebarWidth != 0 && u.SidebarWidth < UISidebarWidthMin {
 		return fmt.Errorf("ui.sidebar_width %d: want >= %d (or 0 for the client default)", u.SidebarWidth, UISidebarWidthMin)
+	}
+	for _, z := range []struct {
+		key string
+		v   int
+	}{{"sidebar_zoom", u.SidebarZoom}, {"chat_zoom", u.ChatZoom}} {
+		if z.v != 0 && (z.v < UIAsideZoomMin || z.v > UIAsideZoomMax) {
+			return fmt.Errorf("ui.%s %d: want %d..%d percent (or 0 for the client default)", z.key, z.v, UIAsideZoomMin, UIAsideZoomMax)
+		}
 	}
 	return nil
 }

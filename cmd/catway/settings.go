@@ -90,7 +90,9 @@ func (o *orch) ConfigSet(r app.Responder, p app.ConfigSetParams) {
 // burst's copy, and what broadcastUIPrefs pushes.
 func (o *orch) uiPrefsMsg() wire.UIPrefs {
 	u := o.cfg.UI
-	return wire.NewUIPrefs(u.FontPx, u.SidebarWidth, u.ShowUntitledPanes)
+	m := wire.NewUIPrefs(u.FontPx, u.SidebarWidth, u.ShowUntitledPanes)
+	m.SidebarZoom, m.ChatZoom = u.SidebarZoom, u.ChatZoom
+	return m
 }
 
 // broadcastUIPrefs pushes the "ui" section to every window when it differs
@@ -266,15 +268,16 @@ func applyOptions(cfg *config.Config, opts map[string]json.RawMessage) error {
 //     json writes INTO an existing map), so a removed row would survive the
 //     save. A "types" object in the request therefore REPLACES the map; a
 //     request without one leaves it alone, the usual partial-object rule.
+//
 //   - The file's map is merged key-wise over the defaults at load
 //     (config.parse), so a default tool (dbc, gonotes) simply left out of the
 //     saved map would come back on the next load. A default the new map does
 //     not name is written as "", the documented opt-out, so removing its row
 //     means what it looks like.
 //
-//	live: {dbc: db_client, gonotes: notes_mgr, mytool: x}
-//	sent: {gonotes: notes_mgr, other: y}
-//	kept: {dbc: "", gonotes: notes_mgr, other: y}      (mytool gone, dbc opted out)
+//     live: {dbc: db_client, gonotes: notes_mgr, mytool: x}
+//     sent: {gonotes: notes_mgr, other: y}
+//     kept: {dbc: "", gonotes: notes_mgr, other: y}      (mytool gone, dbc opted out)
 func applyToolTypes(cfg *config.Config, raw json.RawMessage) error {
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &fields); err != nil {

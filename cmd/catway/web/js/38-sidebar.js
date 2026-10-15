@@ -6,13 +6,14 @@
   // for free because it reads the same variable.
   //
   // A stored width is the BASE width: what the column measures at the default
-  // font size. The column on screen is that times the font zoom (uiZoom), so
-  // ⌘+ widens a dragged sidebar exactly as it widens the default one, and the
-  // text that just grew inside it does not start truncating:
+  // font size and the sidebar's own zoom at 100%. The column on screen is that
+  // times both zooms (sidebarZoom), so ⌘+ widens a dragged sidebar exactly as
+  // it widens the default one, and the text that just grew inside it does not
+  // start truncating:
   //
-  //   drag ── screen px ÷ uiZoom ──▶ sbwBase ──▶ localStorage / ui.sidebar_width
-  //                                     │
-  //   --sidebar-w = clamp(150px, sbwBase × --ui-zoom, 60vw)   ◀── CSS, live
+  //   drag ── screen px ÷ sidebarZoom ──▶ sbwBase ──▶ localStorage / ui.sidebar_width
+  //                                         │
+  //   --sidebar-w = clamp(150px, sbwBase × --ui-zoom × --sb-zoom, 60vw)   ◀── CSS, live
   //
   // Storing the base rather than the screen width is what keeps a zoom from
   // being a write: the multiplication happens in CSS against --ui-zoom, so a
@@ -29,10 +30,16 @@
   const SBW_KEY = "cats.sidebar_w", SBW_MIN = 150;
   const sbwMax = () => Math.max(SBW_MIN, Math.round(window.innerWidth * 0.6));
   let sbwBase = 0;   // 0 = no override: the stylesheet's own default width
+  // sidebarZoom is the factor the column's base is multiplied by on screen:
+  // the font zoom times the sidebar's own (asideZooms, 01-bootstrap.js). The
+  // same product the stylesheet takes in --sb-scale, as a number.
+  function sidebarZoom() {
+    return uiZoom() * asideZooms.sidebar.pct / 100;
+  }
   // sidebarWidthCSS is the --sidebar-w value for a base width. Kept in step
   // with the default's clamp in 01-theme.css.
   function sidebarWidthCSS(base) {
-    return "max(" + SBW_MIN + "px, min(calc(" + base + "px * var(--ui-zoom)), 60vw))";
+    return "max(" + SBW_MIN + "px, min(calc(" + base + "px * var(--ui-zoom) * var(--sb-zoom)), 60vw))";
   }
   // setSidebarBase applies (and remembers in this browser) a base width — the
   // unit stored in localStorage and in config.json's ui.sidebar_width.
@@ -47,7 +54,7 @@
   // base the window could never show; the floor is applied on the base.
   function setSidebarWidth(px) {
     px = Math.min(sbwMax(), Math.max(SBW_MIN, Math.round(px)));
-    setSidebarBase(px / uiZoom());
+    setSidebarBase(px / sidebarZoom());
   }
   try {
     const storedW = parseInt(localStorage.getItem(SBW_KEY), 10);
@@ -187,6 +194,10 @@
     persistUIPref("sidebar_width", 0); // back to "each browser's own default"
     sidebarResized(true);
   });
+
+  // The column's own zoom: ⌘+ / ⌘- / ⌘0 with the pointer over it, or
+  // Ctrl+wheel / pinch on it (attachAsideZoom, 01-bootstrap.js).
+  attachAsideZoom(document.getElementById("sidebar"), "sidebar");
 
 
   // ---- Section splitters ----

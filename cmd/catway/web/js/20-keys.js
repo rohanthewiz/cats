@@ -98,11 +98,34 @@
   // a host composition instead of the pane; onKey swallows their keyup.
   const composedCodes = new Set();
 
+  // zoomChord reads a keydown as a zoom step: +1 for ⌘+ (⌘= / ⌘⇧+ / numpad
+  // +), -1 for ⌘-, 0 for ⌘0, and null for anything else — keyups included,
+  // so a held chord steps once per autorepeat keydown and never twice.
+  // Matched on e.code so ⌘= and ⌘⇧+ are the same key, numpad included.
+  function zoomChord(e) {
+    if (e.type !== "keydown" || !e.metaKey || e.ctrlKey) return null;
+    switch (e.code) {
+      case "Equal": case "NumpadAdd": return 1;
+      case "Minus": case "NumpadSubtract": return -1;
+      case "Digit0": case "Numpad0": return 0;
+    }
+    return null;
+  }
+
   function onKey(e) {
     // The chat panel owns the keyboard while focus is inside it: composed
     // text must never reach a PTY, and terminal shortcuts (⌘V paste-to-pane,
     // font sizing) must not fire mid-composition.
-    if (chatEl.contains(document.activeElement)) return;
+    //
+    // The zoom chords are the one exception. Without it ⌘+ in the composer
+    // would fall to the browser's page zoom, the one zoom cats suppresses
+    // everywhere else; with it, ⌘+ while typing in the chat sizes the chat
+    // (zoomTarget prefers a focused chat when the pointer is on no column).
+    if (chatEl.contains(document.activeElement)) {
+      const d = zoomChord(e);
+      if (d !== null) { e.preventDefault(); zoomStep(d); }
+      return;
+    }
     // A key pressed while the host is composing text (an IME picking a
     // candidate, dictation's marked text) belongs to the composition, not to
     // the pane: forwarding it would type the raw key into the PTY AND the
@@ -208,17 +231,12 @@
     const isV = e.key === "v" || e.key === "V";
     if (e.type === "keydown" && e.metaKey && !e.ctrlKey && isV) { e.preventDefault(); pasteText(); return; }
     // ⌘+ / ⌘- / ⌘0 size the terminal type instead of zooming the browser (page
-    // zoom would blur the canvas and leave the grid math on the old cell size).
-    // Matched on e.code so ⌘= and ⌘⇧+ are the same key, numpad included.
-    if (e.type === "keydown" && e.metaKey && !e.ctrlKey) {
-      switch (e.code) {
-        case "Equal": case "NumpadAdd":
-          e.preventDefault(); setFontSize(FONT_PX + 1); return;
-        case "Minus": case "NumpadSubtract":
-          e.preventDefault(); setFontSize(FONT_PX - 1); return;
-        case "Digit0": case "Numpad0":
-          e.preventDefault(); setFontSize(FONT_DEFAULT); return;
-      }
+    // zoom would blur the canvas and leave the grid math on the old cell size)
+    // — or, with the pointer over the sidebar or the chat panel, just that
+    // column (zoomStep / zoomTarget in 01-bootstrap.js).
+    {
+      const d = zoomChord(e);
+      if (d !== null) { e.preventDefault(); zoomStep(d); return; }
     }
     // ⌘← / ⌘→ — the macOS line-start / line-end convention — delivered to
     // the pane as Home / End. The chord itself cannot be forwarded: on a

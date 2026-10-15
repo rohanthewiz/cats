@@ -21,6 +21,10 @@
   }
   chatBtnEl.addEventListener("click", () => setChatOpen(!chatIsOpen()));
   try { if (localStorage.getItem(CHAT_KEY)) document.body.classList.add("chat-open"); } catch (e) { /* closed */ }
+  // The panel's own zoom, independent of the sidebar's: ⌘+ / ⌘- / ⌘0 with the
+  // pointer over it or while typing in it, Ctrl+wheel / pinch on it
+  // (attachAsideZoom, 01-bootstrap.js).
+  attachAsideZoom(chatEl, "chat");
 
   // chatNudge marks the chip when something worth seeing (a permission
   // prompt, a dead agent) happens while the panel is closed.

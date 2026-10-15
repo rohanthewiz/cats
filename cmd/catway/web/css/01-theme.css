@@ -118,12 +118,19 @@
        Ctrl+wheel / a ui_prefs push changes the font. 1 here is the default font
        and the value a page without JS (or before boot) renders at. */
     --ui-zoom:1;
+    /* --sb-zoom / --chat-zoom are the two side columns' OWN zooms, as ratios
+       (ui.sidebar_zoom / ui.chat_zoom ÷ 100), written by applyAsideZoom
+       (01-bootstrap.js) when ⌘+ / ⌘- / Ctrl+wheel land over that column.
+       Each multiplies --ui-zoom rather than replacing it, so a zoom over the
+       panes still moves both columns and a zoom over one column moves only it. */
+    --sb-zoom:1; --chat-zoom:1;
     /* --sb-scale sizes the whole left column as one unit: the column width and
        every type size inside it are expressed against it, so the sidebar grows
        or shrinks without any of its parts drifting out of proportion. It rides
        --ui-zoom, so zooming the panes zooms the sidebar with them — 1.15 is
-       still the column's own size at the default font, the zoom multiplies it. */
-    --sb-scale:calc(1.15 * var(--ui-zoom));
+       still the column's own size at the default font, the zoom multiplies it,
+       and --sb-zoom multiplies again for the column's own ⌘+. */
+    --sb-scale:calc(1.15 * var(--ui-zoom) * var(--sb-zoom));
     /* Sidebar column width. Anything else that has to clear the sidebar (the
        banner) reads it from here so the two can't drift apart. Clamped the way
        a dragged width is (sidebarWidthCSS, 38-sidebar.js): never under the
@@ -134,6 +141,11 @@
     /* Chat column width. 0 keeps the grid math identical to the pre-chat
        layout when the panel is closed; body.chat-open widens it. */
     --chat-w:0px;
+    /* --chat-scale is --sb-scale's twin for the chat panel: every type size in
+       14-chat.css and the open column's width (02-layout.css) are calc()s
+       against it. 1 at the default font and an unzoomed panel, i.e. exactly
+       the panel's old fixed sizes. */
+    --chat-scale:calc(var(--ui-zoom) * var(--chat-zoom));
     /* Splitter column width. Its own variable because the folded sidebar widens
        it (body.sb-hidden) to carry a visible reveal handle, and #banner has to
        clear both tracks to sit flush against the terminals. */

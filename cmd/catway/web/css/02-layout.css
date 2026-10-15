@@ -1,4 +1,8 @@
-  body.chat-open { --chat-w:340px; }
+  /* The open chat column grows with its text (--chat-scale). Capped at 40% of
+     the window so a zoomed panel cannot crowd the terminals out, but never
+     capped under the old fixed 340px — at scale 1 the column is what it
+     always was, on any window. */
+  body.chat-open { --chat-w:min(calc(340px * var(--chat-scale)), max(340px, 40vw)); }
   html,body { margin:0; height:100%; background:var(--bg); color:var(--fg);
     font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; overflow:hidden; }
   #app { position:fixed; inset:0; display:grid; grid-template-columns:var(--sidebar-w) var(--gutter-w) 1fr var(--chat-w); }

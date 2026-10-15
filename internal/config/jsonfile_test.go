@@ -32,7 +32,7 @@ func TestSaveLoadJSONRoundTrip(t *testing.T) {
 	cfg := Default()
 	cfg.Panes.ReapExited = "2h"
 	cfg.Theme.Name = "darcula"
-	cfg.UI = UI{FontPx: 16, SidebarWidth: 240, ShowUntitledPanes: true}
+	cfg.UI = UI{FontPx: 16, SidebarWidth: 240, SidebarZoom: 120, ChatZoom: 90, ShowUntitledPanes: true}
 	if err := Save(path, cfg); err != nil {
 		t.Fatal(err)
 	}
@@ -217,6 +217,9 @@ func TestUIValidation(t *testing.T) {
 		{UI{FontPx: 4}, false},
 		{UI{FontPx: 99}, false},
 		{UI{SidebarWidth: 20}, false},
+		{UI{SidebarZoom: 50, ChatZoom: 250}, true},
+		{UI{SidebarZoom: 40}, false},
+		{UI{ChatZoom: 260}, false},
 	}
 	for _, c := range cases {
 		cfg := Default()

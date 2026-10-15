@@ -19,13 +19,56 @@
     const filePx = (window.__catsUI || {}).font_px;
     if (filePx >= FONT_MIN && filePx <= FONT_MAX) FONT_PX = filePx;
   }
+
+  // ---- Per-aside zoom ----
+  // The two side columns — the left sidebar (#sidebar) and the right chat
+  // panel (#chat), both <aside> — each carry a zoom of their own, in percent.
+  // It MULTIPLIES the font zoom rather than replacing it:
+  //
+  //   column scale = uiZoom (FONT_PX / 14)  ×  aside zoom (pct / 100)
+  //                  └ ⌘+ over the panes ┘    └ ⌘+ / Ctrl+wheel over the column ┘
+  //
+  // so the one gesture everybody already knows still grows the whole window
+  // together, and the same gesture made over a column adjusts just that
+  // column against it. Keeping the font zoom as a factor (instead of letting
+  // each column own an absolute size) is what keeps the previous behaviour
+  // intact for anyone who never zooms a column: both factors default to 100.
+  //
+  // Percent ints, not ratios, because that is what config.json stores (an
+  // all-int "ui" section where 0 means unset) and a 10% step is the browser's
+  // own page-zoom granularity. Bounds mirror config.go's UIAsideZoomMin/Max.
+  const ASIDE_ZOOM_DEFAULT = 100, ASIDE_ZOOM_MIN = 50, ASIDE_ZOOM_MAX = 250, ASIDE_ZOOM_STEP = 10;
+  // One record per column. `cssVar` is the ratio the stylesheet multiplies
+  // into that column's scale (01-theme.css); `key` / `pref` are where it is
+  // remembered — this browser's localStorage, and config.json's ui section.
+  const asideZooms = {
+    sidebar: { pct: ASIDE_ZOOM_DEFAULT, key: "cats.sidebar_zoom", pref: "sidebar_zoom", cssVar: "--sb-zoom" },
+    chat: { pct: ASIDE_ZOOM_DEFAULT, key: "cats.chat_zoom", pref: "chat_zoom", cssVar: "--chat-zoom" },
+  };
+  // Same precedence as the font size above: built-in default, then this
+  // browser's memory, then the file when it says anything.
+  for (const name of Object.keys(asideZooms)) {
+    const z = asideZooms[name];
+    try {
+      const stored = parseInt(localStorage.getItem(z.key), 10);
+      if (stored >= ASIDE_ZOOM_MIN && stored <= ASIDE_ZOOM_MAX) z.pct = stored;
+    } catch (e) { /* storage disabled — keep the default */ }
+    const filePct = (window.__catsUI || {})[z.pref];
+    if (filePct >= ASIDE_ZOOM_MIN && filePct <= ASIDE_ZOOM_MAX) z.pct = filePct;
+    applyAsideZoom(name);
+  }
+  // zoomHover names the column under the pointer ("sidebar" / "chat"), or ""
+  // over anything else. Kept by pointerenter/leave (attachAsideZoom) rather
+  // than looked up per keystroke, because a key event carries no pointer
+  // position to look it up from.
+  let zoomHover = "";
   applyUIZoom();
 
   // uiZoom is the font zoom as a ratio of the default size — 1 at 14px, 2 at
   // 28px. The terminal font is the one zoom control cats has (⌘+ / ⌘- /
   // Ctrl+wheel; the browser's own page zoom is suppressed, see 20-keys.js), so
-  // whatever else should grow with the panes reads this ratio rather than
-  // keeping a zoom of its own: today that is the left sidebar.
+  // whatever else should grow with the panes reads this ratio: today the two
+  // side columns, each of which multiplies its own zoom on top (asideZooms).
   function uiZoom() {
     return FONT_PX / FONT_DEFAULT;
   }
@@ -314,7 +357,90 @@
   // Hook for the mac app's View menu. In a WKWebView, Cocoa resolves ⌘+/⌘-/⌘0
   // as menu key equivalents before the page's keydown handler runs, so the
   // native menu items call back into Go, which Evals this. delta of 0 resets.
-  window.catsAdjustFont = (delta) => setFontSize(delta ? FONT_PX + delta : FONT_DEFAULT);
+  // Routed through zoomStep, so the menu items zoom whatever the pointer is
+  // over exactly as the in-page chord does.
+  window.catsAdjustFont = (delta) => zoomStep(delta);
+
+  // applyAsideZoom publishes one column's zoom as its ratio custom property
+  // (--sb-zoom / --chat-zoom) on <html>. Like --ui-zoom, that one write is the
+  // whole rescale: every size in the column is a calc() against it.
+  function applyAsideZoom(name) {
+    const z = asideZooms[name];
+    document.documentElement.style.setProperty(z.cssVar, String(z.pct / 100));
+  }
+
+  // setAsideZoom is setFontSize's twin for one side column: clamp, apply,
+  // remember (localStorage now, config.json debounced via persistUIPref), and
+  // re-derive the pane grid. That last step is not optional — both columns
+  // are #app grid tracks whose width rides their zoom (--sidebar-w,
+  // --chat-w), so a zoomed column narrows or widens #panes exactly like a
+  // gutter drag, and the server has to hear the new cols/rows.
+  //
+  // A reset persists 100 rather than 0 (unset), as ⌘0 persists 14 for the
+  // font: "back to normal" is a choice that should reach the other windows,
+  // and an unset value would leave each of them at whatever it last had.
+  function setAsideZoom(name, pct) {
+    const z = asideZooms[name];
+    pct = Math.min(ASIDE_ZOOM_MAX, Math.max(ASIDE_ZOOM_MIN, Math.round(pct)));
+    if (pct === z.pct) return;
+    z.pct = pct;
+    try { localStorage.setItem(z.key, String(pct)); } catch (e) { /* not persisted */ }
+    persistUIPref(z.pref, pct);
+    applyAsideZoom(name);
+    sidebarResized(true);
+    toast(`${name} ${pct}%`);
+  }
+
+  // zoomTarget decides what a zoom chord (⌘+ / ⌘- / ⌘0, or the Mac app's View
+  // menu) applies to:
+  //
+  //   pointer over the sidebar ─▶ "sidebar"
+  //   pointer over the chat ────▶ "chat"
+  //   focus in the chat ────────▶ "chat"   (typing in the composer, pointer elsewhere)
+  //   anything else ────────────▶ ""       (the terminal font, as before)
+  //
+  // The pointer wins over focus because it is the more deliberate signal:
+  // keyboard focus lingers wherever the last click left it, while moving the
+  // mouse onto a column right before ⌘+ is pointing at what should change.
+  // A hover recorded on a column that has since gone away (⌘B folding the
+  // sidebar, or the chat closing, under a still pointer — no pointerleave
+  // fires for an element that stops rendering) is ignored rather than trusted.
+  function zoomTarget() {
+    if (zoomHover === "sidebar" && !sidebarHidden()) return "sidebar";
+    if (zoomHover === "chat" && chatIsOpen()) return "chat";
+    if (chatIsOpen() && chatEl.contains(document.activeElement)) return "chat";
+    return "";
+  }
+
+  // zoomStep applies one zoom step (+1 bigger, -1 smaller, 0 reset) to
+  // whatever zoomTarget names. A font step is one px; a column step is
+  // ASIDE_ZOOM_STEP percent.
+  function zoomStep(delta) {
+    const t = zoomTarget();
+    if (!t) { setFontSize(delta ? FONT_PX + delta : FONT_DEFAULT); return; }
+    setAsideZoom(t, delta ? asideZooms[t].pct + delta * ASIDE_ZOOM_STEP : ASIDE_ZOOM_DEFAULT);
+  }
+
+  // attachAsideZoom wires one column to its zoom: hover tracking for the
+  // keyboard chords (zoomTarget), and Ctrl+wheel / pinch for the wheel —
+  // the column twin of the pane canvas's own Ctrl+wheel (24-upload.js), with
+  // the same step accumulator so a trackpad pinch moves 10% at a time rather
+  // than racing to the bound. The accumulator object is the column's own, so
+  // a gesture over one column never banks travel for the other. A plain
+  // wheel is left alone: it scrolls the column, as it always did.
+  function attachAsideZoom(el, name) {
+    el.addEventListener("pointerenter", () => { zoomHover = name; });
+    el.addEventListener("pointerleave", () => { if (zoomHover === name) zoomHover = ""; });
+    const acc = {};
+    el.addEventListener("wheel", (ev) => {
+      if (!ev.ctrlKey || ev.metaKey || ev.altKey) return;
+      // Non-passive for this: without it the browser would page-zoom the
+      // whole window (and blur every pane canvas) instead.
+      ev.preventDefault();
+      const step = fontWheelStep(acc, ev.deltaY, ev.deltaMode === 1 ? 16 : 1);
+      if (step) setAsideZoom(name, asideZooms[name].pct + step * ASIDE_ZOOM_STEP);
+    }, { passive: false });
+  }
 
 
   // ---- Startup reporting to the native launcher ----

@@ -111,7 +111,7 @@ func keybindingsScript(k config.Keybindings) string {
 }
 
 // uiPrefsScript publishes the config file's front-end preferences as
-// window.__catsUI (font_px, sidebar_width). Only set fields are emitted — an
+// window.__catsUI (font_px, sidebar_width, sidebar_zoom, chat_zoom). Only set fields are emitted — an
 // empty object means "the file says nothing", and the page then keeps whatever
 // this browser last used (its localStorage), exactly as before the section
 // existed. When a field IS set the file wins over localStorage: that is what

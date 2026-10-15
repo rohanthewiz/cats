@@ -1021,8 +1021,8 @@ func NewPluginNotice(failedDefaults []string) PluginNotice {
 // browser follows the user into the others already open, as it already did
 // into the next one loaded.
 //
-// The two sizes keep the config's "0 = unset" meaning, so they are omitempty:
-// an absent size tells the page to keep whatever it has. ShowUntitledPanes is
+// The sizes and the two side-column zooms keep the config's "0 = unset"
+// meaning, so they are omitempty: an absent size tells the page to keep whatever it has. ShowUntitledPanes is
 // always sent, because its false is a value (the default) that must be able to
 // turn a true back off.
 //
@@ -1034,10 +1034,15 @@ type UIPrefs struct {
 	T                 Type `json:"t"`
 	FontPx            int  `json:"font_px,omitempty"`
 	SidebarWidth      int  `json:"sidebar_width,omitempty"`
+	SidebarZoom       int  `json:"sidebar_zoom,omitempty"` // percent; 0 = unset
+	ChatZoom          int  `json:"chat_zoom,omitempty"`    // percent; 0 = unset
 	ShowUntitledPanes bool `json:"show_untitled_panes"`
 }
 
-// NewUIPrefs builds the message.
+// NewUIPrefs builds the message. The two side-column zooms are set on the
+// result by the caller (uiPrefsMsg) rather than added here as two more
+// positional ints, so existing callers keep compiling and a reader never has
+// to count which int is which.
 func NewUIPrefs(fontPx, sidebarWidth int, showUntitledPanes bool) UIPrefs {
 	return UIPrefs{T: MsgUIPrefs, FontPx: fontPx, SidebarWidth: sidebarWidth, ShowUntitledPanes: showUntitledPanes}
 }

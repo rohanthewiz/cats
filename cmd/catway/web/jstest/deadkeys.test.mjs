@@ -12,7 +12,10 @@ function world() {
   const sent = [];
   const f = loadFns({
     files: ["20-keys.js"],
-    names: ["onKey"],
+    // zoomChord is onKey's own helper (same file); zoomStep is never reached
+    // by these keys, so it is a stub.
+    names: ["onKey", "zoomChord"],
+    stubs: ["zoomStep"],
     env: {
       chatEl: { contains: () => false },
       document: { activeElement: null },

@@ -233,6 +233,10 @@
       const uiOpts = (cfg.options && cfg.options.ui) || {};
       const uiFont = numInput(row("font size"), uiOpts.font_px, 9, 32, "px — blank: each browser's own (⌘+ / ⌘-)");
       const uiSbw = numInput(row("sidebar width"), uiOpts.sidebar_width, 150, 2000, "px at the default font size, ⌘+ scales it — blank: each browser's own (drag the gutter)");
+      // The side columns' own zooms (asideZooms, 01-bootstrap.js), on top of
+      // the font size. Bounds are config.go's UIAsideZoomMin / UIAsideZoomMax.
+      const uiSbZoom = numInput(row("sidebar zoom"), uiOpts.sidebar_zoom, 50, 250, "% — blank: each browser's own (⌘+ / ⌘- over the sidebar)");
+      const uiChatZoom = numInput(row("chat zoom"), uiOpts.chat_zoom, 50, 250, "% — blank: each browser's own (⌘+ / ⌘- over the chat)");
       // A checkbox rather than a third number box: off is the default, and
       // off is also what an absent key reads as, so the box never needs a
       // "blank" state of its own.
@@ -334,7 +338,10 @@
           if (err) { errEl.textContent = err; return; }
           if (obj) options[section] = obj;
         }
-        const ui = uiChanges(uiOpts, uiFont, uiSbw, uiUntitled);
+        const ui = uiChanges(uiOpts, {
+          font_px: [uiFont, "font size"], sidebar_width: [uiSbw, "sidebar width"],
+          sidebar_zoom: [uiSbZoom, "sidebar zoom"], chat_zoom: [uiChatZoom, "chat zoom"],
+        }, uiUntitled);
         if (ui.err) { errEl.textContent = ui.err; return; }
         if (ui.obj) options.ui = ui.obj;
         let appOut = null;
@@ -623,10 +630,11 @@
     return i;
   }
 
-  // uiChanges reads the interface controls against the file's values. All
-  // three travel together once any one changed: config.set decodes the section
-  // onto the file's current value, so the unchanged two land as no-ops.
-  function uiChanges(orig, fontEl, sbwEl, untitledEl) {
+  // uiChanges reads the interface controls against the file's values. `nums`
+  // maps each numeric key to its [input, label]. All the fields travel
+  // together once any one changed: config.set decodes the section onto the
+  // file's current value, so the unchanged ones land as no-ops.
+  function uiChanges(orig, nums, untitledEl) {
     const read = (el, label) => {
       const t = el.value.trim();
       if (t === "") return 0;
@@ -634,18 +642,22 @@
       if (!/^\d+$/.test(t) || n < lo || n > hi) return new Error(label + ": want " + lo + "–" + hi + ", or blank");
       return n;
     };
-    const font = read(fontEl, "font size"), sbw = read(sbwEl, "sidebar width");
-    if (font instanceof Error) return { err: font.message };
-    if (sbw instanceof Error) return { err: sbw.message };
-    const untitled = !!untitledEl.checked;
-    if (font === (orig.font_px || 0) && sbw === (orig.sidebar_width || 0) &&
-      untitled === !!orig.show_untitled_panes) return {};
-    return { obj: { font_px: font, sidebar_width: sbw, show_untitled_panes: untitled } };
+    const obj = {};
+    let changed = false;
+    for (const key of Object.keys(nums)) {
+      const v = read(nums[key][0], nums[key][1]);
+      if (v instanceof Error) return { err: v.message };
+      obj[key] = v;
+      if (v !== (orig[key] || 0)) changed = true;
+    }
+    obj.show_untitled_panes = !!untitledEl.checked;
+    if (obj.show_untitled_panes !== !!orig.show_untitled_panes) changed = true;
+    return changed ? { obj } : {};
   }
 
   // ---- front-end preferences ↔ config.json ------------------------------------
   //
-  // Font size and sidebar width start from the file (window.__catsUI, baked
+  // Font size, sidebar width and the side columns' zooms start from the file (window.__catsUI, baked
   // into the page by catway) when it has them, else from this browser's
   // localStorage, else the built-in default — see 01-bootstrap.js and
   // 38-sidebar.js. A change made the ordinary way (⌘+, a gutter drag) is
@@ -675,6 +687,9 @@
     if (ui.font_px) setFontSize(ui.font_px);
     // A base width (see setSidebarBase): the zoom is applied in CSS on top.
     if (ui.sidebar_width) { setSidebarBase(ui.sidebar_width); sidebarResized(true); }
+    // The side columns' own zooms; setAsideZoom re-derives the grid itself.
+    if (ui.sidebar_zoom) setAsideZoom("sidebar", ui.sidebar_zoom);
+    if (ui.chat_zoom) setAsideZoom("chat", ui.chat_zoom);
     // Redrawn on the spot rather than left for the next push: in a quiet
     // session that push could be minutes away, and the save should show.
     if ("show_untitled_panes" in ui && layoutMsg) renderWorkspaces(layoutMsg);
@@ -699,7 +714,7 @@
   // so their persistUIPref sees the file already agreeing and writes nothing.
   function applyUIPrefsPush(msg) {
     const ui = {};
-    for (const k of ["font_px", "sidebar_width"]) {
+    for (const k of ["font_px", "sidebar_width", "sidebar_zoom", "chat_zoom"]) {
       const v = msg[k] || 0;
       if (!v) { delete uiPrefsFile[k]; continue; }
       if (v !== (uiPrefsFile[k] || 0)) ui[k] = v;

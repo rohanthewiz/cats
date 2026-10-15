@@ -383,6 +383,17 @@ func TestConfigSetBroadcastsUIPrefs(t *testing.T) {
 		t.Fatalf("expected a ui_prefs push with font_px 17 and untitled on, got %#v", m)
 	}
 
+	// The side columns' own zooms ride the same push (asideZooms in
+	// 01-bootstrap.js), so a column zoomed in one window follows into the rest.
+	o.handleCmd(c, cmd(t, "c1z", browserproto.CmdConfigSet, browserproto.ConfigSetParams{
+		Options: map[string]json.RawMessage{"ui": json.RawMessage(`{"sidebar_zoom":120,"chat_zoom":140}`)},
+	}))
+	expectOK(t, c, "config.set ui zooms")
+	expectThemePush(t, c)
+	if m, ok := recvDown(t, c).(*wire.UIPrefs); !ok || m.SidebarZoom != 120 || m.ChatZoom != 140 || m.FontPx != 17 {
+		t.Fatalf("expected a ui_prefs push carrying both zooms and the earlier font, got %#v", m)
+	}
+
 	o.handleCmd(c, cmd(t, "c2", browserproto.CmdConfigSet, browserproto.ConfigSetParams{
 		Options: map[string]json.RawMessage{"panes": json.RawMessage(`{"reap_exited":"30m"}`)},
 	}))

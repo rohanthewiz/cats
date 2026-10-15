@@ -23,7 +23,11 @@ peers keep their own dialogs.
   rewrites it; each process rewrites only its own sections, under a lock.
 - **`ui`** holds front-end preferences that follow you between browsers:
   `font_px` (9–32) and `sidebar_width` (≥150). ⌘+/⌘- and dragging the sidebar
-  gutter write them; unset means each browser keeps its own. It also holds
+  gutter write them; unset means each browser keeps its own. `sidebar_zoom`
+  and `chat_zoom` (percent, 50–250) are the left sidebar's and the right chat
+  panel's own zooms, multiplied on top of the font size: ⌘+/⌘-/⌘0 or
+  Ctrl+wheel with the pointer over a column (or while typing in the chat)
+  zoom just that column and write its value. It also holds
   `show_untitled_panes` (default `false`): a workspace row's pane dropdown
   leaves out panes that have no title, neither a rename nor one their program
   set, unless they are flagged or running an agent. Set it to `true`

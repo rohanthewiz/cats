@@ -62,6 +62,9 @@
         ["rename pane / tab / workspace", ["double-click its title"]],
         ["scrollback", ["wheel", "drag the scrollbar"]],
         ["bigger / smaller font", ["Ctrl+wheel", "pinch"]],
+        // zoomTarget (01-bootstrap.js): the gesture over a side column
+        // zooms that column alone, on top of the font size.
+        ["zoom just the sidebar / chat", ["⌘+ / ⌘- over it", "Ctrl+wheel over it"]],
         // Unconditional, unlike the ⌘[ / ⌘] twins: an editor pane never
         // takes these, so this is the gesture that always means cats'.
         ["back / forward (pane & workspace history)", ["back / forward buttons"]],

@@ -9,19 +9,20 @@
 
 import { loadFns, eq, has, ok, report } from "./testutil.mjs";
 
-function world(fontPx, innerWidth) {
+function world(fontPx, innerWidth, sbZoomPct) {
   const props = {};
   const stored = {};
   const env = {
     FONT_PX: fontPx,
     sbwBase: 0,
+    asideZooms: { sidebar: { pct: sbZoomPct || 100 } },
     window: { innerWidth: innerWidth || 2000 },
     document: { documentElement: { style: { setProperty: (k, v) => { props[k] = v; } } } },
     localStorage: { setItem: (k, v) => { stored[k] = v; } },
   };
   const f = loadFns({
     files: ["01-bootstrap.js", "38-sidebar.js"],
-    names: ["uiZoom", "sidebarWidthCSS", "setSidebarBase", "setSidebarWidth"],
+    names: ["uiZoom", "sidebarZoom", "sidebarWidthCSS", "setSidebarBase", "setSidebarWidth"],
     consts: ["FONT_DEFAULT", "SBW_KEY", "sbwMax"],
     env,
     lets: ["sbwBase"],
@@ -40,12 +41,26 @@ eq(world(28).f.uiZoom(), 2, "twice the font is zoom 2");
   const { f, stored, props } = world(14);
   f.setSidebarWidth(300);
   eq(stored["cats.sidebar_w"], "300", "at the default font, base = screen width");
-  has(props["--sidebar-w"], "300px * var(--ui-zoom)", "and the CSS multiplies it by the zoom");
+  has(props["--sidebar-w"], "300px * var(--ui-zoom) * var(--sb-zoom)", "and the CSS multiplies it by both zooms");
 }
 {
   const { f, stored } = world(21);
   f.setSidebarWidth(300);
   eq(stored["cats.sidebar_w"], "200", "a 300px drag at 1.5× zoom banks 200 — what it is at 1×");
+}
+
+{
+  // The sidebar's own zoom divides out the same way: at 14px type and a 150%
+  // sidebar, a 300px column is a 200 base.
+  const { f, stored } = world(14, 2000, 150);
+  eq(f.sidebarZoom(), 1.5, "the column factor is font zoom × sidebar zoom");
+  f.setSidebarWidth(300);
+  eq(stored["cats.sidebar_w"], "200", "a 300px drag on a 150% sidebar banks 200");
+}
+{
+  const { f, stored } = world(21, 2000, 200);
+  f.setSidebarWidth(600);
+  eq(stored["cats.sidebar_w"], "200", "and the two zooms compose: 600 ÷ (1.5 × 2) = 200");
 }
 
 // ---- the clamps ------------------------------------------------------------------------
