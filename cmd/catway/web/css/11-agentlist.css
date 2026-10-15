@@ -93,3 +93,13 @@
      show one dot among others, where the full green still earns its place. */
   :is(#agent-list, #plugin-list) .adot.st-idle { color:#79be86; }
   :is(#agent-list, #plugin-list) .adot.st-idle { color:color-mix(in srgb, var(--ok) 70%, var(--muted)); }
+
+  /* The blank dot (new or cleared), white here rather than the light brown it
+     shows everywhere else. AGENTS is the list read top to bottom for "who can
+     take a prompt", and a fresh conversation is the most open answer to that,
+     so it gets the plainest, brightest mark — while the softened idle green
+     above stays the quiet resting colour. --fg-bright rather than a literal
+     #fff: it is white on every dark built-in and flips to near-black on the
+     light ones, where a white dot would vanish into the panel. Scoped like the
+     idle rule: the pane rows, header and workspace badge keep --blank. */
+  :is(#agent-list, #plugin-list) .adot.st-blank { color:var(--fg-bright); }

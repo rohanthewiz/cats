@@ -8,7 +8,8 @@
   // markerState folds a rollup item's flags into the display state:
   // idle+unseen renders as the "done" attention tier (cats's teal dot), and an
   // idle agent whose conversation has had nothing asked of it — a fresh launch
-  // or a /clear (it.blank: "new" | "cleared") — as "blank", a light-brown dot.
+  // or a /clear (it.blank: "new" | "cleared") — as "blank", a light-brown dot
+  // (white in AGENTS; see 11-agentlist.css).
   // Blank is checked first: a blank conversation has done no work, so an
   // unseen flag still standing from the conversation before a /clear is stale.
   function markerState(it) {
