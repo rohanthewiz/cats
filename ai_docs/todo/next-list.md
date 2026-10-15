@@ -38,7 +38,7 @@ window were dated by grepping every session doc.
   Open (or Validate, for a check, or Roadmap, for future work) with the next
   ID.
 
-**Next ID:** N-064
+**Next ID:** N-066
 
 ## Open
 
@@ -70,6 +70,13 @@ window were dated by grepping every session doc.
   through MVS. That is what raised gonotes' `rweb` v0.1.26 → v0.1.31. Cats
   itself would then need the tag (or a workspace) to edit both together, and
   the `go get cats@…` flow in cats-mobile must not see a `replace`.
+
+- **N-065** · raised `2026-1015-1507-n064-workspace-last-pane-sleeps` · value low
+  The auto-close header still reads "close in Ns" on a workspace's last pane,
+  where the countdown now ends in the workspace going to sleep
+  (`Session.RetirePane`), not a close. Say "sleep in Ns" there, which needs
+  `pane_exited` to carry which outcome is coming (`CanRetirePane` /
+  `retireSleeps` already know).
 
 ## Validate
 
@@ -257,6 +264,14 @@ and `raised`.
   there, check that the restarted server holds `~/.gonotes/data/*.bytdb.lock`.
   The running one (an Oct 12 `go run` build) had the databases open without
   the lock, so a second gonotes could open them at the same time.
+
+- **N-064** · raised `2026-1015-1507-n064-workspace-last-pane-sleeps` · value medium
+  Workspace-preserving auto-close and reap (cats `7e4647f`). After rebuilding
+  and reinstalling the Mac app, open a throwaway single-pane workspace, run
+  `exit` in it, and check that ten seconds later it shows under Asleep rather
+  than vanishing, with a "put to sleep" warning in
+  `~/Library/Application Support/cats/daemons.log`. The reaper path (4h) is
+  covered by tests only.
 
 ## Roadmap
 
