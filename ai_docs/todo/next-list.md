@@ -38,7 +38,7 @@ window were dated by grepping every session doc.
   Open (or Validate, for a check, or Roadmap, for future work) with the next
   ID.
 
-**Next ID:** N-061
+**Next ID:** N-064
 
 ## Open
 
@@ -62,6 +62,14 @@ window were dated by grepping every session doc.
   The context used/window segment on agent rows (`43k/1M`) is claude-only.
   Copilot's `events.jsonl` would need its own reader, if it records usage at
   all (`lastCopilotModel`, `cmd/catway/agentmodel.go`).
+
+- **N-063** · raised `2026-1015-1022-buildbadge-package-and-gonotes` · value low
+  Make `buildbadge/` its own Go module (a nested `go.mod`, tagged
+  `buildbadge/vX.Y.Z`) so a project importing it downloads ~300 lines rather
+  than the whole ~33 MB cats module, and stops inheriting cats' requirements
+  through MVS. That is what raised gonotes' `rweb` v0.1.26 → v0.1.31. Cats
+  itself would then need the tag (or a workspace) to edit both together, and
+  the `go get cats@…` flow in cats-mobile must not see a `replace`.
 
 ## Validate
 
@@ -229,6 +237,26 @@ and `raised`.
   or the /clear, and survive a catway restart. Only unit-tested so far, plus
   a classifier run against real transcripts on this machine and scratch
   catways with stand-in claude processes for the dot and the origin.
+
+- **N-061** · raised `2026-1015-1022-buildbadge-package-and-gonotes` · value low
+  The cats side of the build badge now mounts through the shared package
+  (`BuildBadge.mount` in `js/10-buildbadge.js`, with `armTip`/`showTip` as
+  its show/hide hooks), and nobody has looked at it in a real page. In a
+  stamped catway (`make binaries`) or Cats.app: the hash sits beside the
+  wordmark in the `small.hash` style, the card opens only after the
+  sidebar's dwell (and on contact within the warm window), shows Build /
+  Commit / When with "· Nh ago", and closes on leave, a press, a key and
+  window blur. Covered so far only by the package's node test, the
+  page-injection Go tests and a headless render of gonotes.
+
+- **N-062** · raised `2026-1015-1022-buildbadge-package-and-gonotes` · value low
+  The gonotes rollout of the badge (gonotes `619126f`). Restart the live
+  gonotes server from a stamped build and relink the cats plugin
+  (`catctl plugin link .`, since `bin/gonotes` only refreshes then), then
+  check the badge beside the GN logo in the real UI and the Mac app. While
+  there, check that the restarted server holds `~/.gonotes/data/*.bytdb.lock`.
+  The running one (an Oct 12 `go run` build) had the databases open without
+  the lock, so a second gonotes could open them at the same time.
 
 ## Roadmap
 
