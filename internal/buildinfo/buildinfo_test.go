@@ -10,10 +10,16 @@ import (
 // sync.Once has usually fired already by the time a test calls it.
 func stamp(t *testing.T, hashVal, subject string) Info {
 	t.Helper()
-	oldHash, oldSubj, oldRes := hash, subjectB64, resolved
-	t.Cleanup(func() { hash, subjectB64, resolved = oldHash, oldSubj, oldRes })
+	return stampWhen(t, hashVal, subject, "")
+}
 
-	hash, subjectB64, resolved = hashVal, subject, Info{}
+// stampWhen is stamp with a commit time as well.
+func stampWhen(t *testing.T, hashVal, subject, whenVal string) Info {
+	t.Helper()
+	oldHash, oldSubj, oldWhen, oldRes := hash, subjectB64, when, resolved
+	t.Cleanup(func() { hash, subjectB64, when, resolved = oldHash, oldSubj, oldWhen, oldRes })
+
+	hash, subjectB64, when, resolved = hashVal, subject, whenVal, Info{}
 	resolve()
 	return resolved
 }
@@ -63,5 +69,27 @@ func TestResolveUnstampedFallback(t *testing.T) {
 	}
 	if got.Hash != "" && len(got.Hash) != 7 {
 		t.Errorf("fallback hash = %q, want empty or 7 chars", got.Hash)
+	}
+}
+
+// A stamped commit time in the committer's own offset is normalised to UTC, so
+// the stamped and toolchain paths hand the page the same shape.
+func TestResolveWhenNormalisesToUTC(t *testing.T) {
+	got := stampWhen(t, "abc1234", "", "2026-10-15T09:41:07-05:00")
+	if got.When != "2026-10-15T14:41:07Z" {
+		t.Errorf("when = %q, want 2026-10-15T14:41:07Z", got.When)
+	}
+}
+
+// A malformed stamp is dropped rather than passed on for the page to render as
+// "Invalid Date". The toolchain may still fill it in, so assert only that what
+// remains is a valid RFC 3339 time or nothing.
+func TestResolveWhenBadStamp(t *testing.T) {
+	got := stampWhen(t, "abc1234", "", "last tuesday")
+	if got.When == "last tuesday" {
+		t.Fatalf("malformed when passed through: %q", got.When)
+	}
+	if got.When != "" && normWhen(got.When) != got.When {
+		t.Errorf("when = %q, want empty or RFC 3339 UTC", got.When)
 	}
 }

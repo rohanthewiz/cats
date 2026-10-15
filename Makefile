@@ -23,12 +23,14 @@ DIST     := dist/cats_$(VERSION)_$(GOOS)_$(GOARCH)
 # quickest way to spot a stale install. The commit subject rides base64-encoded
 # because it is free to contain spaces, quotes and '$', none of which survive a
 # recipe's -ldflags string intact, while base64's alphabet is inert throughout.
-# Unstamped builds (plain `go build`) still show a hash — internal/buildinfo
-# falls back to the toolchain's own VCS stamping.
+# The commit time (%cI, strict ISO 8601) needs no encoding — no spaces or quotes.
+# Unstamped builds (plain `go build`) still show a hash and time —
+# internal/buildinfo falls back to the toolchain's own VCS stamping.
 STAMP_PKG := github.com/rohanthewiz/cats/internal/buildinfo
 GIT_HASH  := $(shell git rev-parse --short HEAD 2>/dev/null)
 GIT_SUBJ  := $(shell git log -1 --pretty=%s 2>/dev/null | base64 | tr -d '\n')
-STAMP     := -ldflags "-X $(STAMP_PKG).hash=$(GIT_HASH) -X $(STAMP_PKG).subjectB64=$(GIT_SUBJ)"
+GIT_WHEN  := $(shell git log -1 --pretty=%cI 2>/dev/null)
+STAMP     := -ldflags "-X $(STAMP_PKG).hash=$(GIT_HASH) -X $(STAMP_PKG).subjectB64=$(GIT_SUBJ) -X $(STAMP_PKG).when=$(GIT_WHEN)"
 
 .PHONY: all vt build test jstest build-ghostty test-ghostty race-ghostty binaries \
         local dist macapp macapp-client fmt-check vet vet-ghostty check clean

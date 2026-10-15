@@ -3,7 +3,7 @@
   // time and served as window.__catsBuild (see internal/buildinfo + page.go). It
   // sits beside the brand because the common confusion is a stale install — an
   // app bundle still carrying an older catway — and the hash names the build at a
-  // glance; hovering expands it to the commit's subject line.
+  // glance; hovering expands it to the commit's subject line and commit time.
   (function initBuildBadge() {
     const b = window.__catsBuild;
     if (!b || !b.hash) return; // built outside a checkout — no badge
@@ -13,6 +13,7 @@
     const items = [
       ["Build", b.hash + (b.dirty ? " · modified tree" : "")],
       ["Commit", b.subject],
+      ["When", fmtBuildWhen(b.when)],
     ];
     // Through armTip like the sidebar rows: one popup element, one rule about
     // when it opens — a badge that answered instantly while the rows next to it
@@ -24,6 +25,23 @@
     el.addEventListener("mousedown", hideTip); // one popup, one set of rules
     document.getElementById("brand").appendChild(el);
   })();
+
+  // fmtBuildWhen renders the commit time as the viewer's local date and time
+  // plus its age — "2026-10-15 09:41 · 3h ago". The age is the part that answers
+  // "is this install stale?"; the absolute stamp is there to compare against a
+  // git log. Computed once at page load, which is fine: the build cannot change
+  // under a running page, and a reload refreshes the age. An unknown or
+  // unparseable time returns "" so showTip drops the row instead of printing
+  // "Invalid Date".
+  function fmtBuildWhen(iso) {
+    if (!iso) return "";
+    const t = new Date(iso);
+    if (isNaN(t)) return "";
+    const p2 = (n) => String(n).padStart(2, "0");
+    const local = t.getFullYear() + "-" + p2(t.getMonth() + 1) + "-" + p2(t.getDate()) +
+      " " + p2(t.getHours()) + ":" + p2(t.getMinutes());
+    return local + " · " + fmtAge(Date.now() - t.getTime());
+  }
 
   function renderTabbar(msg) {
     tabbarEl.innerHTML = "";
