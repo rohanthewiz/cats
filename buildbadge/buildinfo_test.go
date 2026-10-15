@@ -1,4 +1,4 @@
-package buildinfo
+package buildbadge
 
 import (
 	"encoding/base64"

@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/rohanthewiz/cats/cmd/catway/web"
-	"github.com/rohanthewiz/cats/internal/buildinfo"
+	"github.com/rohanthewiz/cats/buildbadge"
 	"github.com/rohanthewiz/cats/internal/config"
 )
 
@@ -87,8 +87,13 @@ func TestRenderPageBuildScript(t *testing.T) {
 		}
 		return
 	}
-	if !strings.Contains(out, `<script id="cats-build">window.__catsBuild={`) {
+	if !strings.Contains(out, `<script data-buildbadge>window.__catsBuild={`) {
 		t.Errorf("build script not injected:\n%s", block)
+	}
+	// The badge library rides with the data: 10-buildbadge.js mounts through
+	// window.BuildBadge, so data without it would be a badge that never draws.
+	if !strings.Contains(out, "root.BuildBadge = {") {
+		t.Error("buildbadge library not injected beside the data")
 	}
 	if !strings.Contains(block, `"hash":"`) || strings.Contains(block, `"hash":""`) {
 		t.Errorf("build script has no hash: %s", block)
@@ -129,14 +134,14 @@ func TestBuildScriptEscapesSubject(t *testing.T) {
 }
 
 // jsonBuildBlock renders a build block for an arbitrary subject, mirroring what
-// buildScript emits (buildinfo's own values are fixed at link time).
+// buildScript emits (buildbadge's own values are fixed at link time).
 func jsonBuildBlock(t *testing.T, subject string) string {
 	t.Helper()
-	data, err := json.Marshal(buildinfo.Info{Hash: "abc1234", Subject: subject})
+	data, err := json.Marshal(buildbadge.Info{Hash: "abc1234", Subject: subject})
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	return "<script id=\"cats-build\">window.__catsBuild=" + string(data) + ";</script>\n"
+	return "<script data-buildbadge>window.__catsBuild=" + string(data) + ";</script>\n"
 }
 
 // With no </head>, the injection still lands (prepended) so settings take effect.

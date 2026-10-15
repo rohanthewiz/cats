@@ -86,13 +86,18 @@ Both pass `-tags ghostty -trimpath` plus the build stamp.
 
 ### The build stamp
 
-`internal/buildinfo` carries the git identity that `catway` serves to the sidebar
+`buildbadge` carries the git identity that `catway` serves to the sidebar
 brand, so a running instance names the commit it was built from — the quickest way
-to spot a stale install.
+to spot a stale install. It is a self-contained, shareable package (stdlib only,
+with the badge's JS and CSS embedded) — see `buildbadge/README.md` to drop the
+same badge into another Go web project.
 
 ```
--ldflags "-X ...buildinfo.hash=<short sha> -X ...buildinfo.subjectB64=<base64 subject>"
+-ldflags "-X ...buildbadge.hash=<short sha> -X ...buildbadge.subjectB64=<base64 subject> -X ...buildbadge.when=<%cI commit time>"
 ```
+
+`buildbadge/stamp.sh` prints the same flags for builds that don't go through
+the Makefile.
 
 The commit **subject is base64-encoded** deliberately: it is free to contain
 spaces, quotes and `$`, none of which survive a Make recipe's `-ldflags` string

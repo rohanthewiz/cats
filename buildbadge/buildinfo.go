@@ -1,18 +1,30 @@
-// Package buildinfo reports the git identity of the running binary: the short
+// Package buildbadge reports the git identity of the running binary — the short
 // hash of the commit it was built from, that commit's subject line, when that
-// commit was made, and whether the working tree was modified at build time.
+// commit was made, and whether the working tree was modified at build time —
+// and ships the small web badge that shows it: the hash as a quiet label, and
+// on hover a card with the hash, the subject, and the commit time in the
+// viewer's zone with its age ("2026-10-15 09:41 · 3h ago").
 //
-// The Makefile stamps the first three at link time (see its STAMP variable). The
-// subject rides base64-encoded on purpose: it is free to contain spaces, quotes
-// and '$', none of which survive a make recipe's -ldflags string intact, while
-// base64's alphabet is inert in every layer in between.
+// It exists to answer "is this install stale?" at a glance, and is written to
+// be lifted into any Go web project: stdlib only, no imports from the rest of
+// cats, its JS and CSS embedded. See README.md for the three-step setup.
+//
+//	link time      stamp.sh / Makefile ──-ldflags -X──▶ hash, subjectB64, when
+//	run time       Get() ──▶ Info{Hash, Subject, When, Dirty}
+//	page render    DataScript / Head ──▶ <script>window.__buildInfo={…}</script>
+//	browser        buildbadge.js ──▶ BuildBadge.mount(el) ──▶ badge + hover card
+//
+// The stamp is three -X values set at link time. The subject rides
+// base64-encoded on purpose: it is free to contain spaces, quotes and '$', none
+// of which survive a make recipe's -ldflags string intact, while base64's
+// alphabet is inert in every layer in between.
 //
 // Nothing here is required. An unstamped build (plain `go build ./...`, `go run`)
 // falls back to the VCS revision and commit time the toolchain records in the
 // binary's build info, so the hash and time are still right — only the subject
-// goes missing, and callers
-// treat an empty field as "unknown" rather than showing a placeholder.
-package buildinfo
+// goes missing, and callers treat an empty field as "unknown" rather than
+// showing a placeholder.
+package buildbadge
 
 import (
 	"encoding/base64"
@@ -43,6 +55,30 @@ type Info struct {
 	// viewer's own zone and compute its age against the viewer's clock.
 	When  string `json:"when"`
 	Dirty bool   `json:"dirty"` // built from a modified working tree
+}
+
+// String is the one-line form for a CLI's `version` output or a startup log:
+// "e251787* · fix the thing · 2026-10-15T14:41:07Z". The '*' marks a dirty
+// tree, the same mark the badge uses. Unknown fields drop out rather than
+// leaving empty separators; a binary that knows nothing says "unknown".
+func (i Info) String() string {
+	var parts []string
+	if i.Hash != "" {
+		h := i.Hash
+		if i.Dirty {
+			h += "*"
+		}
+		parts = append(parts, h)
+	}
+	for _, s := range []string{i.Subject, i.When} {
+		if s != "" {
+			parts = append(parts, s)
+		}
+	}
+	if len(parts) == 0 {
+		return "unknown"
+	}
+	return strings.Join(parts, " · ")
 }
 
 var (

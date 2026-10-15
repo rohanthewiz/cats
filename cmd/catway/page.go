@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/rohanthewiz/cats/internal/buildinfo"
+	"github.com/rohanthewiz/cats/buildbadge"
 	"github.com/rohanthewiz/cats/internal/config"
 	"github.com/rohanthewiz/cats/internal/dlog"
 	"github.com/rohanthewiz/cats/internal/theme"
@@ -124,19 +124,22 @@ func uiPrefsScript(u config.UI) string {
 	return "<script id=\"cats-config-ui\">window.__catsUI=" + string(data) + ";</script>\n"
 }
 
-// buildScript publishes the binary's git identity for the sidebar's build badge.
-// An unknown hash (built outside a git checkout) emits nothing at all, and the
-// front end then leaves the badge off rather than showing a placeholder.
+// buildScript publishes the binary's git identity for the sidebar's build badge,
+// plus the badge library itself (window.BuildBadge, from the shareable
+// buildbadge package). An unknown hash (built outside a git checkout) emits
+// nothing at all, and the front end then leaves the badge off rather than
+// showing a placeholder.
+//
+// Cats takes the parts rather than buildbadge.Head(): the data goes out under
+// its own __catsBuild name, and the stylesheet stays home because the badge is
+// styled by the sidebar's #brand rules and its card is the sidebar's shared
+// hover card (see js/10-buildbadge.js), not the package's built-in one.
 func buildScript() string {
-	bi := buildinfo.Get()
-	if bi.Hash == "" {
+	data := buildbadge.DataScript("__catsBuild")
+	if data == "" {
 		return ""
 	}
-	data, err := json.Marshal(bi)
-	if err != nil {
-		return ""
-	}
-	return "<script id=\"cats-build\">window.__catsBuild=" + string(data) + ";</script>\n"
+	return data + buildbadge.ScriptTag()
 }
 
 // homeScript publishes the user's home directory so the front end can render

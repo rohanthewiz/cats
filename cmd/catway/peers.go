@@ -13,8 +13,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rohanthewiz/cats/buildbadge"
 	"github.com/rohanthewiz/cats/internal/app"
-	"github.com/rohanthewiz/cats/internal/buildinfo"
 	"github.com/rohanthewiz/cats/internal/config"
 	"github.com/rohanthewiz/cats/internal/peersync"
 	"github.com/rohanthewiz/rweb"
@@ -64,7 +64,7 @@ import (
 type peerLocal struct{ o *orch }
 
 func (l peerLocal) Instance() peersync.Instance {
-	return peersync.LocalInstance(buildinfo.Get().Hash)
+	return peersync.LocalInstance(buildbadge.Get().Hash)
 }
 
 // Workspaces lists the workspaces whose folder is on this machine: those on

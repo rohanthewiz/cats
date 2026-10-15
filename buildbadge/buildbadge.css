@@ -1,0 +1,42 @@
+/* buildbadge.css — the badge label and its built-in hover card.
+
+   Theming is by custom property, each with a fallback, so the stylesheet works
+   bare and a host re-skins it with a few --bb-* lines on :root instead of
+   fighting these selectors on specificity:
+
+     --bb-fg       card value text           --bb-muted    badge + card labels
+     --bb-bg       card surface              --bb-line     card border
+     --bb-accent   badge on hover            --bb-font     badge font stack
+
+   The badge is a build fingerprint, not a label anyone reads on purpose, so it
+   sits below the surrounding text's weight: smaller, muted, and knocked down
+   further with opacity. Hover restores full opacity along with the accent, so
+   the thing you are about to read a card from does not stay faded. */
+:root {
+  --bb-fg: #1f2328; --bb-muted: #6e7781; --bb-bg: #ffffff; --bb-line: #d0d7de;
+  --bb-accent: #0969da;
+  --bb-font: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bb-fg: #e6edf3; --bb-muted: #8b949e; --bb-bg: #161b22; --bb-line: #30363d;
+    --bb-accent: #58a6ff;
+  }
+}
+
+.build-badge { cursor: help; font-family: var(--bb-font); font-size: .75em; font-weight: 400;
+  color: var(--bb-muted); opacity: .7; margin-left: 6px; }
+.build-badge:hover { color: var(--bb-accent); opacity: 1; }
+
+/* The card: one reused element (see card() in buildbadge.js), fixed to the
+   viewport and clamped into it by the script. pointer-events:none so it can
+   never sit between the pointer and the badge and cause a leave/enter flicker.
+   A two-column label/value grid, labels small-caps, for a quick scan. */
+.bb-tip { position: fixed; z-index: 2147483000; display: none; pointer-events: none;
+  background: var(--bb-bg); color: var(--bb-fg); border: 1px solid var(--bb-line);
+  border-radius: 6px; padding: 8px 10px; box-shadow: 0 6px 24px rgba(0,0,0,.25);
+  font: 12px/1.4 system-ui, -apple-system, sans-serif; max-width: 340px; }
+.bb-tip.show { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; align-items: baseline; }
+.bb-tip .k { color: var(--bb-muted); font-size: 10px; text-transform: uppercase; letter-spacing: .5px;
+  white-space: nowrap; }
+.bb-tip .v { word-break: break-word; min-width: 0; }

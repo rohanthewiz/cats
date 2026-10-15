@@ -24,9 +24,10 @@ DIST     := dist/cats_$(VERSION)_$(GOOS)_$(GOARCH)
 # because it is free to contain spaces, quotes and '$', none of which survive a
 # recipe's -ldflags string intact, while base64's alphabet is inert throughout.
 # The commit time (%cI, strict ISO 8601) needs no encoding — no spaces or quotes.
-# Unstamped builds (plain `go build`) still show a hash and time —
-# internal/buildinfo falls back to the toolchain's own VCS stamping.
-STAMP_PKG := github.com/rohanthewiz/cats/internal/buildinfo
+# Unstamped builds (plain `go build`) still show a hash and time — buildbadge
+# falls back to the toolchain's own VCS stamping. buildbadge/stamp.sh is the
+# same three values for projects without this Makefile; keep the two in step.
+STAMP_PKG := github.com/rohanthewiz/cats/buildbadge
 GIT_HASH  := $(shell git rev-parse --short HEAD 2>/dev/null)
 GIT_SUBJ  := $(shell git log -1 --pretty=%s 2>/dev/null | base64 | tr -d '\n')
 GIT_WHEN  := $(shell git log -1 --pretty=%cI 2>/dev/null)
@@ -53,10 +54,11 @@ test:
 # The front-end's own tests. cmd/catway/web/js/ is one closure with no exports,
 # so these lift functions out of the part files and evaluate them against stubs
 # — see cmd/catway/web/jstest/testutil.mjs. Node only; skipped, loudly, where
-# there is none, because nothing else in the build needs it.
+# there is none, because nothing else in the build needs it. buildbadge's own
+# test rides along: its JS ships inside every catway page.
 jstest:
 	@command -v node >/dev/null 2>&1 || { echo "jstest: node not found — skipping the front-end tests"; exit 0; }
-	@for t in cmd/catway/web/jstest/*.test.mjs; do node "$$t" || exit 1; done
+	@for t in cmd/catway/web/jstest/*.test.mjs buildbadge/*.test.mjs; do node "$$t" || exit 1; done
 
 # --- ghostty-tagged (the real terminal path) ----------------------------------
 

@@ -1,47 +1,27 @@
   // ---- Build badge ----
   // The short git hash of the commit this catway was built from, stamped at link
-  // time and served as window.__catsBuild (see internal/buildinfo + page.go). It
-  // sits beside the brand because the common confusion is a stale install — an
-  // app bundle still carrying an older catway — and the hash names the build at a
+  // time and served as window.__catsBuild (see buildbadge/ + page.go). It sits
+  // beside the brand because the common confusion is a stale install — an app
+  // bundle still carrying an older catway — and the hash names the build at a
   // glance; hovering expands it to the commit's subject line and commit time.
+  //
+  // The badge itself — its text, the card's rows, the commit-time formatting —
+  // is the shareable buildbadge package's (window.BuildBadge, injected by
+  // renderPage beside the data), so cats and any other project carrying it
+  // render the same thing. What stays here is the one cats-specific choice:
+  // the card goes through armTip/showTip like the sidebar rows, one popup
+  // element and one rule about when it opens — a badge that answered instantly
+  // while the rows next to it waited would read as two different behaviours in
+  // the same corner. Class "hash" keeps it on the #brand small.hash styling.
   (function initBuildBadge() {
-    const b = window.__catsBuild;
-    if (!b || !b.hash) return; // built outside a checkout — no badge
-    const el = document.createElement("small");
-    el.className = "hash";
-    el.textContent = b.hash + (b.dirty ? "*" : "");
-    const items = [
-      ["Build", b.hash + (b.dirty ? " · modified tree" : "")],
-      ["Commit", b.subject],
-      ["When", fmtBuildWhen(b.when)],
-    ];
-    // Through armTip like the sidebar rows: one popup element, one rule about
-    // when it opens — a badge that answered instantly while the rows next to it
-    // waited would read as two different behaviours in the same corner.
-    const tip = (e) => armTip(e, (ev) => showTip(ev, items));
-    el.addEventListener("mouseenter", tip);
-    el.addEventListener("mousemove", tip);
-    el.addEventListener("mouseleave", hideTip);
-    el.addEventListener("mousedown", hideTip); // one popup, one set of rules
-    document.getElementById("brand").appendChild(el);
+    if (!window.BuildBadge) return; // no library means no data either — unknown build
+    BuildBadge.mount(document.getElementById("brand"), window.__catsBuild, {
+      tag: "small",
+      className: "hash",
+      show: (e, items) => armTip(e, (ev) => showTip(ev, items)),
+      hide: hideTip, // also on mousedown: one popup, one set of rules
+    });
   })();
-
-  // fmtBuildWhen renders the commit time as the viewer's local date and time
-  // plus its age — "2026-10-15 09:41 · 3h ago". The age is the part that answers
-  // "is this install stale?"; the absolute stamp is there to compare against a
-  // git log. Computed once at page load, which is fine: the build cannot change
-  // under a running page, and a reload refreshes the age. An unknown or
-  // unparseable time returns "" so showTip drops the row instead of printing
-  // "Invalid Date".
-  function fmtBuildWhen(iso) {
-    if (!iso) return "";
-    const t = new Date(iso);
-    if (isNaN(t)) return "";
-    const p2 = (n) => String(n).padStart(2, "0");
-    const local = t.getFullYear() + "-" + p2(t.getMonth() + 1) + "-" + p2(t.getDate()) +
-      " " + p2(t.getHours()) + ":" + p2(t.getMinutes());
-    return local + " · " + fmtAge(Date.now() - t.getTime());
-  }
 
   function renderTabbar(msg) {
     tabbarEl.innerHTML = "";
