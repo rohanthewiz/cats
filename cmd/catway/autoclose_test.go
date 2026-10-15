@@ -273,3 +273,39 @@ func TestClosingAPaneCancelsItsCountdown(t *testing.T) {
 		t.Fatal("the closed pane's countdown was left armed")
 	}
 }
+
+// A clean exit in a workspace's only pane — `exit` in its shell — used to drop
+// the workspace ten seconds later, usually unseen. The countdown still runs,
+// and what it ends in is the workspace going to sleep.
+func TestAutocloseSleepsTheWorkspaceOfItsLastPane(t *testing.T) {
+	o, wsID, _, dead, _ := twoWorkspaceOrch(t)
+	o.autocloseAfter = 20 * time.Millisecond
+
+	dispatchExit(t, o, dead, 0)
+	if o.panes[dead].autoclose == nil {
+		t.Fatal("no countdown on a workspace's last pane, with another workspace awake")
+	}
+
+	waitFor(t, o, func() bool { return o.panes[dead] == nil })
+	ws := o.session.WorkspaceByID(wsID)
+	if ws == nil || !ws.Asleep {
+		t.Fatalf("after the countdown the workspace is %v, want it kept and asleep", ws)
+	}
+}
+
+// The only awake workspace's last pane cannot sleep (nowhere to land), so the
+// header never promises a close: no countdown at all.
+func TestAutocloseNeverArmsOnTheOnlyAwakeWorkspacesLastPane(t *testing.T) {
+	o, wsID, _, _, otherPane := twoWorkspaceOrch(t)
+	if err := o.session.SleepWorkspace(wsID); err != nil {
+		t.Fatalf("SleepWorkspace: %v", err)
+	}
+	o.applyModel()
+	o.autocloseAfter = 20 * time.Millisecond
+
+	dispatchExit(t, o, otherPane, 0)
+
+	if o.panes[otherPane].autoclose != nil {
+		t.Fatal("armed a countdown that could only end in a refusal")
+	}
+}

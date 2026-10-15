@@ -33,6 +33,11 @@ import (
 //   - The session's last pane is never reaped. Session.ClosePaneIn refuses it
 //     ("cannot close the last pane"), and the sweep just skips what it refuses,
 //     so an idle session cannot reap itself down to nothing.
+//   - A workspace is never reaped away. Every close here goes through
+//     Session.RetirePane, which sleeps a workspace instead of dropping it when
+//     the pane is its last — so a workspace whose only shell died keeps its
+//     name, flag and place in the sidebar, under Asleep. (Through
+//     ClosePaneIn it vanished outright, with nothing in the log to say why.)
 //   - A pane whose PTY was respawned under it (a cold restore, a host reconnect,
 //     or a move to another host — all three route through createPane) has its
 //     whole exit state cleared there, reap clock included, so the reaper only
@@ -105,11 +110,19 @@ func (o *orch) reapExitedPanes(now time.Time) int {
 	n := 0
 	for _, pid := range due {
 		id := layout.PaneID(pid)
-		if _, err := o.session.ClosePaneIn("", &id); err != nil {
-			// The only expected failure is the last-pane refusal. Leave the
-			// stamp alone: if the session grows a second pane later, the next
-			// sweep reaps this one then.
+		wsID, slept, err := o.session.RetirePane(id)
+		if err != nil {
+			// The expected failures are the two last-one refusals (the
+			// session's last pane, the only awake workspace's last pane).
+			// Leave the stamp alone: once there is somewhere else to be, the
+			// next sweep retires this one then.
 			continue
+		}
+		if slept {
+			// Warn, not Printf: daemons.log keeps warnings and up only, and a
+			// workspace leaving the Open list unasked is exactly the line
+			// someone goes looking for afterwards.
+			dlog.Warnf("catway: workspace %s put to sleep — its last pane (%d) exited more than %s ago", wsID, pid, ttl)
 		}
 		// The corpse's scrollback seed goes with it. histSaveNow already prunes
 		// to panes still in the model, but only when a capture arms a write —
@@ -195,7 +208,12 @@ func (o *orch) armAutoclose(rt *paneRuntime, code int) time.Duration {
 	// It is deliberately not re-checked later: a session that grows a second
 	// pane during the countdown leaves this corpse to the reaper, which is
 	// the same answer the sweep gives.
-	if o.session.PaneCount() <= 1 {
+	//
+	// Retirable is the full rule: not the session's last pane, and not the
+	// last pane of the only awake workspace (which would have nowhere to
+	// sleep to). A workspace's last pane elsewhere does count down — what
+	// ends the countdown there is the workspace going to sleep.
+	if !o.session.CanRetirePane(layout.PaneID(rt.id)) {
 		return 0
 	}
 	d := o.autocloseAfter
@@ -250,13 +268,19 @@ func (o *orch) fireAutoclose(pid uint32) {
 	rt.autoclose = nil
 	rt.autocloseAt = time.Time{}
 	id := layout.PaneID(pid)
-	if _, err := o.session.ClosePaneIn("", &id); err != nil {
-		// The last-pane refusal, almost certainly (the session shrank under the
-		// countdown). Leave the corpse and its exit stamp alone: the reaper
-		// still owns it, and the clients' countdown simply ends without the
-		// pane going away.
+	wsID, slept, err := o.session.RetirePane(id)
+	if err != nil {
+		// A last-one refusal, almost certainly (the session, or the set of
+		// awake workspaces, shrank under the countdown). Leave the corpse and
+		// its exit stamp alone: the reaper still owns it, and the clients'
+		// countdown simply ends without the pane going away.
 		dlog.Warnf("catway: pane %d auto-close refused: %v", pid, err)
 		return
+	}
+	if slept {
+		// Kept at warning level for the reason the reaper's is: it is the one
+		// trace in daemons.log of a workspace that left the Open list unasked.
+		dlog.Warnf("catway: workspace %s put to sleep — its last pane (%d) exited cleanly", wsID, pid)
 	}
 	delete(o.capturedHist, pid) // the corpse's scrollback seed goes with it
 	o.applyModel()

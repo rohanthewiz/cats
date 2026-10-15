@@ -58,6 +58,92 @@ func (s *Session) SleepWorkspace(id string) error {
 	return nil
 }
 
+// --- retiring a dead pane on the runtime's own initiative --------------------
+//
+// ClosePaneIn is the close a person asks for: closing a workspace's last pane
+// drops the workspace, because that is what "close this" means when there is
+// nothing left. The runtime's housekeeping — the clean-exit auto-close and the
+// exited-pane reaper — closes panes nobody asked it to close, often in a
+// workspace nobody is looking at, and there the same rule turned "the shell in
+// that workspace's only pane ended" into "the workspace, its name, flag and
+// place in the list are gone", with no prompt and nothing in the log. The
+// workspace was not closed; it was just empty.
+//
+// RetirePane is the housekeeping close. It differs from ClosePaneIn only when
+// the pane is its workspace's last one, and then it does what a clean does with
+// a workspace it empties: sleep it, so it stays in the list and a click wakes it
+// to a fresh shell.
+//
+//	workspace panes   another awake ws   outcome
+//	───────────────   ────────────────   ─────────────────────────────────────
+//	      > 1               any          pane closed (ClosePaneIn, unchanged)
+//	       1                yes          workspace put to sleep (slept = true)
+//	       1                no           refused — the corpse stays put
+//
+// The refusal in the last row is the same judgement as the session's last-pane
+// refusal, one level up: sleeping needs an awake workspace to land on, and
+// dropping the only awake workspace to avoid keeping a dead pane would be the
+// very loss this exists to prevent. The callers already treat a refusal as
+// "leave it to the next sweep", which is right — once another workspace is
+// awake, the next sweep sleeps this one.
+
+// ErrLastAwakeWorkspacePane is RetirePane's refusal for the last pane of the
+// only workspace still awake.
+var ErrLastAwakeWorkspacePane = errors.New("last pane of the only awake workspace")
+
+// RetirePane closes a dead pane on the runtime's behalf (auto-close, reaper),
+// sleeping its workspace instead of dropping it when the pane is the
+// workspace's last. slept reports which happened, and wsID names the workspace
+// either way so the caller can say where it happened.
+func (s *Session) RetirePane(id layout.PaneID) (wsID string, slept bool, err error) {
+	idx, ws := s.workspaceIndexOf(id)
+	if ws == nil {
+		return "", false, fmt.Errorf("unknown pane %d", id)
+	}
+	if !s.retireSleeps(ws) {
+		_, err := s.ClosePaneIn("", &id)
+		return ws.ID, false, err
+	}
+	if s.nearestAwake(idx) < 0 {
+		return ws.ID, false, ErrLastAwakeWorkspacePane
+	}
+	if err := s.SleepWorkspace(ws.ID); err != nil {
+		return ws.ID, false, err
+	}
+	return ws.ID, true, nil
+}
+
+// CanRetirePane reports whether RetirePane would close or sleep something for
+// this pane rather than refuse. The auto-close asks it before arming, so the
+// header never counts down to a close that will not happen.
+func (s *Session) CanRetirePane(id layout.PaneID) bool {
+	idx, ws := s.workspaceIndexOf(id)
+	if ws == nil {
+		return false
+	}
+	if s.retireSleeps(ws) {
+		return s.nearestAwake(idx) >= 0
+	}
+	// A pane that is not its workspace's last has a sibling, so the session
+	// holds at least two panes and ClosePaneIn's last-pane refusal cannot fire.
+	return true
+}
+
+// retireSleeps reports whether retiring a pane of ws empties it — the pane is
+// the workspace's only one. A sleeping workspace never qualifies: its one pane
+// is the placeholder, which has no process to have exited, so there is nothing
+// to retire and the close path's own checks apply.
+func (s *Session) retireSleeps(ws *workspace.Workspace) bool {
+	if ws.Asleep {
+		return false
+	}
+	n := 0
+	for _, tab := range ws.Tabs {
+		n += tab.Layout.PaneCount()
+	}
+	return n == 1
+}
+
 // nearestAwake is the index of the awake workspace closest to i, other than i
 // itself — after it first, then before — or -1 when every other workspace is
 // asleep.

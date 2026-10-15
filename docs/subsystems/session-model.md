@@ -243,10 +243,18 @@ under its new shell. That clearing is also what stops a respawned pane from
 refusing input to the shell that just started, and it emits `pane_respawned` so
 a window that already drew the red header takes it back off.
 
-The sweep closes through `Session.ClosePaneIn`, which refuses the session's last
-pane, and it simply skips what it is refused: an idle session cannot reap itself
-down to nothing, and the corpse still goes on the next sweep once a second pane
-exists. A reap is an ordinary model mutation from there on — one `applyModel`
+The sweep and the auto-close both close through `Session.RetirePane`, not the
+`ClosePaneIn` a person's `pane.close` uses. The difference is a workspace's last
+pane: a manual close drops the workspace, but a housekeeping close **sleeps** it,
+so a workspace whose only shell ended stays in the sidebar under Asleep, keeping
+its name and flag. Before this, such a workspace vanished from both Open and
+Asleep with nothing in the log, usually while nobody was looking at it. Each
+such sleep is logged at warning level, so it lands in `daemons.log`.
+`RetirePane` refuses the session's last pane, and the last pane of the only
+awake workspace (sleeping needs an awake workspace to land on). The sweep simply
+skips what it is refused, and the auto-close does not arm there at all
+(`CanRetirePane`): an idle session cannot reap itself down to nothing, and the
+corpse still goes on the next sweep once there is somewhere else to be. A reap is an ordinary model mutation from there on — one `applyModel`
 for the whole sweep, so the layout broadcast, the `pane_removed` events, and the
 debounced save all happen exactly as they would for a hand-issued close.
 

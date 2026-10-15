@@ -260,3 +260,42 @@ func TestOrchDefaultsToTheBuiltInTTL(t *testing.T) {
 		t.Fatalf("a fresh orch reaps after %v, want the built-in %v", o.reapAfter, defaultExitedPaneTTL)
 	}
 }
+
+// The silent-drop bug: a workspace whose only pane died long ago was reaped out
+// of the list entirely. It now goes to sleep, keeping its place and name.
+func TestReapSleepsAWorkspaceInsteadOfDroppingIt(t *testing.T) {
+	o, wsID, _, dead, _ := twoWorkspaceOrch(t)
+	markExited(o, dead, o.reapAfter+time.Minute)
+
+	if n := o.reapExitedPanes(time.Now()); n != 1 {
+		t.Fatalf("reaped %d panes, want 1", n)
+	}
+	ws := o.session.WorkspaceByID(wsID)
+	if ws == nil {
+		t.Fatal("the reaper dropped the workspace; it should be asleep")
+	}
+	if !ws.Asleep {
+		t.Fatal("the workspace whose last pane was reaped is not asleep")
+	}
+	if o.panes[dead] != nil {
+		t.Error("the reaped pane's runtime survived the sweep")
+	}
+}
+
+// With no other workspace awake there is nowhere to sleep to: the corpse stays
+// for a later sweep rather than the workspace being dropped.
+func TestReapKeepsTheOnlyAwakeWorkspacesLastPane(t *testing.T) {
+	o, wsID, other, _, otherPane := twoWorkspaceOrch(t)
+	if err := o.session.SleepWorkspace(wsID); err != nil {
+		t.Fatalf("SleepWorkspace: %v", err)
+	}
+	o.applyModel()
+	markExited(o, otherPane, o.reapAfter+time.Minute)
+
+	if n := o.reapExitedPanes(time.Now()); n != 0 {
+		t.Fatalf("reaped %d panes, want 0 — it is the only awake workspace's last pane", n)
+	}
+	if ws := o.session.WorkspaceByID(other); ws == nil || ws.Asleep {
+		t.Fatal("the only awake workspace was dropped or slept")
+	}
+}
