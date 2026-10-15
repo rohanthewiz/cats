@@ -71,7 +71,7 @@ var requiredKeys = []string{"bg", "fg", "muted", "line", "accent", "ok", "warn",
 //	muted ── ws-heading ─┬─ branch   (sparse themes only; built-ins author an orange)
 //	                     ├─ blank    (idle agent, nothing asked yet)
 //	                     └─ agent-3
-//	 accent ─ heading · accent-dim(α) · done · sel-fill(α) · cm-cursor(α) · scroll-thumb(α)
+//	 accent ─ heading · accent-dim(α) · done · prompts · sel-fill(α) · cm-cursor(α) · scroll-thumb(α)
 //	 warn ─ todo · warn-fg        err ─ err-fg · err-text
 //	 ok ─ ok-fg                    done ─ done-fg
 //	 agent-1..6 ← accent · done · ws-heading · heading · ok · todo (the palette's own hues)
@@ -105,6 +105,12 @@ var derivations = []struct {
 	// built-in authors as a tan or olive brown, so a theme that leaves blank out
 	// still gets a brown that belongs to its palette.
 	{"blank", "ws-heading", 0},
+	// The pane header's "prompts ▾" control. Meant to be the Cats green: the
+	// default theme's accent, and every built-in authors a green of its own
+	// tuned to its header strip. A sparse theme falls back to its accent —
+	// its own brand colour, which is the role the green plays in the default —
+	// rather than to ok, whose green is the "idle" state word one span over.
+	{"prompts", "accent", 0},
 	{"accent-dim", "accent", 0.45},
 	{"accent-fg", "bg", 0},
 	{"todo", "warn", 0},

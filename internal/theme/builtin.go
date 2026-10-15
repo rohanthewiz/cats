@@ -40,7 +40,13 @@ func builtins() []Theme {
 				// field, and driven dark on the light themes to hold ≥4.5:1
 				// against their pale --chrome strip.
 				"branch": "#ea9a4e",
-				"todo":   "#f0dfa0", "ok": "#6ac47a", "warn": "#e0b64e", "err": "#e57373",
+				// The pane header's "prompts ▾" control: the Cats green itself,
+				// the accent above. Its own key rather than a read of accent so
+				// every built-in can keep it green: on the others accent is an
+				// orange, a blue or a violet. 3.6:1 on the focused strip, the
+				// floor TestBuiltinPromptsContrast holds every built-in to.
+				"prompts": "#4db380",
+				"todo":    "#f0dfa0", "ok": "#6ac47a", "warn": "#e0b64e", "err": "#e57373",
 				// A sky blue rather than the old #00ccf5 cyan: at dot size that
 				// cyan read as a near-neighbour of the ok green, so "finished,
 				// not yet seen" and "settled" blurred together in the sidebar.
@@ -107,6 +113,7 @@ func builtins() []Theme {
 				"chrome": "#3c3f41", "chrome-focus": "#4e5254", "heading": "#ffc66b",
 				"ws-heading": "#a89a68", // the editor's olive annotation color, dimmed
 				"branch":     "#f0a35e", // lighter than the #cc7832 accent so the handle and branch don't merge
+				"prompts":    "#5cc58f", // Cats green lifted: #4db380 is ~3:1 on the #4e5254 focused strip
 				"todo":       "#bbb529", "ok": "#629755", "warn": "#ffc66b", "err": "#ff6b68",
 				"done": "#6897bb", "accent-fg": "#2b1d0e",
 				// ws-heading here is olive/amber, too near the working dot to
@@ -128,6 +135,7 @@ func builtins() []Theme {
 				"chrome": "#1f2335", "chrome-focus": "#33467c", "heading": "#bb9af7",
 				"ws-heading": "#a89372", // the palette's one warm tone, taken down to a sign-lit tan
 				"branch":     "#f5a05a", // the palette's orange, a shade off the #ff9e64 todo mark
+				"prompts":    "#5cc58f", // Cats green lifted: #4db380 sits right at 3.5:1 on the #33467c focused strip
 				"todo":       "#ff9e64", "ok": "#9ece6a", "warn": "#e0af68", "err": "#f7768e",
 				"done": "#7dcfff", "accent-fg": "#15161e", "fg-soft": "#a9b1d6",
 				// "blocked" as text: the rose red is 3.4:1 on the focused
@@ -144,6 +152,7 @@ func builtins() []Theme {
 				"chrome": "#0a4652", "chrome-focus": "#0f5666", "heading": "#2aa198",
 				"ws-heading": "#b09a55", // solarized yellow, softened toward the base tones
 				"branch":     "#e07a3c", // solarized orange lifted: #cb4b16 itself is too dim on base02
+				"prompts":    "#5cc58f", // Cats green lifted off the teal focused strip
 				"todo":       "#cb4b16", "ok": "#859900", "warn": "#b58900", "err": "#dc322f",
 				"done": "#6c71c4", "accent-fg": "#fdf6e3", "fg-strong": "#eee8d5",
 				// ws-heading here is olive/amber, too near the working dot to
@@ -173,7 +182,10 @@ func builtins() []Theme {
 				// Solarized orange taken dark enough (~4.5:1 on #e4ddc8) to read
 				// bold on a 19px strip; the true #cb4b16 lands near 3.4:1.
 				"branch": "#a8420f",
-				"todo":   "#b58900", "ok": "#859900", "warn": "#b58900", "err": "#dc322f",
+				// Cats green taken dark for the light strip (~4.1:1 on the
+				// focused #d9d2bc); #4db380 lands under 2:1 on paper.
+				"prompts": "#1a6e44",
+				"todo":    "#b58900", "ok": "#859900", "warn": "#b58900", "err": "#dc322f",
 				"done": "#6c71c4", "accent-fg": "#fdf6e3",
 				// Blank-conversation dot: a light brown would vanish on paper,
 				// so it goes to a mid brown (~5:1 on #e4ddc8), redder than the
@@ -201,6 +213,7 @@ func builtins() []Theme {
 				"chrome": "#2e2620", "chrome-focus": "#4a3d30", "heading": "#d4915e",
 				"ws-heading": "#a8845c", // the ember heading, one step back from the fire
 				"branch":     "#f28b3a", // redder and hotter than the amber accent/warn it sits among
+				"prompts":    "#4db380", // the Cats green itself; it holds on both header surfaces
 				"todo":       "#f0d090", "ok": "#a8c080", "warn": "#e8b04e", "err": "#e57360",
 				"done": "#7ec8c0", "accent-fg": "#201505",
 				// "blocked" as text: the ember red is 3.5:1 on the focused
@@ -217,6 +230,7 @@ func builtins() []Theme {
 				"chrome": "#3b4252", "chrome-focus": "#4c566a", "heading": "#81a1c1",
 				"ws-heading": "#ab9683", // driftwood: the aurora orange pulled most of the way to gray
 				"branch":     "#e8a060", // the aurora orange brightened past the #d08770 todo mark
+				"prompts":    "#62cc95", // Cats green lifted: #4db380 is under 3:1 on the slate focused strip
 				"todo":       "#d08770", "ok": "#a3be8c", "warn": "#ebcb8b", "err": "#bf616a",
 				"done": "#b48ead", "accent-fg": "#16242a",
 				// The state words as text. The focused header (#4c566a) is a
@@ -242,6 +256,7 @@ func builtins() []Theme {
 				"chrome": "#1b1b26", "chrome-focus": "#2a2a44", "heading": "#ff2d95",
 				"ws-heading": "#b39a4e", // the other CRT phosphor: amber, at rest
 				"branch":     "#ff7a1a", // neon orange, halfway between the warn amber and the err red
+				"prompts":    "#4db380", // the Cats green itself, clear of the #39ff14 neon accent
 				"todo":       "#ffe14d", "ok": "#5fe86a", "warn": "#ffb020", "err": "#ff3860",
 				"done": "#00e5ff", "accent-fg": "#041008",
 				// ws-heading here is olive/amber, too near the working dot to
@@ -262,6 +277,7 @@ func builtins() []Theme {
 				"chrome": "#1e1b30", "chrome-focus": "#35305a", "heading": "#f694ff",
 				"ws-heading": "#a8936f", // sodium streetlight under the neon
 				"branch":     "#ff8c42", // orange neon sign, clear of the #ffb454 warn and #ff6767 err
+				"prompts":    "#4db380", // the Cats green itself; it holds on both header surfaces
 				"todo":       "#ffe073", "ok": "#5df0a6", "warn": "#ffb454", "err": "#ff6767",
 				"done": "#82e2ff", "accent-fg": "#140a24",
 				// "blocked" as text: the sign red is 4.3:1 on the focused
@@ -283,7 +299,9 @@ func builtins() []Theme {
 				// Burnt orange, dark enough (~4.7:1 on #e4e7ed) for the light
 				// strip and redder than the #b07800 warn amber.
 				"branch": "#a8480c",
-				"todo":   "#9a6700", "ok": "#1e8e5a", "warn": "#b07800", "err": "#cc3d3d",
+				// Cats green taken dark for the light strip, as in solarized-light.
+				"prompts": "#1a6e44",
+				"todo":    "#9a6700", "ok": "#1e8e5a", "warn": "#b07800", "err": "#cc3d3d",
 				"done": "#0e8a9e", "accent-fg": "#ffffff",
 				// Blank-conversation dot, taken to a mid brown for the light
 				// panels for the same reason as solarized-light's.

@@ -275,6 +275,33 @@ func TestBuiltinStateWordContrast(t *testing.T) {
 	}
 }
 
+// The header's "prompts ▾" control is authored as a green by every built-in
+// and holds 3.5:1 on both header surfaces. The floor is the default theme's
+// own Cats green on its focused strip (3.6:1) rather than 4.5:1: the control
+// is meant to be that exact green, and it is a click target set off by hue
+// and the ▾, not running text. Authored rather than derived is checked too,
+// since the accent fallback would turn it orange, blue or violet.
+func TestBuiltinPromptsContrast(t *testing.T) {
+	for _, b := range BuiltIns() {
+		if strings.TrimSpace(b.Colors["prompts"]) == "" {
+			t.Errorf("builtin %s: does not author prompts", b.Name)
+			continue
+		}
+		n := Normalize(b)
+		for _, sk := range []string{"chrome", "chrome-focus"} {
+			got, ok := contrastRatio(n.Colors["prompts"], n.Colors[sk])
+			if !ok {
+				t.Errorf("builtin %s: prompts %q or %s %q is not hex", b.Name, n.Colors["prompts"], sk, n.Colors[sk])
+				continue
+			}
+			if got < 3.5 {
+				t.Errorf("builtin %s: prompts %s on %s %s is %.2f:1, want ≥3.5",
+					b.Name, n.Colors["prompts"], sk, n.Colors[sk], got)
+			}
+		}
+	}
+}
+
 // contrastRatio is the WCAG 2 ratio between two hex colours: relative
 // luminance from linearised sRGB, then (lighter+0.05)/(darker+0.05).
 func contrastRatio(a, b string) (float64, bool) {

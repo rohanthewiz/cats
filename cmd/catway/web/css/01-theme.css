@@ -72,6 +72,10 @@
        sentences. Themes that don't author it get their ws-heading, the tan
        every built-in already carries. */
     --blank:#c8a27c;
+    /* The pane header's "prompts ▾" control: the Cats green (this theme's
+       accent). A key of its own so every built-in keeps it green even where
+       its accent is not; light themes author a dark green to hold the strip. */
+    --prompts:#4db380;
     /* Agent identity hues. AGENTS hands each tool name one of these six slots
        (AGENT_HUE below), so claude and ced in the same list are told apart
        without reading. Six fixed slots rather than a colour per agent: the
