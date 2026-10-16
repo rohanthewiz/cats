@@ -2499,6 +2499,9 @@ func (o *orch) PaneMeta(pane uint32) app.PaneMeta {
 		// The same session the history readers use (historySessionRef), so the
 		// id a client sees is the one the model and prompts were read from.
 		meta.AgentSession, meta.AgentSessionOrigin, _ = rt.sessionOrigin(agent)
+		// The blank word the sidebar's dot is drawn from (agentblank.go), so a
+		// drop picker can say "cleared" where the state alone says "idle".
+		meta.AgentBlank = rt.blank
 	}
 	// The plugin pair is resolved the same way the sidebar resolves it
 	// (agentsMsg), so pane.list and the sidebar always agree on what a pane

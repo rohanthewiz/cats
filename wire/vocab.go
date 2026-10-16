@@ -1231,6 +1231,15 @@ type PaneMeta struct {
 	// not be told, e.g. a session restored from before a restart.
 	AgentSession       string `json:"agent_session,omitempty"`
 	AgentSessionOrigin string `json:"agent_session_origin,omitempty"`
+	// AgentBlank is "new" or "cleared" while the agent's current conversation
+	// has had nothing asked of it — a fresh launch, or a /clear — and is
+	// omitted once it has had a turn, or when that cannot be told. It is the
+	// same word the browser's AgentItem.Blank carries (the sidebar's blank
+	// dot), so a client can tell a blank page from an agent that is idle after
+	// real work. Unlike AgentSessionOrigin it goes the moment the agent is
+	// asked something; the agent state stays "idle" either way, so a client
+	// that waits on idle (cats-todo's batch loop) is unaffected by it.
+	AgentBlank string `json:"agent_blank,omitempty"`
 	// Host is the cathost the pane's terminal lives on, resolved against the
 	// live roster — so it always names a host that exists, including for a pane
 	// restored onto one that has since gone away. It sits here rather than

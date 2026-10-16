@@ -108,6 +108,10 @@ func TestBlankFollowsTheConversation(t *testing.T) {
 	if got := rollupItem(t, o, rt.id).Blank; got != "cleared" {
 		t.Fatalf("rollup blank = %q, want cleared", got)
 	}
+	// pane.list carries the same word, for control-API clients.
+	if got := o.PaneMeta(rt.id).AgentBlank; got != "cleared" {
+		t.Fatalf("pane meta blank = %q, want cleared", got)
+	}
 
 	// Asked something: the dot goes the moment the pane works, no read needed.
 	o.onPaneAgent(orchestration.PaneAgent{PaneID: rt.id, Agent: "claude", State: "working"})
@@ -116,6 +120,9 @@ func TestBlankFollowsTheConversation(t *testing.T) {
 	}
 	if got := rollupItem(t, o, rt.id).Blank; got != "" {
 		t.Fatalf("rollup blank while working = %q", got)
+	}
+	if got := o.PaneMeta(rt.id).AgentBlank; got != "" {
+		t.Fatalf("pane meta blank while working = %q", got)
 	}
 
 	// The turn lands in the history; the next read records it as non-blank.
