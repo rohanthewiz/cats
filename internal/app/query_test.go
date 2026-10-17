@@ -82,6 +82,13 @@ func TestDispatchWorkspaceList(t *testing.T) {
 		if ws.Active {
 			active++
 		}
+		// cwd is the stored identity folder, the one an auto-name comes from.
+		if want := h.s.Workspaces()[i].IdentityCwd; ws.Cwd != want {
+			t.Fatalf("workspace[%d] cwd = %q, want %q", i, ws.Cwd, want)
+		}
+	}
+	if got.Workspaces[0].Cwd == "" {
+		t.Fatal("the first workspace must report its identity cwd")
 	}
 	if active != 1 {
 		t.Fatalf("exactly one workspace must be active, got %d", active)

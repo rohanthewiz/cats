@@ -1165,6 +1165,15 @@ type WorkspaceEntry struct {
 	// the backend resolves, because a pane's process is somewhere whether or not
 	// the workspace ever named a machine.
 	Host string `json:"host,omitempty"`
+	// Cwd is the workspace's identity directory — the folder it was created
+	// for, and the one an auto-named workspace takes its Name from. It is the
+	// stored identity, not the live cwd of any pane: a shell that cd's away
+	// does not move the workspace, which is what lets a client ask "which
+	// workspace is this project's?" (ced's Recent folders picker does) with
+	// an exact path compare instead of guessing from pane cwds and names.
+	// Like Host it is a path on the workspace's own machine; omitted when the
+	// workspace has none recorded.
+	Cwd string `json:"cwd,omitempty"`
 }
 
 // WorkspaceListResult is CmdResult.Data for workspace.list.

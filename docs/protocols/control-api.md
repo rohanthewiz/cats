@@ -717,6 +717,12 @@ now, default fallbacks applied), while a workspace's is the id it *stored* —
 empty meaning "whatever the default host is" — because that field is a policy for
 new panes rather than a location.
 
+`workspace.list` also carries `cwd`: the workspace's identity directory, the
+folder it was created for and the one an auto-named workspace takes its name
+from. It is stored, not live — a shell that `cd`s away does not move it — so a
+client can find "this project's workspace" with an exact path compare. Like a
+workspace's `host`, it names a path on that workspace's machine.
+
 ### Worktrees, config, plugins, paths, server
 
 | Method | Ergonomic verb |

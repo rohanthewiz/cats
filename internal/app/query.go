@@ -54,6 +54,9 @@ func (s *Session) ListWorkspacesIn(wsID string) []WorkspaceEntry {
 			Asleep: ws.Asleep,
 			Parked: ParkedInfo(ws.ParkedAgents),
 			Host:   ws.HostID, // as stored: "" = whatever the default host is
+			// The STORED identity, the field Name derives from — not the
+			// first pane's live cwd (DisplayNameFrom), so the two agree.
+			Cwd: ws.IdentityCwd,
 
 			FlagInfo: NewFlagInfo(ws.Flag),
 		})
