@@ -139,8 +139,13 @@
     if (onScreen) items.push({ label: "toggle zoom", fn: () => sendCmd("pane.zoom", { pane: id }) });
     items.push("-");
     if (onScreen) items.push({ label: "copy mode", fn: () => enterCopyMode(id) });
+    items.push({ label: "copy scrollback", fn: () => copyScrollback(id) });
+    // Only offered when there is a branch to copy: the header already shows it
+    // (or shows nothing, outside a repo), so a row that could only toast "no
+    // branch" would be noise. branchCopyText also gates on a live header, which
+    // keeps sidebar rows for off-screen panes from copying a stale value.
+    if (branchCopyText(id)) items.push({ label: branchCopyLabel(id), fn: () => copyBranch(id) });
     items.push(
-      { label: "copy scrollback", fn: () => copyScrollback(id) },
       "-",
       { label: "rename pane…", fn: () => renamePane(id) },
       { label: flagRowLabel(paneFlagFor(id)), sub: flagMenuItems(paneFlagTarget(id)) },

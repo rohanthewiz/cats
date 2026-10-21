@@ -121,6 +121,7 @@
         { label: "copy mode", fn: () => enterCopyMode(f) },
         { label: "copy scrollback", fn: () => copyScrollback(f) },
       );
+      if (branchCopyText(f)) items.push({ label: branchCopyLabel(f), fn: () => copyBranch(f) });
     }
     if (at) {
       items.push({ label: "rename tab…", fn: () => renameTab(at) });

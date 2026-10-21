@@ -65,6 +65,32 @@
     });
   }
 
+  // branchCopyText is what "copy branch" puts on the clipboard for a pane, or ""
+  // when there is nothing to copy (not in a repo, or a pane this window has no
+  // live header for). It reads the same p.branch the header shows, which the
+  // server keeps current with pane_branch, so the menu copies exactly what the
+  // user is looking at. A detached HEAD arrives as "@a1b2c3d" (gitbranch.go's
+  // spelling); the @ is a display flag, not part of any ref, so it is dropped —
+  // the bare sha is what `git checkout` / `git log` will accept when pasted.
+  function branchCopyText(id) {
+    const p = panes.get(id);
+    if (!p || !p.info || !p.branch) return "";
+    return p.branch[0] === "@" ? p.branch.slice(1) : p.branch;
+  }
+  // branchCopyLabel names the row by what it will copy, so a detached pane
+  // offers "copy commit sha" rather than claiming a branch it isn't on.
+  function branchCopyLabel(id) {
+    const p = panes.get(id);
+    return p && p.branch && p.branch[0] === "@" ? "copy commit sha" : "copy branch name";
+  }
+  function copyBranch(id) {
+    const text = branchCopyText(id);
+    if (!text) { toast("no git branch for this pane"); return; }
+    clipWrite(text).then(
+      () => toast("copied " + text),
+      () => toast("clipboard write blocked"));
+  }
+
   // clearStaleSelections drops any completed drag wash (p.sel.done) — a fixed
   // viewport highlight goes stale once new output or the cursor moves, so the
   // next keystroke to the terminal dismisses it. Active drags are left alone.
