@@ -41,6 +41,7 @@
   // One record per column. `cssVar` is the ratio the stylesheet multiplies
   // into that column's scale (01-theme.css); `key` / `pref` are where it is
   // remembered — this browser's localStorage, and config.json's ui section.
+  // attachAsideZoom adds `el`, the column's element, once it is wired.
   const asideZooms = {
     sidebar: { pct: ASIDE_ZOOM_DEFAULT, key: "cats.sidebar_zoom", pref: "sidebar_zoom", cssVar: "--sb-zoom" },
     chat: { pct: ASIDE_ZOOM_DEFAULT, key: "cats.chat_zoom", pref: "chat_zoom", cssVar: "--chat-zoom" },
@@ -60,7 +61,8 @@
   // zoomHover names the column under the pointer ("sidebar" / "chat"), or ""
   // over anything else. Kept by pointerenter/leave (attachAsideZoom) rather
   // than looked up per keystroke, because a key event carries no pointer
-  // position to look it up from.
+  // position to look it up from. The Mac app supplies the real cursor
+  // position with each chord, which takes precedence — see catsAdjustFont.
   let zoomHover = "";
   applyUIZoom();
 
@@ -359,7 +361,48 @@
   // native menu items call back into Go, which Evals this. delta of 0 resets.
   // Routed through zoomStep, so the menu items zoom whatever the pointer is
   // over exactly as the in-page chord does.
-  window.catsAdjustFont = (delta) => zoomStep(delta);
+  //
+  // x / y are the cursor's position in the page, in CSS px, as the native
+  // side read it at chord time (catsZoomKeyWindow), or -1 when the cursor is
+  // outside the web view (a menu item clicked in the menu bar). A known
+  // point overrides zoomHover, because the event-kept hover has a hole the
+  // page cannot close on its own: pointerenter fires only on MOVEMENT, so a
+  // pointer already resting on a column when the page loads (or a window
+  // opens under it) is never announced, and the first ⌘+ would size the
+  // terminal font instead. No DOM API reports the cursor before it moves —
+  // even :hover stays unset after a reload under a still mouse — but AppKit
+  // always knows where it is.
+  //
+  //   ⌘+ ─▶ NSMenu ─▶ Go ─▶ catsZoomKeyWindow ─(cursor x,y)─▶ catsAdjustFont
+  //                                       └─▶ zoomStep(delta, asideAt(x, y))
+  //
+  // The point decides THIS chord only; it is not written into zoomHover.
+  // Stored, it could go stale with no event to clear it: the engine never
+  // thought the resting pointer was on the column, so when the mouse first
+  // moves off it no pointerleave fires, and a later View-menu click (no
+  // point) would zoom a column the pointer left long ago.
+  //
+  // An older native build calls this with delta alone; x / y are then
+  // undefined, the check below fails, and zoomHover is used as before.
+  window.catsAdjustFont = (delta, x, y) => {
+    zoomStep(delta, x >= 0 && y >= 0 ? asideAt(x, y) : undefined);
+  };
+
+  // asideAt names the side column whose box contains the page point (x, y),
+  // or "". It tests geometry rather than document.elementFromPoint because
+  // things that float over a column (the zoom toast this very chord raises,
+  // a popover, a context menu) would win the hit test and turn a column zoom
+  // into a font zoom. A folded or closed column has an empty box, so it
+  // never matches; zoomTarget checks visibility again anyway.
+  function asideAt(x, y) {
+    for (const name of Object.keys(asideZooms)) {
+      const el = asideZooms[name].el;
+      if (!el) continue;
+      const r = el.getBoundingClientRect();
+      if (r.width && r.height && x >= r.left && x < r.right && y >= r.top && y < r.bottom) return name;
+    }
+    return "";
+  }
 
   // applyAsideZoom publishes one column's zoom as its ratio custom property
   // (--sb-zoom / --chat-zoom) on <html>. Like --ui-zoom, that one write is the
@@ -405,18 +448,23 @@
   // A hover recorded on a column that has since gone away (⌘B folding the
   // sidebar, or the chat closing, under a still pointer — no pointerleave
   // fires for an element that stops rendering) is ignored rather than trusted.
-  function zoomTarget() {
-    if (zoomHover === "sidebar" && !sidebarHidden()) return "sidebar";
-    if (zoomHover === "chat" && chatIsOpen()) return "chat";
+  //
+  // `at`, when given, is the column under a cursor position the caller knows
+  // for certain (catsAdjustFont's native point; "" = over neither) and
+  // stands in for zoomHover. Undefined means "no such point": use zoomHover.
+  function zoomTarget(at) {
+    const hover = at === undefined ? zoomHover : at;
+    if (hover === "sidebar" && !sidebarHidden()) return "sidebar";
+    if (hover === "chat" && chatIsOpen()) return "chat";
     if (chatIsOpen() && chatEl.contains(document.activeElement)) return "chat";
     return "";
   }
 
   // zoomStep applies one zoom step (+1 bigger, -1 smaller, 0 reset) to
   // whatever zoomTarget names. A font step is one px; a column step is
-  // ASIDE_ZOOM_STEP percent.
-  function zoomStep(delta) {
-    const t = zoomTarget();
+  // ASIDE_ZOOM_STEP percent. `at` is passed through to zoomTarget.
+  function zoomStep(delta, at) {
+    const t = zoomTarget(at);
     if (!t) { setFontSize(delta ? FONT_PX + delta : FONT_DEFAULT); return; }
     setAsideZoom(t, delta ? asideZooms[t].pct + delta * ASIDE_ZOOM_STEP : ASIDE_ZOOM_DEFAULT);
   }
@@ -429,6 +477,7 @@
   // a gesture over one column never banks travel for the other. A plain
   // wheel is left alone: it scrolls the column, as it always did.
   function attachAsideZoom(el, name) {
+    asideZooms[name].el = el; // for asideAt's geometry check
     el.addEventListener("pointerenter", () => { zoomHover = name; });
     el.addEventListener("pointerleave", () => { if (zoomHover === name) zoomHover = ""; });
     const acc = {};

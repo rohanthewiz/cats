@@ -503,12 +503,37 @@ void catsNavigateAll(const char *cURL, const char *cTitle) {
 // The menu owns ⌘+/⌘-/⌘0 because Cocoa resolves them as key equivalents before
 // the WKWebView sees a keydown; with several windows, "which page" is the key
 // window's, not a process-global one.
+//
+// The cursor's position in the page goes along with the step, so the page can
+// zoom the side column under it even when it has seen no pointer event yet —
+// a mouse resting on the sidebar since the page loaded never fires
+// pointerenter, and nothing in the DOM reports the cursor until it moves (see
+// catsAdjustFont in 01-bootstrap.js). AppKit always knows it:
+// mouseLocationOutsideOfEventStream is the cursor in window coordinates now,
+// not as of some event, and converting it into the web view gives page CSS px
+// — the view sets no pageZoom or magnification, so one point is one CSS px.
+// NSView's origin is bottom-left unless the view is flipped (WKWebView is),
+// and the page's is top-left, hence the guarded flip. A cursor outside the
+// view (a View-menu item clicked in the menu bar) is sent as -1, -1: "no
+// point", leaving the page's own hover tracking to decide.
 void catsZoomKeyWindow(int delta) {
     @autoreleasepool {
         for (CatsWindowController *wc in gWindows) {
             if (wc.window.isKeyWindow) {
+                NSPoint p = [wc.web convertPoint:[wc.window mouseLocationOutsideOfEventStream]
+                                        fromView:nil];
+                NSRect b = wc.web.bounds;
+                if (![wc.web isFlipped]) {
+                    p.y = NSHeight(b) - p.y;
+                }
+                int x = -1, y = -1;
+                if (NSPointInRect(p, b)) {
+                    x = (int)p.x;
+                    y = (int)p.y;
+                }
                 NSString *js = [NSString
-                    stringWithFormat:@"window.catsAdjustFont && window.catsAdjustFont(%d)", delta];
+                    stringWithFormat:@"window.catsAdjustFont && window.catsAdjustFont(%d, %d, %d)",
+                                     delta, x, y];
                 [wc.web evaluateJavaScript:js completionHandler:nil];
                 return;
             }
