@@ -68,7 +68,7 @@ const (
 // safe assumption in a tree that still uses master, or that pushes a fork.
 type Status struct {
 	State  State
-	Branch string // the trunk examined: "main", or "master"
+	Branch string // the trunk examined: "main", "master", or the configured dev branch
 	Remote string // the remote it was compared against, usually "origin"
 	// Ahead is how many commits the local trunk has that the remote's tip does
 	// not, and is only ever set for State == Ahead — see the package comment on
@@ -110,7 +110,24 @@ var trunkNames = []string{"main", "master"}
 //	cat-file -e    local   do we even have their commit?  no -> behind
 //	rev-list       local   how far apart, in each direction?
 func Resolve(ctx context.Context, dir string) Status {
-	branch, local := trunk(ctx, dir)
+	return ResolveBranch(ctx, dir, "")
+}
+
+// ResolveBranch is Resolve against a named trunk: the workspace's configured
+// development branch (workspace.Settings.DevBranch), for a project whose shared
+// branch is not main or master. "" is Resolve's automatic choice.
+//
+// A named branch is taken at its word — there is no fallback to main/master
+// when it does not exist locally. The user said which branch is the trunk; a
+// dot that quietly compared a different one would be answering a question they
+// did not ask, so a missing branch is Unknown like any other "nothing to say".
+//
+// The name must already be a valid branch name (workspace.NormalizeDevBranch).
+// It is only ever spliced in after "refs/heads/", so even an unchecked one
+// could not be read as an option, but a malformed one would fail git's own
+// parse and land on Unknown without saying why.
+func ResolveBranch(ctx context.Context, dir, branch string) Status {
+	branch, local := trunk(ctx, dir, branch)
 	if branch == "" {
 		return Status{}
 	}
@@ -159,20 +176,34 @@ func Resolve(ctx context.Context, dir string) Status {
 // A repository holding BOTH main and master — a rename that left the old branch
 // behind, which is common — resolves to main, since that is the one still being
 // pushed to.
-func trunk(ctx context.Context, dir string) (branch, sha string) {
-	out, ok := git(ctx, dir, localTimeout, "for-each-ref",
-		"--format=%(refname:short) %(objectname)", "refs/heads/main", "refs/heads/master")
+//
+// want, when set, replaces the candidate list with that one branch (see
+// ResolveBranch): same single fork, same parse, only the refs asked for differ.
+func trunk(ctx context.Context, dir, want string) (branch, sha string) {
+	names := trunkNames
+	if want != "" {
+		names = []string{want}
+	}
+	// The FULL refname, stripped here, rather than %(refname:short): short is
+	// "the shortest unambiguous name", so a tag that shares the branch's name
+	// turns "develop" into "heads/develop" and the lookup below would miss it.
+	args := []string{"for-each-ref", "--format=%(refname) %(objectname)"}
+	for _, n := range names {
+		args = append(args, "refs/heads/"+n)
+	}
+	out, ok := git(ctx, dir, localTimeout, args...)
 	if !ok {
 		return "", ""
 	}
 	found := map[string]string{}
 	for _, line := range strings.Split(out, "\n") {
-		name, obj, cut := strings.Cut(strings.TrimSpace(line), " ")
+		ref, obj, cut := strings.Cut(strings.TrimSpace(line), " ")
+		name := strings.TrimPrefix(ref, "refs/heads/")
 		if cut && name != "" && obj != "" {
 			found[name] = obj
 		}
 	}
-	for _, n := range trunkNames {
+	for _, n := range names {
 		if s := found[n]; s != "" {
 			return n, s
 		}

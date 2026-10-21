@@ -119,6 +119,7 @@ var subcommands = []subcommand{
 	{"wake-ws", app.CmdWorkspaceWake, "wake-ws <id>", []argKind{argWorkspace}, "bring a sleeping workspace back: a shell, plus its parked agents resumed", buildWakeWorkspace},
 	{"flag-ws", app.CmdWorkspaceFlag, "flag-ws <id> <kind> [note...]", []argKind{argWorkspace, argFlagKind}, "pin a flag (and an optional note) to a workspace", buildFlagWorkspace},
 	{"unflag-ws", app.CmdWorkspaceFlag, "unflag-ws [id]", []argKind{argWorkspace}, "clear a workspace's flag (active by default)", buildUnflagWorkspace},
+	{"set-ws", app.CmdWorkspaceSettings, "set-ws <id> dev-branch [name]", []argKind{argWorkspace}, "set a workspace setting; no value resets it (dev-branch: the branch the sync dot compares, default main/master)", buildSetWorkspace},
 
 	// Host commands. They edit the roster of the RUNNING catway and its config
 	// file together, so neither needs a restart. Only the two positional
@@ -888,6 +889,41 @@ func buildUnflagWorkspace(args []string) (json.RawMessage, error) {
 	p := app.FlagWorkspaceParams{Kind: ""}
 	if len(args) == 1 {
 		p.ID = args[0]
+	}
+	return marshal(p)
+}
+
+// buildSetWorkspace: set-ws <id> <setting> [value] — workspace.settings, one
+// setting per call.
+//
+//	catctl set-ws w2 dev-branch develop   compare develop with its remote
+//	catctl set-ws w2 dev-branch           back to automatic (main, or master)
+//
+// A key/value verb rather than one verb per setting (dev-branch-ws, …) so a
+// new setting is a new case below, not a new command for users to discover.
+// Leaving the value off resets, rather than taking a spelled-out "default",
+// because any word chosen for that is also a legal branch name.
+//
+// The id is required: with it optional, `set-ws dev-branch develop` and
+// `set-ws w2 dev-branch` would be the same shape meaning different things —
+// flag-ws's argument. The value is validated server-side
+// (workspace.NormalizeDevBranch) so the CLI and the dialog refuse the same
+// names with the same words.
+func buildSetWorkspace(args []string) (json.RawMessage, error) {
+	const synopsis = "set-ws <id> dev-branch [name]"
+	if len(args) < 2 || len(args) > 3 {
+		return nil, usageErr{synopsis}
+	}
+	value := ""
+	if len(args) == 3 {
+		value = args[2]
+	}
+	p := app.WorkspaceSettingsParams{ID: args[0]}
+	switch args[1] {
+	case "dev-branch":
+		p.DevBranch = &value
+	default:
+		return nil, fmt.Errorf("unknown workspace setting %q (known: dev-branch)", args[1])
 	}
 	return marshal(p)
 }

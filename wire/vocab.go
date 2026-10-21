@@ -65,6 +65,9 @@ const (
 	// CmdWorkspaceFlag is CmdPaneFlag one level up: the same annotation pinned
 	// to a whole workspace.
 	CmdWorkspaceFlag = "workspace.flag"
+	// CmdWorkspaceSettings patches a workspace's preferences — the settings
+	// its context menu's "settings…" dialog edits.
+	CmdWorkspaceSettings = "workspace.settings"
 	// CmdWorkspaceClean closes a workspace's idle panes; CmdWorkspaceSleep is
 	// clean's empty case made explicit — every pane gone, the workspace kept
 	// in the list with no terminal behind it; CmdWorkspaceWake brings a
@@ -421,6 +424,7 @@ var commandSpecs = []CommandSpec{
 	{Name: CmdWorkspaceMove, Params: MoveWorkspaceParams{}, ParamsRequired: true, Recorded: true},
 	{Name: CmdWorkspaceLock, Params: LockWorkspaceParams{}, ParamsRequired: true, Recorded: true},
 	{Name: CmdWorkspaceFlag, Params: FlagWorkspaceParams{}, ParamsRequired: true, Recorded: true},
+	{Name: CmdWorkspaceSettings, Params: WorkspaceSettingsParams{}, ParamsRequired: true, Recorded: true},
 	{Name: CmdWorkspaceClean, Params: CleanWorkspaceParams{}, Result: CleanWorkspaceResult{}, Recorded: true},
 	{Name: CmdWorkspaceSleep, Params: CleanWorkspaceParams{}, Result: CleanWorkspaceResult{}, Recorded: true},
 	{Name: CmdWorkspaceWake, Params: WorkspaceParams{}, ParamsRequired: true, Recorded: true},
@@ -1069,6 +1073,38 @@ type LockWorkspaceParams struct {
 	Locked bool   `json:"locked"`
 }
 
+// WorkspaceSettingsParams: workspace.settings — change some of a workspace's
+// preferences. ID "" means the active workspace, the lock/flag default.
+//
+// A patch, not a replacement: each setting is a pointer, nil leaves it as it
+// is, and a pointer to the zero value puts it back to its default. A whole-
+// struct replace would be simpler to decode and wrong the day a second
+// setting exists — `catctl set-ws w2 dev-branch develop` from one terminal
+// would silently reset whatever another client had just set, because the CLI
+// never knew that field was there.
+//
+// Validation is the server's (workspace.NormalizeDevBranch), so the dialog
+// and the CLI refuse a bad branch name with the same words.
+type WorkspaceSettingsParams struct {
+	ID string `json:"id,omitempty" cats:"handle=workspace"`
+	// DevBranch: the development branch the sync dot compares against its
+	// remote. "" = automatic (main, or master).
+	DevBranch *string `json:"dev_branch,omitempty"`
+}
+
+// WorkspaceSettings is a workspace's preferences as they appear on the wire:
+// flat fields embedded into every struct that describes a workspace
+// (WorkspaceEntry, WorkspaceInfo), on the FlagInfo pattern and for its
+// reasons — one more optional scalar per setting for a client to read, and
+// the keys documented once. Every field is omitempty and its zero value means
+// "the default", so a workspace nobody has configured costs nothing.
+type WorkspaceSettings struct {
+	// DevBranch is the configured development branch; "" = automatic (the
+	// sync dot finds main, or master). A client that wants the branch the dot
+	// actually compared reads workspace_git's Branch instead.
+	DevBranch string `json:"dev_branch,omitempty"`
+}
+
 // CleanWorkspaceParams: workspace.clean and workspace.sleep. ID "" means the
 // active workspace, the lock/close default; the whole object may be absent.
 //
@@ -1174,6 +1210,10 @@ type WorkspaceEntry struct {
 	// Like Host it is a path on the workspace's own machine; omitted when the
 	// workspace has none recorded.
 	Cwd string `json:"cwd,omitempty"`
+	// WorkspaceSettings are the user's preferences (workspace.settings); zero
+	// when everything is at its default. A plugin that cares which branch is
+	// the project's trunk (a git UI picking the base for a diff) reads it here.
+	WorkspaceSettings
 }
 
 // WorkspaceListResult is CmdResult.Data for workspace.list.

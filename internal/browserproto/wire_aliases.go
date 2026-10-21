@@ -57,6 +57,8 @@ type (
 	FlagListResult           = wire.FlagListResult
 	FlagPaneParams           = wire.FlagPaneParams
 	FlagWorkspaceParams      = wire.FlagWorkspaceParams
+	WorkspaceSettingsParams  = wire.WorkspaceSettingsParams
+	WorkspaceSettings        = wire.WorkspaceSettings
 	Focus                    = wire.Focus
 	History                  = wire.History
 	HostAttachParams         = wire.HostAttachParams
@@ -270,6 +272,7 @@ const (
 	CmdWorkspaceClose     = wire.CmdWorkspaceClose
 	CmdWorkspaceCreate    = wire.CmdWorkspaceCreate
 	CmdWorkspaceFlag      = wire.CmdWorkspaceFlag
+	CmdWorkspaceSettings  = wire.CmdWorkspaceSettings
 	CmdWorkspaceFocus     = wire.CmdWorkspaceFocus
 	CmdWorkspaceList      = wire.CmdWorkspaceList
 	CmdWorkspaceLock      = wire.CmdWorkspaceLock

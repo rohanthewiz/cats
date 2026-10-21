@@ -136,6 +136,7 @@
         // with idle agents, so the palette does not carry a second entry for it.
         { label: "sleep workspace…", fn: () => sleepWorkspace(aw) },
         { label: "flag workspace…", fn: () => openFlagDialog(wsFlagTarget(aw)) },
+        { label: "workspace settings…", fn: () => openWorkspaceSettings(aw) },
         { label: "close workspace…", fn: () => confirmCloseWorkspace(aw) },
       );
     }

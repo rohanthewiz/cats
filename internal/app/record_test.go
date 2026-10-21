@@ -127,6 +127,10 @@ var recordedParamClasses = map[string]map[string]string{
 		"kind": ClassPlain,
 		"note": ClassPlain,
 	},
+	"workspace.settings": {
+		"id":         ClassWorkspaceHandle,
+		"dev_branch": ClassPlain,
+	},
 	"workspace.clean": {
 		"id":      ClassWorkspaceHandle,
 		"agents":  ClassPlain,

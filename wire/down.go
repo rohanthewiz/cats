@@ -156,6 +156,10 @@ type WorkspaceInfo struct {
 	// glyph with a meaning plus an optional note, drawn beside the name. Zero
 	// when unflagged, which is the usual case.
 	FlagInfo
+	// WorkspaceSettings are the user's per-workspace preferences
+	// (workspace.settings), carried so the settings dialog opens on the
+	// current values. Zero when everything is at its default.
+	WorkspaceSettings
 }
 
 // TabInfo is one tab of the active workspace.

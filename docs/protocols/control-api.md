@@ -435,6 +435,7 @@ catctl pane.split --params '{"direction":"v","command":["ced","main.go"]}'
 | `workspace.move` | — |
 | `workspace.lock` | `lock-ws [id]` / `unlock-ws [id]` |
 | `workspace.flag` | `flag-ws <id> <kind> [note...]` / `unflag-ws [id]` |
+| `workspace.settings` | `set-ws <id> dev-branch [name]` |
 | `workspace.clean` | `clean-ws [id] [park \| run <text...>]` |
 | `workspace.sleep` | `sleep-ws [id] [park \| run <text...>]` |
 | `workspace.wake` | `wake-ws <id>` |
@@ -481,6 +482,31 @@ id they act on the active workspace. The lock is durable (it survives a catway
 restart) and reported by `workspace.list` as `locked`, but it is a guardrail
 rather than a permission boundary — `workspace.lock` is itself an ordinary
 command, so anything holding the control API can lift it.
+
+### Settings
+
+`workspace.settings` changes a workspace's preferences — what the row's
+**settings…** dialog edits. It is a **patch**: each setting is optional, an
+omitted one is left as it is, and an empty value puts it back to its default, so
+two clients each setting a different field never undo one another. `id` defaults
+to the active workspace, as for `workspace.lock`.
+
+| Field | Meaning |
+|---|---|
+| `dev_branch` | The project's development branch — what the workspace row's sync dot compares with its remote. `""` (the default) is automatic: `main`, or `master` where that is still the name. |
+
+```json
+{"id": "w2", "dev_branch": "develop"}
+{"id": "w2", "dev_branch": ""}
+```
+
+A branch name is trimmed, a leading `refs/heads/` is dropped, and anything git
+would refuse as a branch name (spaces, `..`, a leading `-`, …) fails the command
+without changing anything. A configured branch is taken at its word: where it
+does not exist in the checkout the sync state is unknown, not a silent fallback
+to `main`. Settings are durable, and `workspace.list` (and the layout) carry
+them as flat fields beside `locked` and `flag`, omitted while at their default.
+A setting that changes what the sync dot compares re-runs that check at once.
 
 ### Clean, sleep and wake
 

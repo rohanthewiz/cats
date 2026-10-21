@@ -139,6 +139,25 @@ func TestBuildFlag(t *testing.T) {
 	buildErr(t, "unflag-ws", []string{"w2", "extra"})
 }
 
+// set-ws: id, setting, optional value. A missing value is a reset, which on
+// the wire is a pointer to "" — distinct from leaving the setting out, which
+// the patch would read as "don't touch it".
+func TestBuildSetWorkspace(t *testing.T) {
+	str := func(s string) *string { return &s }
+	buildOK(t, "set-ws", []string{"w2", "dev-branch", "develop"},
+		app.WorkspaceSettingsParams{ID: "w2", DevBranch: str("develop")})
+	buildOK(t, "set-ws", []string{"w2", "dev-branch"},
+		app.WorkspaceSettingsParams{ID: "w2", DevBranch: str("")})
+	sc, _ := lookupSubcommand("set-ws")
+	if raw, _ := sc.build([]string{"w2", "dev-branch"}); string(raw) != `{"id":"w2","dev_branch":""}` {
+		t.Fatalf("reset params = %s, want dev_branch present and empty", raw)
+	}
+	buildErr(t, "set-ws", []string{"w2"})                         // a setting is required
+	buildErr(t, "set-ws", []string{"dev-branch", "develop"})      // and so is the id
+	buildErr(t, "set-ws", []string{"w2", "colour", "red"})        // unknown setting
+	buildErr(t, "set-ws", []string{"w2", "dev-branch", "a", "b"}) // one value
+}
+
 // clean-ws / sleep-ws: an optional id first, then the agent mode; wake-ws
 // takes the id it cannot guess.
 func TestBuildCleanWorkspace(t *testing.T) {

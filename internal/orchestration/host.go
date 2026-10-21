@@ -859,7 +859,7 @@ func (h *Host) dispatch(typ MessageType, payload []byte) error {
 		// asked about in one order routinely answer in the other, since one
 		// remote is reachable and the other is not.
 		go func() {
-			h.emit(NewGitSyncResult(c.ID, gitsync.Resolve(context.Background(), c.Dir)))
+			h.emit(NewGitSyncResult(c.ID, gitsync.ResolveBranch(context.Background(), c.Dir, c.Branch)))
 		}()
 	case MsgRequestFile:
 		var c RequestFile

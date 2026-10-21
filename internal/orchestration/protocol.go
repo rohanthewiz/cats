@@ -544,14 +544,21 @@ func NewRequestWorktree(id uint64, req worktree.OpRequest) RequestWorktree {
 // sweep, so a daemon may see several at once. That is deliberate: the daemon is
 // stateless here, holds no subscription, and a sweep that is abandoned costs it
 // nothing beyond the answers already in flight.
+//
+// Branch is the workspace's configured development branch ("" = the daemon's
+// automatic main/master choice; see gitsync.ResolveBranch). An additive,
+// omitempty field rather than a new feature flag: a daemon from before it
+// existed ignores the key and answers for main/master, and its reply names the
+// branch it compared, so the tooltip still says truthfully what the dot means.
 type RequestGitSync struct {
-	Type MessageType `json:"type"`
-	ID   uint64      `json:"id"`
-	Dir  string      `json:"dir"`
+	Type   MessageType `json:"type"`
+	ID     uint64      `json:"id"`
+	Dir    string      `json:"dir"`
+	Branch string      `json:"branch,omitempty"`
 }
 
-func NewRequestGitSync(id uint64, dir string) RequestGitSync {
-	return RequestGitSync{Type: MsgRequestGitSync, ID: id, Dir: dir}
+func NewRequestGitSync(id uint64, dir, branch string) RequestGitSync {
+	return RequestGitSync{Type: MsgRequestGitSync, ID: id, Dir: dir, Branch: branch}
 }
 
 // The control relay carries the client's control API to a socket on the

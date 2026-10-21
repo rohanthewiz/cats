@@ -99,6 +99,8 @@ func BuildLayout(workspaces []*workspace.Workspace, active int, area layout.Rect
 			Asleep:   ws.Asleep,
 			Parked:   app.ParkedInfo(ws.ParkedAgents),
 			FlagInfo: app.NewFlagInfo(ws.Flag),
+
+			WorkspaceSettings: app.NewWorkspaceSettings(ws.Settings),
 		})
 	}
 	if active < 0 || active >= len(workspaces) {

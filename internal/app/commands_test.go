@@ -121,15 +121,16 @@ func (b *fakeBackend) SetViewWorkspace(wsID string) {
 // means a backend that does not record is a backend that returns nil here.
 func (b *fakeBackend) Recorder() Recorder { return b.recorder }
 
-func (b *fakeBackend) rec(s string)                { *b.log = append(*b.log, s) }
-func (b *fakeBackend) Area() layout.Rect           { return b.area }
-func (b *fakeBackend) ApplyModel()                 { b.rec("applyModel") }
-func (b *fakeBackend) BroadcastLayout()            { b.rec("broadcastLayout") }
-func (b *fakeBackend) BroadcastPaneTitle(p uint32) { b.rec("title"); b.lastTitle = p }
-func (b *fakeBackend) BroadcastFlags()             { b.rec("broadcastFlags") }
-func (b *fakeBackend) KeepPane(pane uint32) bool   { b.rec("keepPane"); return true }
-func (b *fakeBackend) PaneExists(uint32) bool      { return b.paneExists }
-func (b *fakeBackend) DaemonConnected() bool       { return b.daemonUp }
+func (b *fakeBackend) rec(s string)                       { *b.log = append(*b.log, s) }
+func (b *fakeBackend) Area() layout.Rect                  { return b.area }
+func (b *fakeBackend) ApplyModel()                        { b.rec("applyModel") }
+func (b *fakeBackend) BroadcastLayout()                   { b.rec("broadcastLayout") }
+func (b *fakeBackend) BroadcastPaneTitle(p uint32)        { b.rec("title"); b.lastTitle = p }
+func (b *fakeBackend) BroadcastFlags()                    { b.rec("broadcastFlags") }
+func (b *fakeBackend) WorkspaceSettingsChanged(id string) { b.rec("settingsChanged " + id) }
+func (b *fakeBackend) KeepPane(pane uint32) bool          { b.rec("keepPane"); return true }
+func (b *fakeBackend) PaneExists(uint32) bool             { return b.paneExists }
+func (b *fakeBackend) DaemonConnected() bool              { return b.daemonUp }
 
 // PaneHostConnected tracks daemonUp: the fake session is single-host, so every
 // pane's host is the default one.
@@ -2899,4 +2900,105 @@ func TestDispatchPanePromptsResolvesAndClamps(t *testing.T) {
 			t.Fatalf("an unknown pane reached the backend: %v", *h.log)
 		}
 	}
+}
+
+func TestDispatchWorkspaceSettings(t *testing.T) {
+	// wsSettings reads the active workspace's settings back through
+	// workspace.list — the path a plugin reads them on.
+	wsSettings := func(t *testing.T, h cmdHarness) WorkspaceSettings {
+		t.Helper()
+		for _, ws := range okDataFor[WorkspaceListResult](t, h, CmdWorkspaceList).Workspaces {
+			if ws.Active {
+				return ws.WorkspaceSettings
+			}
+		}
+		t.Fatal("no active workspace in workspace.list")
+		return WorkspaceSettings{}
+	}
+	str := func(s string) *string { return &s }
+
+	t.Run("sets, normalizes and resets the dev branch", func(t *testing.T) {
+		h := newCmdHarness(t)
+		id := h.s.ActiveWorkspace().ID
+		r := h.resp()
+
+		// Whitespace and a pasted refs/heads/ prefix are both cleaned off.
+		h.d.Dispatch(CmdWorkspaceSettings, params(t, WorkspaceSettingsParams{
+			ID: id, DevBranch: str("  refs/heads/develop ")}), r)
+
+		if !r.okCall || r.failCall {
+			t.Fatalf("workspace.settings: ok=%v fail=%v (%q)", r.okCall, r.failCall, r.errMsg)
+		}
+		want := "settingsChanged " + id
+		if lg := *h.log; len(lg) != 2 || lg[0] != want || lg[1] != "ok" {
+			t.Fatalf("workspace.settings effects = %v, want [%s ok]", lg, want)
+		}
+		if got := wsSettings(t, h).DevBranch; got != "develop" {
+			t.Fatalf("dev_branch = %q, want develop", got)
+		}
+
+		// "" puts it back to automatic.
+		r = h.resp()
+		h.d.Dispatch(CmdWorkspaceSettings, params(t, WorkspaceSettingsParams{ID: id, DevBranch: str("")}), r)
+		if !r.okCall {
+			t.Fatalf("reset: fail=%v (%q)", r.failCall, r.errMsg)
+		}
+		if got := wsSettings(t, h); got != (WorkspaceSettings{}) {
+			t.Fatalf("after reset, settings = %+v", got)
+		}
+	})
+
+	t.Run("an unchanged value is a quiet no-op", func(t *testing.T) {
+		h := newCmdHarness(t)
+		h.d.Dispatch(CmdWorkspaceSettings, params(t, WorkspaceSettingsParams{DevBranch: str("trunk")}), h.resp())
+		*h.log = nil
+
+		r := h.resp()
+		h.d.Dispatch(CmdWorkspaceSettings, params(t, WorkspaceSettingsParams{DevBranch: str("trunk")}), r)
+
+		// No backend call: the sync dot must not be thrown away and re-asked
+		// for a save that changed nothing.
+		if lg := *h.log; len(lg) != 1 || lg[0] != "ok" {
+			t.Fatalf("no-op effects = %v, want [ok]", lg)
+		}
+	})
+
+	t.Run("an omitted field is left alone", func(t *testing.T) {
+		h := newCmdHarness(t)
+		h.d.Dispatch(CmdWorkspaceSettings, params(t, WorkspaceSettingsParams{DevBranch: str("trunk")}), h.resp())
+
+		// The patch contract: a params object that names no setting changes
+		// none, rather than resetting the ones it did not mention.
+		r := h.resp()
+		h.d.Dispatch(CmdWorkspaceSettings, params(t, WorkspaceSettingsParams{}), r)
+
+		if !r.okCall || wsSettings(t, h).DevBranch != "trunk" {
+			t.Fatalf("empty patch: ok=%v settings=%+v (%q)", r.okCall, wsSettings(t, h), r.errMsg)
+		}
+	})
+
+	t.Run("a bad branch name is refused and changes nothing", func(t *testing.T) {
+		h := newCmdHarness(t)
+		r := h.resp()
+
+		h.d.Dispatch(CmdWorkspaceSettings, params(t, WorkspaceSettingsParams{DevBranch: str("--upload-pack=x")}), r)
+
+		if !r.failCall || !strings.Contains(r.errMsg, "invalid branch name") {
+			t.Fatalf("bad name: fail=%v msg=%q", r.failCall, r.errMsg)
+		}
+		if got := wsSettings(t, h); got != (WorkspaceSettings{}) {
+			t.Fatalf("a refused patch changed settings to %+v", got)
+		}
+	})
+
+	t.Run("unknown workspace fails", func(t *testing.T) {
+		h := newCmdHarness(t)
+		r := h.resp()
+
+		h.d.Dispatch(CmdWorkspaceSettings, params(t, WorkspaceSettingsParams{ID: "w404", DevBranch: str("develop")}), r)
+
+		if !r.failCall || !strings.Contains(r.errMsg, "unknown workspace") {
+			t.Fatalf("unknown workspace: fail=%v msg=%q", r.failCall, r.errMsg)
+		}
+	})
 }

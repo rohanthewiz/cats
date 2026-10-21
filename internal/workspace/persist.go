@@ -68,8 +68,12 @@ type Snapshot struct {
 	// workspace is awake with nothing parked — which is every workspace in a
 	// session written before sleeping existed, so those files restore
 	// byte-identically.
-	Asleep         bool                  `json:"asleep,omitempty"`
-	ParkedAgents   []ParkedAgent         `json:"parked_agents,omitempty"`
+	Asleep       bool          `json:"asleep,omitempty"`
+	ParkedAgents []ParkedAgent `json:"parked_agents,omitempty"`
+	// Settings is omitzero for the same reason: a workspace whose settings are
+	// all at their defaults — every workspace from before settings existed —
+	// writes no key at all.
+	Settings       Settings              `json:"settings,omitzero"`
 	ActiveTab      int                   `json:"active_tab"`
 	PaneNumbers    map[layout.PaneID]int `json:"pane_numbers"`
 	NextPaneNumber int                   `json:"next_pane_number"`
@@ -114,6 +118,7 @@ func (w *Workspace) Snapshot() Snapshot {
 		Flag:           w.Flag.Clone(),
 		Asleep:         w.Asleep,
 		ParkedAgents:   slices.Clone(w.ParkedAgents),
+		Settings:       w.Settings,
 		ActiveTab:      w.activeTab,
 		PaneNumbers:    numbers,
 		NextPaneNumber: w.nextPublicPaneNumber,
@@ -145,6 +150,7 @@ func Restore(s PaneSpawner, snap Snapshot) (*Workspace, error) {
 		Flag:              snap.Flag.Clone(),
 		Asleep:            snap.Asleep,
 		ParkedAgents:      slices.Clone(snap.ParkedAgents),
+		Settings:          snap.Settings,
 		PublicPaneNumbers: make(map[layout.PaneID]int, len(snap.PaneNumbers)),
 		activeTab:         snap.ActiveTab,
 		spawner:           s,

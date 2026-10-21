@@ -193,6 +193,7 @@ catctl unflag-ws [id]
 catctl clean-ws [id] [park | run <text...>]
 catctl sleep-ws [id] [park | run <text...>]
 catctl wake-ws <id>
+catctl set-ws <id> dev-branch [name]
 ```
 
 `lock-ws` sets a workspace aside for hand work: no launching a plugin or an agent
@@ -250,6 +251,24 @@ there after the agent is restarted in place — and a plain shell can wear one t
 workspace: with both optional, `flag-ws followup` and `flag-ws w2` would be the
 same shape meaning different things. Clearing takes one argument and has no such
 collision.
+
+`set-ws` changes a workspace setting — the same values the workspace row's
+**settings…** dialog edits. Today there is one, `dev-branch`: the project's
+development branch, which the sync dot on the workspace row compares with its
+remote. It defaults to main (or master, where that is still the name); set it
+for a project whose shared branch is called something else, and leave the value
+off to go back to the default:
+
+```bash
+catctl set-ws w2 dev-branch develop
+catctl set-ws w2 dev-branch            # back to main / master
+```
+
+The name is checked against git's branch-name rules, and a pasted
+`refs/heads/` prefix is dropped. A configured branch is taken at its word: if it
+does not exist in the checkout the dot stays uncoloured rather than quietly
+comparing main instead. Settings are durable and `catctl workspaces` reports
+them (`dev_branch`), omitted while at their default.
 
 Command history — one record per command, across every pane and host:
 

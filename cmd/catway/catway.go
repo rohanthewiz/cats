@@ -1759,6 +1759,17 @@ func (o *orch) BroadcastFlags() {
 	o.saveSoon()
 }
 
+// WorkspaceSettingsChanged implements app.Backend: a workspace's preferences
+// changed (workspace.settings). The layout carries them, so every window's
+// settings dialog opens on the new values; the save is armed because they are
+// durable; and the sync dot is re-asked, since the development branch is the
+// very thing it compares. Loop goroutine — the dispatcher runs there.
+func (o *orch) WorkspaceSettingsChanged(wsID string) {
+	o.broadcastLayouts()
+	o.saveSoon()
+	o.resweepWorkspaceGit(wsID)
+}
+
 // --- daemon round-trips: read + capture (loop goroutine only) ----------------
 //
 // read and capture are the only §7 commands that need a daemon round-trip: the

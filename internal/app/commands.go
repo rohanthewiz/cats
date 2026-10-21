@@ -62,6 +62,17 @@ type Backend interface {
 	// workspace) and therefore its own message. Nothing structural changed, so
 	// unlike ApplyModel this reconciles no PTYs and moves no viewport.
 	BroadcastFlags()
+	// WorkspaceSettingsChanged is told after workspace.settings changed a
+	// workspace's preferences. It must rebroadcast the layout (which carries
+	// the settings, so every window's dialog opens on the new values) and arm
+	// the save — settings are durable.
+	//
+	// Its own method rather than BroadcastLayout because a setting can make
+	// runtime state stale that the session knows nothing about: a new
+	// development branch turns the cached sync dot into the answer to a
+	// question nobody is asking any more, and only the backend holds that
+	// cache and the sweep that refreshes it.
+	WorkspaceSettingsChanged(wsID string)
 
 	// KeepPane cancels the auto-close countdown on an exited pane (pane.keep),
 	// reporting false for a pane the backend does not know. A pane with no
@@ -1147,6 +1158,43 @@ func (d *Dispatcher) dispatch(name string, dec ParamDecoder, r Responder) {
 		}
 		if changed {
 			d.backend.BroadcastFlags()
+		}
+		r.OK(nil)
+
+	case CmdWorkspaceSettings:
+		var p WorkspaceSettingsParams
+		if err := dec.Decode(&p); err != nil {
+			bad(err)
+			return
+		}
+		// Validate every named field before touching the model, so a patch
+		// with one bad field changes nothing. A bad branch name is malformed
+		// params (bad), the way a bad flag kind is, not a failed effect.
+		var devBranch *string
+		if p.DevBranch != nil {
+			name, err := workspace.NormalizeDevBranch(*p.DevBranch)
+			if err != nil {
+				bad(err)
+				return
+			}
+			devBranch = &name
+		}
+		target := p.ID
+		if target == "" {
+			target = d.viewWorkspaceID() // the workspace.lock default
+		}
+		wsID, changed, err := d.session.UpdateWorkspaceSettings(target, func(s *workspace.Settings) {
+			// nil = not named by this patch, so left as it is.
+			if devBranch != nil {
+				s.DevBranch = *devBranch
+			}
+		})
+		if err != nil {
+			r.Fail(err.Error())
+			return
+		}
+		if changed {
+			d.backend.WorkspaceSettingsChanged(wsID)
 		}
 		r.OK(nil)
 

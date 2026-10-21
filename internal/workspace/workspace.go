@@ -68,6 +68,10 @@ type Workspace struct {
 	// the pane is gone, the session id is kept, and wake resumes each one in a
 	// pane of its own. Durable for the same reason Asleep is.
 	ParkedAgents []ParkedAgent
+	// Settings are the user's per-workspace preferences (settings.go) — the
+	// development branch, for now. Durable like the lock and the flag: a
+	// preference that reset itself on restart would not be one.
+	Settings Settings
 	// CachedGitBranch / CachedGitAheadBehind are plain optionals fed by the
 	// deferred GitProvider seam (WS1 Stage 4); nil until wired.
 	CachedGitBranch      *string

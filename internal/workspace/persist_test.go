@@ -32,6 +32,7 @@ func buildWorkspace(t *testing.T) *Workspace {
 	}
 	ws.SetCustomName("myws")
 	ws.SetLocked(true)
+	ws.SetSettings(Settings{DevBranch: "develop"})
 	ws.SetFlag(&flags.Flag{Kind: flags.KindFollowup, Note: "waiting on the API review", AtMs: 1_700_000_000_000})
 	// One flag on a pane too, and on a NAMED kind's neighbour — a custom glyph —
 	// so the round trip covers both halves of the vocabulary. The root pane of
@@ -83,6 +84,11 @@ func TestWorkspaceSnapshotRoundTrip(t *testing.T) {
 	// the one moment nobody is watching for it.
 	if !restored.Locked {
 		t.Fatal("locked workspace restored unlocked")
+	}
+	// Settings are preferences, and a preference that reset on restart is not
+	// one.
+	if restored.Settings != ws.Settings {
+		t.Fatalf("settings: got %+v want %+v", restored.Settings, ws.Settings)
 	}
 	// Flags are durable for the same reason the lock is, and more so: the whole
 	// point of "come back to this" is that it is still there tomorrow.

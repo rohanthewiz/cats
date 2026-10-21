@@ -299,3 +299,53 @@ func TestResolveWithPackedRefs(t *testing.T) {
 		t.Fatalf("state = %q, want %q", got.State, Synced)
 	}
 }
+
+// A configured development branch replaces the main/master guess: the dot
+// measures develop, even though main is right there and level with origin.
+func TestResolveBranchUsesConfiguredTrunk(t *testing.T) {
+	clone, _ := fixture(t)
+	run(t, clone, "checkout", "-b", "develop")
+	commit(t, clone, "dev-one")
+	run(t, clone, "push", "-u", "origin", "develop")
+	commit(t, clone, "dev-two") // develop is now one ahead; main is synced
+
+	got := ResolveBranch(context.Background(), clone, "develop")
+	if got.Branch != "develop" {
+		t.Fatalf("branch = %q, want develop", got.Branch)
+	}
+	if got.State != Ahead || got.Ahead != 1 {
+		t.Errorf("got %q (+%d), want ahead by 1 — main would have read as synced", got.State, got.Ahead)
+	}
+	// The empty name is Resolve's automatic choice, unchanged.
+	if auto := ResolveBranch(context.Background(), clone, ""); auto.Branch != "main" || auto.State != Synced {
+		t.Errorf("automatic: got %q on %q, want synced on main", auto.State, auto.Branch)
+	}
+}
+
+// A configured branch that does not exist is Unknown, not a quiet fallback to
+// main: the user named the trunk, and a dot comparing a different branch would
+// be answering a question nobody asked.
+func TestResolveBranchMissingIsUnknown(t *testing.T) {
+	clone, _ := fixture(t)
+	if got := ResolveBranch(context.Background(), clone, "develop"); got != (Status{}) {
+		t.Fatalf("got %+v for a missing branch, want the zero Status", got)
+	}
+}
+
+// Slash-separated names resolve, and a tag sharing the branch's name does not
+// hide it — %(refname:short) would have turned the ref into "heads/develop".
+func TestResolveBranchNestedNameAndShadowingTag(t *testing.T) {
+	clone, _ := fixture(t)
+	run(t, clone, "checkout", "-b", "release/2.0")
+	run(t, clone, "push", "-u", "origin", "release/2.0")
+	if got := ResolveBranch(context.Background(), clone, "release/2.0"); got.State != Synced || got.Branch != "release/2.0" {
+		t.Errorf("nested: got %q on %q, want synced on release/2.0", got.State, got.Branch)
+	}
+
+	run(t, clone, "checkout", "-b", "develop")
+	run(t, clone, "push", "-u", "origin", "develop")
+	run(t, clone, "tag", "develop")
+	if got := ResolveBranch(context.Background(), clone, "develop"); got.State != Synced || got.Branch != "develop" {
+		t.Errorf("shadowed by a tag: got %q on %q, want synced on develop", got.State, got.Branch)
+	}
+}

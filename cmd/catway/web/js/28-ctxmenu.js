@@ -294,6 +294,10 @@
       // the section heading.
       { label: "open in new window", fn: () => openWindow(w.id) },
       { label: w.locked ? "unlock" : "lock", fn: () => toggleWorkspaceLock(w) },
+      // Preferences about the project behind the workspace (its development
+      // branch, for now) — one dialog for all of them, so a new setting is a
+      // new field there rather than another row here.
+      { label: "settings…", fn: () => openWorkspaceSettings(w) },
       // The winding-down rows, in the order they escalate: clean drops idle
       // panes, sleep parks the whole thing, close ends it. Clean is a submenu
       // for the one decision it needs — what to do with idle agents: the plain

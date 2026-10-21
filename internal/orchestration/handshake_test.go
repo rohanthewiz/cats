@@ -540,7 +540,7 @@ func TestGitSyncAnswersFromTheDaemonsFilesystem(t *testing.T) {
 		}
 	}
 
-	if err := WriteMessage(c, NewRequestGitSync(11, repo)); err != nil {
+	if err := WriteMessage(c, NewRequestGitSync(11, repo, "")); err != nil {
 		t.Fatalf("request: %v", err)
 	}
 	typ, payload := readEvent(t, c)
@@ -564,7 +564,7 @@ func TestGitSyncAnswersFromTheDaemonsFilesystem(t *testing.T) {
 	// A directory that is not a repository at all answers the same way, over the
 	// same round trip — no error event, because "nothing to say" is not a fault
 	// and a toast every two minutes would be.
-	if err := WriteMessage(c, NewRequestGitSync(12, t.TempDir())); err != nil {
+	if err := WriteMessage(c, NewRequestGitSync(12, t.TempDir(), "")); err != nil {
 		t.Fatalf("request: %v", err)
 	}
 	typ, payload = readEvent(t, c)
@@ -577,6 +577,27 @@ func TestGitSyncAnswersFromTheDaemonsFilesystem(t *testing.T) {
 	}
 	if plain.ID != 12 || plain.Status.State != gitsync.Unknown {
 		t.Fatalf("result = %+v, want id 12 and an unknown state", plain)
+	}
+
+	// A configured development branch rides the request and is what the
+	// daemon examines. With no remote the state is still unknown, but the
+	// reply names the branch it compared — develop, not the automatic main.
+	if out, err := exec.Command("git", "-C", repo, "branch", "develop").CombinedOutput(); err != nil {
+		t.Fatalf("git branch develop: %v\n%s", err, out)
+	}
+	if err := WriteMessage(c, NewRequestGitSync(13, repo, "develop")); err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	typ, payload = readEvent(t, c)
+	if typ != MsgGitSyncResult {
+		t.Fatalf("answer = %q, want git_sync_result", typ)
+	}
+	var dev GitSyncResult
+	if err := json.Unmarshal(payload, &dev); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if dev.ID != 13 || dev.Status.Branch != "develop" {
+		t.Fatalf("result = %+v, want id 13 compared on develop", dev)
 	}
 }
 

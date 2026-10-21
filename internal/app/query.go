@@ -58,7 +58,8 @@ func (s *Session) ListWorkspacesIn(wsID string) []WorkspaceEntry {
 			// first pane's live cwd (DisplayNameFrom), so the two agree.
 			Cwd: ws.IdentityCwd,
 
-			FlagInfo: NewFlagInfo(ws.Flag),
+			FlagInfo:          NewFlagInfo(ws.Flag),
+			WorkspaceSettings: NewWorkspaceSettings(ws.Settings),
 		})
 	}
 	return out

@@ -49,6 +49,15 @@ func NewFlagInfo(f *flags.Flag) FlagInfo {
 	return FlagInfo{Flag: string(f.Kind), FlagNote: f.Note, FlagAtMs: f.AtMs}
 }
 
+// NewWorkspaceSettings projects a workspace's settings onto the wire. A
+// field-by-field copy rather than a shared type because the model's Settings
+// and the wire's are different contracts: wire is the stdlib-only package
+// other repositories pin, and a field added to the model is not on the wire
+// until it is added here on purpose.
+func NewWorkspaceSettings(s workspace.Settings) WorkspaceSettings {
+	return WorkspaceSettings{DevBranch: s.DevBranch}
+}
+
 // optPaneID converts an optional wire pane id into an optional layout.PaneID
 // (nil = the focused pane).
 func optPaneID(p *uint32) *layout.PaneID {

@@ -83,12 +83,14 @@ const (
 )
 
 // gitSyncTarget is one workspace to resolve: its public id, the directory that
-// IS the workspace as far as the sidebar is concerned, and the host that owns
-// that directory.
+// IS the workspace as far as the sidebar is concerned, the host that owns
+// that directory, and the branch to compare ("" = automatic main/master; the
+// workspace's development-branch setting otherwise).
 type gitSyncTarget struct {
-	ws   string
-	dir  string
-	host string
+	ws     string
+	dir    string
+	host   string
+	branch string
 }
 
 // gitSyncPlan is one sweep's division of labour. Split at planning time, on the
@@ -215,7 +217,7 @@ func (o *orch) gitSyncPlan() gitSyncPlan {
 			// state a detach produces (see workspaceHostOwns).
 			continue
 		}
-		t := gitSyncTarget{ws: ws.ID, dir: dir, host: host}
+		t := gitSyncTarget{ws: ws.ID, dir: dir, host: host, branch: ws.Settings.DevBranch}
 		switch {
 		case o.hostByID(host).supports(orchestration.FeatureGitSync):
 			p.viaHost = append(p.viaHost, t)
@@ -260,7 +262,7 @@ func (o *orch) requestWorkspaceGit(gen uint64, t gitSyncTarget) {
 	o.nextGitSyncReq++
 	id := o.nextGitSyncReq
 	o.registerPending(gitSyncResponder{orch: o, gen: gen, ws: t.ws}, gitSyncKey(t.host, id))
-	o.hostByID(t.host).send(orchestration.NewRequestGitSync(id, t.dir))
+	o.hostByID(t.host).send(orchestration.NewRequestGitSync(id, t.dir, t.branch))
 }
 
 // gitSyncResponder turns one daemon reply into one collected result.
@@ -304,7 +306,7 @@ func (o *orch) resolveWorkspaceGit(gen uint64, targets []gitSyncTarget) {
 		sem <- struct{}{}
 		go func(i int, t gitSyncTarget) {
 			defer func() { <-sem; wg.Done() }()
-			results[i] = gitSyncResult{ws: t.ws, st: gitsync.Resolve(context.Background(), t.dir)}
+			results[i] = gitSyncResult{ws: t.ws, st: gitsync.ResolveBranch(context.Background(), t.dir, t.branch)}
 		}(i, t)
 	}
 	wg.Wait()
@@ -388,6 +390,32 @@ func (o *orch) workspaceGitMsg() browserproto.WorkspaceGit {
 }
 
 func (o *orch) broadcastWorkspaceGit() { o.broadcast(o.workspaceGitMsg()) }
+
+// resweepWorkspaceGit (loop goroutine) throws away what is known about one
+// workspace's sync state and starts a fresh sweep at once — for a change that
+// makes the cached answer wrong rather than merely old, which today is a new
+// development branch (see WorkspaceSettingsChanged).
+//
+// The cached entry goes first, so the dot drops to uncoloured immediately
+// instead of showing "main: synced" for a workspace now configured to track
+// develop. Then any sweep in flight is ABANDONED, not waited on: it is asking
+// the old question, and startWorkspaceGitSweep would otherwise see it and
+// decline to start, leaving the stale question's answer to land and the right
+// one up to two minutes away. Abandoning is safe because every answer carries
+// its sweep's generation — the in-flight replies still arrive and resolve
+// their pending entries, and collectWorkspaceGit drops them as stale.
+//
+// The cost is one extra sweep, triggered by a hand edit in a dialog, so the
+// "do not double the load on a host that is not answering" rule that
+// startWorkspaceGitSweep guards does not need protecting here.
+func (o *orch) resweepWorkspaceGit(wsID string) {
+	if _, had := o.wsGit[wsID]; had {
+		delete(o.wsGit, wsID)
+		o.broadcastWorkspaceGit()
+	}
+	o.wsGitSweep = nil
+	o.startWorkspaceGitSweep()
+}
 
 // gitSyncResponder satisfies app.Responder; pin it at compile time rather than
 // discovering a signature drift through a registerPending call site.

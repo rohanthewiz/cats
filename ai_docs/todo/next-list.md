@@ -38,7 +38,7 @@ window were dated by grepping every session doc.
   Open (or Validate, for a check, or Roadmap, for future work) with the next
   ID.
 
-**Next ID:** N-066
+**Next ID:** N-068
 
 ## Open
 
@@ -77,6 +77,21 @@ window were dated by grepping every session doc.
   (`Session.RetirePane`), not a close. Say "sleep in Ns" there, which needs
   `pane_exited` to carry which outcome is coming (`CanRetirePane` /
   `retireSleeps` already know).
+
+- **N-066** · raised `2026-1021-1050-workspace-settings-dev-branch` · value low
+  New worktrees branch from the pane's `HEAD` (`worktree.doCreate` →
+  `AddCommand(…, "HEAD")`). With a workspace's development branch now
+  configurable (`Settings.DevBranch`), basing a new worktree on it (or on
+  main/master when automatic) is the natural next use. Not done because it
+  changes today's behaviour; the user's call.
+
+- **N-067** · raised `2026-1021-1050-workspace-settings-dev-branch` · value low
+  More workspace settings for the "settings…" dialog, suggested and not yet
+  chosen: default host (`HostID`, only pickable at create today), the remote
+  the sync dot compares (`upstream` for forks), a start dir / env for new
+  tabs, and a default agent mode for clean/sleep. Each is one field on
+  `workspace.Settings`, one pointer on `WorkspaceSettingsParams`, one dialog
+  row and one `set-ws` key.
 
 ## Validate
 

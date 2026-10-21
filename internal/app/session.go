@@ -688,6 +688,37 @@ func (s *Session) SetWorkspaceFlag(id string, f *flags.Flag) (bool, error) {
 	return true, nil
 }
 
+// UpdateWorkspaceSettings applies patch to a workspace's settings ("" = the
+// active workspace, the lock/flag default) and reports which workspace that
+// resolved to and whether anything actually changed.
+//
+// A patch function rather than a Settings value because workspace.settings is
+// itself a patch (see WorkspaceSettingsParams): the caller knows which fields
+// the command named, and only this side can read the current value to apply
+// them to without a read-modify-write race across two calls. The patch runs
+// on a copy, so the change check is a plain comparison and a patch that sets
+// a field to what it already was is a no-op the caller can skip broadcasting.
+//
+// The resolved id is returned because "" is the common case from the CLI, and
+// the backend's reaction (re-asking the sync dot) is per workspace.
+func (s *Session) UpdateWorkspaceSettings(id string, patch func(*workspace.Settings)) (string, bool, error) {
+	i := s.active
+	if id != "" {
+		var ok bool
+		if i, ok = s.workspaceIndexByID(id); !ok {
+			return "", false, fmt.Errorf("unknown workspace %s", id)
+		}
+	}
+	ws := s.workspaces[i]
+	next := ws.Settings
+	patch(&next)
+	if next == ws.Settings {
+		return ws.ID, false, nil
+	}
+	ws.SetSettings(next)
+	return ws.ID, true, nil
+}
+
 // MoveWorkspace moves the workspace with the given public id to the insertion
 // point idx (a gap position, 0..=len: len means "to the end"). The active
 // workspace keeps its identity across the move. Reports whether the order

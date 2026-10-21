@@ -380,6 +380,77 @@
     });
   }
 
+  // ---- Workspace settings (workspace.settings) ----
+  //
+  // One dialog for every per-workspace preference, opened from the row's
+  // "settings…". Today that is the development branch: the branch the row's
+  // sync dot compares against its remote.
+  //
+  // The branch is a choice first and a text box second. Nearly every project's
+  // answer is "master / main", the automatic default, so that is one option
+  // and no typing; "other" reveals the box for the projects whose trunk is
+  // called something else. The box is hidden rather than disabled when it does
+  // not apply — the flag dialog's custom-glyph row is the precedent — so the
+  // common case reads as a single question.
+  //
+  // draft ({other, branch}), when given, re-opens the dialog on what the user
+  // had chosen and typed: the dialog closes on submit, so a value the server
+  // refuses would otherwise be lost along with it, and fixing a typo should
+  // not mean retyping it. It carries the choice separately from the text
+  // because "other, with nothing typed" is a draft worth reopening too.
+  const DEV_BRANCH_OTHER = "other"; // never sent: the text box's value is
+  function openWorkspaceSettings(w, draft) {
+    const d = draft || { other: !!w.dev_branch, branch: w.dev_branch || "" };
+    const name = w.name || w.id;
+    dialogFields({
+      title: "settings — " + name,
+      submitLabel: "save",
+      hint: "the sync dot on the row compares this branch with its remote · enter saves · esc cancels",
+      fields: [
+        {
+          label: "development branch",
+          value: d.other ? DEV_BRANCH_OTHER : "",
+          choices: [
+            { value: "", label: "master / main (automatic)" },
+            { value: DEV_BRANCH_OTHER, label: "other" },
+          ],
+          onChange: (v, rows) => {
+            // rows[1] is the branch box; its .field wrapper carries the label.
+            const box = rows[1].input;
+            const show = v === DEV_BRANCH_OTHER;
+            box.parentElement.style.display = show ? "" : "none";
+            // Choosing "other" is choosing to type a name, so the caret goes
+            // there. On open this is harmless: dialogFields focuses the first
+            // field after the onChange pass.
+            if (show && document.activeElement === rows[0].input) box.focus();
+          },
+        },
+        { label: "branch name", value: d.branch, placeholder: "e.g. develop, trunk, release/2.0" },
+      ],
+      onSubmit: (choice, typed) => {
+        // The server normalizes and validates (workspace.NormalizeDevBranch),
+        // so the CLI and this dialog refuse the same names with the same
+        // words. The one check here is the case only the dialog can produce:
+        // "other" with nothing written, which would otherwise quietly mean
+        // "automatic" and save the opposite of what was picked.
+        const branch = choice === DEV_BRANCH_OTHER ? typed.trim() : "";
+        if (choice === DEV_BRANCH_OTHER && !branch) {
+          toast("settings: enter a branch name, or pick master / main");
+          openWorkspaceSettings(w, { other: true, branch: "" });
+          return;
+        }
+        sendCmdAwait("workspace.settings", { id: w.id, dev_branch: branch }, (res) => {
+          if (!res.ok) {
+            toast("settings: " + (res.error || "unknown"));
+            openWorkspaceSettings(w, { other: !!branch, branch });
+            return;
+          }
+          toast(name + " development branch: " + (branch || "master / main"));
+        });
+      },
+    });
+  }
+
   function confirmCloseWorkspace(w) {
     dialogConfirm({
       title: "close workspace",
