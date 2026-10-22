@@ -69,7 +69,19 @@
   // menu's selectAll:, a nil-target item exactly like the ⌘C / ⌘Z pair
   // that already falls through to the pane (see the tail of onKey). Per
   // the lesson above, confirm it by hand in both hosts.
-  const CMD_TO_PANE = new Set(["KeyS", "KeyP", "KeyE", "KeyF", "KeyD", "KeyG", "KeyA", "Slash"]);
+  //
+  // ⌘X joined for the editor's cut (cats-todo's prompt editor cuts a
+  // selection on super+x), and it passes ⌘A's test the same way. The
+  // browser's cut has nothing to act on with a pane focused: the text is
+  // canvas pixels and the DOM focus is the empty text sink, so a shell
+  // loses nothing, and a legacy pane fails the kitty gate and keeps the
+  // browser's chord anyway. In Chrome it is Edit ▸ Cut, a menu item
+  // dispatched to the page first, like ⌘A. In the MAC APP it is the Edit
+  // menu's cut:, the same nil-target kind as ⌘A and the ⌘C / ⌘Z pair.
+  // It is gated rather than added to the ⌘C / ⌘Z fall-through, because
+  // only an app that asked for the kitty protocol has a cut to run. Per
+  // the lesson above, confirm it by hand in both hosts.
+  const CMD_TO_PANE = new Set(["KeyS", "KeyP", "KeyE", "KeyF", "KeyD", "KeyG", "KeyA", "KeyX", "Slash"]);
 
   // cmdGoesToPane answers "does the focused pane want this ⌘ chord?" —
   // and the answer is no unless that pane ASKED for the kitty keyboard
