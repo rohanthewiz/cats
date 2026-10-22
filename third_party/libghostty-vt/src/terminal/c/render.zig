@@ -591,7 +591,12 @@ fn rowCellsGetGraphemesUtf8(
 
     if (!cell.hasText()) return .success;
 
-    var needed = std.unicode.utf8CodepointSequenceLength(cell.codepoint()) catch
+    // usize, not inferred: utf8CodepointSequenceLength returns u3, so an
+    // inferred accumulator wraps at 8 bytes. A longer cluster (ZWJ emoji,
+    // stacked combining marks) then passes the cap check below with a
+    // too-small `needed` and the encode loop overruns the caller's buffer
+    // (ReleaseFast drops the bounds checks that would otherwise trap).
+    var needed: usize = std.unicode.utf8CodepointSequenceLength(cell.codepoint()) catch
         return .invalid_value;
     for (extra) |cp| {
         needed += std.unicode.utf8CodepointSequenceLength(cp) catch
@@ -1353,6 +1358,64 @@ test "render: row cells get graphemes utf8" {
     text = .{ .ptr = &buf, .cap = buf.len };
     try testing.expectEqual(Result.success, row_cells_get(cells, .graphemes_utf8, @ptrCast(&text)));
     try testing.expectEqual(@as(usize, 0), text.len);
+}
+
+test "render: row cells get graphemes utf8 longer than 8 bytes" {
+    // A cluster past 8 UTF-8 bytes must report its true size. The required
+    // length used to accumulate in a u3 and wrap, so this 17-byte cluster
+    // looked like 1 byte, passed the cap check and overran an 8-byte buffer.
+    // Stacked combining marks attach without grapheme-cluster mode (2027),
+    // so the test does not depend on that mode's default.
+    var terminal: terminal_c.Terminal = null;
+    try testing.expectEqual(Result.success, terminal_c.new(
+        &lib.alloc.test_allocator,
+        &terminal,
+        .{ .cols = 10, .rows = 3, .max_scrollback = 10_000 },
+    ));
+    defer terminal_c.free(terminal);
+
+    const input = "a" ++ ("\u{301}" ** 8);
+    terminal_c.vt_write(terminal, input, input.len);
+
+    var state: RenderState = null;
+    try testing.expectEqual(Result.success, new(
+        &lib.alloc.test_allocator,
+        &state,
+    ));
+    defer free(state);
+
+    try testing.expectEqual(Result.success, update(state, terminal));
+
+    var it: RowIterator = null;
+    try testing.expectEqual(Result.success, row_iterator_new(
+        &lib.alloc.test_allocator,
+        &it,
+    ));
+    defer row_iterator_free(it);
+
+    var cells: RowCells = null;
+    try testing.expectEqual(Result.success, row_cells_new(
+        &lib.alloc.test_allocator,
+        &cells,
+    ));
+    defer row_cells_free(cells);
+
+    try testing.expectEqual(Result.success, get(state, .row_iterator, @ptrCast(&it)));
+    try testing.expect(row_iterator_next(it));
+    try testing.expectEqual(Result.success, row_get(it, .cells, @ptrCast(&cells)));
+    try testing.expectEqual(Result.success, row_cells_select(cells, 0));
+
+    // Too small: refused untouched, with the full required length.
+    var small: [8]u8 = @splat('x');
+    var text: lib.Buffer = .{ .ptr = &small, .cap = small.len };
+    try testing.expectEqual(Result.out_of_space, row_cells_get(cells, .graphemes_utf8, @ptrCast(&text)));
+    try testing.expectEqual(@as(usize, input.len), text.len);
+    try testing.expectEqualSlices(u8, &(@as([8]u8, @splat('x'))), &small);
+
+    var buf: [32]u8 = undefined;
+    text = .{ .ptr = &buf, .cap = buf.len };
+    try testing.expectEqual(Result.success, row_cells_get(cells, .graphemes_utf8, @ptrCast(&text)));
+    try testing.expectEqualStrings(input, buf[0..text.len]);
 }
 
 test "render: row iterator next" {

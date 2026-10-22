@@ -38,7 +38,7 @@ window were dated by grepping every session doc.
   Open (or Validate, for a check, or Roadmap, for future work) with the next
   ID.
 
-**Next ID:** N-068
+**Next ID:** N-069
 
 ## Open
 
@@ -92,6 +92,23 @@ window were dated by grepping every session doc.
   tabs, and a default agent mode for clean/sleep. Each is one field on
   `workspace.Settings`, one pointer on `WorkspaceSettingsParams`, one dialog
   row and one `set-ws` key.
+
+- **N-068** · raised `2026-1022-1835-cathost-grapheme-overflow-crash` · value medium
+  A cathost crash leaves the app stuck with no way out but the user noticing.
+  On 2026-10-22 cathost panicked (the libghostty-vt grapheme overflow fixed
+  that session). catapp logged `cathost (pid …) exited while the app was
+  running` and did nothing else. catway retried the dead socket indefinitely, and
+  the page showed only "cathost daemon not connected — retrying". N-025
+  declined an automatic cathost restart on the grounds that "the overlay
+  tells the user to quit and reopen". That overlay (`ui.catwayDown`,
+  `cmd/catapp/restart.go`) only goes up when *catway* exhausts its restart
+  budget, so a cathost-only exit gets no overlay at all. The fix is one of
+  two choices, which is the user's call:
+  - (a) catapp restarts cathost on the same socket (catway reconnects on its
+    own) and says plainly that the panes' processes were lost;
+  - (b) keep N-025 and surface the overlay on a cathost exit too.
+  Either way, catapp's `daemonProc.done` for cathost needs a watcher;
+  today only `cathostExited()` reads it, from the catway path.
 
 ## Validate
 

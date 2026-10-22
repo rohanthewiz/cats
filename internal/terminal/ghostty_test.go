@@ -2,7 +2,10 @@
 
 package terminal
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // newEmu builds an emulator, writes the given VT input, and returns a snapshot.
 func newEmu(t *testing.T, cols, rows uint16, input string) (*ghosttyEmulator, *Snapshot) {
@@ -64,6 +67,24 @@ func TestContent(t *testing.T) {
 	}
 	if snap.At(0, 0).Rune != "h" {
 		t.Errorf("cell(0,0) = %q, want h", snap.At(0, 0).Rune)
+	}
+}
+
+// A grapheme cluster longer than Snapshot's 8-byte scratch buffer must come
+// back whole. libghostty-vt used to size the cluster in a u3 that wrapped at
+// 8 bytes, report success, and write past the Go buffer — cathost then
+// panicked in AppendGraphemes ("slice bounds out of range [:18] with
+// capacity 8") on an 18-byte ZWJ emoji, after already corrupting the heap.
+func TestLongGraphemeCluster(t *testing.T) {
+	// Stacked combining marks attach without grapheme-cluster mode, so this
+	// does not depend on mode 2027's default. 1 + 8×2 = 17 bytes.
+	cluster := "a" + strings.Repeat("́", 8)
+	_, snap := newEmu(t, 10, 2, cluster+"b")
+	if got := snap.At(0, 0).Rune; got != cluster {
+		t.Fatalf("cell(0,0) = %q (%d bytes), want %q (%d bytes)", got, len(got), cluster, len(cluster))
+	}
+	if got := snap.At(1, 0).Rune; got != "b" {
+		t.Errorf("cell(0,1) = %q, want b", got)
 	}
 }
 
