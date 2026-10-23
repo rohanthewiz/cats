@@ -51,6 +51,9 @@ func (u *recordingUI) catwayDown(detail string, canRetry bool) {
 func (u *recordingUI) catwayRestarting() { u.events <- "restarting" }
 func (u *recordingUI) catwayBack()       { u.events <- "back" }
 
+func (u *recordingUI) cathostLost(detail string) { u.events <- "cathost lost" }
+func (u *recordingUI) cathostDown(detail string) { u.events <- "cathost down" }
+
 func (u *recordingUI) expect(t *testing.T, want string) {
 	t.Helper()
 	select {

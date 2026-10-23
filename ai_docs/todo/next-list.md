@@ -93,23 +93,6 @@ window were dated by grepping every session doc.
   `workspace.Settings`, one pointer on `WorkspaceSettingsParams`, one dialog
   row and one `set-ws` key.
 
-- **N-068** · raised `2026-1022-1835-cathost-grapheme-overflow-crash` · value medium
-  A cathost crash leaves the app stuck with no way out but the user noticing.
-  On 2026-10-22 cathost panicked (the libghostty-vt grapheme overflow fixed
-  that session). catapp logged `cathost (pid …) exited while the app was
-  running` and did nothing else. catway retried the dead socket indefinitely, and
-  the page showed only "cathost daemon not connected — retrying". N-025
-  declined an automatic cathost restart on the grounds that "the overlay
-  tells the user to quit and reopen". That overlay (`ui.catwayDown`,
-  `cmd/catapp/restart.go`) only goes up when *catway* exhausts its restart
-  budget, so a cathost-only exit gets no overlay at all. The fix is one of
-  two choices, which is the user's call:
-  - (a) catapp restarts cathost on the same socket (catway reconnects on its
-    own) and says plainly that the panes' processes were lost;
-  - (b) keep N-025 and surface the overlay on a cathost exit too.
-  Either way, catapp's `daemonProc.done` for cathost needs a watcher;
-  today only `cathostExited()` reads it, from the catway path.
-
 ## Validate
 
 Items whose remaining work is purely testing: hand checks in a real terminal
@@ -305,6 +288,19 @@ and `raised`.
   `~/Library/Application Support/cats/daemons.log`. The reaper path (4h) is
   covered by tests only.
 
+- **N-068** · raised `2026-1022-1835-cathost-grapheme-overflow-crash` · value medium
+  catapp now restarts cathost on its own (option (a), the user's call;
+  `cmd/catapp/hostrestart.go`). It uses a separate restart budget with the
+  same policy as catway's, relaunches on the same socket, and puts up a
+  "cathost exited — pane processes were lost" card with an OK button in every
+  window. If the budget is spent, a no-button "quit and reopen" card goes up
+  instead. Unit tests cover the supervisor. A headless run against real
+  cathost and catway binaries (SIGKILL to cathost) showed the relaunch and
+  catway reattaching to the new cathost within about a second. Still to check
+  in a rebuilt, reinstalled Cats.app: `kill -9` the app's cathost, then check
+  that the card renders over every window, that OK dismisses it, and that
+  every pane comes back as a fresh shell in the same layout.
+
 ## Roadmap
 
 Wanted, but not next. Items move here from Open (or straight here when raised
@@ -335,10 +331,6 @@ unchanged.
   purpose: the pane header already names the branch, and the dot is about the
   shared mainline. A long-lived feature branch therefore shows its project's
   staleness, not its own.
-- **N-025** · declined `2026-0914-0158-catway-restart-cats-todo-release` —
-  Restarting cathost automatically. Its exit takes the panes with it, and
-  relaunching it would hide that loss. The overlay tells the user to quit and
-  reopen instead.
 - **N-008** · declined `2026-1011-2349-n043-n008-linked-hint-and-run-end` — Removing `waitReady`
   (`cmd/catapp/supervise.go`). It still has no caller, since it is only
   `waitReadyOrExit(…, nil)`. But it is three lines that document the plain
@@ -351,6 +343,14 @@ unchanged.
 Closures before this file existed live in the session docs' own write-ups.
 Newest first. The unnumbered entries at the end were found done while seeding,
 so they are not carried.
+
+- **N-025** · declined `2026-0914-0158-catway-restart-cats-todo-release` ·
+  closed (reversed) 2026-10-22, `2026-1022-1922-n068-cathost-restart-on-exit`,
+  by N-068. It declined restarting cathost automatically,
+  on the grounds that the relaunch would hide the loss of the panes and that
+  the overlay told the user to quit and reopen. That overlay never went up on
+  a cathost-only exit, so the loss was hidden anyway. cathost is now
+  restarted, and the loss is stated on a card.
 
 - **N-020** · raised `2026-0922-1713-plugin-types-and-releases` ·
   closed 2026-10-14, cats-mobile `2026-1014-1554-n020-plugin-panes-split-by-type` (85ebdec). `Session.SplitPlugins` divides

@@ -42,9 +42,11 @@ import (
 // decides; the overlay's button is a fresh budget, not a single attempt, since
 // whatever they changed may need a moment to settle.
 //
-// cathost is deliberately not restarted. A cathost exit takes the panes with it,
-// so relaunching it would quietly swap live shells for fresh ones — the kind of
-// loss that should be seen, not smoothed over. The overlay says so instead.
+// cathost has its own supervisor (hostrestart.go). It was once deliberately not
+// restarted (N-025), because a cathost exit takes the panes with it and a
+// relaunch would quietly swap live shells for fresh ones. But nothing then told
+// the user it had happened (N-068). Now it is restarted, and every window is
+// told plainly that the panes' processes were lost.
 
 // The restart policy.
 const (
@@ -119,6 +121,11 @@ type backendUI interface {
 	catwayRestarting()
 	// catwayBack: a restarted catway is accepting connections.
 	catwayBack()
+	// cathostLost: cathost exited and has been restarted; the panes' processes
+	// are gone (hostrestart.go).
+	cathostLost(detail string)
+	// cathostDown: cathost's automatic restarts are spent.
+	cathostDown(detail string)
 }
 
 var errBackendStopped = errors.New("the backend is stopping")

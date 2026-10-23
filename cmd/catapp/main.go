@@ -185,9 +185,12 @@ func bootLocal(m *winManager, cfg appConfig) {
 
 	// From here an exit nobody asked for is answered with a restart rather than
 	// a blank window (restart.go). The overlay's "Restart catway" reaches this
-	// backend through activeBackend.
+	// backend through activeBackend. cathost gets its own supervisor
+	// (hostrestart.go): a restart there loses the panes' processes, so it is
+	// answered differently, but it is still answered.
 	activeBackend.Store(b)
 	go b.superviseCatway(windowBackendUI{})
+	go b.superviseCathost(windowBackendUI{})
 }
 
 // runRemote is the thin-client path: no local daemons, just windows pointed at

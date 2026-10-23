@@ -56,6 +56,17 @@ type backend struct {
 	// request is never lost and a double click is one request).
 	restarts restartBudget
 	retry    chan struct{}
+
+	// cathostPath and cathostArgs are how cathost was first started, kept for the
+	// same reason as catway's: its restart (hostrestart.go) relaunches on the same
+	// socket, which catway is already redialing, so nothing else is told.
+	cathostPath string
+	cathostArgs []string
+	// cathostReady is the check a restarted cathost must pass; a test swaps in
+	// its own. cathostRestarts is its own budget, separate from catway's: the two
+	// fail for different reasons, and one crashing must not spend the other's.
+	cathostReady    func(*daemonProc) error
+	cathostRestarts restartBudget
 }
 
 // launch starts a daemon into one of the backend's slots, unless the backend has
@@ -80,6 +91,12 @@ func (b *backend) currentCatway() *daemonProc {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.catway
+}
+
+func (b *backend) currentCathost() *daemonProc {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.cathost
 }
 
 func (b *backend) isStopped() bool {
@@ -150,8 +167,11 @@ func startBackend() (*backend, error) {
 		quit:     make(chan struct{}),
 		retry:    make(chan struct{}, 1),
 		restarts: newRestartBudget(),
+
+		cathostRestarts: newRestartBudget(),
 	}
 	b.ready = func(p *daemonProc) error { return waitReadyOrExit(b.addr, catwayReadyTimeout, p) }
+	b.cathostReady = func(p *daemonProc) error { return waitAlive(p, cathostSettle) }
 	boot.okDetail(portStep, b.addr)
 
 	// Register the teardown BEFORE anything is spawned. Startup now runs on a
@@ -166,7 +186,9 @@ func startBackend() (*backend, error) {
 	// Setpgid detaches each daemon into its own process group so a stray signal
 	// to the launcher's group (e.g. Ctrl-C in a dev terminal) doesn't pre-empt
 	// our orderly teardown; we signal each process explicitly on quit.
-	th, err := b.launch(&b.cathost, thPath, "-persistent", "-socket", thSock)
+	b.cathostPath = thPath
+	b.cathostArgs = []string{"-persistent", "-socket", thSock}
+	th, err := b.launch(&b.cathost, b.cathostPath, b.cathostArgs...)
 	if err != nil {
 		err = fmt.Errorf("start cathost: %w", err)
 		boot.fail(thStep, err)

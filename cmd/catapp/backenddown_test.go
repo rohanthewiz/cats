@@ -47,6 +47,27 @@ func TestBackendOverlayOffersRetryOnlyWhenItCanHelp(t *testing.T) {
 	}
 }
 
+// The cathost card lives in its own element, so catwayBack's clear cannot take
+// it down, and its OK only removes the card (it never asks for a restart).
+func TestCathostCardIsSeparateAndDismissable(t *testing.T) {
+	js := overlayJS(cathostNoticeID, "lost", "d", overlayDismissButton)
+	if !strings.Contains(js, `"`+cathostNoticeID+`"`) || strings.Contains(js, `"`+backendOverlayID+`"`) {
+		t.Fatalf("cathost card does not use its own element: %q", js)
+	}
+	if strings.Contains(backendClearJS(), cathostNoticeID) {
+		t.Fatal("catway's clear would remove the cathost card")
+	}
+	if m := overlayMarkup(t, js); !strings.Contains(m, ">OK</button>") {
+		t.Errorf("no OK button in %q", m)
+	}
+	if !strings.Contains(js, "el.remove()") || strings.Contains(js, "catsRestartBackend") {
+		t.Errorf("OK should dismiss, not restart: %q", js)
+	}
+	if m := overlayMarkup(t, overlayJS(cathostNoticeID, "down", "d", overlayNoButton)); strings.Contains(m, "<button") {
+		t.Errorf("no-button card has a button: %q", m)
+	}
+}
+
 func TestBackendClearTargetsTheOverlay(t *testing.T) {
 	if !strings.Contains(backendClearJS(), `"`+backendOverlayID+`"`) {
 		t.Fatalf("clear script does not name the overlay: %q", backendClearJS())
