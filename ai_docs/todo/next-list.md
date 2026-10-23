@@ -38,7 +38,7 @@ window were dated by grepping every session doc.
   Open (or Validate, for a check, or Roadmap, for future work) with the next
   ID.
 
-**Next ID:** N-069
+**Next ID:** N-070
 
 ## Open
 
@@ -300,6 +300,15 @@ and `raised`.
   in a rebuilt, reinstalled Cats.app: `kill -9` the app's cathost, then check
   that the card renders over every window, that OK dismisses it, and that
   every pane comes back as a fresh shell in the same layout.
+
+- **N-069** · raised `2026-1023-1157-dialog-paste-stays-local` · value medium
+  ⌘V into dialog fields (cats `09db82b`). The page-wide paste listener now
+  leaves a paste alone when it lands in an editable field other than the text
+  sink, or while a dialog or menu is open. Covered by
+  `cmd/catway/web/jstest/paste.test.mjs`. Still to check in a rebuilt,
+  reinstalled Cats.app with a CEd pane focused: open New Workspace and ⌘V
+  into the name and start-path fields, and the rename-pane prompt too. Then
+  close the dialog and check that ⌘V still pastes into the pane.
 
 ## Roadmap
 
