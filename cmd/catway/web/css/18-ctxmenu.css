@@ -46,3 +46,14 @@
   #ctxmenu .item .hint { margin-left:auto; padding-left:12px; color:var(--muted); font-size:11px; }
   #ctxmenu .item:hover .hint { color:inherit; }
   #ctxmenu .note { padding:5px 10px; color:var(--muted); cursor:default; max-width:340px; white-space:normal; }
+
+  /* The workspace path line every right-click menu opens on (28-ctxmenu.js:
+     wsPathItems). Muted and inert like a heading, so the column of verbs is
+     still what the eye lands on, but in the row's own case and size: a path is
+     data that has to read exactly as it is on disk, and an uppercased one would
+     not. Monospace sets it apart from the labels as the one thing in the menu
+     that is a value rather than an action. Never wrapped — a path broken
+     across lines reads as two — so a long one widens the menu instead, with
+     the tooltip holding the absolute form. */
+  #ctxmenu .path { padding:4px 10px; color:var(--muted); cursor:default; white-space:nowrap;
+    font-family:var(--mono, monospace); font-size:11px; }

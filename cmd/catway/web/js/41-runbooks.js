@@ -224,7 +224,8 @@
         // Read fresh, for the reason the click does: the menu is built at the
         // moment it opens, so it can be built against what is true then rather
         // than against whatever the last render saw.
-        openCtx(ev.clientX, ev.clientY, runbookMenuItems(rb, broken, runbookRunOf(rb.name)));
+        openCtx(ev.clientX, ev.clientY,
+          [...wsPathItems(activeWorkspaceID()), ...runbookMenuItems(rb, broken, runbookRunOf(rb.name))]);
       });
       rbListEl.appendChild(li);
     }

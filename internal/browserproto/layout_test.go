@@ -104,8 +104,8 @@ func TestBuildLayout(t *testing.T) {
 		t.Fatalf("t = %q", msg.T)
 	}
 	wantWs := []WorkspaceInfo{
-		{ID: ws1.ID, Name: "proj-a", Active: true},
-		{ID: ws2.ID, Name: "proj-b", Active: false},
+		{ID: ws1.ID, Name: "proj-a", Path: "/tmp/proj-a", Active: true},
+		{ID: ws2.ID, Name: "proj-b", Path: "/tmp/proj-b", Active: false},
 	}
 	if !reflect.DeepEqual(msg.Workspaces, wantWs) {
 		t.Errorf("workspaces = %+v, want %+v", msg.Workspaces, wantWs)

@@ -139,6 +139,14 @@ type WorkspaceInfo struct {
 	Name         string `json:"name"`
 	Active       bool   `json:"active"`
 	AgentSummary string `json:"agent_summary,omitempty"`
+	// Path is the absolute directory the workspace stands for — its identity
+	// cwd, the same field Name is derived from and the git dot reports on, so
+	// all three describe one checkout. Absolute on the wire, like a pane's cwd:
+	// the client shortens it for display ("~/projs/go/x") against the home
+	// directory it was handed. Empty for a workspace with no identity cwd
+	// (old snapshots, tests), which the client simply leaves undrawn. On a
+	// remote host it is a path on THAT host's filesystem.
+	Path string `json:"path,omitempty"`
 	// Locked: closed to automation (workspace.lock). The sidebar draws the row
 	// dimmed with a lock beside the name; the refusal itself is the server's.
 	Locked bool `json:"locked,omitempty"`

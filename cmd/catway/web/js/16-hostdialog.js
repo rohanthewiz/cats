@@ -112,7 +112,7 @@
       li.addEventListener("contextmenu", (e) => {
         const items = hostMenuItems(h);
         if (!items.length) return;
-        e.preventDefault(); openCtx(e.clientX, e.clientY, items);
+        e.preventDefault(); openCtx(e.clientX, e.clientY, [...wsPathItems(activeWorkspaceID()), ...items]);
       });
       hostListEl.appendChild(li);
     }

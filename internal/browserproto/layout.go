@@ -94,6 +94,7 @@ func BuildLayout(workspaces []*workspace.Workspace, active int, area layout.Rect
 		msg.Workspaces = append(msg.Workspaces, WorkspaceInfo{
 			ID:       ws.ID,
 			Name:     ws.DisplayName(),
+			Path:     ws.IdentityCwd,
 			Active:   i == active,
 			Locked:   ws.Locked,
 			Asleep:   ws.Asleep,

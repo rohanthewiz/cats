@@ -51,7 +51,7 @@
         li.addEventListener("click", () => sendCmd("ledger.jump", { pane: e.pane, block: e.block }));
         li.addEventListener("contextmenu", (ev) => {
           ev.preventDefault();
-          openCtx(ev.clientX, ev.clientY, historyMenuItems(e));
+          openCtx(ev.clientX, ev.clientY, [...wsPathItems(paneWsFor(e.pane)), ...historyMenuItems(e)]);
         });
       }
       histListEl.appendChild(li);

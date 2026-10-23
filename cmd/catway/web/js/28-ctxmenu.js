@@ -26,6 +26,10 @@
   // pushed to the row's right edge (an age), and {note: "…"} an inert, muted
   // sentence in place of rows, for a list that came back empty and should say
   // why rather than open as a bare box.
+  //
+  // And {path: "/abs/dir"} is the inert line every right-click menu opens on:
+  // the directory of the workspace the menu is about, drawn the way a shell
+  // prompt draws it ("~/projs/go/x"). See wsPathItems for where it comes from.
   function openCtx(x, y, items) {
     closeCtx();
     // The hover card is the other floating surface over this page, and a menu
@@ -67,6 +71,16 @@
         const n = document.createElement("div");
         n.className = "note"; n.textContent = it.note;
         m.appendChild(n);
+        continue;
+      }
+      // Inert like a heading (and, like one, it leaves an open submenu alone),
+      // but not styled as one: a heading is uppercased, and a path is case-
+      // sensitive data that must read exactly as it is on disk. The tooltip
+      // keeps the absolute form, which is what "~" stands in for.
+      if (it.path) {
+        const pe = document.createElement("div");
+        pe.className = "path"; pe.textContent = shortPath(it.path); pe.title = it.path;
+        m.appendChild(pe);
         continue;
       }
       const el = document.createElement("div");
@@ -113,6 +127,50 @@
   }, true);
   window.addEventListener("blur", () => closeCtx());
 
+  // ---- The workspace path line ----
+  //
+  // Every right-click menu opens on the directory of the workspace it is
+  // about. The sidebar lists panes and agents from every workspace, so the
+  // menu on a row can act in a project other than the one on screen; the path
+  // line says which one before any row is chosen. Which workspace is decided
+  // by the menu's subject, not by where the click landed:
+  //
+  //   menu                          path shown
+  //   ───────────────────────────   ─────────────────────────────────────────
+  //   workspace row                 that workspace
+  //   pane (canvas, header,         the pane's OWN workspace, which is not
+  //     sidebar dropdown, agents)     always the one this window shows
+  //   tab                           this window's (the tab strip is its own)
+  //   history row                   the workspace of the pane the command ran in
+  //   runbook / host row            this window's — where a run or a new pane
+  //                                   would land
+  //
+  // Menus opened by a left-click on a button (the flag chip, prompts ▾, the
+  // plugin, record and boot buttons) are dropdowns rather than context menus
+  // and stay as they were: each already sits on the thing it is about.
+  //
+  // The line and its separator are left out entirely when there is no path to
+  // show — a workspace with no identity cwd, or the instant before the first
+  // layout — so a menu never opens on an empty row.
+  function wsPathItems(wsID) {
+    const w = layoutMsg && layoutMsg.workspaces.find((x) => x.id === wsID);
+    return w && w.path ? [{ path: w.path }, "-"] : [];
+  }
+
+  // paneWsFor names the workspace a pane belongs to, by the fallback chain
+  // paneRefFor uses and for the same reason: the layout only carries the
+  // panes on screen, so an off-screen pane's workspace has to be read from the
+  // agents rollup or the pane inventory. "" when nobody knows the pane yet,
+  // which wsPathItems turns into no path line.
+  function paneWsFor(id) {
+    const p = panes.get(id);
+    if (p && p.pub) return wsOf(p.pub);
+    const a = agentItems.find((x) => x.pane === id);
+    if (a) return a.workspace;
+    const pi = paneInv.find((x) => x.pane === id);
+    return pi && pi.handle ? wsOf(pi.handle) : "";
+  }
+
   // The sidebar lists panes from every workspace, so this menu also opens on panes
   // that are not on screen. Those get the workspace-resolved actions — split,
   // capture, rename, close — plus a reveal; zoom and copy mode are left out, being
@@ -120,7 +178,7 @@
   function paneMenuItems(id, onCanvas) {
     const p = panes.get(id);
     const onScreen = !!(p && p.info);
-    const items = [];
+    const items = wsPathItems(paneWsFor(id));
     if (onCanvas) items.push({ label: "paste", fn: pasteText }, "-");
     if (!onScreen) items.push({ label: "reveal pane", fn: () => sendCmd("agent.focus", { pane: id }) }, "-");
     items.push(
@@ -155,6 +213,7 @@
   }
   function tabMenuItems(t, count) {
     const items = [
+      ...wsPathItems(activeWorkspaceID()),
       { label: "new tab", fn: () => sendCmd("tab.create", {}) },
     ];
     if (multiHost()) {
@@ -284,6 +343,9 @@
   // word and read as a plain list of verbs.
   function wsMenuItems(w) {
     return [
+      // Above the first heading rather than under "Workspace": the path names
+      // the row the menu was opened on, which is the context for both groups.
+      ...wsPathItems(w.id),
       { head: "Workspace" },
       // The rows that address the workspace ITSELF come first — make one, name
       // one, mark one (bare or with a note) — since those are reached most often
