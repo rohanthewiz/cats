@@ -163,12 +163,22 @@ func TestKeyKitty(t *testing.T) {
 		{"ctrl c", disambiguate, press("KeyC", "c", ctrl), "\x1b[99;5u"},
 		{"ctrl a", disambiguate, press("KeyA", "a", ctrl), "\x1b[97;5u"},
 		{"super a", disambiguate, press("KeyA", "a", meta), "\x1b[97;9u"},
+		// ⌘L over a kitty-protocol pane (CMD_TO_PANE): the editor's Go to
+		// line. 108 is 'l'.
+		{"super l", disambiguate, press("KeyL", "l", meta), "\x1b[108;9u"},
 		// ⌘[ / ⌘] over a kitty-protocol pane: the front end forwards the
 		// chord as super on BOTH spellings (20-keys.js's bracket branch),
 		// and the editor on the other side reads it as its own back /
 		// forward. 91 and 93 are '[' and ']'.
 		{"super bracketleft", disambiguate, press("BracketLeft", "[", meta), "\x1b[91;9u"},
 		{"super bracketright", disambiguate, press("BracketRight", "]", meta), "\x1b[93;9u"},
+		// ⌘↑ / ⌘↓ over a kitty-protocol pane (CMD_TO_PANE): arrows keep
+		// their legacy CSI form with the modifier parameter added, 9 =
+		// 1 + super and 10 = 1 + super + shift. The editor reads them as
+		// top / end of file, shift selecting there.
+		{"super arrowup", disambiguate, press("ArrowUp", "ArrowUp", meta), "\x1b[1;9A"},
+		{"super arrowdown", disambiguate, press("ArrowDown", "ArrowDown", meta), "\x1b[1;9B"},
+		{"super shift arrowup", disambiguate, press("ArrowUp", "ArrowUp", meta|shift), "\x1b[1;10A"},
 		{"ctrl enter", disambiguate, press("Enter", "Enter", ctrl), "\x1b[13;5u"},
 		{"plain a stays text", disambiguate, press("KeyA", "a", 0), "a"},
 		{"plain enter stays legacy", disambiguate, press("Enter", "Enter", 0), "\r"},

@@ -8,7 +8,7 @@
   // app wants and a browser can spare, matched on e.code so a non-QWERTY
   // layout still gets the physical key (same rule as ⌘K / ⌘B above).
   //
-  // Chosen by what the browser loses. ⌘W ⌘T ⌘L ⌘R ⌘N ⌘Q are the window's
+  // Chosen by what the browser loses. ⌘W ⌘T ⌘R ⌘N ⌘Q are the window's
   // own and are deliberately absent: swallowing "close the tab" to give a
   // pane a shortcut is a bad trade, and a user who cannot close a tab
   // blames cats, correctly. The set below costs a page that draws its
@@ -81,7 +81,34 @@
   // It is gated rather than added to the ⌘C / ⌘Z fall-through, because
   // only an app that asked for the kitty protocol has a cut to run. Per
   // the lesson above, confirm it by hand in both hosts.
-  const CMD_TO_PANE = new Set(["KeyS", "KeyP", "KeyE", "KeyF", "KeyD", "KeyG", "KeyA", "KeyX", "Slash"]);
+  //
+  // ⌘↑ / ⌘↓ joined for the editor's top / end of file — the macOS
+  // document-motion pair, with ⌘⇧↑ / ⌘⇧↓ selecting there (Shift rides in
+  // the modifiers like every entry here). They are handed down VERBATIM
+  // as super+arrow, unlike ⌘← / ⌘→, which are translated to Home / End
+  // for every pane (see that branch in onKey): there is no bare key that
+  // means "top of document" to every terminal app, so a legacy pane keeps
+  // the browser's ⌘↑ through the kitty gate instead of getting a guess.
+  // The browser loses nothing over a kitty pane: its ⌘↑ / ⌘↓ scroll the
+  // page, and this page does not scroll — the panes are a fixed canvas
+  // grid. Neither is a menu item in Chrome or in the mac app, so both
+  // hosts dispatch the keydown to the page (the ⌘E trap does not apply).
+  // Per the lesson above, confirm it by hand in both hosts.
+  //
+  // ⌘L joined for the editor's Go to line (the GoLand keycap), and it is
+  // the one entry here that DOES cost the browser something: ⌘L was on
+  // the window's-own list above, as "focus the address bar". The trade
+  // was made deliberately (2026-10-25) because the cost is narrow — only
+  // while a kitty-protocol pane has focus; a shell pane fails the gate
+  // and keeps the browser's ⌘L, and clicking the address bar always works
+  // — while the editor's alternative keycap (⌘G) was wanted for its git
+  // panel. The page cannot tell Chrome from the mac app, so it is handed
+  // down in both. In the MAC APP nothing is lost at all: catapp's menus
+  // claim no ⌘L (menu_darwin.m), so the chord falls through to the
+  // WebView. In Chrome, Open Location is a menu item; whether Chrome
+  // offers the keydown to the page first (as for ⌘S ⌘P ⌘F) or resolves it
+  // natively (the ⌘E trap) is the by-hand check this needs.
+  const CMD_TO_PANE = new Set(["KeyS", "KeyP", "KeyE", "KeyF", "KeyD", "KeyG", "KeyA", "KeyX", "KeyL", "Slash", "ArrowUp", "ArrowDown"]);
 
   // cmdGoesToPane answers "does the focused pane want this ⌘ chord?" —
   // and the answer is no unless that pane ASKED for the kitty keyboard
