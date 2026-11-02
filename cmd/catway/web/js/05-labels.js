@@ -71,6 +71,24 @@
     return "";
   }
 
+  // modelEffort pulls the reasoning-effort segment back out of the resolved model
+  // string ("claude-opus-5 · high · 43k/1M" -> "high"), for the pane header,
+  // which names the effort where it used to name the agent's state.
+  //
+  // The segments after the id are effort and/or context, in that order when both
+  // are present, but the effort is found by elimination rather than position:
+  // it is the first trailing segment that is not the context figure. That keeps
+  // "claude-haiku-4-5 · 800/200k" (context, no effort) from reading its context
+  // as an effort. The server (agentmodel.go isEffortLabel) already gates the
+  // value to a short bare token, so nothing further is checked here. "" when the
+  // agent has not answered yet or its transcript names no effort (copilot on
+  // auto, older claude builds) — the header then simply omits the field.
+  function modelEffort(model) {
+    if (!model) return "";
+    const segs = model.split("·").map((s) => s.trim());
+    return segs.slice(1).find((s) => s && !MODEL_CTX.test(s)) || "";
+  }
+
   // agentLabel is what every place that names a pane's agent prints: the agent's
   // own name, then the model it is running — "claude opus 5", "copilot gpt 5.4
   // mini", "codex" for an agent whose model can't be read.

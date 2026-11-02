@@ -10,9 +10,9 @@
 
 import { loadFns, eq, report } from "./testutil.mjs";
 
-const { modelLabel } = loadFns({
+const { modelLabel, modelEffort } = loadFns({
   files: ["05-labels.js"],
-  names: ["modelLabel", "modelVersion"],
+  names: ["modelLabel", "modelVersion", "modelEffort"],
   consts: ["MODEL_SIZES", "MODEL_VER", "MODEL_CTX"],
 });
 
@@ -25,5 +25,14 @@ eq(modelLabel("claude-opus-5 · high"), "opus 5", "effort alone is dropped");
 eq(modelLabel("claude-sonnet-4-5-20250929[1m]"), "sonnet 4.5 [1M]", "1M marker kept");
 eq(modelLabel("gpt-5.4-mini · medium"), "gpt 5.4 mini", "copilot id");
 eq(modelLabel(""), "", "empty");
+
+// The effort, for the pane header (modelEffort): found by elimination, so a
+// context-only string yields nothing rather than its context figure.
+eq(modelEffort("claude-opus-5-5 · high · 44k/1M"), "high", "effort before context");
+eq(modelEffort("claude-opus-5 · xhigh"), "xhigh", "effort alone");
+eq(modelEffort("gpt-5.4-mini · medium"), "medium", "copilot effort");
+eq(modelEffort("claude-haiku-4-5 · 800/200k"), "", "context is not an effort");
+eq(modelEffort("claude-sonnet-4-5-20250929[1m]"), "", "no trailing segments");
+eq(modelEffort(""), "", "empty");
 
 report("modellabel");

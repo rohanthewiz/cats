@@ -1,5 +1,5 @@
   // ---- Chrome: per-pane header (styled HTML, WS8) ----
-  // The identity line — pane id · title · path · branch · agent · agent state —
+  // The identity line — pane id · title · path · branch · agent · agent effort —
   // followed by the flexible gap the CSS opens, and then the pane toolbar at the
   // right edge. Every field is its own span with its own class, so the row can
   // colour them apart and decide which ones give up width (see the .info rules).
@@ -90,10 +90,20 @@
       // fact about the pane.
       if (p.agent) {
         seg("agent", agentLabel(p.agent, p.agentModel));
-        // An idle agent with a blank conversation shows the blank colour and
-        // says which blank it is ("new" / "cleared") in place of "idle".
+        // The header names the agent's reasoning effort ("high") where it used
+        // to name its state ("working"). The state word was the one field here
+        // the sidebar already says — its dot, the tab mark and the workspace
+        // badge all carry it — while the effort was only reachable through the
+        // hover card. The state is not dropped outright: the effort word keeps
+        // the state's colour class, so working/blocked/idle/blank still read
+        // at a glance, and the word itself is in the tooltip.
+        //
+        // An idle agent with a blank conversation keeps the blank colour, and
+        // its tooltip says which blank it is ("new" / "cleared").
         const blank = p.agentState === "idle" && p.agentBlank;
-        seg("astate " + stClass(blank ? "blank" : p.agentState), blank ? p.agentBlank : p.agentState);
+        const stWord = blank ? p.agentBlank : p.agentState;
+        const es = seg("astate " + stClass(blank ? "blank" : p.agentState), modelEffort(p.agentModel));
+        if (es) es.title = "effort " + es.textContent + (stWord ? " — " + stWord : "");
         // How the conversation began and when ("cleared 5m ago"), once it is
         // past its first prompt. Placed through seg so it gets its separator;
         // the age itself is kept current by the agents tick (13-agents.js).
