@@ -41,7 +41,7 @@
         // CMD_TO_PANE (20-keys.js), pinned both ways by cmdhelp.test.mjs,
         // so this row cannot drift from the set again. Keep it ONE line:
         // the test reads it from the source.
-        ["sent to an editor pane, not the browser", ["⌘C", "⌘Z", "⌘A", "⌘X", "⌘S", "⌘P", "⌘E†", "⌘F", "⌘D", "⌘G", "⌘L", "⌘/", "⌘↑", "⌘↓"]],
+        ["sent to an editor pane, not the browser", ["⌘C", "⌘Z", "⌘A", "⌘X", "⌘S", "⌘P", "⌘E†", "⌘F", "⌘D", "⌘G", "⌘L", "⌘O", "⌘/", "⌘↑", "⌘↓"]],
       ]));
       left.appendChild(helpSection("start-path picker (new workspace)", [
         ["move through directories", ["↑", "↓", "Ctrl+n", "Ctrl+p"]],

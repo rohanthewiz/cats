@@ -87,6 +87,25 @@ function key(type, code, extra) {
   eq(sent.length, 0, "and nothing is sent for it");
 }
 
+// ---- ⌘O: the editor's Open file…, same gate as ⌘L --------------------------
+// Costs the browser File ▸ Open File, and only over a kitty pane — so, like
+// ⌘L, both halves of the gate are pinned.
+
+{
+  const { f, sent } = world(true);
+  const down = key("keydown", "KeyO", { key: "o" });
+  f.onKey(down);
+  ok(down.prevented, "⌘O over a kitty pane is taken from the browser");
+  eq(sent.map((m) => m.code + ":" + m.mods), ["KeyO:8"], "and sent as super+o");
+}
+{
+  const { f, sent } = world(false);
+  const down = key("keydown", "KeyO", { key: "o" });
+  f.onKey(down);
+  ok(!down.prevented, "⌘O over a legacy pane stays the browser's");
+  eq(sent.length, 0, "and nothing is sent for it");
+}
+
 // ---- ⌘← is still translated, not swept into the verbatim set ----------------
 
 {

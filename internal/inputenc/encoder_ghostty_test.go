@@ -166,6 +166,9 @@ func TestKeyKitty(t *testing.T) {
 		// ⌘L over a kitty-protocol pane (CMD_TO_PANE): the editor's Go to
 		// line. 108 is 'l'.
 		{"super l", disambiguate, press("KeyL", "l", meta), "\x1b[108;9u"},
+		// ⌘O over a kitty-protocol pane (CMD_TO_PANE): the editor's Open
+		// file…. 111 is 'o'.
+		{"super o", disambiguate, press("KeyO", "o", meta), "\x1b[111;9u"},
 		// ⌘[ / ⌘] over a kitty-protocol pane: the front end forwards the
 		// chord as super on BOTH spellings (20-keys.js's bracket branch),
 		// and the editor on the other side reads it as its own back /

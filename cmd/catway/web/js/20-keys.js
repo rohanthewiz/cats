@@ -109,10 +109,22 @@
   // offers the keydown to the page first (as for ⌘S ⌘P ⌘F) or resolves it
   // natively (the ⌘E trap) is the by-hand check this needs.
   //
+  // ⌘O joined for the editor's Open file… (a typed path anywhere on disk).
+  // It costs the browser File ▸ Open File, and only while a kitty-protocol
+  // pane has focus — a shell pane fails the gate and keeps it. That is the
+  // same narrow trade ⌘L made, and a cheaper one: opening a local file IN
+  // the tab that hosts a terminal is something nobody does on purpose, and
+  // the menu item stays a click away. In the MAC APP nothing is lost:
+  // catapp's menus claim no ⌘O (menu_darwin.m), so the chord falls through
+  // to the WebView. In Chrome, Open File is a menu item, so ⌘O is in the
+  // same doubt as ⌘L — offered to the page first like ⌘S, or resolved
+  // natively like ⌘E. Per the lesson above, confirm it by hand in both
+  // hosts; if Chrome keeps it, it gets ⌘E's † in the help row.
+  //
   // Every entry here is listed in the help overlay's "sent to an editor
   // pane" row (32-help.js); cmdhelp.test.mjs fails when one is missing, so
   // a chord added here must be added there too.
-  const CMD_TO_PANE = new Set(["KeyS", "KeyP", "KeyE", "KeyF", "KeyD", "KeyG", "KeyA", "KeyX", "KeyL", "Slash", "ArrowUp", "ArrowDown"]);
+  const CMD_TO_PANE = new Set(["KeyS", "KeyP", "KeyE", "KeyF", "KeyD", "KeyG", "KeyA", "KeyX", "KeyL", "KeyO", "Slash", "ArrowUp", "ArrowDown"]);
 
   // cmdGoesToPane answers "does the focused pane want this ⌘ chord?" —
   // and the answer is no unless that pane ASKED for the kitty keyboard
