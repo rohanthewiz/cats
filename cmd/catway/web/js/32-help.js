@@ -36,8 +36,12 @@
         ["this help", ["⌘K → keyboard shortcuts"]],
         // Not a cats shortcut — a statement about who gets the key, and
         // the only place a user can find out why ⌘S stopped opening the
-        // browser's save dialog over an editor pane.
-        ["sent to an editor pane, not the browser", ["⌘C", "⌘Z", "⌘S", "⌘P", "⌘E†", "⌘F", "⌘D", "⌘G", "⌘L", "⌘/", "⌘↑", "⌘↓"]],
+        // browser's save dialog over an editor pane. ⌘C / ⌘Z lead because
+        // they fall through to every pane (onKey's tail); the rest is
+        // CMD_TO_PANE (20-keys.js), pinned both ways by cmdhelp.test.mjs,
+        // so this row cannot drift from the set again. Keep it ONE line:
+        // the test reads it from the source.
+        ["sent to an editor pane, not the browser", ["⌘C", "⌘Z", "⌘A", "⌘X", "⌘S", "⌘P", "⌘E†", "⌘F", "⌘D", "⌘G", "⌘L", "⌘/", "⌘↑", "⌘↓"]],
       ]));
       left.appendChild(helpSection("start-path picker (new workspace)", [
         ["move through directories", ["↑", "↓", "Ctrl+n", "Ctrl+p"]],

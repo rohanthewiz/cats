@@ -108,6 +108,10 @@
   // WebView. In Chrome, Open Location is a menu item; whether Chrome
   // offers the keydown to the page first (as for ⌘S ⌘P ⌘F) or resolves it
   // natively (the ⌘E trap) is the by-hand check this needs.
+  //
+  // Every entry here is listed in the help overlay's "sent to an editor
+  // pane" row (32-help.js); cmdhelp.test.mjs fails when one is missing, so
+  // a chord added here must be added there too.
   const CMD_TO_PANE = new Set(["KeyS", "KeyP", "KeyE", "KeyF", "KeyD", "KeyG", "KeyA", "KeyX", "KeyL", "Slash", "ArrowUp", "ArrowDown"]);
 
   // cmdGoesToPane answers "does the focused pane want this ⌘ chord?" —
