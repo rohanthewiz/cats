@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 )
 
 // This file is the protocol-neutral §7 command vocabulary: the command names,
@@ -50,6 +52,7 @@ const (
 	CmdCapture            = "capture"
 	CmdWaitForOutput      = "pane.wait_for_output"
 	CmdPaneSendInput      = "pane.send_input"
+	CmdPaneSendKeys       = "pane.send_keys" // send_input's typed twin: keys, not a paste (SendKeysParams)
 	CmdTabCreate          = "tab.create"
 	CmdTabClose           = "tab.close"
 	CmdTabFocus           = "tab.focus"
@@ -405,6 +408,7 @@ var commandSpecs = []CommandSpec{
 	{Name: CmdCapture, Params: CaptureParams{}, Result: CaptureResult{}, ReplyRequired: true, ParamsRequired: true},
 	{Name: CmdWaitForOutput, Params: WaitForOutputParams{}, Result: WaitForOutputResult{}, ReplyRequired: true, ParamsRequired: true, Recorded: true},
 	{Name: CmdPaneSendInput, Params: SendInputParams{}, ParamsRequired: true, Recorded: true},
+	{Name: CmdPaneSendKeys, Params: SendKeysParams{}, ParamsRequired: true, Recorded: true},
 
 	// Tabs. tab.create returns its new tab/pane so an automation client can
 	// drive the fresh pane without diffing pane.list.
@@ -944,6 +948,106 @@ type SendInputParams struct {
 func (p SendInputParams) Validate() error {
 	if p.Text == "" && !p.Submit {
 		return errors.New("send_input: empty text and no submit — nothing to send")
+	}
+	return nil
+}
+
+// SendKeysParams: pane.send_keys — press keys in a pane, the way a person at
+// the keyboard would, where pane.send_input pastes.
+//
+// Both inject input addressed by pane id; they differ in what the program on
+// the other end is told about where the input came from:
+//
+//	pane.send_input   Text → the pane's paste encoder → ESC[200~ … ESC[201~
+//	                  (bracketed paste, when the app asked for it)
+//	pane.send_keys    each stroke → the pane's key encoder → the bytes a real
+//	                  keypress makes under the pane's live keyboard modes
+//	                  (kitty flags, modifyOtherKeys, DECCKM), as browser keys do
+//
+// That difference is the reason this verb exists. An app may treat a paste as
+// something other than its user's own words: Claude Code (2.1.283 on) tags
+// pasted input as pasted content whose instructions are followed only where the
+// user's typing asks, so a prompt delivered whole by paste can be declined as
+// "only pasted text". And some keys have no paste form at all — ↓ into a list,
+// ←/→ on a slider, a bare `s` that picks a menu row — so driving an app's own
+// pickers needs named keys, not text.
+//
+// Keys is an ordered list, and each stroke is one of two shapes:
+//
+//	{"text": "fix the test"}               typed rune by rune; each rune is the
+//	                                       key a US keyboard presses for it
+//	                                       ("A" is shift+KeyA), anything else
+//	                                       is sent as its own text
+//	{"code": "Enter", "mods": 1}           one named key (W3C code, as a browser
+//	                                       reports it) with its modifiers
+//	                                       (wire.ModShift|ModAlt|ModCtrl|ModMeta)
+//
+// Text carries no control characters: a newline in typed text is a decision
+// the caller has to make (Enter submits in most line editors, shift+Enter is a
+// newline in some), so it is said as a named key instead of guessed here.
+//
+// Every stroke is a press and a release, and the whole call is ONE write to
+// the pane, in order. Pacing is the caller's: an app that guesses at pastes
+// from the size of a burst (because the terminal did not bracket one) sees a
+// long Keys list arrive as exactly that kind of burst, so a caller typing a
+// long text splits it over several calls. The server stays a pure encoder,
+// with no timer on the loop goroutine and no partial-send state to report.
+type SendKeysParams struct {
+	Pane uint32      `json:"pane" cats:"handle=pane"`
+	Keys []KeyStroke `json:"keys"`
+}
+
+// KeyStroke is one entry of pane.send_keys: typed Text, or one named key.
+type KeyStroke struct {
+	// Text is typed a rune at a time. Exclusive with Code/Key/Mods.
+	Text string `json:"text,omitempty"`
+	// Code names the key the way a browser KeyboardEvent.code does ("Enter",
+	// "ArrowDown", "KeyS", "Tab", "Escape", "F5").
+	Code string `json:"code,omitempty"`
+	// Key is the KeyboardEvent.key value: the text the key produces ("s",
+	// "S") or its name ("Enter"). Empty means "derive it from Code", which is
+	// right for every named key and for unshifted letters and digits.
+	Key string `json:"key,omitempty"`
+	// Mods is the browser protocol's modifier bitmask (wire.ModShift …).
+	Mods uint8 `json:"mods,omitempty"`
+}
+
+// maxSendKeysRunes bounds one pane.send_keys call. Typing is the slow road on
+// purpose (a long text belongs over several paced calls, see SendKeysParams),
+// so a call this large is a caller that skipped the pacing, and the refusal
+// says so rather than handing the app the very burst it would take for a paste.
+const maxSendKeysRunes = 4096
+
+// Validate rejects a call that would send nothing, a stroke that is both
+// shapes or neither, and typed text holding a control character.
+func (p SendKeysParams) Validate() error {
+	if len(p.Keys) == 0 {
+		return errors.New("send_keys: no keys — nothing to send")
+	}
+	total := 0
+	for i, k := range p.Keys {
+		named := k.Code != "" || k.Key != "" || k.Mods != 0
+		switch {
+		case k.Text != "" && named:
+			return fmt.Errorf("send_keys: key %d has both text and a named key — send them as two strokes", i)
+		case k.Text == "" && !named:
+			return fmt.Errorf("send_keys: key %d is empty — give it text or a code", i)
+		case named && k.Code == "" && k.Key == "":
+			return fmt.Errorf("send_keys: key %d has modifiers but no key", i)
+		}
+		if !utf8.ValidString(k.Text) {
+			return fmt.Errorf("send_keys: key %d's text is not valid UTF-8", i)
+		}
+		for _, r := range k.Text {
+			if unicode.IsControl(r) {
+				return fmt.Errorf("send_keys: key %d's text holds %q — send Enter, Tab and the like as named keys", i, r)
+			}
+			total++
+		}
+		total++ // a named key counts as one press
+	}
+	if total > maxSendKeysRunes {
+		return fmt.Errorf("send_keys: %d keys in one call (max %d) — split a long text over several calls", total, maxSendKeysRunes)
 	}
 	return nil
 }

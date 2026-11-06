@@ -412,3 +412,54 @@ func TestFocus(t *testing.T) {
 		t.Fatalf("focus-out = %q, want CSI O", got)
 	}
 }
+
+// typedBytes runs a pane.send_keys stroke list through the encoder exactly as
+// catway's SendKeys does (press then release per event) and returns the bytes.
+func typedBytes(t *testing.T, e *Encoder, strokes ...browserproto.KeyStroke) string {
+	t.Helper()
+	var out []byte
+	for _, s := range strokes {
+		evs, ok := StrokeKeys(s)
+		if !ok {
+			t.Fatalf("StrokeKeys(%+v) refused", s)
+		}
+		for _, ev := range evs {
+			for _, kind := range []string{browserproto.KeyDown, browserproto.KeyUp} {
+				ev.Kind = kind
+				b, err := e.Key(ev)
+				if err != nil {
+					t.Fatalf("Key(%+v): %v", ev, err)
+				}
+				out = append(out, b...)
+			}
+		}
+	}
+	return string(out)
+}
+
+// Typed text is the text itself under the modes a line editor runs in, with no
+// paste brackets around it — the point of pane.send_keys. Runes no US key makes
+// ("é", "—") still arrive as their UTF-8. shift+Enter is the stroke a caller
+// types a newline with, so it must never collapse into a bare "\r" (which
+// submits): kitty spells it CSI 13;2u, and with kitty off ghostty still sends
+// the xterm form CSI 27;2;13~ rather than dropping the shift.
+func TestTypedStrokes(t *testing.T) {
+	text := browserproto.KeyStroke{Text: "Fix it: é — now!"}
+	nl := browserproto.KeyStroke{Code: "Enter", Mods: browserproto.ModShift}
+
+	legacy := newEnc(t, terminal.InputModes{})
+	if got := typedBytes(t, legacy, text); got != "Fix it: é — now!" {
+		t.Errorf("legacy typed = %q", got)
+	}
+	if got := typedBytes(t, legacy, nl); got != "\x1b[27;2;13~" {
+		t.Errorf("legacy shift+Enter = %q, want the xterm modified-key form", got)
+	}
+
+	kitty := newEnc(t, terminal.InputModes{KittyKeyboardFlags: 1})
+	if got := typedBytes(t, kitty, text, nl, browserproto.KeyStroke{Text: "x"}); got != "Fix it: é — now!\x1b[13;2ux" {
+		t.Errorf("kitty typed = %q", got)
+	}
+	if got := typedBytes(t, kitty, browserproto.KeyStroke{Code: "ArrowDown"}, browserproto.KeyStroke{Code: "KeyS"}); got != "\x1b[Bs" {
+		t.Errorf("kitty ↓ s = %q", got)
+	}
+}

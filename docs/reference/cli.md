@@ -178,6 +178,8 @@ catctl read <pane> <r0> <c0> <r1> <c1>
 catctl wait <pane> <pattern> [timeout_secs]
 catctl send <pane> <text...>    # type, do not submit
 catctl run <pane> [text...]     # type and press Enter
+catctl type <pane> <text...>    # key presses, not a paste; no Enter
+catctl keys <pane> <CODE[:mods]...>  # e.g. ArrowDown KeyS Enter:s
 ```
 
 Tabs and workspaces:

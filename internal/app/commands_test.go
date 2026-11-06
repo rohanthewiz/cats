@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -50,6 +51,7 @@ type fakeBackend struct {
 	lastScroll     [2]int
 	sendErr        error
 	lastSend       SendInputParams
+	lastKeys       SendKeysParams
 	lastTitle      uint32
 	lastWtList     Responder
 	lastWtCreate   Responder
@@ -242,6 +244,11 @@ func (b *fakeBackend) ScrollPane(pane uint32, delta int) error {
 func (b *fakeBackend) SendInput(pane uint32, text string, submit bool) error {
 	b.rec("sendInput")
 	b.lastSend = SendInputParams{Pane: pane, Text: text, Submit: submit}
+	return b.sendErr
+}
+func (b *fakeBackend) SendKeys(pane uint32, keys []KeyStroke) error {
+	b.rec("sendKeys")
+	b.lastKeys = SendKeysParams{Pane: pane, Keys: keys}
 	return b.sendErr
 }
 
@@ -888,6 +895,80 @@ func TestDispatchSendInputGated(t *testing.T) {
 	failing.d.Dispatch(CmdPaneSendInput, params(t, SendInputParams{Pane: 1, Text: "x"}), r)
 	if !r.failCall || r.errMsg != "pane 1 has exited" {
 		t.Fatalf("backend error: fail=%v msg=%q", r.failCall, r.errMsg)
+	}
+}
+
+// send_keys forwards its strokes to the backend untouched and acks; a call
+// Validate refuses never reaches the backend.
+func TestDispatchSendKeys(t *testing.T) {
+	h := newCmdHarness(t)
+	r := h.resp()
+	p := SendKeysParams{Pane: 3, Keys: []KeyStroke{{Text: "fix it"}, {Code: "Enter", Mods: 1}}} // 1 = wire.ModShift
+
+	h.d.Dispatch(CmdPaneSendKeys, params(t, p), r)
+
+	if !r.okCall {
+		t.Fatalf("send_keys should ack: fail=%v msg=%q", r.failCall, r.errMsg)
+	}
+	if got := *h.log; len(got) != 2 || got[0] != "sendKeys" || got[1] != "ok" {
+		t.Fatalf("send_keys effects = %v, want [sendKeys ok]", got)
+	}
+	if !reflect.DeepEqual(h.b.lastKeys, p) {
+		t.Fatalf("send_keys params = %+v, want %+v", h.b.lastKeys, p)
+	}
+
+	h = newCmdHarness(t)
+	r = h.resp()
+	h.d.Dispatch(CmdPaneSendKeys, params(t, SendKeysParams{Pane: 1, Keys: []KeyStroke{{Text: "a\nb"}}}), r)
+	if !r.failCall || !strings.Contains(r.errMsg, "bad params") {
+		t.Fatalf("newline in typed text: fail=%v msg=%q", r.failCall, r.errMsg)
+	}
+	if len(*h.log) != 1 {
+		t.Fatalf("a refused send_keys must not reach the backend, log=%v", *h.log)
+	}
+}
+
+// send_keys is input into a pane by id, so it takes send_input's gates: an
+// unknown pane, a dead host, a locked workspace and a backend error all fail.
+func TestDispatchSendKeysGated(t *testing.T) {
+	keys := []KeyStroke{{Code: "ArrowDown"}}
+
+	unknown := newCmdHarness(t)
+	unknown.b.paneExists = false
+	r := unknown.resp()
+	unknown.d.Dispatch(CmdPaneSendKeys, params(t, SendKeysParams{Pane: 9, Keys: keys}), r)
+	if !r.failCall || !strings.Contains(r.errMsg, "unknown pane") {
+		t.Fatalf("unknown pane: fail=%v msg=%q", r.failCall, r.errMsg)
+	}
+
+	down := newCmdHarness(t)
+	down.b.daemonUp = false
+	r = down.resp()
+	down.d.Dispatch(CmdPaneSendKeys, params(t, SendKeysParams{Pane: 1, Keys: keys}), r)
+	if !r.failCall || !strings.Contains(r.errMsg, "not connected") {
+		t.Fatalf("daemon down: fail=%v msg=%q", r.failCall, r.errMsg)
+	}
+
+	failing := newCmdHarness(t)
+	failing.b.sendErr = errors.New("pane 1 has exited")
+	r = failing.resp()
+	failing.d.Dispatch(CmdPaneSendKeys, params(t, SendKeysParams{Pane: 1, Keys: keys}), r)
+	if !r.failCall || r.errMsg != "pane 1 has exited" {
+		t.Fatalf("backend error: fail=%v msg=%q", r.failCall, r.errMsg)
+	}
+
+	locked := newCmdHarness(t)
+	rl := locked.resp()
+	locked.d.Dispatch(CmdWorkspaceLock, params(t, LockWorkspaceParams{Locked: true}), rl)
+	pane, _ := locked.s.FocusedPane()
+	*locked.log = nil
+	r = locked.resp()
+	locked.d.Dispatch(CmdPaneSendKeys, params(t, SendKeysParams{Pane: uint32(pane), Keys: keys}), r)
+	if !r.failCall || !strings.Contains(r.errMsg, "is locked") {
+		t.Fatalf("locked workspace: fail=%v msg=%q", r.failCall, r.errMsg)
+	}
+	if lg := *locked.log; len(lg) != 1 || lg[0] != "fail" {
+		t.Fatalf("a refused send_keys must not reach the backend, log=%v", lg)
 	}
 }
 

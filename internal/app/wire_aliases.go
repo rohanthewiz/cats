@@ -99,6 +99,8 @@ type (
 	RunbookStepResult        = wire.RunbookStepResult
 	ScrollParams             = wire.ScrollParams
 	SendInputParams          = wire.SendInputParams
+	SendKeysParams           = wire.SendKeysParams
+	KeyStroke                = wire.KeyStroke
 	SessionInfoResult        = wire.SessionInfoResult
 	SpawnOverride            = wire.SpawnOverride
 	SplitParams              = wire.SplitParams
@@ -176,6 +178,7 @@ const (
 	CmdPaneRename         = wire.CmdPaneRename
 	CmdPaneResizeBorder   = wire.CmdPaneResizeBorder
 	CmdPaneSendInput      = wire.CmdPaneSendInput
+	CmdPaneSendKeys       = wire.CmdPaneSendKeys
 	CmdPaneSplit          = wire.CmdPaneSplit
 	CmdPaneSwap           = wire.CmdPaneSwap
 	CmdPaneSwapWith       = wire.CmdPaneSwapWith

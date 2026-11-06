@@ -364,6 +364,7 @@ channel, since a result with nowhere to go is not worth producing.
 | `pane.flag` | `flag <pane> <kind> [note...]` / `unflag <pane>` |
 | `pane.resize_border` | `resize <border> <ratio>` |
 | `pane.send_input` | `send <pane> <text...>` / `run <pane> [text...]` |
+| `pane.send_keys` | `type <pane> <text...>` / `keys <pane> <CODE[:mods]...>` |
 | `pane.wait_for_output` | `wait <pane> <pattern> [timeout_secs]` |
 | `scroll` | `scroll <pane> <delta>` |
 | `read` | `read <pane> <r0> <c0> <r1> <c1>` |
@@ -371,6 +372,27 @@ channel, since a result with nowhere to go is not worth producing.
 
 `send` stages text without submitting; `run` types it and presses Enter. Both map
 to `pane.send_input` — the difference is one flag.
+
+`pane.send_keys` is the typed twin of `pane.send_input`. `send_input` pastes:
+its text goes through the pane's paste encoder, so an app with bracketed paste on
+is told it was pasted. `send_keys` presses keys: each stroke goes through the key
+encoder a browser keystroke uses, under the pane's live keyboard modes, and the
+app reads typing. Two things need that. Claude Code (2.1.283 on) treats pasted
+text as material, not as the user's request, so a prompt an automation client
+delivers by paste can be declined as "only pasted text". And an app's own pickers
+want keys that have no paste form: `↓` into a list, `←`/`→` on a slider, a bare
+`s` on a menu row.
+
+Its params are `{"pane": N, "keys": [...]}`, each key either `{"text": "…"}`
+(typed a rune at a time on a US layout; a rune with no key is sent as its own
+text) or `{"code": "ArrowDown", "mods": 1}` (a W3C `KeyboardEvent.code` and the
+browser protocol's modifier bits). Typed text holds no control characters: a
+newline is `Enter` or `shift+Enter`, and which one is the caller's call, so it
+is said as a named key. One call is one write to the pane. An app that guesses
+pastes from the size of a burst sees a long call as exactly that, so the pacing
+is the caller's: split a long text over several calls (a call over 4096 keys is
+refused). The gates are `send_input`'s: unknown pane, host down, locked
+workspace.
 
 `capture` of an **exited** pane answers from catway's copy of the last screen
 the pane showed, because cathost drops the pane's emulator, and its scrollback,

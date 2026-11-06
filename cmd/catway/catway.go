@@ -2465,6 +2465,49 @@ func (o *orch) SendInput(pane uint32, text string, submit bool) error {
 	return nil
 }
 
+// SendKeys presses keys in a pane (pane.send_keys), addressed by pane id like
+// SendInput, but through the key encoder rather than the paste encoder: each
+// stroke becomes the browser key event a person would have produced
+// (inputenc.StrokeKeys), and each event is encoded as a press then a release
+// under the pane's live keyboard modes. So the app reads typing — a kitty
+// shift+Enter is CSI 13;2u, an "A" is shift+a — and nothing marks it a paste.
+//
+// Every byte is encoded before any is sent, and all of it leaves as ONE input
+// message. Encoding first means a key the encoder refuses fails the call with
+// nothing typed, rather than leaving half a prompt in the pane; one message
+// keeps the strokes in order with nothing interleaved. Pacing is the caller's
+// (wire.SendKeysParams): this runs on the loop goroutine and does not sleep.
+func (o *orch) SendKeys(pane uint32, keys []app.KeyStroke) error {
+	rt := o.panes[pane]
+	if rt == nil {
+		return fmt.Errorf("unknown pane %d", pane)
+	}
+	if rt.exited != nil {
+		return fmt.Errorf("pane %d has exited", pane)
+	}
+	var out []byte
+	for i, s := range keys {
+		evs, ok := inputenc.StrokeKeys(s)
+		if !ok {
+			return fmt.Errorf("send_keys: key %d has no key event", i)
+		}
+		for _, ev := range evs {
+			for _, kind := range []string{browserproto.KeyDown, browserproto.KeyUp} {
+				ev.Kind = kind
+				b, err := rt.enc.Key(ev)
+				if err != nil {
+					return fmt.Errorf("send_keys: key %d encode: %w", i, err)
+				}
+				out = append(out, b...)
+			}
+		}
+	}
+	if len(out) > 0 {
+		o.hostOf(rt).send(orchestration.NewInput(rt.id, out))
+	}
+	return nil
+}
+
 // StageSpawn registers a one-shot spawn override for a pane the next
 // applyModel will create (tab.create's optional command/cwd/env). Loop
 // goroutine, and always dispatched before that applyModel — createPane is the

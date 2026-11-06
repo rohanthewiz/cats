@@ -142,6 +142,8 @@ type (
 	Scroll                   = wire.Scroll
 	ScrollParams             = wire.ScrollParams
 	SendInputParams          = wire.SendInputParams
+	SendKeysParams           = wire.SendKeysParams
+	KeyStroke                = wire.KeyStroke
 	SessionInfoResult        = wire.SessionInfoResult
 	Shutdown                 = wire.Shutdown
 	SpawnOverride            = wire.SpawnOverride
@@ -239,6 +241,7 @@ const (
 	CmdPaneRename         = wire.CmdPaneRename
 	CmdPaneResizeBorder   = wire.CmdPaneResizeBorder
 	CmdPaneSendInput      = wire.CmdPaneSendInput
+	CmdPaneSendKeys       = wire.CmdPaneSendKeys
 	CmdPaneSplit          = wire.CmdPaneSplit
 	CmdPaneSwap           = wire.CmdPaneSwap
 	CmdPaneSwapWith       = wire.CmdPaneSwapWith

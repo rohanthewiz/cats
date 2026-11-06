@@ -237,6 +237,22 @@ func TestBuildSendRun(t *testing.T) {
 	buildErr(t, "run", []string{"x"})
 }
 
+// type/keys: type joins its words and presses no Enter; keys parses
+// CODE[:mods] per arg and refuses a modifier letter it does not know.
+func TestBuildTypeKeys(t *testing.T) {
+	buildOK(t, "type", []string{"4", "fix", "the", "test"},
+		app.SendKeysParams{Pane: 4, Keys: []app.KeyStroke{{Text: "fix the test"}}})
+	buildErr(t, "type", []string{"4"})
+	buildErr(t, "type", []string{"x", "text"})
+
+	buildOK(t, "keys", []string{"5", "ArrowDown", "KeyS", "Enter:s"},
+		app.SendKeysParams{Pane: 5, Keys: []app.KeyStroke{
+			{Code: "ArrowDown"}, {Code: "KeyS"}, {Code: "Enter", Mods: 1}}})
+	buildErr(t, "keys", []string{"5"})
+	buildErr(t, "keys", []string{"5", ":s"})
+	buildErr(t, "keys", []string{"5", "Enter:q"})
+}
+
 // events: optional pane filter.
 func TestBuildEvents(t *testing.T) {
 	buildOK(t, "events", nil, app.EventsSubscribeParams{})

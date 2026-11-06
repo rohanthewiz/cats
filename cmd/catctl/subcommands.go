@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/rohanthewiz/cats/internal/app"
+	"github.com/rohanthewiz/cats/internal/browserproto"
 	"github.com/rohanthewiz/cats/internal/ctlproto"
 	"github.com/rohanthewiz/cats/internal/peersync"
 )
@@ -100,6 +101,8 @@ var subcommands = []subcommand{
 	{"wait", app.CmdWaitForOutput, "wait <pane> <pattern> [timeout_secs]", []argKind{argPane}, "wait until a pane's output contains a pattern", buildWait},
 	{"send", app.CmdPaneSendInput, "send <pane> <text...>", []argKind{argPane}, "type text into a pane without submitting it", buildSend},
 	{"run", app.CmdPaneSendInput, "run <pane> [text...]", []argKind{argPane}, "type text into a pane and submit it with Enter", buildRun},
+	{"type", app.CmdPaneSendKeys, "type <pane> <text...>", []argKind{argPane}, "type text as key presses (not a paste); no Enter", buildType},
+	{"keys", app.CmdPaneSendKeys, "keys <pane> <CODE[:mods]...>", []argKind{argPane}, "press named keys, e.g. ArrowDown KeyS Enter:s (mods c s a m)", buildKeys},
 
 	// Tab commands.
 	{"tab", app.CmdTabFocus, "tab <num>", []argKind{argTab}, "focus a tab", buildTabFocus},
@@ -527,6 +530,59 @@ func buildRun(args []string) (json.RawMessage, error) {
 		return nil, err
 	}
 	return marshal(app.SendInputParams{Pane: pane, Text: strings.Join(args[1:], " "), Submit: true})
+}
+
+// buildType / buildKeys: the two faces of pane.send_keys, as send/run are of
+// pane.send_input. `type` presses the keys for its text (words joined with
+// single spaces, like send) and nothing else — no Enter, since which Enter
+// submits is the app's business and `keys <pane> Enter` says it outright.
+// `keys` presses named keys in order, each written CODE[:MODS] with the mods
+// as catctl probe spells them (c ctrl, s shift, a alt, m meta/⌘): `keys 3
+// ArrowDown KeyS` walks into a picker and presses s, `keys 3 Enter:s` is a
+// shift+Enter. One call is one write; a long text is the caller's to split.
+func buildType(args []string) (json.RawMessage, error) {
+	if len(args) < 2 {
+		return nil, usageErr{"type <pane> <text...>"}
+	}
+	pane, err := parsePane(args[0])
+	if err != nil {
+		return nil, err
+	}
+	return marshal(app.SendKeysParams{Pane: pane, Keys: []app.KeyStroke{{Text: strings.Join(args[1:], " ")}}})
+}
+
+func buildKeys(args []string) (json.RawMessage, error) {
+	if len(args) < 2 {
+		return nil, usageErr{"keys <pane> <CODE[:mods]...>"}
+	}
+	pane, err := parsePane(args[0])
+	if err != nil {
+		return nil, err
+	}
+	keys := make([]app.KeyStroke, 0, len(args)-1)
+	for _, a := range args[1:] {
+		code, mods, _ := strings.Cut(a, ":")
+		if code == "" {
+			return nil, fmt.Errorf("keys: %q names no key", a)
+		}
+		var m uint8
+		for _, c := range mods {
+			switch c {
+			case 'c':
+				m |= browserproto.ModCtrl
+			case 's':
+				m |= browserproto.ModShift
+			case 'a':
+				m |= browserproto.ModAlt
+			case 'm':
+				m |= browserproto.ModMeta
+			default:
+				return nil, fmt.Errorf("keys: %q has an unknown modifier %q (use c s a m)", a, c)
+			}
+		}
+		keys = append(keys, app.KeyStroke{Code: code, Mods: m})
+	}
+	return marshal(app.SendKeysParams{Pane: pane, Keys: keys})
 }
 
 // buildEvents: events [pane] — an optional pane filter for the event stream. The

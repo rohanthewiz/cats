@@ -94,6 +94,12 @@ type Backend interface {
 	// so success means "encoded and sent", not "the app consumed it"; it errors
 	// if the pane is unknown/exited or the encode fails.
 	SendInput(pane uint32, text string, submit bool) error
+	// SendKeys presses keys in a pane — pane.send_keys, send_input's typed twin.
+	// Every stroke goes through the pane's key encoder (a press, then a
+	// release) and the whole list leaves as one write, in order. Same contract
+	// as SendInput otherwise: synchronous, "encoded and sent", an error for an
+	// unknown/exited pane or a key the encoder cannot make.
+	SendKeys(pane uint32, keys []KeyStroke) error
 
 	// PaneActivity is the runtime's account of what a pane is doing — the
 	// half of workspace.clean's idle test the session cannot answer (see
@@ -807,6 +813,37 @@ func (d *Dispatcher) dispatch(name string, dec ParamDecoder, r Responder) {
 			return
 		}
 		if err := d.backend.SendInput(p.Pane, p.Text, p.Submit); err != nil {
+			r.Fail(err.Error())
+			return
+		}
+		r.OK(nil)
+
+	case CmdPaneSendKeys:
+		// The same gates as pane.send_input, in the same order and with the same
+		// words: it is the same act (input into a pane by id) arriving as keys
+		// instead of a paste, so a locked workspace or a dead host refuses both.
+		var p SendKeysParams
+		if err := dec.Decode(&p); err != nil {
+			bad(err)
+			return
+		}
+		if err := p.Validate(); err != nil {
+			bad(err)
+			return
+		}
+		if !d.backend.PaneExists(p.Pane) {
+			r.Fail(fmt.Sprintf("unknown pane %d", p.Pane))
+			return
+		}
+		if !d.backend.PaneHostConnected(p.Pane) {
+			r.Fail("cathost daemon not connected")
+			return
+		}
+		if ws := d.session.PaneWorkspace(layout.PaneID(p.Pane)); ws != nil && ws.Locked {
+			r.Fail(workspaceLockedErr(ws.ID, "send input to a pane in"))
+			return
+		}
+		if err := d.backend.SendKeys(p.Pane, p.Keys); err != nil {
 			r.Fail(err.Error())
 			return
 		}

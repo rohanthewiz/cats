@@ -77,6 +77,12 @@ var recordedParamClasses = map[string]map[string]string{
 		"submit": ClassPlain,
 		"text":   ClassPlain,
 	},
+	// pane.send_keys' typed text is as private as send_input's and plain for
+	// the same reason: replaying it is what a macro is for.
+	"pane.send_keys": {
+		"pane": ClassPaneHandle,
+		"keys": ClassPlain,
+	},
 	"tab.create": {
 		"command":   ClassPlain,
 		"cwd":       ClassPlain,
