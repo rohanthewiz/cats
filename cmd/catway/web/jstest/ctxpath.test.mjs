@@ -7,7 +7,7 @@
 // one this window shows, or the line would name the wrong project at exactly
 // the moment it is there to prevent a mistake.
 
-import { loadFns, eq, report } from "./testutil.mjs";
+import { loadFns, eq, ok, report } from "./testutil.mjs";
 
 const layoutMsg = {
   workspaces: [
@@ -67,5 +67,48 @@ const ws = wsMenuItems(layoutMsg.workspaces[1]);
 eq(ws[0], { path: "/Users/me/projs/go/ced" }, "workspace menu: the row's own workspace");
 eq(ws[2], { head: "Workspace" }, "the first heading follows the separator");
 eq(wsMenuItems(layoutMsg.workspaces[2])[0], { head: "Workspace" }, "pathless workspace: heading first, as before");
+
+// ---- Clicking the path line copies it ----
+//
+// buildCtx is lifted on its own with a fake DOM just deep enough to mount a
+// menu: elements record their children, class, text, title and listeners.
+// The behaviour pinned: a click copies the ABSOLUTE path (not the "~" form the
+// line displays, which does not expand everywhere it might be pasted), closes
+// the menu, and toasts what was copied; and the line binds no mouseenter, so
+// crossing it on the way out of a submenu leaves that submenu open.
+function fakeEl(tag) {
+  const n = {
+    tag, children: [], className: "", textContent: "", title: "", style: {}, on: {},
+    appendChild(c) { n.children.push(c); return c; },
+    addEventListener(ev, fn) { n.on[ev] = fn; },
+    getBoundingClientRect: () => ({ width: 100, height: 100, right: 100, top: 0 }),
+    remove() {},
+  };
+  return n;
+}
+const copied = [], toasts = [];
+let closed = 0;
+const { buildCtx } = loadFns({
+  files: ["28-ctxmenu.js"],
+  names: ["buildCtx"],
+  env: {
+    document: { createElement: fakeEl, createTextNode: (t) => ({ textContent: t }), body: fakeEl("body") },
+    window: { innerWidth: 1000, innerHeight: 1000 },
+    shortPath: (p) => p.replace("/Users/me", "~"),
+    clipWrite: (t) => { copied.push(t); return Promise.resolve(); },
+    toast: (m) => toasts.push(m),
+    closeCtx: () => { closed++; },
+  },
+});
+const menu = buildCtx(0, 0, [{ path: "/Users/me/projs/go/ced" }, "-", { label: "x", fn: () => {} }]);
+const line = menu.children[0];
+eq(line.className, "path", "the first row is the path line");
+eq(line.children[0].textContent, "copy", "it carries a copy hint for hover");
+ok(!line.on.mouseenter, "no mouseenter: crossing the line leaves an open submenu alone");
+line.on.click();
+eq(copied, ["/Users/me/projs/go/ced"], "a click copies the absolute path, not the ~ form");
+eq(closed, 1, "and closes the menu");
+await Promise.resolve();
+eq(toasts, ["copied /Users/me/projs/go/ced"], "and says what it copied");
 
 report("ctxpath");

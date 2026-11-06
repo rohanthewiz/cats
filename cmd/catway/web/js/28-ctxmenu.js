@@ -27,7 +27,8 @@
   // sentence in place of rows, for a list that came back empty and should say
   // why rather than open as a bare box.
   //
-  // And {path: "/abs/dir"} is the inert line every right-click menu opens on:
+  // And {path: "/abs/dir"} is the line every right-click menu opens on (a click
+  // on it copies the absolute path):
   // the directory of the workspace the menu is about, drawn the way a shell
   // prompt draws it ("~/projs/go/x"). See wsPathItems for where it comes from.
   function openCtx(x, y, items) {
@@ -73,13 +74,34 @@
         m.appendChild(n);
         continue;
       }
-      // Inert like a heading (and, like one, it leaves an open submenu alone),
-      // but not styled as one: a heading is uppercased, and a path is case-
+      // Not styled as a heading: a heading is uppercased, and a path is case-
       // sensitive data that must read exactly as it is on disk. The tooltip
       // keeps the absolute form, which is what "~" stands in for.
+      //
+      // A click copies that absolute form to the clipboard. The line already
+      // sits in every right-click menu, on the exact directory the menu is
+      // about, so making it the copy target answers "what is this path?" and
+      // "give me this path" in one place — a separate "copy path" row would
+      // repeat the value one line further down. It still binds no mouseenter,
+      // so, like a heading, crossing it leaves an open submenu alone; only a
+      // deliberate click acts. The copy is the absolute path, never the "~"
+      // form, since "~" does not expand in every place it might be pasted
+      // (quoted shell args, config files, other apps).
       if (it.path) {
         const pe = document.createElement("div");
-        pe.className = "path"; pe.textContent = shortPath(it.path); pe.title = it.path;
+        pe.className = "path";
+        pe.textContent = shortPath(it.path);
+        pe.title = it.path + "\nclick to copy";
+        const ph = document.createElement("span");
+        ph.className = "hint"; ph.textContent = "copy";
+        pe.appendChild(ph);
+        const abs = it.path;
+        pe.addEventListener("click", () => {
+          closeCtx();
+          clipWrite(abs).then(
+            () => toast("copied " + abs),
+            () => toast("clipboard write blocked"));
+        });
         m.appendChild(pe);
         continue;
       }

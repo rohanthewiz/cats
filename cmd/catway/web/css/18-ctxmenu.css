@@ -57,3 +57,14 @@
      the tooltip holding the absolute form. */
   #ctxmenu .path { padding:4px 10px; color:var(--muted); cursor:default; white-space:nowrap;
     font-family:var(--mono, monospace); font-size:11px; }
+  /* Clicking the line copies the absolute path (28-ctxmenu.js: buildCtx). At
+     rest it stays muted, so the verbs remain what the eye lands on; the
+     affordance appears only on hover — a pointer cursor, the row brightening
+     the way an item does, and a "copy" hint at the right edge naming what the
+     click will do. The hint is hidden (not removed) at rest so the menu's
+     width does not jump when the pointer arrives. */
+  #ctxmenu .path { display:flex; gap:8px; align-items:baseline; border-radius:4px; cursor:pointer; }
+  #ctxmenu .path .hint { margin-left:auto; padding-left:12px; font-family:inherit;
+    font-size:10px; visibility:hidden; }
+  #ctxmenu .path:hover { background:var(--chrome-focus); color:var(--fg-bright); }
+  #ctxmenu .path:hover .hint { visibility:visible; color:inherit; opacity:.7; }
