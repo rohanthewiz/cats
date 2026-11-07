@@ -182,6 +182,11 @@ func completeCatctl(words []string) ([]candidate, string) {
 	case "integration":
 		return completeIntegration(rest, cur)
 	case "plugin":
+		// The one value in the family worth a live lookup: --pane's id, which
+		// is an opaque number without the described list livePanes gives.
+		if len(rest) > 0 && rest[len(rest)-1] == pluginPaneFlag.name {
+			return filter(livePanes(words), cur), dirNoFiles
+		}
 		return completePlugin(rest, cur)
 	case "probe":
 		return completeProbe(rest, cur)
@@ -308,9 +313,17 @@ func integrationTargets() []candidate {
 var (
 	pluginRefFlag = flagSpec{"--ref", "branch or tag to install", true, dirNoFiles}
 	pluginAllFlag = flagSpec{"--all", "start the action in every unlocked workspace", false, dirNoFiles}
+	// The split placements (pluginRunSplit). --pane takes a value, which is
+	// what keeps `--pane 4 cats-todo` from counting 4 as the plugin id.
+	pluginRightFlag = flagSpec{"--right", "start the action in a new pane to the right", false, dirNoFiles}
+	pluginBelowFlag = flagSpec{"--below", "start the action in a new pane below", false, dirNoFiles}
+	pluginPaneFlag  = flagSpec{"--pane", "pane to split instead of this one (implies --right)", true, dirNoFiles}
 )
 
-var pluginFlags = append([]flagSpec{pluginRefFlag, pluginAllFlag}, globalFlags...)
+// pluginRunFlags is what `plugin run` offers after a dash, in help order.
+var pluginRunFlags = []flagSpec{pluginAllFlag, pluginRightFlag, pluginBelowFlag, pluginPaneFlag}
+
+var pluginFlags = append([]flagSpec{pluginRefFlag, pluginAllFlag, pluginRightFlag, pluginBelowFlag, pluginPaneFlag}, globalFlags...)
 
 // completePlugin completes the plugin family.
 func completePlugin(rest []string, cur string) ([]candidate, string) {
@@ -348,10 +361,10 @@ func completePlugin(rest []string, cur string) ([]candidate, string) {
 		// Both take any number of ids, so every slot offers the set.
 		return filter(installedPlugins(), cur), dirNoFiles
 	case "run":
-		// --all is offered at every slot: it is positionless, so a user who
-		// reaches for it after typing the id should still find it.
+		// The flags are offered at every slot: they are positionless, so a user
+		// who reaches for one after typing the id should still find it.
 		if strings.HasPrefix(cur, "-") {
-			return filter(flagCandidates([]flagSpec{pluginAllFlag}), cur), dirNoFiles
+			return filter(flagCandidates(pluginRunFlags), cur), dirNoFiles
 		}
 		switch len(pos) {
 		case 1:

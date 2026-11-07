@@ -4,7 +4,8 @@
   // shape the host pickers need, where one row would otherwise become one row
   // per host and bury the ordinary actions. A submenu is a second menu element
   // built by the same function, so nesting costs nothing and every item type
-  // (separators, danger rows) works at any depth.
+  // (separators, danger rows) works at any depth. sub may also be a loader
+  // function for rows that need a server round trip (see buildCtx).
   //
   // An item may also carry {icon: {text, cls}}: a leading glyph in its own span,
   // so it can take a colour the label does not. The flag menu is what wants it —
@@ -124,10 +125,31 @@
         // Hover opens it (and closes any sibling's), which is what a pointer
         // expects; click does the same so a tap reaches it too. The child is
         // placed at the row's right edge and clamped by buildCtx itself.
+        //
+        // sub may also be a loader, (done) => …, for rows that need a server
+        // round trip — the "run plugin…" roster is plugin.list, which the
+        // browser deliberately does not cache (a stale list offers argv that no
+        // longer resolve). The submenu opens at once on a "loading…" note so
+        // the hover has visible effect, and done(items) swaps the real rows in
+        // at the same spot. The swap is guarded: by the time the answer lands
+        // the pointer may have moved to a sibling row (which closed this
+        // submenu and maybe opened another) or the whole menu may be gone, and
+        // a late answer must not resurrect a submenu nobody is looking at.
         const open = () => {
           closeSub();
           const r = el.getBoundingClientRect();
-          m._sub = buildCtx(r.right - 2, r.top - 4, it.sub);
+          const x = r.right - 2, y = r.top - 4;
+          if (typeof it.sub !== "function") {
+            m._sub = buildCtx(x, y, it.sub);
+            return;
+          }
+          const pending = buildCtx(x, y, [{ note: "loading…" }]);
+          m._sub = pending;
+          it.sub((items) => {
+            if (!m.isConnected || m._sub !== pending) return;
+            pending.remove();
+            m._sub = buildCtx(x, y, items && items.length ? items : [{ note: "nothing to show" }]);
+          });
         };
         el.addEventListener("mouseenter", open);
         el.addEventListener("click", open);
@@ -216,6 +238,14 @@
         { label: "split top/bottom on…", sub: hostChoices((h) => sendCmd("pane.split", { pane: id, direction: "v", host: h })) },
       );
     }
+    // A plugin started beside this pane rather than in a new tab: a companion
+    // panel (a todo list feeding the agent here, a git view of its checkout)
+    // is only useful while both are on screen. It sits with the splits because
+    // that is what it is — a split whose new pane runs the plugin. One row with
+    // a loaded submenu rather than a "right"/"below" pair: the roster needs a
+    // plugin.list round trip either way, and two rows would add a second
+    // always-visible line to a menu that most right-clicks use for paste.
+    items.push({ label: "run plugin…", sub: (done) => pluginSplitMenu(id, done) });
     if (onScreen) items.push({ label: "toggle zoom", fn: () => sendCmd("pane.zoom", { pane: id }) });
     items.push("-");
     if (onScreen) items.push({ label: "copy mode", fn: () => enterCopyMode(id) });

@@ -113,8 +113,9 @@ func TestCompleteFamilies(t *testing.T) {
 	}
 	// Each subcommand offers only its own flag: --all belongs to run, --ref to
 	// install, and neither should surface on the other.
-	if got, _ := complete("plugin", "run", "--"); !slices.Equal(got, []string{"--all"}) {
-		t.Errorf("plugin run flags = %v, want [--all]", got)
+	wantRun := []string{"--all", "--right", "--below", "--pane"}
+	if got, _ := complete("plugin", "run", "--"); !slices.Equal(got, wantRun) {
+		t.Errorf("plugin run flags = %v, want %v", got, wantRun)
 	}
 	if got, _ := complete("integration", "install", ""); !slices.Contains(got, "claude") {
 		t.Errorf("integration targets = %v, want to include claude", got)
@@ -269,6 +270,14 @@ command = ["./bin/demo"]
 	}
 	if got, _ := complete("plugin", "run", "acme.demo", "--all", ""); !slices.Contains(got, "ui") {
 		t.Errorf("action slot with a trailing --all = %v, want to include ui", got)
+	}
+	// --pane takes a value, so the id after it is not counted as the plugin:
+	// slot 1 is still open.
+	if got, _ := complete("plugin", "run", "--pane", "4", ""); !slices.Contains(got, "acme.demo") {
+		t.Errorf("id slot after --pane 4 = %v, want to include acme.demo", got)
+	}
+	if got, _ := complete("plugin", "run", "--right", "acme.demo", ""); !slices.Contains(got, "ui") {
+		t.Errorf("action slot after --right = %v, want to include ui", got)
 	}
 }
 

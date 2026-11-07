@@ -544,11 +544,13 @@ catctl plugin check                             # which plugins have an update w
 catctl plugin update rohanthewiz.some-plugin    # fetch recorded source + rebuild
 catctl plugin list                              # ids, versions, actions
 catctl plugin run rohanthewiz.cats-todo         # launch in a new tab
+catctl plugin run rohanthewiz.cats-todo --right # ... or beside this pane (--below)
 catctl plugin uninstall rohanthewiz.cats-todo
 ```
 
 Install, link, list, check, update and uninstall are **offline** — they need no running
 `catway`. Only `run` dials the control socket, and only to issue `tab.create` —
+or `pane.split` with `--right` / `--below` / `--pane` —
 plus one `workspace.list` first when it is given `--all`, the CLI twin of the
 plugins dialog's **run all** button (see [Where an action starts](#where-an-action-starts)
 for the semantics both share).
@@ -649,7 +651,32 @@ the skip as a count rather than as an error.
 the same no-cwd and skip-locked rules — see
 [`catctl plugin`](../reference/cli.md#catctl-plugin).
 
-A third way in: the **new workspace** dialog's *start plugin* field starts an
+#### Beside a pane
+
+A tab hides a plugin behind the pane it is usually about — cats-todo feeds the
+agent next door, cats-git shows that pane's checkout. Two surfaces start an
+action in a new pane split off an existing one instead:
+
+- the pane right-click menu's **run plugin…** row, whose submenu lists every
+  action under a *to the right* and a *below* heading (a single action shows
+  the two placements as its rows). The roster is one `plugin.list` when the
+  submenu opens; a pane in a locked workspace gets a note instead.
+- the plugins dialog's **run beside…** button, which places the action beside
+  the focused pane.
+
+Both send `pane.split` with the action's argv and identity env — the same spawn
+params as `tab.create`, so there is no plugin-specific server verb. No cwd is
+sent: the split inherits the split pane's directory, which is the project the
+plugin is placed next to (and is dropped when the split pane lives on another
+host). The workspace lock is checked against the workspace that owns the split
+pane, so a sidebar right-click on an off-screen pane in a locked workspace is
+refused even while an unlocked one is on screen. `catctl plugin run … --right |
+--below [--pane <id>]` is the CLI form; without `--pane` it splits the pane it
+was typed in.
+
+Left and above are not offered: `pane.split` always puts the new pane second.
+
+A further way in: the **new workspace** dialog's *start plugin* field starts an
 action in the workspace as it opens, against the start path chosen in the same
 dialog. The roster comes from one `plugin.list` before the dialog opens; a failed
 or empty list drops the field rather than the dialog, since creating a workspace

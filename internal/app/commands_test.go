@@ -1423,6 +1423,50 @@ func TestDispatchWorkspaceLock(t *testing.T) {
 		}
 	})
 
+	t.Run("refuses a split carrying a command", func(t *testing.T) {
+		h := newCmdHarness(t)
+		lock(t, h)
+		r := h.resp()
+
+		// The shape "run plugin… → to the right" arrives in: a split of the
+		// focused pane whose new pane execs the plugin's argv.
+		h.d.Dispatch(CmdPaneSplit, params(t, SplitParams{
+			Direction: SplitH,
+			Command:   []string{"/opt/plug/bin/tool", "--ui"},
+		}), r)
+
+		if !r.failCall || !strings.Contains(r.errMsg, "is locked") {
+			t.Fatalf("plugin split into a locked workspace: fail=%v msg=%q", r.failCall, r.errMsg)
+		}
+		if n := len(h.s.ActiveWorkspace().Tabs[0].Layout.PaneIDs()); n != 1 {
+			t.Fatalf("a refused split must not create a pane, panes=%d", n)
+		}
+	})
+
+	t.Run("refuses a split of a pane in a locked workspace the view is not on", func(t *testing.T) {
+		h := newCmdHarness(t)
+		lock(t, h)
+		lockedPane, _ := h.s.FocusedPane()
+		// Move the view to a fresh, unlocked workspace. The pane named below
+		// still lives in the locked one, and that is where the split would land
+		// (the sidebar's pane menu addresses off-screen panes exactly this way).
+		if _, err := h.s.CreateWorkspace(); err != nil {
+			t.Fatalf("CreateWorkspace: %v", err)
+		}
+		pane := uint32(lockedPane)
+		r := h.resp()
+
+		h.d.Dispatch(CmdPaneSplit, params(t, SplitParams{
+			Pane:      &pane,
+			Direction: SplitH,
+			Command:   []string{"/opt/plug/bin/tool"},
+		}), r)
+
+		if !r.failCall || !strings.Contains(r.errMsg, "is locked") {
+			t.Fatalf("split into an off-screen locked workspace: fail=%v msg=%q", r.failCall, r.errMsg)
+		}
+	})
+
 	t.Run("still opens a plain tab", func(t *testing.T) {
 		h := newCmdHarness(t)
 		lock(t, h)

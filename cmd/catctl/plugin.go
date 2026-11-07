@@ -6,7 +6,8 @@ package main
 // the plugin's git remote, but not the cats server).
 // `run` is the one online verb: it resolves an action locally, then launches
 // it in a fresh tab through the §7 tab.create command's spawn params
-// (command/cwd/env) — the server stays plugin-agnostic; the manifest never
+// (command/cwd/env), or beside an existing pane through pane.split's identical
+// ones (--right / --below) — the server stays plugin-agnostic; the manifest never
 // crosses the socket.
 
 import (
@@ -19,6 +20,7 @@ import (
 
 	"github.com/rohanthewiz/cats/internal/app"
 	"github.com/rohanthewiz/cats/internal/ctlproto"
+	"github.com/rohanthewiz/cats/internal/integration"
 	"github.com/rohanthewiz/cats/internal/plugin"
 )
 
@@ -288,7 +290,7 @@ func printFailedDefaults() {
 	}
 }
 
-const pluginRunUsage = "usage: catctl plugin run <id> [action] [--all]"
+const pluginRunUsage = "usage: catctl plugin run <id> [action] [--all | --right | --below] [--pane <id>]"
 
 // pluginRun launches an action in a fresh tab: one tab.create round trip
 // carrying the resolved argv, the invoking directory as cwd (a plugin like
@@ -299,15 +301,45 @@ const pluginRunUsage = "usage: catctl plugin run <id> [action] [--all]"
 //
 // --all fans the same action out across every workspace instead (pluginRunAll),
 // the CLI twin of the plugins dialog's "run all" button.
+//
+// --right / --below put the action in a new pane beside an existing one instead
+// of a new tab (pluginRunSplit): the "keep my todo list next to the agent it
+// feeds" case, where a tab would hide the plugin behind the very pane it is
+// about. --pane names the pane to split; without it, the pane catctl was typed
+// in. --pane alone means --right, the usual side for a companion panel.
 func pluginRun(args []string, socket string) int {
 	// Manual scan instead of a FlagSet, matching pluginInstall: the family stays
 	// FlagSet-free to avoid the global-FlagSet re-parse pitfall (subcommands.go).
 	all := false
+	split := ""   // "" = new tab; app.SplitH (--right) or app.SplitV (--below)
+	paneArg := "" // --pane value, parsed once the flags are all in
 	pos := make([]string, 0, len(args))
-	for _, a := range args {
+	for i := 0; i < len(args); i++ {
+		a := args[i]
 		switch {
 		case a == "--all":
 			all = true
+		case a == "--right" || a == "--below":
+			dir := app.SplitH
+			if a == "--below" {
+				dir = app.SplitV
+			}
+			// Both given is a contradiction, not a last-one-wins: a script that
+			// says both has a bug the user should hear about.
+			if split != "" && split != dir {
+				fmt.Fprintf(os.Stderr, "catctl: --right and --below are exclusive\n%s\n", pluginRunUsage)
+				return 2
+			}
+			split = dir
+		case a == "--pane":
+			if i+1 >= len(args) {
+				fmt.Fprintf(os.Stderr, "catctl: --pane requires a value\n%s\n", pluginRunUsage)
+				return 2
+			}
+			i++
+			paneArg = args[i]
+		case strings.HasPrefix(a, "--pane="):
+			paneArg = strings.TrimPrefix(a, "--pane=")
 		case len(a) > 0 && a[0] == '-':
 			// Caught here rather than left to fall through as an id: a mistyped
 			// flag would otherwise come back as "no such plugin --foo", which
@@ -321,6 +353,24 @@ func pluginRun(args []string, socket string) int {
 	if len(pos) < 1 || len(pos) > 2 {
 		fmt.Fprintln(os.Stderr, pluginRunUsage)
 		return 2
+	}
+	if paneArg != "" && split == "" {
+		split = app.SplitH
+	}
+	// A fan-out has no single pane to sit beside, so the two placements cannot
+	// combine; refusing beats silently dropping one of them.
+	if all && split != "" {
+		fmt.Fprintf(os.Stderr, "catctl: --all cannot be combined with --right, --below or --pane\n%s\n", pluginRunUsage)
+		return 2
+	}
+	var pane *uint32
+	if paneArg != "" {
+		n, err := parsePane(paneArg)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "catctl: %v\n", err)
+			return 2
+		}
+		pane = &n
 	}
 	inst, err := plugin.Get(pos[0])
 	if err != nil {
@@ -343,6 +393,9 @@ func pluginRun(args []string, socket string) int {
 	if all {
 		return pluginRunAll(sock, argv, env)
 	}
+	if split != "" {
+		return pluginRunSplit(sock, split, pane, argv, env)
+	}
 
 	cwd, _ := os.Getwd()
 	params, err := json.Marshal(app.TabCreateParams{Cwd: cwd, Command: argv, Env: env})
@@ -362,6 +415,94 @@ func pluginRun(args []string, socket string) int {
 		return 1
 	}
 	return 0
+}
+
+// pluginRunSplit starts an action in a new pane split off an existing one: one
+// pane.split round trip carrying the same argv and identity env a tab launch
+// sends.
+//
+// Which pane is split, in order:
+//
+//	--pane N              that pane, wherever it lives
+//	$CATS_PANE_ID         the pane this catctl is running in (invokingPane)
+//	neither               the server's focused pane (pane.split's default)
+//
+// The middle case is what makes `catctl plugin run cats-todo --right` mean
+// "beside me" when typed in a pane. It usually is the focused pane too, but not
+// when catctl runs from a script in a background pane, or from a pane in a
+// workspace another window is showing — and "beside the pane I am in" is the
+// only reading that stays right in both.
+//
+// Deliberately no cwd, where the tab launch sends the invoking directory:
+// pane.split already inherits the split pane's live cwd (and drops it when the
+// split crosses hosts, where a local path would mean nothing). With the default
+// target that is this shell's directory anyway; with --pane it is the directory
+// of the pane the plugin will sit next to, which is the project it belongs to.
+func pluginRunSplit(sock, dir string, pane *uint32, argv []string, env map[string]string) int {
+	if pane == nil {
+		pane = invokingPane(sock)
+	}
+	params, err := json.Marshal(app.SplitParams{Pane: pane, Direction: dir, Command: argv, Env: env})
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	resp, err := ctlproto.Call(sock,
+		ctlproto.Request{ID: "1", Method: app.CmdPaneSplit, Params: params}, 10*time.Second)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "catctl: %v\n", err)
+		return 2
+	}
+	printResult(resp)
+	if !resp.OK {
+		return 1
+	}
+	return 0
+}
+
+// invokingPane resolves $CATS_PANE_ID — the pane this process was started in —
+// to the internal id pane.split takes, or nil when there is no such pane (run
+// outside cats, or the pane is gone), which leaves the split on the focused
+// pane.
+//
+// The variable comes in two forms (see Session.PaneByPublicID):
+//
+//   - "p_<raw>" embeds the internal id, so it is used as is; the server still
+//     answers "unknown pane" if it has since closed.
+//   - "w1:p3" is a public handle and is looked up in pane.list, whose rows
+//     carry it as Handle. pane.list covers the server's current workspace only,
+//     so a handle from elsewhere is simply not found and falls back to the
+//     focused pane — the same answer the flag-less split would have given.
+//
+// The lookup failing for any reason is never an error: the split still has a
+// sensible target, and the user asked for a plugin, not for a pane audit.
+func invokingPane(sock string) *uint32 {
+	h := os.Getenv(integration.CatsPaneIDEnvVar)
+	if h == "" {
+		return nil
+	}
+	if raw, ok := strings.CutPrefix(h, "p_"); ok {
+		if n, err := parsePane(raw); err == nil {
+			return &n
+		}
+		return nil
+	}
+	resp, err := ctlproto.Call(sock,
+		ctlproto.Request{ID: "0", Method: app.CmdPaneList}, 10*time.Second)
+	if err != nil || !resp.OK {
+		return nil
+	}
+	var list app.PaneListResult
+	if err := json.Unmarshal(resp.Data, &list); err != nil {
+		return nil
+	}
+	for _, p := range list.Panes {
+		if p.Handle == h {
+			n := p.Pane
+			return &n
+		}
+	}
+	return nil
 }
 
 // pluginRunAll starts one action in every workspace: a workspace.list to learn
@@ -461,5 +602,8 @@ func printPluginHelp() {
   catctl plugin list
   catctl plugin run <id> [action]   launch an action in a new tab (needs a running server)
                      [--all]        ... in every workspace instead (locked ones are skipped)
+                     [--right]      ... in a new pane to the right of this one instead
+                     [--below]      ... in a new pane below this one instead
+                     [--pane <id>]  ... beside that pane rather than this one (implies --right)
 `)
 }

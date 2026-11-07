@@ -544,7 +544,7 @@ What it completes:
 | `integration install\|uninstall` | agent targets, each showing its install state |
 | `plugin run\|update\|uninstall` | installed plugin ids, then that plugin's action ids |
 | `plugin link` | directories |
-| flags | the global flags, plus a family's own (`--ref`, `plugin run --all`, probe's `--url`, …) |
+| flags | the global flags, plus a family's own (`--ref`, `plugin run --all/--right/--below/--pane`, probe's `--url`, …) |
 
 The live rows come from a read-only query over the control socket, capped at
 half a second: with no server running you simply get no candidates, never a
@@ -727,6 +727,9 @@ catctl plugin update <id>...                     # re-fetch + rebuild, in sequen
 catctl plugin list                               # id, version, [type], kind, dir
 catctl plugin run <id>                           # launch in a new tab
 catctl plugin run <id> [action] --all            # ... in every workspace
+catctl plugin run <id> [action] --right          # ... in a new pane to the right of this one
+catctl plugin run <id> [action] --below          # ... in a new pane below this one
+catctl plugin run <id> [action] --pane 4 [--below]  # ... beside pane 4 (right by default)
 catctl plugin uninstall <id>
 ```
 
@@ -750,6 +753,23 @@ w3   tab 2 (pane 9)
 
 Exit is 1 if any launch failed, or if nothing started at all — a command with no
 effect should not read as success to a script.
+
+`--right` / `--below` start the action beside a pane instead of in a new tab —
+one `pane.split` carrying the same argv and identity env, so the plugin sits
+next to the pane it is about (a todo list beside the agent it feeds). The pane
+split is `--pane <id>` when given (ids from `catctl panes`; `--pane` alone
+means `--right`), otherwise the pane `catctl` is running in, read from
+`$CATS_PANE_ID`, and the focused pane when that cannot be resolved. No cwd is
+sent: the new pane inherits the split pane's directory. The placements cannot
+be combined with each other or with `--all`, and a locked workspace refuses the
+split the same way it refuses a tab launch.
+
+```
+$ catctl plugin run rohanthewiz.cats-todo --right
+{
+  "pane": 8
+}
+```
 
 ### `catctl probe`
 

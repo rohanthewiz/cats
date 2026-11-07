@@ -641,8 +641,19 @@ func (d *Dispatcher) dispatch(name string, dec ParamDecoder, r Responder) {
 		// in a workspace, so leaving it open would make the lock a matter of which
 		// verb the automation happened to pick. A bare split is a shell the user
 		// asked for by hand and goes through.
+		//
+		// The workspace checked is the one that will receive the new pane, which
+		// is not always the view's: an explicit pane can live in any workspace
+		// (the sidebar's pane menu splits off-screen panes, and "run plugin…" on
+		// one starts a plugin there), and SplitPaneOnIn splits it where it lives.
+		// Checking the view instead would let a launch into a locked workspace
+		// through whenever the window happened to be showing an unlocked one.
 		if len(sp.Command) > 0 {
-			if ws := d.viewWorkspace(); ws != nil && ws.Locked {
+			ws := d.viewWorkspace()
+			if sp.Pane != nil {
+				ws = d.session.PaneWorkspace(layout.PaneID(*sp.Pane))
+			}
+			if ws != nil && ws.Locked {
 				r.Fail(workspaceLockedErr(ws.ID, "run a command in"))
 				return
 			}

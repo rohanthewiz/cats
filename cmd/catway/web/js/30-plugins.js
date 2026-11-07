@@ -114,6 +114,99 @@
     }
   }
 
+  // ---- Running a plugin beside a pane ----
+  //
+  // The tab launch above hides the plugin behind the pane it is usually about:
+  // cats-todo feeds prompts to the agent next door, cats-git shows that pane's
+  // checkout. pane.split already takes the same spawn params as tab.create
+  // (command/env/cwd), so placing a plugin beside a pane is a split whose new
+  // pane execs the action instead of a shell — no new server verb, and the
+  // workspace lock applies exactly as it does to the tab launch.
+  //
+  //   ┌──────────────┬──────────────┐      ┌──────────────┐
+  //   │  pane (id)   │  plugin      │      │  pane (id)   │
+  //   │              │  (to the     │      ├──────────────┤
+  //   │              │   right, h)  │      │  plugin (v)  │
+  //   └──────────────┴──────────────┘      └──────────────┘
+  //
+  // pluginSplits maps the user's words to pane.split directions. "h" puts the
+  // new pane second along a left/right split, i.e. on the right; "v" puts it
+  // second along a top/bottom split, i.e. below. Left/above are not offered:
+  // the split verb has no "new pane first" form, and a placement that needs a
+  // follow-up swap is two layout broadcasts and a visible flicker. A function
+  // rather than a const so jstest can lift it (testutil slices functions only)
+  // and pin the mapping itself, not a copy of it.
+  function pluginSplits() {
+    return [
+      { dir: "h", label: "to the right" },
+      { dir: "v", label: "below" },
+    ];
+  }
+
+  // pluginRunSplit starts one action in a new pane split off paneId (null =
+  // the focused pane, pane.split's own default). No cwd, unlike
+  // pluginRunAction: pane.split inherits the split pane's live directory, which
+  // is the project the plugin is being placed next to — and it drops that
+  // directory when the split pane is on another host, where a local path would
+  // mean nothing. Sending focusedPaneCwd() here would be wrong both times the
+  // split pane is not the focused one (the sidebar's menu on an off-screen
+  // pane, a guest pane on another machine).
+  function pluginRunSplit(p, a, paneId, dir) {
+    closeModal();
+    const params = { direction: dir, command: a.argv, env: p.env || {} };
+    if (paneId != null) params.pane = paneId;
+    sendCmdAwait("pane.split", params, (res) => {
+      if (!res.ok) toast("plugin run failed: " + (res.error || "unknown"));
+    });
+  }
+
+  // pluginSplitItems lays out the "where?" × "which plugin?" choice as one flat
+  // menu, a heading per placement with the runners under each:
+  //
+  //   TO THE RIGHT          (one runner)        to the right
+  //   cats-todo                            →    below
+  //   cats-git
+  //   BELOW
+  //   cats-todo
+  //   cats-git
+  //
+  // Flat rather than plugin ▸ placement because the menu is already a submenu
+  // of the pane menu, and a third level of hover-to-open is where pointers
+  // start falling off. With a single runner (the plugins dialog's per-row
+  // button, or a session with one plugin) the headings would label a list of
+  // one, so the placements become the rows themselves.
+  function pluginSplitItems(runners, paneId) {
+    if (!runners.length) return [{ note: "no plugins installed — see ⧉ plugins" }];
+    if (runners.length === 1) {
+      const r = runners[0];
+      return pluginSplits().map((s) => (
+        { label: s.label, fn: () => pluginRunSplit(r.plugin, r.action, paneId, s.dir) }
+      ));
+    }
+    const items = [];
+    for (const s of pluginSplits()) {
+      items.push({ head: s.label });
+      for (const r of runners) {
+        items.push({ label: r.label, fn: () => pluginRunSplit(r.plugin, r.action, paneId, s.dir) });
+      }
+    }
+    return items;
+  }
+
+  // pluginSplitMenu is the pane menu's "run plugin…" loader (a buildCtx sub
+  // loader): one plugin.list round trip, then the runners laid out beside pane
+  // id. A pane in a locked workspace answers with a note instead of rows the
+  // server would only refuse — the lock is visible in the sidebar, but a
+  // right-click on a pane is not where the user is looking at it.
+  function pluginSplitMenu(id, done) {
+    const ws = paneWsFor(id);
+    if (ws && wsLocked(ws)) { done([{ note: "workspace is locked — no plugins here" }]); return; }
+    sendCmdAwait("plugin.list", {}, (res) => {
+      if (!res.ok) { done([{ note: "plugin list failed: " + (res.error || "unknown") }]); return; }
+      done(pluginSplitItems(pluginRunners((res.data || {}).plugins || []), id));
+    });
+  }
+
   // pluginPickAction is the run buttons' shared "which action?" step: one action
   // launches straight away (the catctl default), several open a picker at the
   // button — the ctx menu coexists with the modal. run and run-all differ only
@@ -578,6 +671,16 @@
         };
         if (!p.broken && (p.actions || []).length) {
           actBtn("run", "", (e) => pluginPickAction(p, e, (a) => pluginRunAction(p, a)));
+          // Beside the focused pane: the pane the user was in when they opened
+          // this dialog. Its own button rather than a row under run, for the
+          // reason run all is: run stays one click for the common case. The
+          // menu asks placement (and the action, for a plugin with several) in
+          // one step; see pluginSplitItems.
+          actBtn("run beside…", "", (e) => {
+            const r = e.target.getBoundingClientRect();
+            openCtx(r.left, r.bottom + 4, pluginSplitItems(pluginRunners([p]), focusedPaneId()));
+            e.stopPropagation();
+          }, "start in a new pane to the right of or below the focused pane");
           // The fan-out is its own button rather than a row in run's menu:
           // launching here is by far the common case, and folding both targets
           // into one menu would charge every multi-workspace session an extra
