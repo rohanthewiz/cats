@@ -9,10 +9,7 @@ package main
 // Defined in menu_darwin.m — builds and installs the native macOS menu bar.
 // hostCount < 0 omits the Connect menu entirely (local mode has nothing to
 // connect to); 0 keeps the menu with only its "Connect to Another…" item.
-// windowMenu != 0 adds the Window menu (New Window ⌘N and the standard items);
-// it is left out of the single-window webview_go paths, which have nothing to
-// put in it.
-void installAppMenu(const char *appName, const char **hostNames, int hostCount, int currentHost, int windowMenu);
+void installAppMenu(const char *appName, const char **hostNames, int hostCount, int currentHost);
 */
 import "C"
 
@@ -42,8 +39,8 @@ func catappZoom(delta C.int) {
 
 // catappOpenSettings is called from Cats › Settings… (⌘,) in menu_darwin.m. It
 // opens the page's settings screen in the front window; the guard makes it a
-// no-op on pages that have none (the connect form, the login page, the error
-// sheet), where there is no catway to configure yet.
+// no-op on pages that have none (the connect form, the login page), where there
+// is no catway to configure yet.
 //
 //export catappOpenSettings
 func catappOpenSettings() {
@@ -71,12 +68,12 @@ func catappConnectPreset(index C.int) {
 	selectPreset(int(index))
 }
 
-// installMenu installs the native menu bar on the shared NSApplication. webview
-// creates a bundled app with no menu of its own, so without this Cmd-Q cannot
-// quit and the standard Cmd-C/V/X/A editing shortcuts — routed in Cocoa through
-// Edit-menu items to the first responder (the WKWebView) — do not work. Must be
-// called on the main thread, after webview.New (which creates NSApplication) and
-// before Run().
+// installMenu installs the native menu bar on the shared NSApplication. An app
+// built in code has no menu of its own, so without this Cmd-Q cannot quit and
+// the standard Cmd-C/V/X/A editing shortcuts — routed in Cocoa through Edit-menu
+// items to the first responder (the WKWebView) — do not work. Must be called on
+// the main thread, after catsAppStart (which creates NSApplication) and before
+// the run loop starts.
 //
 // No Connect menu: this is the menu every mode gets, installed before anyone
 // knows whether there are catways to list. The thin client re-installs with its
@@ -115,14 +112,7 @@ func installConnectMenu(names []string, current int) {
 			arr = (**C.char)(unsafe.Pointer(&cs[0]))
 		}
 	}
-	// The Window menu exists exactly when the native multi-window shell does.
-	// windows is nil in the error-sheet path, which is one webview_go window and
-	// has nothing to list.
-	windowMenu := C.int(0)
-	if windows != nil {
-		windowMenu = 1
-	}
-	C.installAppMenu(name, arr, count, C.int(current), windowMenu)
+	C.installAppMenu(name, arr, count, C.int(current))
 }
 
 // appMenuName is the name shown in the app menu and its About/Hide/Quit items.

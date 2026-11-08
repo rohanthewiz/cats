@@ -170,11 +170,11 @@ project.
 
 ### Native menu bar
 
-`webview` creates a bundled app with **no menu**, so without intervention ⌘Q
-cannot quit and the standard ⌘C/⌘V/⌘X/⌘A editing shortcuts — which Cocoa routes
-through Edit-menu items to the first responder — do not work. `installMenu()`
-(cgo → `menu_darwin.m`) installs one after `webview.New` creates
-`NSApplication` and before `Run()`.
+An app built in code has **no menu**, so without intervention ⌘Q cannot quit and
+the standard ⌘C/⌘V/⌘X/⌘A editing shortcuts — which Cocoa routes through Edit-menu
+items to the first responder — do not work. `installMenu()` (cgo →
+`menu_darwin.m`) installs one after `catsAppStart` creates `NSApplication` and
+before the run loop starts.
 
 The View menu also owns ⌘+ / ⌘- / ⌘0 font zoom, because Cocoa resolves those as
 key equivalents *before* the WKWebView's page sees a keydown — the page's own
@@ -284,12 +284,6 @@ way. Nothing else opens, and the window stays until it is closed — closing it
 when it is the only window quits the app, which is the way out of a launch that
 is going nowhere. It is all logged for a dev terminal too, and written to
 `boot.log`.
-
-`showError` — the old single-window error sheet — is kept for a failure with no
-AppKit behind it at all. It cannot be used once the shell is up: it builds a
-`webview_go` window, and `webview_go` makes itself `NSApp`'s delegate and calls
-`[NSApp run]`, which would re-enter a running loop and displace the delegate that
-owns teardown.
 
 ## Trade-offs
 

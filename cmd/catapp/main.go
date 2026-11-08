@@ -17,9 +17,7 @@
 // NSWindow + WKWebView each, all over one catway session. A window is a view on
 // one workspace — the server has treated every connection that way since
 // multi-window — so "a window per project on the second monitor" is a URL
-// (`?ws=<id>`) plus a window to put it in. webview_go remains only for the
-// startup error sheet, which is modal, single-window, and happens before any of
-// this exists.
+// (`?ws=<id>`) plus a window to put it in.
 //
 // The launcher itself is plain Go (no -tags ghostty) — it only supervises
 // processes and shows windows; the terminal/VT work lives entirely in the
@@ -36,8 +34,6 @@ import (
 	"strings"
 	"sync"
 	"syscall"
-
-	webview "github.com/webview/webview_go"
 )
 
 // defaultMode is the build-time default mode: "local" for the self-contained
@@ -102,8 +98,8 @@ func runCleanup() {
 
 func main() {
 	// Cocoa/WebKit require every UI call on the process's main thread; pin the
-	// main goroutine to it before touching the webview. Run() then blocks here
-	// until the window closes.
+	// main goroutine to it before touching AppKit. The run loop then blocks here
+	// until the app terminates.
 	runtime.LockOSThread()
 	log.SetFlags(0)
 	log.SetPrefix("catapp: ")
@@ -384,18 +380,4 @@ func installSignalHandler() {
 		runCleanup()
 		os.Exit(0)
 	}()
-}
-
-// showError opens a small, self-contained window describing a startup failure.
-// A double-clicked .app has no console, so surfacing the reason in a window is
-// the only way the user sees why nothing opened. Also logged for a dev terminal.
-func showError(title, detail string) {
-	log.Printf("%s: %s", title, detail)
-	w := webview.New(false)
-	installMenu()
-	defer w.Destroy()
-	w.SetTitle("Cats Mux — error")
-	w.SetSize(560, 320, webview.HintFixed)
-	w.SetHtml(errorPageHTML(title, detail))
-	w.Run()
 }

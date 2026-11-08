@@ -76,8 +76,7 @@ type winManager struct {
 }
 
 // windows is the process's window manager, nil until a native-window mode
-// starts. Its nil-ness is also what the menu and the zoom path read as "this
-// process is still on the single webview_go window" (the error sheet).
+// starts.
 var windows *winManager
 
 // windowSaveDelay is the debounce for the restore list — long enough that a
@@ -274,7 +273,7 @@ func drainMainQueue() {
 // runNativeApp installs the menu bar and enters the run loop. Returns when the
 // app terminates — the last window closing, Cmd-Q, or a signal handler's exit.
 func (m *winManager) run() {
-	installMenu() // NSApp exists by now; the Window menu appears because windows != nil
+	installMenu() // NSApp exists by now
 	C.catsRunApp()
 }
 

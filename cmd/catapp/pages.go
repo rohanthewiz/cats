@@ -10,8 +10,8 @@ import "html"
 // share the catway's dark palette so the window looks of a piece before the
 // real UI or a remote login page loads.
 //
-// connectPage is the thin client's front door, errorPageHTML reports a startup
-// failure, and splashPageHTML is the startup log's window.
+// connectPage is the thin client's front door, and splashPageHTML is the startup
+// log's window.
 
 // connectPage is the thin client's own front door: the catways it knows, and a
 // form for one it does not.
@@ -115,32 +115,6 @@ func connectPage(presets []remoteTarget, current string, canCancel bool) string 
     if (v) connect(v, document.getElementById('label').value.trim());
   }
 </script>
-</body></html>`
-}
-
-// errorPageHTML renders a startup-failure page. title and detail are HTML-escaped
-// because detail can be an arbitrary error string (paths, messages).
-func errorPageHTML(title, detail string) string {
-	return `<!DOCTYPE html>
-<html lang="en"><head>
-<meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>Cats Mux · error</title>
-<style>
-  html,body{margin:0;height:100%;background:#181818;color:#d4d4d4;
-    font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
-    display:flex;align-items:center;justify-content:center;}
-  .card{background:#202020;border:1px solid #3a2a2a;border-radius:8px;
-    padding:24px 26px;width:440px;box-shadow:0 4px 20px rgba(0,0,0,.5);}
-  h1{font-size:15px;margin:0 0 10px;color:#ff6b6b;}
-  pre{font-size:12px;color:#c9c9c9;background:#141414;border:1px solid #333;
-    border-radius:5px;padding:12px;white-space:pre-wrap;word-break:break-word;
-    margin:0;}
-</style></head><body>
-<div class="card">
-  <h1>` + html.EscapeString(title) + `</h1>
-  <pre>` + html.EscapeString(detail) + `</pre>
-</div>
 </body></html>`
 }
 

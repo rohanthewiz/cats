@@ -387,12 +387,6 @@ func finishBoot() {
 // and what the daemons said on the way — so all this does is make sure it is
 // on screen. If the user had closed it, it is reopened: the log is held in
 // memory, so a reopened window shows the whole launch including the failure.
-//
-// (showError, the old single-window error sheet, is NOT the fallback here. It
-// builds a webview_go window, and webview_go makes itself NSApp's delegate and
-// calls [NSApp run] — re-entering a run loop that is already going, in an app
-// whose delegate owns teardown. It stays for a failure with no AppKit at all
-// behind it; every local-mode failure now happens after the shell is up.)
 func bootFailed(title string, err error) {
 	log.Printf("%s: %v", title, err)
 	onMainThread(func() {
