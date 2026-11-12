@@ -38,7 +38,7 @@ window were dated by grepping every session doc.
   Open (or Validate, for a check, or Roadmap, for future work) with the next
   ID.
 
-**Next ID:** N-070
+**Next ID:** N-072
 
 ## Open
 
@@ -92,6 +92,15 @@ window were dated by grepping every session doc.
   tabs, and a default agent mode for clean/sleep. Each is one field on
   `workspace.Settings`, one pointer on `WorkspaceSettingsParams`, one dialog
   row and one `set-ws` key.
+
+- **N-071** · raised `2026-1112-1531-clipboard-utf8-locale` · value medium
+  Panes run with no locale at all. `hydratePATH` (`cmd/catapp/shellenv.go`)
+  adopts only the login shell's PATH, and launchd sets no `LANG`, so every
+  pane, catway and cathost inherit none. That is the root of N-070's bug
+  class: any tool in a pane that transcodes through the locale gets MacRoman
+  or ASCII (cats-todo's pbpaste was one). Terminal.app, iTerm2 and Ghostty
+  set `LANG=en_US.UTF-8` for their shells when it is unset. Doing the same
+  for panes changes every pane's environment, so it is the user's call.
 
 ## Validate
 
@@ -173,7 +182,10 @@ and `raised`.
     clear from pane N`. Do not try this on the old build: it empties the
     pasteboard. If "clipboard has no text" recurs with no such line in the
     log, the 2026-10-05 clear came from outside cats (a password manager's
-    timed clear, say).
+    timed clear, say). Updated 2026-11-12 (`2026-1112-1531-clipboard-utf8-locale`):
+    before that fix the toast also fired for any non-ASCII text, with nothing
+    cleared at all (see N-070). Use plain ASCII for this check, or a build with
+    the fix, so the two causes do not mix.
   - closing onto an awake workspace (`2026-1008-1429-close-lands-on-awake-workspace`).
     This needs a new catway only. With a sleeping workspace just above a
     worktree workspace at the bottom of the list, remove the worktree. The
@@ -309,6 +321,18 @@ and `raised`.
   reinstalled Cats.app with a CEd pane focused: open New Workspace and ⌘V
   into the name and start-path fields, and the rename-pane prompt too. Then
   close the dialog and check that ⌘V still pastes into the pane.
+
+- **N-070** · raised `2026-1112-1531-clipboard-utf8-locale` · value high
+  ⌘V said "clipboard has no text" for any non-ASCII clipboard. The cause was
+  launchd giving Cats.app no `LANG`, so pbpaste answered in MacRoman and the
+  ObjC bridge rejected the bytes. pbcopy/pbpaste now run under
+  `clipboard.UTF8Env` (the app bridge and catway's `catctl clipboard` read),
+  and cats-todo pins the same locale for its own pbcopy/pbpaste. Covered by
+  `TestPasteboardRoundTripsUnicodeWithoutLocale`, which fails without the
+  fix. Still to check in a rebuilt, reinstalled Cats.app (`make macapp`):
+  copy `smart “quotes” — café 🐱` from a browser and ⌘V it into a pane. Copy
+  the same text out of a pane and paste it into another app. Ctrl+V it in a
+  rebuilt cats-todo and check that no `�` appears.
 
 ## Roadmap
 
