@@ -1,6 +1,8 @@
 package clipboard
 
 import (
+	"os"
+	"os/exec"
 	"runtime"
 	"strings"
 	"testing"
@@ -107,5 +109,89 @@ func TestReadDoesNotFailOnAnyClipboardState(t *testing.T) {
 	}
 	if !utf8.ValidString(text) {
 		t.Error("Read returned invalid UTF-8")
+	}
+}
+
+// UTF8Env must win over whatever locale the process inherited, including one
+// that is set but not UTF-8. pbpaste falls back to MacRoman when ANY of LANG,
+// LC_ALL or LC_CTYPE is non-UTF-8 (see UTF8Env), so a parent with only
+// LC_ALL=C would still break the read if just LANG were overridden.
+func TestUTF8EnvOverridesInheritedLocale(t *testing.T) {
+	t.Setenv("LANG", "C")
+	t.Setenv("LC_ALL", "C")
+	t.Setenv("LC_CTYPE", "C")
+
+	// os/exec keeps the last value of a duplicated key; resolve the same way.
+	last := map[string]string{}
+	for _, kv := range UTF8Env() {
+		if k, v, ok := strings.Cut(kv, "="); ok {
+			last[k] = v
+		}
+	}
+	for _, k := range []string{"LANG", "LC_ALL", "LC_CTYPE"} {
+		if !strings.HasSuffix(last[k], ".UTF-8") {
+			t.Errorf("%s = %q under UTF8Env, want a UTF-8 locale", k, last[k])
+		}
+	}
+	if last["HOME"] != os.Getenv("HOME") {
+		t.Error("UTF8Env dropped the inherited environment")
+	}
+}
+
+// The real tools, in the environment Cats.app actually runs in: launched by
+// launchd, so no locale at all. The bug this guards was smart quotes and emoji
+// coming back from pbpaste as MacRoman (and the mac app then reporting
+// "clipboard has no text"), and the same text copied OUT of a pane landing on
+// the pasteboard as mojibake. It uses the `ruler` pasteboard rather than the
+// general one so running the tests never clobbers what the user has copied.
+//
+// Each direction is paired with a reference side whose locale is spelled out
+// here, independently of UTF8Env. Pairing UTF8Env with itself would prove
+// nothing: with no locale both tools use MacRoman, and the two mistranslations
+// cancel out in a round trip — the bug only shows when one side is the real,
+// Unicode-native pasteboard user (any other app).
+func TestPasteboardRoundTripsUnicodeWithoutLocale(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("pbcopy/pbpaste are macOS tools")
+	}
+	if _, err := exec.LookPath("pbpaste"); err != nil {
+		t.Skip("pbpaste not on PATH")
+	}
+	for _, k := range []string{"LANG", "LC_ALL", "LC_CTYPE"} {
+		t.Setenv(k, "") // registers the restore …
+		os.Unsetenv(k)  // … then removes the key outright, as launchd leaves it
+	}
+	reference := append(os.Environ(), "LANG=en_US.UTF-8", "LC_ALL=en_US.UTF-8", "LC_CTYPE=en_US.UTF-8")
+
+	const want = "smart “quotes” — café 🐱"
+	copyWith := func(env []string) {
+		t.Helper()
+		cmd := exec.Command("pbcopy", "-pboard", "ruler")
+		cmd.Env = env
+		cmd.Stdin = strings.NewReader(want)
+		if err := cmd.Run(); err != nil {
+			t.Skipf("pbcopy unavailable here (no pasteboard server?): %v", err)
+		}
+	}
+	pasteWith := func(env []string) string {
+		t.Helper()
+		cmd := exec.Command("pbpaste", "-pboard", "ruler")
+		cmd.Env = env
+		out, err := cmd.Output()
+		if err != nil {
+			t.Fatalf("pbpaste: %v", err)
+		}
+		return string(out)
+	}
+
+	// Read: another app put Unicode on the pasteboard; cats reads it.
+	copyWith(reference)
+	if got := pasteWith(UTF8Env()); got != want {
+		t.Errorf("read under UTF8Env = %q, want %q", got, want)
+	}
+	// Write: cats puts it there; another app reads it.
+	copyWith(UTF8Env())
+	if got := pasteWith(reference); got != want {
+		t.Errorf("write under UTF8Env, read back = %q, want %q", got, want)
 	}
 }

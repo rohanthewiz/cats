@@ -22,6 +22,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -58,6 +59,38 @@ type reader struct {
 	// treating it as a failure would report a broken clipboard every time the
 	// user has not copied anything yet.
 	emptyIsError bool
+	// utf8Locale marks a tool that transcodes the clipboard through the
+	// process locale. pbpaste does, and a cats process often has no locale to
+	// give it — see UTF8Env — so it is run with one pinned to UTF-8.
+	utf8Locale bool
+}
+
+// UTF8Env returns this process's environment with the locale pinned to UTF-8,
+// for running pbcopy/pbpaste.
+//
+// Those two transcode between the pasteboard (Unicode) and their stdin/stdout
+// bytes using the locale environment, and with no UTF-8 locale they fall back
+// to MacRoman (the __CF_USER_TEXT_ENCODING default). A cats process often has
+// none: Cats.app is started by launchd, which sets no LANG, and catway and every
+// pane inherit that. Measured on macOS 26 with the clipboard holding `“é” 🐱`:
+//
+//	env (LANG / LC_ALL / LC_CTYPE)         pbpaste bytes
+//	none set                               d2 8e d3 20 3f 3f       MacRoman, emoji → "??"
+//	LANG=en_US.UTF-8                       e2 80 9c c3 a9 …        UTF-8
+//	LANG=C          LC_ALL=en_US.UTF-8     MacRoman  ┐ any of the three being
+//	LANG=en_US.UTF-8 LC_ALL=C              MacRoman  ┘ non-UTF-8 is enough
+//
+// So all three are overridden rather than only LANG: a parent with LC_ALL=C (a
+// script that set it for sort order, say) would otherwise still get MacRoman.
+// The override reaches only the pasteboard tool's own process, whose sole use of
+// the locale is this charset choice. os/exec keeps the LAST value of a
+// duplicated key, so appending is enough to win over the inherited ones.
+func UTF8Env() []string {
+	return append(os.Environ(),
+		"LANG=en_US.UTF-8",
+		"LC_ALL=en_US.UTF-8",
+		"LC_CTYPE=en_US.UTF-8",
+	)
 }
 
 // readers returns the candidates for this platform, best first. The first one
@@ -68,7 +101,7 @@ type reader struct {
 func readers() []reader {
 	switch runtime.GOOS {
 	case "darwin":
-		return []reader{{name: "pbpaste"}}
+		return []reader{{name: "pbpaste", utf8Locale: true}}
 	case "linux", "freebsd", "openbsd", "netbsd":
 		return []reader{
 			// Wayland first: on a session running Xwayland both are present, and
@@ -113,6 +146,9 @@ func Read() (text string, truncated bool, err error) {
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, r.name, r.args...)
+	if r.utf8Locale {
+		cmd.Env = UTF8Env() // else MacRoman bytes under launchd — see UTF8Env
+	}
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()

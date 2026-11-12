@@ -134,9 +134,18 @@ all.
 
 ### ⌘V says "clipboard has no text" right after a copy
 
-That toast means the pasteboard held no text at all, which a normal copy never
-leaves behind. Something emptied it after the copy. Common causes are a password
-manager's timed clear, or a clipboard utility.
+**On an app built before the 2026-11-12 fix**, the usual cause was non-ASCII
+text on the clipboard: smart quotes, an em dash, an accented letter, an emoji.
+Cats.app is started by launchd, which sets no `LANG`, so `pbpaste` answered in
+MacRoman and the bridge rejected the whole string as invalid UTF-8. Pasting the
+same text from a terminal app inside a pane appeared to work only because it
+tolerated the bad bytes (the non-ASCII characters came out as `�`). Copies out
+of a pane were hit too: other apps pasted mojibake (`‚Äú` for `“`). Rebuild and
+reinstall the app (`make macapp`). The bridge now pins a UTF-8 locale.
+
+On a current build, the toast means the pasteboard held no text at all, which a
+normal copy never leaves behind. Something emptied it after the copy. Common
+causes are a password manager's timed clear, or a clipboard utility.
 
 It is **not** a program in a pane. An OSC 52 write with an empty payload
 (`ESC ] 52;c; BEL`) asks the terminal to clear the clipboard, and catway drops

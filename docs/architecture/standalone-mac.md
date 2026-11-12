@@ -192,6 +192,14 @@ and the UI prefers them when present. The windows only ever load the configured
 `catway` UI, so exposing the pasteboard to the page does not leak it to
 arbitrary content.
 
+Both tools run with the locale pinned to UTF-8 (`clipboard.UTF8Env`). A
+launchd-started app has no `LANG`, and without a UTF-8 locale pbcopy/pbpaste
+transcode through MacRoman. The read side then hands the bridge bytes that
+`[NSString stringWithUTF8String:]` rejects as a whole (nil, which the page
+reports as "clipboard has no text"), and the write side puts mojibake on the
+pasteboard. `catappClipRead` also replaces any invalid UTF-8 with U+FFFD, so
+a future encoding slip degrades a character instead of dropping the paste.
+
 ## Windows
 
 The app opens **native windows**: one `NSWindow` + `WKWebView` each
