@@ -2,7 +2,8 @@
 
 ## Prerequisites
 
-* **Go 1.26+**.
+* **Go 1.26+** and the **Xcode Command Line Tools** on macOS (no Homebrew,
+  Zig or pkg-config needed — see the fresh-Mac steps in the README).
 * A **login shell** (present everywhere) and **`git`** (only if you use
   worktrees or plugins).
 * The VT engine, **libghostty-vt**, is vendored in

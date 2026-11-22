@@ -15,14 +15,44 @@ Three binaries make up the app:
 
 ## Getting started
 
-Go 1.26+ and `git` are the only prerequisites — the VT engine is vendored, and
-building it downloads a pinned Zig into `.tools/` (gitignored, no system
-changes).
+The only prerequisites are the Xcode Command Line Tools and Go 1.26+. You don't
+need Homebrew, Zig, or pkg-config. The VT engine is vendored, and building it
+downloads a pinned Zig into `.tools/` (gitignored, no system changes). If no
+`pkg-config` is on your PATH, the Makefile uses `scripts/pkg-config-lite`.
+
+### Building on a fresh Mac
+
+These steps start from a clean macOS install (Apple Silicon or Intel) and
+were tested on macOS 27.2 with only the Command Line Tools installed.
 
 ```bash
-make vt          # one-time: build the vendored libghostty-vt
-make local       # catway + cathost + catctl into ~/bin (keep it on your PATH)
+# 1. Xcode Command Line Tools (clang, git, make, the macOS SDK). Skip if
+#    `xcode-select -p` already prints a path.
+xcode-select --install
+
+# 2. Go 1.26+: the official installer puts it in /usr/local/go and adds it
+#    to PATH for new shells. Skip if `go version` already reports 1.26 or newer.
+GOVER=$(curl -fsSL 'https://go.dev/VERSION?m=text' | head -1)
+GOARCH=$(uname -m | sed 's/x86_64/amd64/')
+curl -fsSLO "https://go.dev/dl/$GOVER.darwin-$GOARCH.pkg"
+sudo installer -pkg "$GOVER.darwin-$GOARCH.pkg" -target /
+export PATH="/usr/local/go/bin:$PATH"        # this shell only; new shells already have it
+
+# 3. Clone and build.
+git clone https://github.com/rohanthewiz/cats.git && cd cats
+make vt          # one-time, ~2 min: fetches Zig 0.15.2 into .tools/, builds libghostty-vt
+make binaries    # catway + cathost + catctl into bin/
+
+# 4. Optional: install the three binaries into ~/bin and put it on your PATH.
+make local
+echo 'export PATH="$HOME/bin:$PATH"' >> ~/.zprofile && export PATH="$HOME/bin:$PATH"
 ```
+
+On macOS 26/27, `make vt` builds a patched copy of the SDK in `.tools/` (see
+`scripts/build-libghostty-vt.sh`) because Zig 0.15.2 can't use those SDKs
+as shipped. Your real SDK is never modified. `make vt` needs network access
+the first time: it downloads Zig from ziglang.org and a few Zig packages from
+deps.files.ghostty.org.
 
 Then either run the binaries by hand:
 

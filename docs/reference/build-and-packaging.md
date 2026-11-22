@@ -75,6 +75,29 @@ Zig 0.16 handles SDK 26.5 fine, but libghostty-vt requires 0.15.x. The patch
 touches a **copy** — your real SDK is not modified. On Linux the whole step is
 skipped, which is why the Linux build path is simpler.
 
+### The macOS 27 SDK `INFINITY` fix
+
+When modules are enabled, the macOS 27 SDK's `math.h` no longer defines
+`INFINITY` and `NAN` itself. It asks `<float.h>` for them through
+`__need_infinity_nan`. Zig 0.15.2's bundled clang `float.h` predates that, so
+under `-std=c++17` `INFINITY` is never defined and libc++ fails with
+`use of undeclared identifier 'INFINITY'`. The fix is in the same patched copy
+of the SDK: `usr/include` becomes a directory of symlinks into the real SDK,
+plus one copy of `math.h` with its `__has_feature(modules)` test forced false,
+so it uses the classic `__builtin` definitions. This step runs on every build,
+so an existing `.tools/` sysroot gets upgraded in place. It does nothing on
+SDKs whose `math.h` has no such branch.
+
+### pkg-config without Homebrew
+
+The Go binding links libghostty-vt through `#cgo pkg-config:`, so a tagged build
+needs a `pkg-config` binary. The Xcode Command Line Tools don't ship one. When
+none is on `PATH`, the Makefile sets `PKG_CONFIG=scripts/pkg-config-lite`. That
+script is a minimal `.pc` reader that handles `--cflags`, `--libs`, `--static`
+and `${var}` expansion, which is all cgo asks for on a package with no
+`Requires`. A real `pkg-config`/`pkgconf` on `PATH` always takes precedence.
+Override with `make PKG_CONFIG=... binaries`.
+
 ## Building the binaries
 
 ```bash

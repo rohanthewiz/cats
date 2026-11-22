@@ -6,7 +6,11 @@ SHELL := /bin/bash
 
 VT_DIR   := third_party/libghostty-vt
 PC_DIR   := $(abspath $(VT_DIR))/zig-out/share/pkgconfig
-GHOSTTY  := PKG_CONFIG_PATH=$(PC_DIR)
+# cgo's `#cgo pkg-config:` needs a pkg-config binary. The Xcode Command Line
+# Tools ship none, so fall back to scripts/pkg-config-lite (a minimal .pc
+# reader) when there is no real one on PATH. Override with PKG_CONFIG=...
+PKG_CONFIG ?= $(or $(shell command -v pkg-config 2>/dev/null),$(abspath scripts/pkg-config-lite))
+GHOSTTY  := PKG_CONFIG=$(PKG_CONFIG) PKG_CONFIG_PATH=$(PC_DIR)
 TAGS     := -tags ghostty
 
 # The shipped binaries. The other cmd/ entries are development spikes.

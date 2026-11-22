@@ -78,6 +78,22 @@ if [[ "$os" == "Darwin" ]]; then
     done < <(find "$FAKE_SDK/usr/lib" -type f -name '*.tbd')
     echo ">> patched $n .tbd files (injected arm64-macos slice)"
   fi
+  # macOS 27 SDK: math.h, when modules are on, takes INFINITY/NAN from
+  # <float.h> via `__need_infinity_nan` — a protocol Zig 0.15.2's bundled
+  # clang float.h predates, so under -std=c++17 INFINITY is never defined and
+  # libc++ fails to compile. Shadow math.h with a copy whose modules test is
+  # forced false (the classic __builtin definitions). usr/include becomes a
+  # directory of symlinks into the real SDK plus that one patched file. Runs
+  # outside the build-once block above so an older .tools/ sysroot is upgraded
+  # in place; a no-op on SDKs without the modules branch.
+  if [[ -L "$FAKE_SDK/usr/include" ]] && grep -q '__has_feature(modules)' "$REAL_SDK/usr/include/math.h"; then
+    echo ">> shadowing math.h in patched sysroot (macOS 27 SDK INFINITY fix)"
+    rm "$FAKE_SDK/usr/include"
+    mkdir "$FAKE_SDK/usr/include"
+    for e in "$REAL_SDK/usr/include"/*; do ln -s "$e" "$FAKE_SDK/usr/include/"; done
+    rm "$FAKE_SDK/usr/include/math.h"
+    perl -pe 's/__has_feature\(modules\)/0/g' "$REAL_SDK/usr/include/math.h" > "$FAKE_SDK/usr/include/math.h"
+  fi
   sdk_version="$(xcrun --show-sdk-version)"
   mkdir -p "$SHIM"
   cat > "$SHIM/xcrun" <<EOF

@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+# pkg-config-lite: just enough pkg-config for cgo's `#cgo pkg-config:` lines,
+# so a fresh Mac with only the Xcode Command Line Tools (which ship no
+# pkg-config) can build the ghostty-tagged binaries without Homebrew.
+#
+# The Makefile points $PKG_CONFIG here only when no real pkg-config is on PATH;
+# a real one always wins. Supports what `go build` asks for — --cflags, --libs,
+# --static, --exists, --modversion — over .pc files found in $PKG_CONFIG_PATH,
+# with ${var} expansion. Packages with Requires/Requires.private are refused
+# (no dependency resolution): install a real pkg-config for those.
+set -euo pipefail
+
+want_cflags=0 want_libs=0 static=0 want_ver=0
+pkgs=()
+for a in "$@"; do
+  case "$a" in
+    --cflags) want_cflags=1 ;;
+    --libs) want_libs=1 ;;
+    --static) static=1 ;;
+    --modversion) want_ver=1 ;;
+    --exists|--print-errors|--short-errors|--) ;;
+    --version) echo "0.29.2"; exit 0 ;;
+    -*) echo "pkg-config-lite: unsupported flag $a" >&2; exit 1 ;;
+    *) pkgs+=("$a") ;;
+  esac
+done
+
+find_pc() {
+  local IFS=: d
+  for d in ${PKG_CONFIG_PATH:-}; do
+    [[ -f "$d/$1.pc" ]] && { echo "$d/$1.pc"; return 0; }
+  done
+  return 1
+}
+
+out=()
+for p in ${pkgs[@]+"${pkgs[@]}"}; do
+  pc="$(find_pc "$p")" || { echo "Package $p was not found in the pkg-config search path (PKG_CONFIG_PATH=${PKG_CONFIG_PATH:-})" >&2; exit 1; }
+  # Parse: "name=value" are variables, "Key: value" are fields.
+  vars_k=() vars_v=()
+  cflags="" libs="" libs_priv="" version="" reqs=""
+  expand() {
+    local s="$1" i n
+    for ((n = 0; n < 10; n++)); do
+      [[ "$s" == *'${'* ]] || break
+      for i in "${!vars_k[@]}"; do s="${s//\$\{${vars_k[$i]}\}/${vars_v[$i]}}"; done
+    done
+    printf '%s' "$s"
+  }
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line%%#*}"
+    [[ -z "${line// /}" ]] && continue
+    if [[ "$line" =~ ^([A-Za-z0-9_.]+)=(.*)$ ]]; then
+      k="${BASH_REMATCH[1]}"; v="$(expand "${BASH_REMATCH[2]}")"
+      vars_k+=("$k"); vars_v+=("$v")
+    elif [[ "$line" =~ ^([A-Za-z.]+):[[:space:]]*(.*)$ ]]; then
+      v="$(expand "${BASH_REMATCH[2]}")"
+      case "${BASH_REMATCH[1]}" in
+        Cflags) cflags="$v" ;;
+        Libs) libs="$v" ;;
+        Libs.private) libs_priv="$v" ;;
+        Version) version="$v" ;;
+        Requires|Requires.private) reqs="$reqs$v" ;;
+      esac
+    fi
+  done < "$pc"
+  if [[ -n "${reqs// /}" ]]; then
+    echo "pkg-config-lite: $p has Requires ($reqs) — install a real pkg-config" >&2; exit 1
+  fi
+  ((want_ver)) && echo "$version"
+  ((want_cflags)) && out+=($cflags)
+  if ((want_libs)); then
+    out+=($libs)
+    ((static)) && out+=($libs_priv)
+  fi
+done
+((${#out[@]})) && echo "${out[*]}"
+exit 0
