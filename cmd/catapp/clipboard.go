@@ -18,11 +18,12 @@ import (
 // UI prefers them over the browser API when present. pbcopy/pbpaste are
 // used instead of NSPasteboard to keep this file cgo-free.
 //
-// Both run with the locale pinned to UTF-8 (clipboard.UTF8Env). Cats.app is
-// started by launchd, which sets no LANG, and without one pbcopy/pbpaste
-// transcode through MacRoman. That broke both directions for any non-ASCII
-// text — smart quotes, em dashes, accents, emoji, i.e. most text copied from
-// a browser, Slack or a doc:
+// Both run with the locale pinned to UTF-8 (clipboard.UTF8Env). Without a
+// UTF-8 locale pbcopy/pbpaste transcode through MacRoman. Cats.app is started
+// by launchd, which sets no LANG, and before hydrateLocale that broke both
+// directions for any non-ASCII text, i.e. most text copied from a browser,
+// Slack or a doc. The pin stays, because an inherited LC_ALL or LC_CTYPE
+// outranks the LANG hydrateLocale sets:
 //
 //	read   pasteboard ─pbpaste─▶ MacRoman bytes ─▶ [NSString stringWithUTF8String:]
 //	                                               returns nil on invalid UTF-8

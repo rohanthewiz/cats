@@ -156,8 +156,11 @@ func runLocal(cfg appConfig) {
 // the way there, which is a good deal more use than the one-line error sheet it
 // replaces.
 func bootLocal(m *winManager, cfg appConfig) {
-	// Before any child exists: a GUI launch hands us launchd's bare PATH, and
-	// everything downstream (daemons → panes → plugin build steps) inherits it.
+	// Before any child exists: a GUI launch hands us launchd's bare PATH and no
+	// LANG, and everything downstream (daemons → panes → plugin build steps)
+	// inherits both. The locale goes first so the login shell hydratePATH
+	// probes runs with the same environment a pane will.
+	hydrateLocale()
 	hydratePATH()
 
 	// startBackend registers its own teardown as soon as it has something to

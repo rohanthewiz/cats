@@ -60,8 +60,8 @@ type reader struct {
 	// user has not copied anything yet.
 	emptyIsError bool
 	// utf8Locale marks a tool that transcodes the clipboard through the
-	// process locale. pbpaste does, and a cats process often has no locale to
-	// give it — see UTF8Env — so it is run with one pinned to UTF-8.
+	// process locale. pbpaste does, and a cats process cannot count on having
+	// a UTF-8 one to give it — see UTF8Env — so it is run with one pinned.
 	utf8Locale bool
 }
 
@@ -70,9 +70,11 @@ type reader struct {
 //
 // Those two transcode between the pasteboard (Unicode) and their stdin/stdout
 // bytes using the locale environment, and with no UTF-8 locale they fall back
-// to MacRoman (the __CF_USER_TEXT_ENCODING default). A cats process often has
-// none: Cats.app is started by launchd, which sets no LANG, and catway and every
-// pane inherit that. Measured on macOS 26 with the clipboard holding `“é” 🐱`:
+// to MacRoman (the __CF_USER_TEXT_ENCODING default). launchd sets no LANG, so a
+// catway run as a launchd job has none, and neither does anything it spawns.
+// Cats.app sets LANG at launch (hydrateLocale in cmd/catapp), but it keeps an
+// inherited LC_ALL or LC_CTYPE, and either one outranks LANG. Measured on macOS
+// 26 with the clipboard holding `“é” 🐱`:
 //
 //	env (LANG / LC_ALL / LC_CTYPE)         pbpaste bytes
 //	none set                               d2 8e d3 20 3f 3f       MacRoman, emoji → "??"

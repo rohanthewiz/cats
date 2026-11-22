@@ -167,8 +167,8 @@ Consequences worth knowing:
 ## Running it as a background service on macOS
 
 `launchd` is the macOS equivalent of the systemd setup in
-[Mode 2](mac-client-linux-server.md#running-the-backend-as-a-service). Two
-caveats specific to launchd, both already solved for `Cats.app` and worth
+[Mode 2](mac-client-linux-server.md#running-the-backend-as-a-service). Three
+caveats specific to launchd, all already solved for `Cats.app` and worth
 copying by hand here:
 
 1. **PATH.** A launchd job gets the bare system PATH, not your shell's. Panes and
@@ -179,6 +179,10 @@ copying by hand here:
    `WorkingDirectory` to your home directory, or every new pane opens at the
    filesystem root. (`internal/startdir` already falls back to `$HOME`, but
    being explicit costs nothing.)
+3. **Locale.** A launchd job gets no `LANG`, so every pane runs in the C
+   locale: `ls` prints non-ASCII names as `?`, and the shell edits an `é` as
+   two characters. Set `EnvironmentVariables.LANG` to a UTF-8 locale, for
+   example `en_US.UTF-8`.
 
 ## Headless clients
 

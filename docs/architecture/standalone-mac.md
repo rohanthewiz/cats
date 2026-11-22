@@ -79,7 +79,7 @@ sequenceDiagram
   APP->>SP: showSplash() — the boot log, live
   APP->>BG: go bootLocal()
   APP->>APP: [NSApp run] — the loop, so the log can paint
-  BG->>BG: hydratePATH() from the login shell
+  BG->>BG: hydrateLocale(), then hydratePATH() from the login shell
   BG->>BG: resolveBinary(), pickPort(), socketPath() for th / ctl / hooks
   BG->>TH: exec cathost -persistent -socket TMPDIR/cats-th-PID.sock
   BG->>GW: exec catway --addr 127.0.0.1:PORT --auth none<br/>--socket ... --control-socket ... --hook-socket ...
@@ -160,6 +160,21 @@ they are found next to the executable, not via PATH.
 Launched from a dev terminal, `__CFBundleIdentifier` is unset and the inherited
 PATH is already yours, so hydration is skipped.
 
+### Locale
+
+launchd sets no `LANG` either, so without help every pane runs in the C locale.
+Tools that transcode through the locale then see ASCII: `ls` prints `café` as
+`caf??`, zsh's line editor treats each byte of an `é` as its own character, and
+pbpaste answers in MacRoman.
+
+`hydrateLocale()` runs just before PATH hydration and does what Terminal.app,
+iTerm2 and Ghostty do for their shells. If `LANG` is unset or empty, it sets it
+to the system's Language & Region as a UTF-8 locale (`en_GB.UTF-8`, say), once
+libc confirms it has that locale. When it does not (`en_DE`, `en_150`), it
+falls back to `en_US.UTF-8`. An inherited `LANG` is kept as it is, and
+`LC_ALL`/`LC_CTYPE` are never touched. The boot log records the value it set
+under `locale`.
+
 ### Working directory
 
 From Finder the process cwd is `/`, which the daemons would hand to every pane's
@@ -192,12 +207,13 @@ and the UI prefers them when present. The windows only ever load the configured
 `catway` UI, so exposing the pasteboard to the page does not leak it to
 arbitrary content.
 
-Both tools run with the locale pinned to UTF-8 (`clipboard.UTF8Env`). A
-launchd-started app has no `LANG`, and without a UTF-8 locale pbcopy/pbpaste
-transcode through MacRoman. The read side then hands the bridge bytes that
-`[NSString stringWithUTF8String:]` rejects as a whole (nil, which the page
-reports as "clipboard has no text"), and the write side puts mojibake on the
-pasteboard. `catappClipRead` also replaces any invalid UTF-8 with U+FFFD, so
+Both tools run with the locale pinned to UTF-8 (`clipboard.UTF8Env`). Without
+a UTF-8 locale pbcopy/pbpaste transcode through MacRoman. The read side then
+hands the bridge bytes that `[NSString stringWithUTF8String:]` rejects as a
+whole (nil, which the page reports as "clipboard has no text"), and the write
+side puts mojibake on the pasteboard. The app's own `LANG` (see
+[Locale](#locale)) is not enough on its own: an inherited `LC_ALL=C` outranks
+it, and a `catway` run outside the app may have no locale at all. `catappClipRead` also replaces any invalid UTF-8 with U+FFFD, so
 a future encoding slip degrades a character instead of dropping the paste.
 
 ## Windows

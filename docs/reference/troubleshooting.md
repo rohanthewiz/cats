@@ -79,6 +79,21 @@ delete `session.json`.
 
 For a launchd job, set `WorkingDirectory` explicitly.
 
+## Accented letters show as `?` in a pane
+
+`ls` lists `café` as `caf??`, or the shell's cursor moves through an `é` in two
+steps. The pane has no UTF-8 locale. Run `echo $LANG` in it.
+
+* **Empty, in `Cats.app`:** the app was built before 2026-11-21. launchd sets
+  no `LANG`, and the app now sets one from Language & Region at launch.
+  Rebuild and reinstall the app (`make macapp`), then open a new pane. Panes
+  that are already open keep the environment they started with.
+* **Empty, with `catway` under launchd by hand:** set
+  `EnvironmentVariables.LANG` in the plist. See
+  [Mode 3](../architecture/web-client-mac-server.md#running-it-as-a-background-service-on-macos).
+* **Set, but not `.UTF-8`, or `LC_ALL` is set:** that came from your own
+  environment or rc files, and cats keeps it as it is.
+
 ## The Mac app will not open on another Mac
 
 The bundles are unsigned. One-time **right-click → Open** to clear Gatekeeper.
