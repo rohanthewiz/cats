@@ -114,4 +114,35 @@ function key(type, code, extra) {
   eq(sent.map((m) => m.code + ":" + m.mods), ["Home:0"], "⌘← still arrives as a bare Home");
 }
 
+// ---- ⌘⇧← / ⌘⇧→: verbatim to a kitty pane, so the editor selects ----------
+// The translation above skips Shift, and before cmdGoesToPane learned these
+// the chord fell to the browser — the editor never saw a select-to-line-end.
+
+{
+  const { f, sent } = world(true);
+  for (const code of ["ArrowLeft", "ArrowRight"]) {
+    const down = key("keydown", code, { shiftKey: true });
+    f.onKey(down);
+    ok(down.prevented, `⌘⇧${code} over a kitty pane is taken from the browser`);
+  }
+  eq(sent.map((m) => m.code + ":" + m.mods).join(","), "ArrowLeft:9,ArrowRight:9",
+    "and each is sent as the arrow with super + shift, not as a Home / End");
+}
+{
+  const { f, sent } = world(false);
+  const down = key("keydown", "ArrowRight", { shiftKey: true });
+  f.onKey(down);
+  ok(!down.prevented, "⌘⇧→ over a legacy pane stays the browser's");
+  eq(sent.length, 0, "and nothing is sent for it");
+}
+{
+  // ⌘⌥← / ⌘⌥→ are Chrome's tab switch; the Shift-only test must not sweep
+  // them down even with Shift added.
+  const { f, sent } = world(true);
+  const down = key("keydown", "ArrowLeft", { shiftKey: true, altKey: true });
+  f.onKey(down);
+  ok(!down.prevented, "⌘⌥⇧← over a kitty pane stays the browser's");
+  eq(sent.length, 0, "and nothing is sent for it");
+}
+
 report("cmd arrows");

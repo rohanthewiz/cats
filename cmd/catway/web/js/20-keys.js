@@ -145,8 +145,25 @@
     return !!(p && p.modes && p.modes.kitty);
   }
 
+  // ⌘⇧← / ⌘⇧→ (select to line start / end) are the second way in, and they
+  // are tested here rather than listed in CMD_TO_PANE on purpose. The bare
+  // ⌘← / ⌘→ never get this far — onKey translates them to Home / End for
+  // every pane — and that branch skips Shift, so before this the Shift
+  // chords fell to the browser and an editor never saw them. The fix is
+  // the ⌘↑ / ⌘⇧↑ rule: hand them down VERBATIM (super+shift+arrow, mods 9)
+  // to a kitty-protocol pane, whose editor reads that as "extend to the
+  // end of the line". Not translated to ⇧Home / ⇧End, because a legacy
+  // shell would print the unbound CSI 1;2H as junk; a legacy pane keeps
+  // the browser's chord via the same kitty gate as everything else.
+  // The test is Shift-only (no Alt, no Ctrl) so ⌘⌥← / ⌘⌥→, Chrome's
+  // previous / next tab, stay with the browser — putting the arrows in
+  // the set would have swept those down too, and would have put them in
+  // the help row's "sent to an editor pane" list, where the bare ⌘← / ⌘→
+  // (a Home / End for EVERY pane) would read wrong.
   function cmdGoesToPane(e) {
-    return CMD_TO_PANE.has(e.code) && focusedPaneKitty();
+    const shiftLineArrow = e.shiftKey && !e.altKey && !e.ctrlKey &&
+      (e.code === "ArrowLeft" || e.code === "ArrowRight");
+    return (CMD_TO_PANE.has(e.code) || shiftLineArrow) && focusedPaneKitty();
   }
 
   // composedCodes are the physical keys (e.code) whose current keydown went to
@@ -302,8 +319,9 @@
     // read them as the motions they already are. The preventDefault
     // matters as much as the translation: without it the browser spends
     // ⌘←/⌘→ on history navigation, which tears down the WebSocket.
-    // Shift is excluded so ⌘⇧←/→ stay whatever the host means by them,
-    // rather than a phantom ⇧Home selection the pane never asked for.
+    // Shift is excluded so ⌘⇧←/→ are not a phantom ⇧Home a shell never
+    // asked for: they fall to cmdGoesToPane below, which hands them down
+    // verbatim (select to line start / end) only to a kitty-protocol pane.
     if (!e.shiftKey && e.metaKey && !e.ctrlKey && !e.altKey &&
         (e.code === "ArrowLeft" || e.code === "ArrowRight")) {
       e.preventDefault();

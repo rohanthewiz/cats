@@ -182,6 +182,11 @@ func TestKeyKitty(t *testing.T) {
 		{"super arrowup", disambiguate, press("ArrowUp", "ArrowUp", meta), "\x1b[1;9A"},
 		{"super arrowdown", disambiguate, press("ArrowDown", "ArrowDown", meta), "\x1b[1;9B"},
 		{"super shift arrowup", disambiguate, press("ArrowUp", "ArrowUp", meta|shift), "\x1b[1;10A"},
+		// ⌘⇧← / ⌘⇧→ over a kitty-protocol pane (cmdGoesToPane's Shift-only
+		// arm — the bare ⌘← / ⌘→ are Home / End and never reach here): the
+		// editor reads super+shift+arrow as select to line start / end.
+		{"super shift arrowleft", disambiguate, press("ArrowLeft", "ArrowLeft", meta|shift), "\x1b[1;10D"},
+		{"super shift arrowright", disambiguate, press("ArrowRight", "ArrowRight", meta|shift), "\x1b[1;10C"},
 		{"ctrl enter", disambiguate, press("Enter", "Enter", ctrl), "\x1b[13;5u"},
 		{"plain a stays text", disambiguate, press("KeyA", "a", 0), "a"},
 		{"plain enter stays legacy", disambiguate, press("Enter", "Enter", 0), "\r"},
