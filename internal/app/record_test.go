@@ -113,6 +113,7 @@ var recordedParamClasses = map[string]map[string]string{
 		"mkdir": ClassPlain,
 		"name":  ClassPlain,
 		"path":  ClassPlain,
+		"repo":  ClassPlain,
 	},
 	"workspace.close": {"id": ClassWorkspaceHandle},
 	"workspace.focus": {"id": ClassWorkspaceHandle},

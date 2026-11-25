@@ -59,6 +59,12 @@ func (b viewBackend) StartWorktreeCreate(r app.Responder, p app.WorktreeCreatePa
 	b.orch.startWorktreeCreate(b.c, r, p)
 }
 
+// A clone ends in a new workspace the issuing window is moved onto, so it
+// carries the window for the same reason.
+func (b viewBackend) StartWorkspaceClone(r app.Responder, c app.WorkspaceClone) {
+	b.orch.startWorkspaceClone(b.c, r, c)
+}
+
 func (b viewBackend) StartWorktreeOpen(r app.Responder, p app.WorktreeOpenParams) {
 	b.orch.startWorktreeOpen(b.c, r, p)
 }

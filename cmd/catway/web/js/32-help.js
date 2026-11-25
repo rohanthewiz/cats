@@ -48,6 +48,7 @@
         ["complete, then list inside it", ["Tab", "click"]],
         ["create in the highlighted one", ["Enter"]],
         ["make a folder that doesn't exist yet", ["type its path, Enter, confirm"]],
+        ["clone a repo into the start path", ["from repo: user/repo or a git URL"]],
         ["include dotted directories", ["type a leading ."]],
       ]));
       left.appendChild(helpSection("mouse", [

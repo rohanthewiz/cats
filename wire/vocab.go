@@ -1140,11 +1140,23 @@ type WorkspaceParams struct {
 // "~", stat it, or create it (see workspaceStartDir). Mkdir is therefore
 // ignored for a remote workspace: the cwd fallback that keeps a bad path from
 // producing a dead pane belongs to cathost.
+//
+// Repo opens the workspace on a repository that is not on disk yet: it is
+// cloned first, and the workspace starts in the checkout. It is a git URL, or
+// "owner/repo" as shorthand for https://github.com/owner/repo.git (see
+// gitclone.Resolve). With Repo set, Path stops being the start directory and
+// becomes its parent — the clone lands in <Path>/<repo name>, the name git
+// itself would pick — so the same three Path states and the same Mkdir
+// escalation apply, one level up. The command answers only once the clone has
+// finished; a destination that already exists fails it ("already exists: …")
+// rather than being reused or overwritten. Local workspaces only: the clone
+// runs in this process, so a Repo together with a non-local Host is refused.
 type WorkspaceCreateParams struct {
 	Name  string  `json:"name,omitempty"`
 	Path  *string `json:"path,omitempty"`
 	Mkdir bool    `json:"mkdir,omitempty"`
 	Host  string  `json:"host,omitempty"`
+	Repo  string  `json:"repo,omitempty"`
 }
 
 // WorkspaceCreateResult is CmdResult.Data for workspace.create: the new

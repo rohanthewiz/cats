@@ -73,6 +73,7 @@ type fakeBackend struct {
 	lastPlgCheck   Responder
 	lastPlgCheckP  PluginCheckUpdatesParams
 	lastPathList   Responder
+	lastClone      WorkspaceClone
 	lastPathP      PathListParams
 	lastFileStatP  FileStatParams
 	lastFileGetP   FileGetParams
@@ -348,6 +349,10 @@ func (b *fakeBackend) PeerAttach(r Responder, p PeerAttachParams) {
 func (b *fakeBackend) PeerDetach(r Responder, p PeerDetachParams) {
 	b.rec("peerDetach")
 	r.OK(PeerListResult{Peers: []PeerInfo{}})
+}
+func (b *fakeBackend) StartWorkspaceClone(_ Responder, c WorkspaceClone) {
+	b.rec("wsClone")
+	b.lastClone = c
 }
 func (b *fakeBackend) StartPathList(r Responder, p PathListParams) {
 	b.rec("pathList")
@@ -2306,6 +2311,64 @@ func TestDispatchTabCreateHost(t *testing.T) {
 	h.d.Dispatch(CmdTabCreate, params(t, TabCreateParams{Host: "nope"}), r)
 	if !r.failCall || !strings.Contains(r.errMsg, "unknown host") {
 		t.Fatalf("unknown host: fail=%v err=%q", r.failCall, r.errMsg)
+	}
+}
+
+// workspace.create with a repo hands the backend a resolved clone — the URL
+// (GitHub shorthand expanded) and a destination under the start path — and
+// creates nothing itself: the workspace only exists once the clone has landed.
+func TestDispatchWorkspaceCreateRepo(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	ptr := func(s string) *string { return &s }
+
+	h := newCmdHarness(t)
+	before := len(h.s.Workspaces())
+	r := h.resp()
+	h.d.Dispatch(CmdWorkspaceCreate, params(t, WorkspaceCreateParams{
+		Name: "picker", Path: ptr("~"), Repo: "rohanthewiz/cdx",
+	}), r)
+	want := WorkspaceClone{
+		URL: "https://github.com/rohanthewiz/cdx.git", Dest: filepath.Join(home, "cdx"), Name: "picker",
+	}
+	if h.b.lastClone != want {
+		t.Fatalf("clone = %+v, want %+v", h.b.lastClone, want)
+	}
+	if lg := *h.log; len(lg) != 1 || lg[0] != "wsClone" {
+		t.Fatalf("effects = %v, want [wsClone] alone", lg)
+	}
+	if got := len(h.s.Workspaces()); got != before {
+		t.Fatalf("workspaces = %d, want %d: nothing is created before the clone", got, before)
+	}
+
+	// The parent directory keeps workspace.create's own escalation: a missing
+	// one is refused first, and mkdir creates it.
+	h = newCmdHarness(t)
+	r = h.resp()
+	h.d.Dispatch(CmdWorkspaceCreate, params(t, WorkspaceCreateParams{Path: ptr("~/src"), Repo: "a/b"}), r)
+	if !r.failCall || !strings.HasPrefix(r.errMsg, "no such directory: ") || len(*h.log) != 1 {
+		t.Fatalf("missing parent: fail=%v err=%q log=%v", r.failCall, r.errMsg, *h.log)
+	}
+	h.d.Dispatch(CmdWorkspaceCreate, params(t, WorkspaceCreateParams{Path: ptr("~/src"), Repo: "a/b", Mkdir: true}), h.resp())
+	if want := filepath.Join(home, "src", "b"); h.b.lastClone.Dest != want {
+		t.Fatalf("dest = %q, want %q", h.b.lastClone.Dest, want)
+	}
+
+	// A spec that names no repository fails here, before any backend work.
+	h = newCmdHarness(t)
+	r = h.resp()
+	h.d.Dispatch(CmdWorkspaceCreate, params(t, WorkspaceCreateParams{Path: ptr("~"), Repo: "nonsense"}), r)
+	if !r.failCall || !strings.Contains(r.errMsg, "not a repository") {
+		t.Fatalf("bad spec: fail=%v err=%q", r.failCall, r.errMsg)
+	}
+
+	// The clone runs in this process, so it cannot serve another machine.
+	h = newCmdHarness(t)
+	twoHostBackend(h)
+	r = h.resp()
+	h.d.Dispatch(CmdWorkspaceCreate, params(t, WorkspaceCreateParams{Host: "devbox", Repo: "a/b"}), r)
+	if !r.failCall || !strings.Contains(r.errMsg, "devbox") || h.b.lastClone != (WorkspaceClone{}) {
+		t.Fatalf("remote clone: fail=%v err=%q clone=%+v", r.failCall, r.errMsg, h.b.lastClone)
 	}
 }
 

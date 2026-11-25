@@ -486,6 +486,25 @@ applied there (tab numbers restart per workspace), the returned `pane` is the ne
 tab's root pane rather than whatever the viewport has focused, an omitted `cwd` is
 inherited from *that* workspace's last tab, and the lock consulted is its own.
 
+`workspace.create` takes a `repo` to open a workspace on a project that is not
+on disk yet: the repository is cloned first and the workspace starts in the
+checkout. `repo` is a git URL, or `owner/repo` as shorthand for
+`https://github.com/owner/repo.git`. With it, `path` is the folder the clone
+goes *into* — the checkout lands in `<path>/<repo name>` — and the command
+answers once the clone has finished:
+
+```bash
+catctl workspace.create --params '{"repo":"rohanthewiz/cdx","path":"~/projs/go"}'
+# {"id": "w4"}   — rooted at ~/projs/go/cdx
+```
+
+A destination that already exists fails the command (`already exists: …`)
+rather than being reused. The clone never prompts: a private repository needs
+credentials git already has (a credential helper, or an ssh key in the agent),
+and to clone GitHub over ssh by default, say so once in git's own config
+(`git config --global url."git@github.com:".insteadOf https://github.com/`).
+Cloning is local-only — `repo` with a non-local `host` is refused.
+
 `workspace.lock` sets a workspace aside for hand work: while it is locked, two
 commands refuse it — `tab.create` **carrying a `command`** (the path a plugin
 action and an agent launch both arrive on) and `pane.send_input` into any of its

@@ -217,6 +217,11 @@
         rows = []; sel = -1;
         if (enabled) render();
       },
+      // refresh re-reads the field after a caller rewrote its value. Assigning
+      // .value fires no input event, so without this the drop-down would go on
+      // listing the directory the field used to name. It leaves `pristine`
+      // alone on purpose: a value the dialog put there is still a prefill.
+      refresh() { if (enabled) render(); },
       // key handles the picker's own keys and reports whether it consumed the
       // event; Enter stays with the dialog (see commit).
       key(e) {
@@ -328,16 +333,21 @@
       // host choice switching the start-path picker off, which it can only do
       // once both fields exist. The callback gets the field's value and the
       // dialog's rows ({input, picker}), and runs once up front so the initial
-      // selection is applied rather than only the first change.
+      // selection is applied rather than only the first change. Its third
+      // argument is the dialog itself, as far as a field may reshape it:
+      // setHint swaps the hint line ("" restores the dialog's own), for a field
+      // whose value changes what submitting will do.
+      let hintEl = null;
+      if (opts.hint) { hintEl = document.createElement("div"); hintEl.className = "hint"; hintEl.textContent = opts.hint; body.appendChild(hintEl); }
+      const ui = { setHint: (text) => { if (hintEl) hintEl.textContent = text || opts.hint; } };
       opts.fields.forEach((f, i) => {
         if (!f.onChange) return;
         const rows = inputs.map((inp) => ({ input: inp, picker: pickers.get(inp) || null }));
-        const fire = () => f.onChange(inputs[i].value, rows);
+        const fire = () => f.onChange(inputs[i].value, rows, ui);
         inputs[i].addEventListener("change", fire);
         inputs[i].addEventListener("input", fire);
         fire();
       });
-      if (opts.hint) { const t = document.createElement("div"); t.className = "hint"; t.textContent = opts.hint; body.appendChild(t); }
       // Last, below the fields, in both dialogs. The fields are what the user
       // has come to do and where focus lands; the list is the reference they
       // scan before committing, and a ten-line preview above the inputs would

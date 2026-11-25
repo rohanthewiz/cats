@@ -4,12 +4,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/rohanthewiz/cats/internal/flags"
+	"github.com/rohanthewiz/cats/internal/gitclone"
 	"github.com/rohanthewiz/cats/internal/layout"
 	"github.com/rohanthewiz/cats/internal/startdir"
 	"github.com/rohanthewiz/cats/internal/workspace"
@@ -214,6 +216,14 @@ type Backend interface {
 	// it can wait behind a seed pass still running at startup, so it resolves
 	// off the loop too.
 	StartPluginDismissDefault(r Responder, p PluginDismissDefaultParams)
+
+	// StartWorkspaceClone is workspace.create with a Repo: clone c.URL into
+	// c.Dest off the loop goroutine, then create the workspace rooted there
+	// (named c.Name when set, pinned to c.Host), move the issuing window onto
+	// it and resolve r with a WorkspaceCreateResult. A failed clone fails r and
+	// creates nothing. The dispatcher has already resolved the repo spec and
+	// the destination; the backend owns the subprocess and the model effects.
+	StartWorkspaceClone(r Responder, c WorkspaceClone)
 
 	// StartPathList answers the start-path picker's directory listing. Off-loop
 	// like the commands above — a listing can land on a cold network mount — and
@@ -1046,6 +1056,26 @@ func (d *Dispatcher) dispatch(name string, dec ParamDecoder, r Responder) {
 		cwd, err := workspaceStartDir(p.Path, d.session.Cwd(), p.Mkdir, host.Local)
 		if err != nil {
 			r.Fail(err.Error())
+			return
+		}
+		if strings.TrimSpace(p.Repo) != "" {
+			// A workspace on a repository that is not here yet: cwd is now the
+			// directory the clone goes *into*, and everything after this point
+			// — the clone, then the same create/rename/focus as below — is the
+			// backend's, because a clone is seconds of network work that must
+			// not run on the loop goroutine.
+			if !host.Local {
+				r.Fail("cannot clone a repository onto host " + p.Host + ": cloning only works for a workspace on this machine")
+				return
+			}
+			url, dirName, err := gitclone.Resolve(p.Repo)
+			if err != nil {
+				r.Fail(err.Error())
+				return
+			}
+			d.backend.StartWorkspaceClone(r, WorkspaceClone{
+				URL: url, Dest: filepath.Join(cwd, dirName), Name: p.Name, Host: p.Host,
+			})
 			return
 		}
 		id, err := d.session.CreateWorkspaceAtOn(cwd, p.Host)
@@ -2153,6 +2183,16 @@ func unknownHostErr(id string) string {
 // a script that never saw the sidebar's lock mark.
 func workspaceLockedErr(id, verb string) string {
 	return fmt.Sprintf("workspace %s is locked: cannot %s it (unlock it first)", id, verb)
+}
+
+// WorkspaceClone is a resolved workspace.create-from-a-repo request, as handed
+// to Backend.StartWorkspaceClone: the URL git clones, the absolute directory
+// the checkout lands in, and the name and host the workspace takes.
+type WorkspaceClone struct {
+	URL  string
+	Dest string
+	Name string
+	Host string
 }
 
 // workspaceStartDir resolves workspace.create's optional Path against the

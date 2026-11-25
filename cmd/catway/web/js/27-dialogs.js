@@ -70,10 +70,61 @@
     return runners;
   }
 
+  // repoSpec previews what the server will make of a typed repository — the
+  // URL it clones and the folder name the checkout takes — so the dialog can
+  // say where a clone is about to land before it starts. It mirrors
+  // gitclone.Resolve (the authority; this is only a preview): a bare
+  // "owner/repo", or "github.com/owner/repo", is GitHub over https, and
+  // anything else is a URL or path passed to git as typed. null = not a
+  // repository yet, the normal state of one half-way through being typed.
+  function repoSpec(text) {
+    const s = (text || "").trim();
+    if (!s || s.startsWith("-")) return null;
+    const colon = s.indexOf(":"), slash = s.indexOf("/");
+    const scp = colon > 0 && (slash < 0 || colon < slash);
+    let url = s;
+    if (!s.includes("://") && !scp && !/^[.~/]/.test(s)) {
+      const m = /^(?:github\.com\/)?(\w[\w.-]*)\/(\w[\w.-]*?)(?:\.git)?\/?$/i.exec(s);
+      if (!m) return null;
+      url = "https://github.com/" + m[1] + "/" + m[2] + ".git";
+    }
+    const name = url.replace(/\/+$/, "").replace(/\.git$/, "").replace(/\/+$/, "").split(/[/:]/).pop();
+    if (!name || name === "." || name === "..") return null;
+    return { url, name };
+  }
+
   function openNewWorkspaceDialog(runners) {
+    // With a repo, the start path is where the clone goes *into*, and the
+    // prefill — the directory the user is standing in, usually a project of
+    // its own — is exactly where a second project should not be cloned. So
+    // while the path is still that untouched prefill, typing a repo moves it up
+    // one level (the new project lands beside the current one) and clearing
+    // the repo moves it back. A path the user has edited is theirs and is left
+    // alone either way.
+    const cwd = focusedPaneCwd();
+    const cwdParent = cwd.replace(/\/+$/, "").replace(/\/[^/]*$/, "") || (cwd ? "/" : "");
+    const defaultHint = "↑↓ picks a directory · tab drills in · enter creates · esc cancels";
     const fields = [
       { label: "name", value: "", placeholder: "optional — auto-named after the start directory" },
-      { label: "start path", value: focusedPaneCwd(), placeholder: "empty starts in your home directory", pick: true },
+      { label: "start path", value: cwd, placeholder: "empty starts in your home directory", pick: true },
+      {
+        label: "from repo",
+        value: "",
+        placeholder: "optional — user/repo (GitHub) or a git URL, cloned into the start path",
+        onChange: (text, rows, ui) => {
+          const path = rows[1], typed = !!text.trim();
+          const swap = (from, to) => {
+            if (!from || path.input.value !== from) return;
+            path.input.value = to;
+            if (path.picker) path.picker.refresh();
+          };
+          if (typed) swap(cwd, cwdParent); else swap(cwdParent, cwd);
+          const spec = repoSpec(text);
+          ui.setHint(spec
+            ? "clones " + spec.url + " into a new " + spec.name + "/ folder under the start path"
+            : (typed ? "from repo: user/repo for GitHub, or a full git URL" : defaultHint));
+        },
+      },
     ];
     // The host a workspace is pinned to is where every pane created in it runs,
     // so it belongs in the dialog that creates it rather than being re-chosen at
@@ -112,7 +163,7 @@
             : (lists
               ? "path on " + (h.label || h.id) + " — empty starts in that host's home directory"
               : "path on " + (h.label || h.id) + " — empty starts where that host starts panes");
-          if (!local && path.input.value === focusedPaneCwd()) path.input.value = "";
+          if (!local && path.input.value && (path.input.value === cwd || path.input.value === cwdParent)) path.input.value = "";
         },
       });
     }
@@ -131,7 +182,7 @@
     dialogFields({
       title: "new workspace",
       fields,
-      hint: "↑↓ picks a directory · tab drills in · enter creates · esc cancels",
+      hint: defaultHint,
       submitLabel: "create",
       // Read by index rather than by positional parameters: two of the fields
       // are conditional (host, plugin), so their slots move. sel is "" for
@@ -140,7 +191,7 @@
       // plugin in the list is not swallowed by it.
       onSubmit: (...vs) => {
         const sel = vs[plugIdx];
-        createWorkspace(vs[0], vs[1], sel ? runners[Number(sel)] : null, hostIdx < 0 ? "" : vs[hostIdx]);
+        createWorkspace(vs[0], vs[1], sel ? runners[Number(sel)] : null, hostIdx < 0 ? "" : vs[hostIdx], vs[2]);
       },
     });
   }
@@ -161,24 +212,38 @@
   // does: it is the same create, and the server reads the path against the host
   // it was given (a remote path is never stat'ed here, so the mkdir escalation
   // simply never fires for one).
-  function createWorkspace(name, path, runner, host) {
+  // repo (optional) clones a repository first and starts the workspace in the
+  // checkout; path is then the folder the clone goes into, and the missing-
+  // folder offer is about that parent. The command only answers once the clone
+  // is done — seconds at least — so the wait is announced: a dialog that closes
+  // into nothing for ten seconds reads as a create that did not happen.
+  function createWorkspace(name, path, runner, host, repo) {
+    repo = (repo || "").trim();
+    const params = { name, path, host };
+    if (repo) params.repo = repo;
     const created = (res) => {
       if (!runner) return;
       startPluginInWorkspace(runner, (res.data || {}).id);
     };
-    sendCmdAwait("workspace.create", { name, path, host }, (res) => {
+    const cloning = () => { if (repo) toast("cloning " + repo + " — the workspace opens when it lands"); };
+    cloning();
+    sendCmdAwait("workspace.create", params, (res) => {
       if (res.ok) { created(res); return; }
       const err = res.error || "";
       if (err.startsWith("no such directory: ")) {
         dialogConfirm({
           title: "create folder?",
           message: err.slice("no such directory: ".length) +
-            " does not exist — create it and start the workspace there?",
+            (repo ? " does not exist — create it and clone into it?"
+              : " does not exist — create it and start the workspace there?"),
           confirmLabel: "create folder",
-          onConfirm: () => sendCmdAwait("workspace.create", { name, path, host, mkdir: true }, (r2) => {
-            if (!r2.ok) { toast("new workspace: " + (r2.error || "unknown")); return; }
-            created(r2);
-          }),
+          onConfirm: () => {
+            cloning();
+            sendCmdAwait("workspace.create", { ...params, mkdir: true }, (r2) => {
+              if (!r2.ok) { toast("new workspace: " + (r2.error || "unknown")); return; }
+              created(r2);
+            });
+          },
         });
       } else {
         toast("new workspace: " + (err || "unknown"));
