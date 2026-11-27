@@ -187,6 +187,8 @@ static WKWebViewConfiguration *catsConfig(CatsWindowController *owner) {
 }
 
 // --- window.open → a native window ---------------------------------------------
+
+static BOOL catsSameOrigin(NSURL *a, NSURL *b);
 //
 // The page's "open in new window" is a plain window.open(location.pathname +
 // "?ws=" + id). Returning nil here would make it a blocked popup; opening a real
@@ -198,10 +200,43 @@ static WKWebViewConfiguration *catsConfig(CatsWindowController *owner) {
                forNavigationAction:(WKNavigationAction *)navigationAction
                     windowFeatures:(WKWindowFeatures *)windowFeatures {
     NSURL *url = navigationAction.request.URL;
-    if (url) {
+    if (!url) {
+        return nil;
+    }
+    // window.open serves two different things: the page opening ANOTHER VIEW
+    // OF ITSELF (same origin, "?ws=<id>"), and the page following a link a
+    // terminal printed (an OSC 8 hyperlink, or a ⌘-clicked plain URL). The
+    // first is a Cats window. The second is the user's browser: loading
+    // someone else's site inside a Cats window would give it the window
+    // chrome, the cookie jar and the bridges the app's own page has, and it
+    // is not what a click on a link in a terminal means anywhere else.
+    // Origin (scheme + host + port) is the line between the two.
+    if (catsSameOrigin(url, webView.URL)) {
         catappOpenWindowURL((char *)[[url absoluteString] UTF8String]);
+    } else {
+        [[NSWorkspace sharedWorkspace] openURL:url];
     }
     return nil;
+}
+
+// catsSameOrigin reports whether two URLs share scheme, host and port. A nil
+// or host-less page URL (a literal-HTML window such as the connect form) has
+// no origin of its own, so nothing counts as same-origin with it and every
+// link it opens goes to the browser. Ports compare by the scheme's default
+// when omitted, so http://h/ and http://h:80/ agree.
+static BOOL catsSameOrigin(NSURL *a, NSURL *b) {
+    if (!a.host || !b.host) {
+        return NO;
+    }
+    if ([a.scheme caseInsensitiveCompare:b.scheme] != NSOrderedSame ||
+        [a.host caseInsensitiveCompare:b.host] != NSOrderedSame) {
+        return NO;
+    }
+    NSInteger (^port)(NSURL *) = ^NSInteger(NSURL *u) {
+        if (u.port) return u.port.integerValue;
+        return [u.scheme caseInsensitiveCompare:@"https"] == NSOrderedSame ? 443 : 80;
+    };
+    return port(a) == port(b);
 }
 
 - (void)webView:(WKWebView *)webView

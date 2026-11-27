@@ -38,7 +38,7 @@ window were dated by grepping every session doc.
   Open (or Validate, for a check, or Roadmap, for future work) with the next
   ID.
 
-**Next ID:** N-072
+**Next ID:** N-073
 
 ## Open
 
@@ -333,6 +333,21 @@ and `raised`.
   copy `smart “quotes” — café 🐱` from a browser and ⌘V it into a pane. Copy
   the same text out of a pane and paste it into another app. Ctrl+V it in a
   rebuilt cats-todo and check that no `�` appears.
+
+- **N-072** · raised `2026-1127-0849-cmd-click-plain-urls` · value medium
+  ⌘-click on plain-text URLs (and OSC 8 links) in a pane, with a hand cursor
+  and underline while ⌘ is held. Detection is covered by
+  `cmd/catway/web/jstest/urlclick.test.mjs`; the mouse wiring, the underline
+  and the Mac app's new external-origin → default browser routing
+  (`catsSameOrigin` in `cmd/catapp/window_darwin.m`) are unseen. Still to
+  check in a rebuilt, reinstalled Cats.app (`make macapp`) and in a browser:
+  ⌘-hover `rosync serve`'s token URL and see it underlined whole (also with
+  the pane narrow enough to wrap it), ⌘-click it and land in the default
+  browser, not a Cats window; ⌘-click inside a mouse-capturing app (vim with
+  `mouse=a`) opens the link and the app sees no click; Ctrl-click on a Mac
+  still opens the pane menu; sidebar "open in new window" still opens a Cats
+  window. Known soft spot: the underline does not track new output under a
+  still pointer until the mouse moves.
 
 ## Roadmap
 

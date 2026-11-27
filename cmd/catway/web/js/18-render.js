@@ -253,6 +253,7 @@
       ctx.globalAlpha = 1;
     }
     if (p.sel) drawSelection(p, ctx);
+    if (p.hoverLink) drawLinkHover(p, ctx, defFg);
     if (p.cm) drawCopyCursor(p, ctx);
     if (hasScrollbar(p)) drawScrollbar(p, ctx);
   }
@@ -284,6 +285,21 @@
     ctx.strokeStyle = CM_CURSOR; ctx.lineWidth = 2;
     ctx.strokeRect(x * cellW + 1, y * cellH + 1, cellW - 2, cellH - 2);
     ctx.restore();
+  }
+
+  // drawLinkHover underlines the link a ⌘-click would follow: every cell from
+  // its first (a) to its last (b), which for a wrapped URL runs to the right
+  // edge and resumes at column 0 of the next row. a and b are p.cells indexes
+  // from when the hover was computed; a resize since then can leave them past
+  // the grid, and that hover is simply not drawn until the pointer moves.
+  function drawLinkHover(p, ctx, defFg) {
+    const { a, b } = p.hoverLink;
+    if (b >= p.W * p.H) return;
+    ctx.fillStyle = css(defFg);
+    for (let i = a; i <= b; i++) {
+      const x = i % p.W, y = Math.floor(i / p.W);
+      ctx.fillRect(x * cellW, y * cellH + cellH - 2, cellW, 1);
+    }
   }
 
   // drawSelection washes the pane-local drag range (viewport cells). Linear mode

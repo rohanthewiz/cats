@@ -234,6 +234,131 @@
     return { path, line: m ? parseInt(m[1], 10) : 0 };
   }
 
+  // ---- Plain-text URLs (⌘-click) ----
+  //
+  // OSC 8 links are opt-in: the program marks the cell, the frame carries the
+  // URI, and a plain click follows it (the mouseup path in attachMouse). Most
+  // programs never emit OSC 8 — a server printing "listening on http://…" just
+  // prints text. Those URLs are found by scanning the cells the client already
+  // holds, and are followed only with the link modifier held, the convention
+  // of Terminal.app, iTerm2, Ghostty and VS Code: a bare click on a pane means
+  // focus / select / a click for the app inside, and stealing it whenever the
+  // pointer happens to sit on something URL-shaped would break all three.
+  //
+  // The scan is entirely client-side. A server round trip (the §7 read) would
+  // see soft-wrap flags the cells do not carry, but it would put latency on
+  // every hover, and the heuristic below gets wrapped URLs right in practice.
+
+  // linkModHeld reports whether the event carries the "follow link" modifier:
+  // ⌘ on a Mac, Ctrl elsewhere. Not "either": on a Mac, Ctrl-click IS a right
+  // click — it fires contextmenu, and the pane menu has to keep opening for it.
+  function linkModHeld(ev) {
+    const mac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform || "");
+    return mac ? !!ev.metaKey : !!ev.ctrlKey;
+  }
+
+  // URL_MAX_ROWS caps how many rows a wrapped URL is followed across, each way
+  // from the hovered row. A token-bearing URL in an 80-column pane runs to two
+  // or three rows; eight is generous without letting one hover walk a whole
+  // screen of dense text.
+  const URL_MAX_ROWS = 8;
+
+  // plainUrlAt finds the URL in pane p's viewport that covers cell (x, y), or
+  // returns null. The result names the URL and its first and last cell, as
+  // indexes into p.cells, so a hover can underline exactly that span.
+  //
+  // Wrapping. The VT grid's soft-wrap flag does not ride the frame, so a
+  // "logical line" is approximated the way most terminals' URL detectors do
+  // it: a row whose LAST cell is non-blank is assumed to continue on the next.
+  //
+  //   row 3 │ first visit: http://127.0.0.1:7420/?token=12db11a9d96│ ← last cell filled
+  //   row 4 │5ca2449b996bab0183e7aebb8aae8d98056d3                  │ ← so it joins
+  //
+  // The rows top..bot are joined into one string, with `at` mapping each
+  // character back to its cell; the regex runs over the string and the match
+  // covering the clicked character wins. A hard line that merely happens to
+  // fill its row is joined too — harmless unless a URL ends exactly at the
+  // right edge and the next line begins with URL-legal characters, which is
+  // the price of not asking the server.
+  function plainUrlAt(p, x, y) {
+    const W = p.W, H = p.H, cells = p.cells;
+    if (!W || !H || !cells || x < 0 || y < 0 || x >= W || y >= H) return null;
+    const filled = (row) => {
+      const c = cells[row * W + W - 1];
+      return !!(c && c.s && c.s !== " ");
+    };
+    let top = y, bot = y;
+    while (top > 0 && y - top < URL_MAX_ROWS && filled(top - 1)) top--;
+    while (bot < H - 1 && bot - y < URL_MAX_ROWS && filled(bot)) bot++;
+
+    // text is built per CODE UNIT so regex indexes map straight back: at[k]
+    // is the cell that code unit k came from. A cell may hold a multi-unit
+    // grapheme (an emoji); every unit of it maps to that one cell. A wide
+    // glyph's spacer cell holds "" and contributes nothing, so a click on it
+    // resolves to the glyph to its left. A missing cell reads as a blank.
+    let text = "";
+    const at = [];
+    let hit = -1;
+    for (let r = top; r <= bot; r++) {
+      for (let cx = 0; cx < W; cx++) {
+        const i = r * W + cx;
+        const c = cells[i];
+        const s = c ? (c.s || "") : " ";
+        if (r === y && cx === x) hit = s ? text.length : text.length - 1;
+        for (let k = 0; k < s.length; k++) at.push(i);
+        text += s;
+      }
+    }
+    if (hit < 0) return null;
+
+    // Schemes are listed rather than matched generically (`\w+://`) so a
+    // "Cargo.toml://" or a log line's "key://" is not a link; file:// is in
+    // because followLink hands it to the pane's editor. The body stops at
+    // whitespace, quotes, angle brackets, backticks and box drawing
+    // (U+2500–U+257F) — a TUI framing a URL in │ … │ must not drag the border
+    // into it.
+    const re = new RegExp("\\b(?:https?|ftp|file)://[^\\s<>\"'`\\u2500-\\u257f]+", "gi");
+    let m;
+    while ((m = re.exec(text)) !== null) {
+      const start = m.index;
+      if (start > hit) break; // matches run left to right; the rest are past the click
+      const url = trimUrlTail(m[0]);
+      const end = start + url.length; // exclusive
+      if (hit < end && url.length > url.indexOf("://") + 3) {
+        return { url, a: at[start], b: at[end - 1] };
+      }
+    }
+    return null;
+  }
+
+  // trimUrlTail drops what prose puts after a URL but the URL does not own:
+  // sentence punctuation ("see http://x/.") and a closing bracket or quote
+  // that has no opener inside the URL ("(at http://x/)"). A balanced closer
+  // stays — Wikipedia's "Go_(programming_language)" is the classic case.
+  function trimUrlTail(u) {
+    const pairs = { ")": "(", "]": "[", "}": "{" };
+    const count = (s, ch) => s.split(ch).length - 1;
+    for (;;) {
+      const last = u[u.length - 1];
+      if (".,;:!?'\"*".indexOf(last) >= 0) { u = u.slice(0, -1); continue; }
+      const open = pairs[last];
+      if (open && count(u, last) > count(u, open)) { u = u.slice(0, -1); continue; }
+      return u;
+    }
+  }
+
+  // linkAt is what a ⌘-click at cell (x, y) would follow: an OSC 8 link on
+  // that cell first (the program said exactly what it means), else a
+  // plain-text URL found around it. Returns { url, a, b } or null; an OSC 8
+  // link's span is just its own cell, which is enough for a pointer cursor.
+  function linkAt(p, x, y) {
+    if (!p.cells || !p.W) return null;
+    const i = y * p.W + x;
+    const c = p.cells[i];
+    if (c && c.h && p.links && p.links[c.h - 1]) return { url: p.links[c.h - 1], a: i, b: i };
+    return plainUrlAt(p, x, y);
+  }
+
   // sendCmdAwait issues a command under a fresh id and resolves cb with its
   // cmd_result (read/capture and the §7 query commands carry result data).
   let cmdSeq = 0;

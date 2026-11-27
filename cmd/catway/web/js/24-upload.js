@@ -132,6 +132,25 @@
           return;
         }
       }
+      // ⌘-click (Ctrl-click off a Mac) on a link follows it, and that click
+      // goes nowhere else. Checked BEFORE the mouse-capture branch on purpose:
+      // in vim, htop or Claude Code a click belongs to the app, and the
+      // modifier is how the user says "this one is for the terminal" — the
+      // same deal iTerm2 and Ghostty make. Followed on the press rather than
+      // the release: nothing was started (no p.sel, no p.pressed), so the
+      // window mouseup below finds nothing to finish and the app never sees
+      // a stray button-up. With no link under the pointer the click falls
+      // through and behaves as it would without the modifier.
+      if (ev.button === 0 && linkModHeld(ev)) {
+        const [x, y] = cellOf(p, ev);
+        const link = linkAt(p, x, y);
+        if (link) {
+          ev.preventDefault();
+          setLinkHover(p, null);
+          followLink(p, link.url);
+          return;
+        }
+      }
       if (!p.modes.mouse) {
         // No capture: left-drag originates a browser-local selection (§7 read);
         // Alt makes it a rectangular block. A plain click (no drag) is resolved on
@@ -154,6 +173,7 @@
       sendMouse(p, "d", ev.button, ev);
     });
     p.canvas.addEventListener("mousemove", (ev) => {
+      trackLinkHover(p, ev);
       // A copied drag keeps its wash on screen (p.sel.done) until a keystroke
       // clears it — but it is finished, so the pointer must not go on extending
       // it. Requiring the button still be held also covers a mouseup we missed.
@@ -207,6 +227,10 @@
         sendCmd("scroll", { pane: p.id, delta: lines });
       }
     }, { passive: false });
+    p.canvas.addEventListener("mouseleave", () => {
+      if (linkHover.p === p) linkHover.p = null;
+      setLinkHover(p, null);
+    });
     // Right-click: mouse-capturing apps get the encoded button; otherwise the
     // pane menu (with paste on top) replaces the browser's default menu.
     p.canvas.addEventListener("contextmenu", (ev) => {
@@ -214,6 +238,62 @@
       if (!p.modes.mouse) openCtx(ev.clientX, ev.clientY, paneMenuItems(p.id, true));
     });
   }
+
+  // ---- ⌘-hover link affordance ----
+  //
+  // While the link modifier is held over a link, the pointer becomes a hand
+  // and the link is underlined (drawLinkHover), so the user can see what a
+  // ⌘-click would open — and, for a URL wrapped across rows, that all of it
+  // was found — before committing to it.
+  //
+  // The modifier can change without the mouse moving (press ⌘ over a URL
+  // and nothing should have to wiggle), so the last pointer position over a
+  // pane is remembered here and replayed when ⌘/Ctrl goes down or up.
+  const linkHover = { p: null, x: 0, y: 0 };
+
+  // trackLinkHover recomputes the hovered link from a pointer (or replayed)
+  // event. Suppressed while the left button is down: that is a drag selection
+  // in progress, and a hand cursor over it would be noise.
+  function trackLinkHover(p, ev) {
+    linkHover.p = p; linkHover.x = ev.clientX; linkHover.y = ev.clientY;
+    let link = null;
+    if (linkModHeld(ev) && !(ev.buttons & 1)) {
+      const [x, y] = cellOf(p, ev);
+      link = linkAt(p, x, y);
+    }
+    setLinkHover(p, link);
+  }
+
+  // setLinkHover swaps the pane's hovered link, repainting only on a change —
+  // trackLinkHover runs on every mousemove, and a full redraw per pixel of
+  // pointer travel would be wasted work for an unchanged span.
+  function setLinkHover(p, link) {
+    const prev = p.hoverLink || null;
+    if (prev === link) return;
+    if (prev && link && prev.a === link.a && prev.b === link.b && prev.url === link.url) return;
+    p.hoverLink = link;
+    if (p.canvas) p.canvas.style.cursor = link ? "pointer" : "";
+    scheduleDraw(p);
+  }
+
+  // The modifier going down or up over a pane replays the last pointer
+  // position with the new modifier state. Only the bare modifier key: a ⌘C
+  // must not flicker the hover. The pane is re-looked-up because applyLayout
+  // rebuilds panes on a tab switch and a remembered one may be gone.
+  function onLinkModKey(ev) {
+    if (ev.key !== "Meta" && ev.key !== "Control") return;
+    const p = linkHover.p;
+    if (!p || panes.get(p.id) !== p) { linkHover.p = null; return; }
+    trackLinkHover(p, { clientX: linkHover.x, clientY: linkHover.y, buttons: 0,
+      metaKey: ev.metaKey, ctrlKey: ev.ctrlKey });
+  }
+  window.addEventListener("keydown", onLinkModKey, true);
+  window.addEventListener("keyup", onLinkModKey, true);
+  // ⌘-Tab away delivers ⌘'s keydown here and its keyup to another app, which
+  // would leave the hand cursor stuck on. Losing focus drops the hover.
+  window.addEventListener("blur", () => {
+    for (const p of panes.values()) if (p.hoverLink) setLinkHover(p, null);
+  });
 
   // Release is watched on the window, not the canvas: a drag that ends outside
   // the pane still has to finish its selection, and a mouse-capturing app still
